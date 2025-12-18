@@ -14,14 +14,17 @@ class DoubaoLLM(AbstractLLM):
 
     DEFAULT_MODEL = "doubao-seed-1-6-250615"
     API_ENDPOINT = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    DEFAULT_TIMEOUT = 60  # Increased timeout to 60 seconds
+    MAX_RETRIES = 3  # Maximum number of retry attempts
 
-    def __init__(self, model: str = None, api_key: str = None):
+    def __init__(self, model: str = None, api_key: str = None, timeout: int = None):
         """
         Initialize the DoubaoLLM with the given model and API key.
         
         Args:
             model (str): The model identifier to use. Defaults to doubao-seed-1-6-250615
             api_key (str): API key for authentication. Must be provided as parameter.
+            timeout (int): Request timeout in seconds. Defaults to 60 seconds.
         """
         self.model = model or self.DEFAULT_MODEL
         
@@ -29,6 +32,7 @@ class DoubaoLLM(AbstractLLM):
             raise ValueError("API key must be provided as a parameter")
             
         self.api_key = api_key
+        self.timeout = timeout or self.DEFAULT_TIMEOUT
 
     def chat(self, messages: List[Dict[str, str]], **kwargs) -> Response:
         """
@@ -62,28 +66,48 @@ class DoubaoLLM(AbstractLLM):
             "Content-Type": "application/json"
         }
         
-        try:
-            # Make the API request
-            response = requests.post(
-                self.API_ENDPOINT,
-                headers=headers,
-                json=payload,
-                timeout=30  # 30 second timeout
-            )
-            
-            # Raise an exception for bad status codes
-            response.raise_for_status()
-            
-            # Parse the JSON response
-            raw_response = response.json()
-            
-            # Convert to our structured response format
-            return self._convert_response(raw_response)
-            
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"API request failed: {str(e)}") from e
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse JSON response: {str(e)}") from e
+        # Try up to MAX_RETRIES times
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # Make the API request
+                response = requests.post(
+                    self.API_ENDPOINT,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout
+                )
+                
+                # Raise an exception for bad status codes
+                response.raise_for_status()
+                
+                # Parse the JSON response
+                raw_response = response.json()
+                
+                # Convert to our structured response format
+                return self._convert_response(raw_response)
+                
+            except requests.exceptions.Timeout:
+                if attempt < self.MAX_RETRIES - 1:  # If not the last attempt
+                    # Wait before retrying with exponential backoff
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise RuntimeError(f"API request timed out after {self.MAX_RETRIES} attempts. Last timeout was {self.timeout} seconds.")
+                    
+            except requests.exceptions.RequestException as e:
+                if attempt < self.MAX_RETRIES - 1:  # If not the last attempt
+                    # Wait before retrying with exponential backoff
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise RuntimeError(f"API request failed after {self.MAX_RETRIES} attempts: {str(e)}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to parse JSON response: {str(e)}") from e
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Unexpected error in chat method")
 
     def _convert_response(self, raw_response: Dict[str, Any]) -> Response:
         """
