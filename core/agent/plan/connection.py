@@ -1,35 +1,36 @@
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .subscene import Subscene
+from typing import Dict, Any
+from dataclasses import dataclass, asdict
 
 
+@dataclass
 class Connection:
     """
-    Represents a connection between subscenes in the agent's scene graph.
+    Represents a connection between subscenes in agent's scene graph.
     Connections define transition conditions between subscenes.
     """
-
-    def __init__(self, name: str, from_subscene: 'Subscene', to_subscene: 'Subscene', condition: str):
+    
+    name: str # The name of the connection (short, explanatory text)
+    from_subscene: str # The name of the starting subscene
+    to_subscene: str # The name of the destination subscene
+    condition: str = "" # Text description of conditions for transitioning
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the connection to a dictionary representation with proper JSON keys.
+        
+        Returns:
+            Dict[str, Any]: Dictionary representation of the connection
         """
-        Initialize a Connection.
+        return asdict(self)
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]):
+        """Create a Connection from a dictionary representation with proper JSON keys.
         
         Args:
-            name (str): The name of the connection (short, explanatory text)
-            from_subscene (Subscene): The starting subscene
-            to_subscene (Subscene): The destination subscene
-            condition (str): Text description of conditions for transitioning
-        """
-        self.name = name
-        self.from_subscene = from_subscene
-        self.to_subscene = to_subscene
-        self.condition = condition
+            data (Dict[str, Any]): The dictionary representation of the connection
         
-    def to_dict(self) -> dict:
-        """Convert the connection to a dictionary representation."""
-        return {
-            "name": self.name,
-            "from": self.from_subscene.name,
-            "to": self.to_subscene.name,
-            "condition": self.condition
-        }
+        Returns:
+            Connection: The created Connection object
+        """
+        # Create instance using mapped data
+        return cls(**data)

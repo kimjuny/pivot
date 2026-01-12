@@ -2,6 +2,10 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+from core.utils.logging_config import get_logger
+
+# Get logger for this module
+logger = get_logger('llm')
 
 
 class FinishReason(Enum):
@@ -26,7 +30,6 @@ class ChatMessage:
     """A single message in a chat."""
     role: str  # "system", "user", "assistant", etc.
     content: str  # The message content
-
 
 @dataclass
 class Choice:
@@ -77,39 +80,39 @@ class Response:
     
     def pretty_print(self) -> None:
         """Print the core information of the response in a formatted way."""
-        print("Response from LLM:")
-        print(f"  ID: {self.id}")
-        print(f"  Model: {self.model}")
-        print(f"  Created: {self.created}")
-        print("  Choices:")
+        logger.info("Response from LLM:")
+        logger.info(f"  ID: {self.id}")
+        logger.info(f"  Model: {self.model}")
+        logger.info(f"  Created: {self.created}")
+        logger.info("  Choices:")
         for choice in self.choices:
-            print(f"    Choice {choice.index}:")
-            print(f"      Role: {choice.message.role}")
-            print(f"      Content: {choice.message.content}")
+            logger.info(f"    Choice {choice.index}:")
+            logger.info(f"      Role: {choice.message.role}")
+            logger.info(f"      Content: {choice.message.content}")
         if self.usage:
-            print("  Usage:")
-            print(f"    Prompt Tokens: {self.usage.prompt_tokens}")
-            print(f"    Completion Tokens: {self.usage.completion_tokens}")
-            print(f"    Total Tokens: {self.usage.total_tokens}")
+            logger.info("  Usage:")
+            logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
+            logger.info(f"    Completion Tokens: {self.usage.completion_tokens}")
+            logger.info(f"    Total Tokens: {self.usage.total_tokens}")
     
     def pretty_print_full(self) -> None:
         """Print all information of the response in a formatted way."""
-        print("Response from LLM (Full):")
-        print(f"  ID: {self.id}")
-        print(f"  Model: {self.model}")
-        print(f"  Created: {self.created}")
-        print(f"  Object: {self.object}")
-        print("  Choices:")
+        logger.info("Response from LLM (Full):")
+        logger.info(f"  ID: {self.id}")
+        logger.info(f"  Model: {self.model}")
+        logger.info(f"  Created: {self.created}")
+        logger.info(f"  Object: {self.object}")
+        logger.info("  Choices:")
         for choice in self.choices:
-            print(f"    Choice {choice.index}:")
-            print(f"      Role: {choice.message.role}")
-            print(f"      Content: {choice.message.content}")
-            print(f"      Finish Reason: {choice.finish_reason.value if choice.finish_reason else None}")
+            logger.info(f"    Choice {choice.index}:")
+            logger.info(f"      Role: {choice.message.role}")
+            logger.info(f"      Content: {choice.message.content}")
+            logger.info(f"      Finish Reason: {choice.finish_reason.value if choice.finish_reason else None}")
         if self.usage:
-            print("  Usage:")
-            print(f"    Prompt Tokens: {self.usage.prompt_tokens}")
-            print(f"    Completion Tokens: {self.usage.completion_tokens}")
-            print(f"    Total Tokens: {self.usage.total_tokens}")
+            logger.info("  Usage:")
+            logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
+            logger.info(f"    Completion Tokens: {self.usage.completion_tokens}")
+            logger.info(f"    Total Tokens: {self.usage.total_tokens}")
     
     def first(self) -> Choice:
         """Return the first choice in the response.

@@ -49,3 +49,20 @@ class Scene:
             "state": self.state.value,
             "subscenes": [subscene.to_dict() for subscene in self.subscenes]
         }
+    
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Create a Scene from a dictionary representation."""
+        from .subscene import Subscene
+        
+        scene = cls(
+            name=data["name"],
+            identification_condition=data["identification_condition"]
+        )
+        scene.state = SceneState(data["state"].lower())
+        
+        # Create subscenes from dict data
+        if "subscenes" in data and data["subscenes"]:
+            scene.subscenes = [Subscene.from_dict(subscene_data) for subscene_data in data["subscenes"]]
+        
+        return scene

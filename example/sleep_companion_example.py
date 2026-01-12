@@ -61,38 +61,38 @@ def create_sleep_companion_scenario() -> Scene:
     # From greeting, user can go to storytelling or breathing exercise
     conn1 = Connection(
         name="进入故事时间",
-        from_subscene=greeting,
-        to_subscene=storytelling,
+        from_subscene=greeting.name,
+        to_subscene=storytelling.name,
         condition="用户表示想听故事或者显得很有兴趣"
     )
     
     conn2 = Connection(
         name="进入放松练习",
-        from_subscene=greeting,
-        to_subscene=breathing_exercise,
+        from_subscene=greeting.name,
+        to_subscene=breathing_exercise.name,
         condition="用户表示感到紧张或需要放松"
     )
     
     # From storytelling, user can go to breathing exercise or goodnight
     conn3 = Connection(
         name="需要进一步放松",
-        from_subscene=storytelling,
-        to_subscene=breathing_exercise,
+        from_subscene=storytelling.name,
+        to_subscene=breathing_exercise.name,
         condition="用户表示还想继续放松或者还没完全放松下来"
     )
     
     conn4 = Connection(
         name="准备入睡",
-        from_subscene=storytelling,
-        to_subscene=goodnight,
+        from_subscene=storytelling.name,
+        to_subscene=goodnight.name,
         condition="用户表示已经很放松了，准备睡觉"
     )
     
     # From breathing exercise, user can go to goodnight
     conn5 = Connection(
         name="完成放松",
-        from_subscene=breathing_exercise,
-        to_subscene=goodnight,
+        from_subscene=breathing_exercise.name,
+        to_subscene=goodnight.name,
         condition="用户表示已经放松下来，准备睡觉"
     )
     

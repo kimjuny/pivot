@@ -1,9 +1,6 @@
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 from enum import Enum
-
-if TYPE_CHECKING:
-    from .connection import Connection
-
+from .connection import Connection
 
 class SubsceneType(Enum):
     START = "start"
@@ -31,13 +28,15 @@ class Subscene:
             subscene_type (SubsceneType): Type of the subscene (start, end, or normal)
             mandatory (bool): Whether this node is mandatory (cannot be skipped)
             objective (str): Text description of what should be achieved in this subscene
+            state (SubsceneState): State of the subscene (active or inactive)
+            connections (List[Connection], optional): List of connections from this subscene to other subscenes. Defaults to empty list.
         """
         self.name = name
         self.type = subscene_type
         self.mandatory = mandatory
         self.objective = objective
         self.state = SubsceneState.INACTIVE
-        self.connections: List['Connection'] = []
+        self.connections: List[Connection] = []
         
     def activate(self):
         """Set the subscene state to active."""
@@ -47,7 +46,7 @@ class Subscene:
         """Set the subscene state to inactive."""
         self.state = SubsceneState.INACTIVE
         
-    def add_connection(self, connection: 'Connection'):
+    def add_connection(self, connection: Connection):
         """Add a connection from this subscene."""
         self.connections.append(connection)
         
@@ -61,3 +60,21 @@ class Subscene:
             "state": self.state.value,
             "connections": [conn.to_dict() for conn in self.connections]
         }
+    
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Create a Subscene from a dictionary representation with connections."""
+        
+        subscene = cls(
+            name=data["name"],
+            subscene_type=SubsceneType(data["type"]),
+            mandatory=data["mandatory"],
+            objective=data["objective"]
+        )
+        subscene.state = SubsceneState(data["state"].lower())
+        
+        # Process connections directly from data
+        if "connections" in data and data["connections"]:
+            subscene.connections = [Connection.from_dict(connection_data) for connection_data in data["connections"]]
+        
+        return subscene
