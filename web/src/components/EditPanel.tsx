@@ -4,13 +4,13 @@ interface EditPanelProps {
   element: {
     type: 'node' | 'edge';
     id: string;
-    data: any;
+    data: Record<string, unknown>;
     label?: string;
   } | null;
   onClose: () => void;
   onSave: () => void;
-  onNodeChange: (nodeId: string, data: any) => void;
-  onEdgeChange: (edgeId: string, data: any) => void;
+  onNodeChange: (nodeId: string, data: Record<string, unknown>) => void;
+  onEdgeChange: (edgeId: string, data: Record<string, unknown>) => void;
 }
 
 interface NodeFormData {
@@ -36,18 +36,17 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
 
   useEffect(() => {
     if (element) {
-      console.log('EditPanel element:', element);
       if (element.type === 'node') {
         setFormData({
-          name: element.data.label || '',
-          type: element.data.type || 'normal',
-          mandatory: element.data.mandatory || false,
-          objective: element.data.objective || ''
+          name: (element.data.label as string) || '',
+          type: (element.data.type as 'start' | 'normal' | 'end') || 'normal',
+          mandatory: (element.data.mandatory as boolean) || false,
+          objective: (element.data.objective as string) || ''
         });
       } else if (element.type === 'edge') {
         setFormData({
-          name: element.data.label || '',
-          condition: element.data.condition || ''
+          name: (element.data.label as string) || '',
+          condition: (element.data.condition as string) || ''
         });
       }
     }
@@ -55,9 +54,9 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
 
   const handleSave = () => {
     if (element?.type === 'node') {
-      onNodeChange(element.id, formData as NodeFormData);
+      onNodeChange(element.id, formData as unknown as Record<string, unknown>);
     } else if (element?.type === 'edge') {
-      onEdgeChange(element.id, formData as EdgeFormData);
+      onEdgeChange(element.id, formData as unknown as Record<string, unknown>);
     }
     onSave();
   };
@@ -159,12 +158,12 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
 
             <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
               <p className="text-sm text-dark-text-secondary mb-2">From Subscene</p>
-              <p className="text-xs text-dark-text-muted">{element.data.from_subscene || 'Not specified'}</p>
+              <p className="text-xs text-dark-text-muted">{(element.data.from_subscene as string) || 'Not specified'}</p>
             </div>
 
             <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
               <p className="text-sm text-dark-text-secondary mb-2">To Subscene</p>
-              <p className="text-xs text-dark-text-muted">{element.data.to_subscene || 'Not specified'}</p>
+              <p className="text-xs text-dark-text-muted">{(element.data.to_subscene as string) || 'Not specified'}</p>
             </div>
           </div>
         )}

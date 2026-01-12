@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import AgentList from './components/AgentList';
 import AgentVisualization from './components/AgentVisualization';
-import { useAgentStore } from './store/agentStore';
 import { getAgentById, getScenes } from './utils/api';
 import type { Agent, Scene } from './types';
 
 function App() {
-  const { agentState, initializeAgent, sceneGraph, refreshSceneGraph } = useAgentStore();
   const [isInitializing, setIsInitializing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -16,16 +14,9 @@ function App() {
   const { agentId } = useParams<{ agentId?: string }>();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (agentId) {
-      loadAgentDetails();
-    }
-    document.body.classList.add('dark');
-  }, [agentId]);
-
-  const loadAgentDetails = async () => {
+  const loadAgentDetails = useCallback(async () => {
     if (!agentId) return;
-    
+
     setIsInitializing(true);
     setError(null);
     try {
@@ -41,19 +32,25 @@ function App() {
         setSelectedScene(firstScene);
       }
     } catch (err) {
-      const error = err as Error;
-      setError(error.message);
+      setError((err as Error).message || 'Failed to load agent details');
     } finally {
       setIsInitializing(false);
     }
-  };
+  }, [agentId]);
+
+  useEffect(() => {
+    if (agentId) {
+      void loadAgentDetails();
+    }
+    document.body.classList.add('dark');
+  }, [agentId, loadAgentDetails]);
 
   const handleResetSceneGraph = async () => {
     try {
+      const { refreshSceneGraph } = await import('./store/agentStore').then(m => m.useAgentStore());
       await refreshSceneGraph();
     } catch (err) {
-      const error = err as Error;
-      setError(error.message);
+      setError((err as Error).message || 'Failed to refresh scene graph');
     }
   };
 
@@ -73,7 +70,7 @@ function App() {
       <div className="flex flex-col items-center justify-center h-screen bg-dark-bg">
         <div className="text-xl text-red-400 mb-4 font-medium">Error: {error}</div>
         <button
-          onClick={loadAgentDetails}
+          onClick={() => void loadAgentDetails()}
           className="px-6 py-3 btn-accent rounded-lg font-medium"
         >
           Retry
@@ -95,6 +92,7 @@ function App() {
           selectedScene={selectedScene} 
           agentId={parseInt(agentId)}
           onResetSceneGraph={handleResetSceneGraph}
+          onSceneSelect={setSelectedScene}
         />
       </div>
     </div>

@@ -1,5 +1,7 @@
+/* eslint-disable no-undef */
+
 type WebSocketEvent = 'connected' | 'disconnected' | 'error' | 'message' | 'maxReconnectAttemptsReached';
-type EventCallback = (data?: any) => void;
+type EventCallback = (data?: unknown) => void;
 
 interface WebSocketClient {
   ws: WebSocket | null;
@@ -10,11 +12,11 @@ interface WebSocketClient {
   listeners: Record<string, EventCallback[]>;
   connect(): void;
   attemptReconnect(): void;
-  sendMessage(message: any): void;
+  sendMessage(message: unknown): void;
   disconnect(): void;
   on(event: WebSocketEvent, callback: EventCallback): void;
   off(event: WebSocketEvent, callback: EventCallback): void;
-  emit(event: WebSocketEvent, data?: any): void;
+  emit(event: WebSocketEvent, data?: unknown): void;
 }
 
 class WebSocketClientImpl implements WebSocketClient {
@@ -37,7 +39,6 @@ class WebSocketClientImpl implements WebSocketClient {
       this.ws = new WebSocket(wsUrl);
       
       this.ws.onopen = () => {
-        console.log('WebSocket connected');
         this.isConnected = true;
         this.reconnectAttempts = 0;
         this.emit('connected');
@@ -45,22 +46,20 @@ class WebSocketClientImpl implements WebSocketClient {
 
       this.ws.onmessage = (event: MessageEvent) => {
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(event.data as string) as Record<string, unknown>;
           this.emit('message', data);
         } catch (error) {
-          console.error('Error parsing WebSocket message:', error);
+          void error;
         }
       };
 
       this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
         this.isConnected = false;
         this.emit('disconnected');
         this.attemptReconnect();
       };
 
       this.ws.onerror = (error: Event) => {
-        console.error('WebSocket error:', error);
         this.emit('error', error);
       };
     } catch (error) {
@@ -73,22 +72,18 @@ class WebSocketClientImpl implements WebSocketClient {
   attemptReconnect(): void {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
       
       setTimeout(() => {
         this.connect();
       }, this.reconnectInterval);
     } else {
-      console.error('Max reconnect attempts reached');
       this.emit('maxReconnectAttemptsReached');
     }
   }
 
-  sendMessage(message: any): void {
+  sendMessage(message: unknown): void {
     if (this.isConnected && this.ws) {
       this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn('Cannot send message, WebSocket is not connected');
     }
   }
 
@@ -111,7 +106,7 @@ class WebSocketClientImpl implements WebSocketClient {
     }
   }
 
-  emit(event: WebSocketEvent, data?: any): void {
+  emit(event: WebSocketEvent, data?: unknown): void {
     if (this.listeners[event]) {
       this.listeners[event].forEach(callback => callback(data));
     }

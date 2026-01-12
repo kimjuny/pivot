@@ -120,23 +120,39 @@ const useAgentStore = create<AgentStore>((set, get) => ({
     const now = new Date();
     const utcTimestamp = now.toISOString();
     
-    set(state => ({
-      isChatting: true,
-      error: null,
-      chatHistory: [...state.chatHistory, { role: 'user', message, create_time: utcTimestamp }]
-    }));
+    set(state => {
+      const newUserMessage: ChatHistory = {
+        id: 0,
+        agent_id: agentId,
+        user: user,
+        role: 'user',
+        message,
+        create_time: utcTimestamp
+      };
+      return {
+        isChatting: true,
+        error: null,
+        chatHistory: [...state.chatHistory, newUserMessage]
+      };
+    });
     try {
       const response = await chatWithAgentById(agentId, message, user);
       
-      set(state => ({
-        chatHistory: [...state.chatHistory, {
+      set(state => {
+        const newAgentMessage: ChatHistory = {
+          id: 0,
+          agent_id: agentId,
+          user: user,
           role: 'agent',
           message: response.response,
           reason: response.reason,
-          create_time: response.create_time
-        }],
-        isChatting: false
-      }));
+          create_time: response.create_time || new Date().toISOString()
+        };
+        return {
+          chatHistory: [...state.chatHistory, newAgentMessage],
+          isChatting: false
+        };
+      });
       
       if (response.graph) {
         set({ sceneGraph: response.graph });
@@ -154,22 +170,39 @@ const useAgentStore = create<AgentStore>((set, get) => ({
   },
 
   chatWithAgent: async (message: string) => {
-    set(state => ({
-      isChatting: true,
-      error: null,
-      chatHistory: [...state.chatHistory, { role: 'user', message }]
-    }));
+    set(state => {
+      const newUserMessage: ChatHistory = {
+        id: 0,
+        agent_id: 0,
+        user: 'preview-user',
+        role: 'user',
+        message,
+        create_time: new Date().toISOString()
+      };
+      return {
+        isChatting: true,
+        error: null,
+        chatHistory: [...state.chatHistory, newUserMessage]
+      };
+    });
     try {
       const response = await chatWithAgent(message);
       
-      set(state => ({
-        chatHistory: [...state.chatHistory, {
+      set(state => {
+        const newAgentMessage: ChatHistory = {
+          id: 0,
+          agent_id: 0,
+          user: 'preview-user',
           role: 'agent',
           message: response.response,
-          reason: response.reason
-        }],
-        isChatting: false
-      }));
+          reason: response.reason,
+          create_time: response.create_time || new Date().toISOString()
+        };
+        return {
+          chatHistory: [...state.chatHistory, newAgentMessage],
+          isChatting: false
+        };
+      });
       
       return response.response;
     } catch (error) {
@@ -227,8 +260,8 @@ const useAgentStore = create<AgentStore>((set, get) => ({
 websocket.connect();
 
 websocket.on('message', (data) => {
-  if (data.type === 'scene_update') {
-    const sceneGraphCopy = JSON.parse(JSON.stringify(data.data));
+  if ((data as { type?: string }).type === 'scene_update') {
+    const sceneGraphCopy = JSON.parse(JSON.stringify((data as { data?: unknown }).data)) as SceneGraph;
     useAgentStore.setState(state => ({ ...state, sceneGraph: sceneGraphCopy }));
   }
 });

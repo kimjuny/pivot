@@ -1,7 +1,6 @@
-import React, { useState, useRef, useEffect, FormEvent } from 'react';
+import { useState, useRef, useEffect, FormEvent } from 'react';
 import { useAgentStore } from '../store/agentStore';
 import { formatTimestamp } from '../utils/timestamp';
-import type { ChatHistory } from '../types';
 
 interface ChatInterfaceProps {
   agentId: number;
@@ -20,7 +19,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
 
   useEffect(() => {
     if (agentId && !hasLoadedHistory) {
-      loadChatHistory(agentId, 'preview-user');
+      void loadChatHistory(agentId, 'preview-user');
       setHasLoadedHistory(true);
     }
   }, [agentId, hasLoadedHistory, loadChatHistory]);
@@ -35,13 +34,11 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
       setExpandedThinking({});
       await loadChatHistory(agentId, 'preview-user');
     } catch (err) {
-      console.error('Failed to clear chat history:', err);
+      void err;
     }
   };
 
   useEffect(() => {
-    return () => {
-    };
   }, [agentId]);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -52,13 +49,12 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
       await chatWithAgentById(agentId, inputMessage, 'preview-user');
       setInputMessage('');
     } catch (err) {
-      console.error('Failed to send message:', err);
+      void err;
     }
   };
 
-  const handleReset = async () => {
-    if (window.confirm('Are you sure you want to reset the agent?')) {
-    }
+  const handleReset = () => {
+    window.confirm('Are you sure you want to reset the agent?');
   };
 
   const toggleThinking = (index: number) => {
@@ -76,7 +72,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
           Chat with Agent
         </h2>
         <button
-          onClick={handleClearHistory}
+          onClick={() => void handleClearHistory()}
           className="text-xs font-medium text-dark-text-secondary hover:text-primary transition-colors px-3 py-1.5 rounded-lg hover:bg-dark-bg-lighter border border-transparent hover:border-dark-border"
         >
           Clear
@@ -93,7 +89,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
                 </svg>
               </div>
               <p className="text-base font-medium text-dark-text-secondary mb-2">Start a conversation with agent</p>
-              <p className="text-sm opacity-70">Try saying: "I want to sleep" or "Tell me a story"</p>
+              <p className="text-sm opacity-70">Try saying: &quot;I want to sleep&quot; or &quot;Tell me a story&quot;</p>
             </div>
           </div>
         ) : (
@@ -173,7 +169,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
         </div>
       )}
       
-      <form onSubmit={handleSubmit} className="p-5 border-t border-dark-border bg-dark-bg">
+      <form onSubmit={(e) => { void handleSubmit(e); }} className="p-5 border-t border-dark-border bg-dark-bg">
         <div className="flex space-x-3">
           <input
             type="text"
@@ -192,7 +188,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
           </button>
         </div>
         <div className="mt-3 text-xs text-dark-text-muted text-center opacity-70">
-          Try: "I want to sleep" / "I'm tired today" / "Tell me a story"
+          Try: &quot;I want to sleep&quot; / &quot;I&apos;m tired today&quot; / &quot;Tell me a story&quot;
         </div>
       </form>
     </div>

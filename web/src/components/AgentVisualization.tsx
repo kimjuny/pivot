@@ -13,7 +13,8 @@ import {
   Node,
   Edge,
   Connection,
-  ReactFlowInstance
+  ReactFlowInstance,
+  Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useAgentStore } from '../store/agentStore';
@@ -41,12 +42,13 @@ interface AgentVisualizationProps {
   selectedScene: Scene | null;
   agentId: number;
   onResetSceneGraph: () => Promise<void>;
+  onSceneSelect: (scene: Scene) => void;
 }
 
 interface SelectedElement {
   type: 'node' | 'edge';
   id: string;
-  data: any;
+  data: Record<string, unknown>;
   label?: string;
 }
 
@@ -71,13 +73,13 @@ function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
     >
       <Handle
         type="source"
-        position="right"
+        position={Position.Right}
         id="right"
         className="w-4 h-4 bg-primary hover:bg-primary/90 rounded-full border-2 border-white shadow-md"
       />
       <Handle
         type="target"
-        position="left"
+        position={Position.Left}
         id="left"
         className="w-4 h-4 bg-primary hover:bg-primary/90 rounded-full border-2 border-white shadow-md"
       />
@@ -99,21 +101,19 @@ const edgeTypes = {
   bezier: BezierEdge,
 };
 
-function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetSceneGraph }: AgentVisualizationProps) {
+function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph, onSceneSelect }: AgentVisualizationProps) {
   const { sceneGraph, refreshSceneGraph } = useAgentStore();
-  const [nodes, setNodes, onNodesChange] = useNodesState<SubsceneNodeData>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isPreviewMode, setIsPreviewMode] = useState<boolean>(false);
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [sceneGraphData, setSceneGraphData] = useState<SceneGraph | null>(null);
-  const [isLoadingGraph, setIsLoadingGraph] = useState<boolean>(false);
-  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
   useEffect(() => {
     if (sceneGraph) {
       setSceneGraphData(sceneGraph);
-      setIsLoadingGraph(false);
     }
   }, [sceneGraph]);
 
@@ -122,14 +122,14 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
       if (!isPreviewMode && selectedScene) {
         try {
           const defaultGraph = await getSceneGraph(selectedScene.id);
-          setSceneGraphData(defaultGraph);
+          setSceneGraphData(defaultGraph as SceneGraph);
         } catch (error) {
           console.error('Failed to reset scene graph:', error);
         }
       }
     };
     
-    resetToDefaultSceneGraph();
+    void resetToDefaultSceneGraph();
   }, [isPreviewMode, selectedScene]);
 
   useEffect(() => {
@@ -143,45 +143,41 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
         return;
       }
 
-      setIsLoadingGraph(true);
       try {
         const graphData = await getSceneGraph(selectedScene.id);
-        setSceneGraphData(graphData);
+        setSceneGraphData(graphData as SceneGraph);
       } catch (error) {
         console.error('Failed to load scene graph:', error);
         setSceneGraphData(null);
-      } finally {
-        setIsLoadingGraph(false);
       }
     };
-    loadSceneGraph();
+    void loadSceneGraph();
   }, [selectedScene, sceneGraph]);
 
   const handleElementClick = (event: React.MouseEvent, element: Node | Edge) => {
     event.stopPropagation();
     if (element.id.startsWith('edge-')) {
-      setSelectedElement({ type: 'edge', id: element.id, data: element.data, label: element.data.label });
+      setSelectedElement({ type: 'edge', id: element.id, data: (element.data as Record<string, unknown>) || {}, label: (element.data as { label?: string }).label });
     } else {
-      setSelectedElement({ type: 'node', id: element.id, data: element.data });
+      setSelectedElement({ type: 'node', id: element.id, data: (element.data as Record<string, unknown>) || {} });
     }
   };
 
   const handleNodeUpdate = (nodeId: string, updatedData: Partial<SubsceneNodeData>) => {
-    setNodes(nodes => nodes.map(node => 
+    setNodes((nodes) => nodes.map((node) => 
       node.id === nodeId ? { ...node, data: { ...node.data, ...updatedData } } : node
     ));
     setSelectedElement(null);
   };
 
-  const handleEdgeUpdate = (edgeId: string, updatedData: any) => {
-    setEdges(edges => edges.map(edge => 
+  const handleEdgeUpdate = (edgeId: string, updatedData: Record<string, unknown>) => {
+    setEdges((edges) => edges.map((edge) => 
       edge.id === edgeId ? { ...edge, data: { ...edge.data, ...updatedData } } : edge
     ));
     setSelectedElement(null);
   };
 
   const handleSave = () => {
-    console.log('Saving graph state:', { nodes, edges });
     setSelectedElement(null);
   };
 
@@ -195,7 +191,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
     
     let subscenes: SceneNode[];
     if (hasSubscenesField) {
-      subscenes = scene.subscenes;
+      subscenes = scene.subscenes || [];
     } else {
       subscenes = sceneGraphData.scenes;
     }
@@ -204,7 +200,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
       return { nodes: [], edges: [] };
     }
 
-    const nodes: Node<SubsceneNodeData>[] = [];
+    const nodes: Node[] = [];
     const edges: Edge[] = [];
     let edgeId = 1;
 
@@ -214,7 +210,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
     const normalSubscenes: SceneNode[] = [];
     const endSubscenes: SceneNode[] = [];
 
-    subscenes.forEach(subscene => {
+    subscenes.forEach((subscene) => {
       if (subscene.type === 'start') {
         startSubscenes.push(subscene);
       } else if (subscene.type === 'end') {
@@ -224,7 +220,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
       }
     });
 
-    let yPosition = 100;
+    const yPosition = 100;
     const nodeSpacing = 150;
     const xOffsets = {
       start: 100,
@@ -242,14 +238,14 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
           y: yPosition + index * nodeSpacing 
         },
         data: {
-          label: subscene.name,
+          label: subscene.name || '',
           type: subscene.type,
           state: subscene.state,
           mandatory: subscene.mandatory || false,
           objective: subscene.objective || ''
         }
       });
-      subsceneNameToId[subscene.name] = subsceneNodeId;
+      subsceneNameToId[subscene.name || ''] = subsceneNodeId;
     });
 
     normalSubscenes.forEach((subscene, index) => {
@@ -262,14 +258,14 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
           y: yPosition + index * nodeSpacing 
         },
         data: {
-          label: subscene.name,
+          label: subscene.name || '',
           type: subscene.type,
           state: subscene.state,
           mandatory: subscene.mandatory || false,
           objective: subscene.objective || ''
         }
       });
-      subsceneNameToId[subscene.name] = subsceneNodeId;
+      subsceneNameToId[subscene.name || ''] = subsceneNodeId;
     });
 
     endSubscenes.forEach((subscene, index) => {
@@ -282,22 +278,22 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
           y: yPosition + index * nodeSpacing 
         },
         data: {
-          label: subscene.name,
+          label: subscene.name || '',
           type: subscene.type,
           state: subscene.state,
           mandatory: subscene.mandatory || false,
           objective: subscene.objective || ''
         }
       });
-      subsceneNameToId[subscene.name] = subsceneNodeId;
+      subsceneNameToId[subscene.name || ''] = subsceneNodeId;
     });
 
-    subscenes.forEach((subscene, subsceneIndex) => {
-      const subsceneNodeId = subsceneNameToId[subscene.name];
+    subscenes.forEach((subscene) => {
+      const subsceneNodeId = subsceneNameToId[subscene.name || ''];
       
       if (subscene.connections) {
         subscene.connections.forEach((connection, connIndex) => {
-          const targetNodeId = subsceneNameToId[connection.to_subscene];
+          const targetNodeId = subsceneNameToId[connection.to_subscene || ''];
           
           if (targetNodeId) {
             edges.push({
@@ -316,8 +312,6 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
                 strokeLinecap: 'round'
               },
               type: 'bezier',
-              sourcePosition: 'right',
-              targetPosition: 'left',
               labelBgPadding: [8, 5],
               labelBgBorderRadius: 4,
               labelBgStyle: {
@@ -384,7 +378,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
               {scenes && scenes.map((scene, index) => (
                 <div 
                   key={`scene-${index}`}
-                  onClick={() => setSelectedScene(scene)}
+                  onClick={() => onSceneSelect(scene)}
                   className={`p-3 rounded-lg cursor-pointer transition-all ${selectedScene?.name === scene.name 
                     ? 'bg-primary/20 border border-primary shadow-glow-sm' 
                     : 'bg-dark-bg-lighter border border-dark-border hover:bg-dark-border-light hover:border-dark-border'}`}
@@ -414,7 +408,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
             
             <div className="absolute top-4 right-4 z-10 flex space-x-2">
               <button
-                onClick={onResetSceneGraph}
+                onClick={() => void onResetSceneGraph()}
                 className="flex items-center space-x-2 px-4 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-sm font-medium hover:bg-primary hover:border-primary hover:shadow-glow-sm transition-all duration-200"
                 title="Reset to default scene graph"
               >
@@ -424,7 +418,7 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
                 <span>Reset</span>
               </button>
               <button
-                onClick={refreshSceneGraph}
+                onClick={() => void refreshSceneGraph()}
                 className="flex items-center space-x-2 px-4 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-sm font-medium hover:bg-primary hover:border-primary hover:shadow-glow-sm transition-all duration-200"
                 title="Refresh"
               >
@@ -495,15 +489,15 @@ function AgentVisualization({ agent, scenes, selectedScene, agentId, onResetScen
               onPaneClick={onPaneClick}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
-              onNodeClick={(event, node) => handleElementClick(event, { type: 'node', id: node.id, data: node.data })}
-              onEdgeClick={(event, edge) => handleElementClick(event, { type: 'edge', id: edge.id, data: edge.data })}
+              onNodeClick={(event, node) => handleElementClick(event, node)}
+              onEdgeClick={(event, edge) => handleElementClick(event, edge)}
               onInit={(instance) => {
                 reactFlowInstanceRef.current = instance;
               }}
             >
               <Controls />
               <MiniMap />
-              <Background variant="dots" gap={12} size={1} />
+              <Background />
             </ReactFlow>
             
             {selectedElement && !isPreviewMode && (

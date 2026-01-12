@@ -73,6 +73,12 @@ export interface SceneNode {
     mandatory?: boolean;
     objective?: string;
   };
+  connections?: Connection[];
+  name?: string;
+  state?: string;
+  mandatory?: boolean;
+  objective?: string;
+  subscenes?: SceneNode[];
 }
 
 export interface ChatRequest {

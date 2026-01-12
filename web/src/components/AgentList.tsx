@@ -11,7 +11,7 @@ function AgentList() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    loadAgents();
+    void loadAgents();
   }, []);
 
   const loadAgents = async () => {
@@ -29,7 +29,6 @@ function AgentList() {
   };
 
   const handleCreateAgent = () => {
-    console.log('Create agent button clicked (not implemented yet)');
   };
 
   const handleAgentClick = (agent: Agent) => {
@@ -52,7 +51,7 @@ function AgentList() {
       <div className="flex flex-col items-center justify-center h-screen bg-dark-bg">
         <div className="text-xl text-red-400 mb-4 font-medium">错误: {error}</div>
         <button
-          onClick={loadAgents}
+          onClick={() => void loadAgents()}
           className="px-6 py-3 btn-accent rounded-lg font-medium"
         >
           重试
@@ -86,7 +85,7 @@ function AgentList() {
             <div className="text-6xl text-dark-text-muted mb-4">📭</div>
             <h3 className="text-xl font-semibold text-dark-text-secondary mb-2">暂无 Agent</h3>
             <p className="text-dark-text-muted mb-6">
-              点击右上角的"创建 Agent"按钮来创建您的第一个 Agent
+              点击右上角的&apos;创建 Agent&apos;按钮来创建您的第一个 Agent
             </p>
           </div>
         ) : (
