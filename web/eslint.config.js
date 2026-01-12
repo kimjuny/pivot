@@ -20,7 +20,7 @@ export default tseslint.config(
       ecmaVersion: 'latest',
       sourceType: 'module',
       parserOptions: {
-        project: ['./tsconfig.json'], // 核心：关联 TS 配置
+        project: ['./tsconfig.json', './tsconfig.node.json'], // 核心：关联 TS 配置
         tsconfigRootDir: import.meta.dirname,
       },
     },

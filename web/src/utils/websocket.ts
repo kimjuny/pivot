@@ -1,4 +1,4 @@
-/* eslint-disable no-undef */
+ 
 
 type WebSocketEvent = 'connected' | 'disconnected' | 'error' | 'message' | 'maxReconnectAttemptsReached';
 type EventCallback = (data?: unknown) => void;
