@@ -75,7 +75,7 @@ class Subscene:
         subscene.state = SubsceneState(data["state"].lower())
         
         # Process connections directly from data
-        if "connections" in data and data["connections"]:
+        if data.get("connections"):
             subscene.connections = [Connection.from_dict(connection_data) for connection_data in data["connections"]]
         
         return subscene

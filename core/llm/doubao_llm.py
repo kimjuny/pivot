@@ -1,6 +1,7 @@
+import contextlib
 import time
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 import requests
 
@@ -25,8 +26,7 @@ class DoubaoLLM(AbstractLLM):
     API_ENDPOINT = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
     DEFAULT_TIMEOUT = 60  # Increased timeout to 60 seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts
-
-    def __init__(self, model: str = None, api_key: str = None, timeout: int = None):
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None, timeout: Optional[int] = None):
         """
         Initialize the DoubaoLLM with the given model and API key.
         
@@ -102,7 +102,7 @@ class DoubaoLLM(AbstractLLM):
                     time.sleep(wait_time)
                     continue
                 else:
-                    raise RuntimeError(f"API request timed out after {self.MAX_RETRIES} attempts. Last timeout was {self.timeout} seconds.")
+                    raise RuntimeError(f"API request timed out after {self.MAX_RETRIES} attempts. Last timeout was {self.timeout} seconds.") from None
                     
             except requests.exceptions.RequestException as e:
                 if attempt < self.MAX_RETRIES - 1:  # If not the last attempt
@@ -111,9 +111,9 @@ class DoubaoLLM(AbstractLLM):
                     time.sleep(wait_time)
                     continue
                 else:
-                    raise RuntimeError(f"API request failed after {self.MAX_RETRIES} attempts: {str(e)}")
+                    raise RuntimeError(f"API request failed after {self.MAX_RETRIES} attempts: {e!s}") from e
             except Exception as e:
-                raise RuntimeError(f"Failed to parse JSON response: {str(e)}") from e
+                raise RuntimeError(f"Failed to parse JSON response: {e!s}") from e
         
         # This should never be reached, but just in case
         raise RuntimeError("Unexpected error in chat method")
@@ -147,11 +147,8 @@ class DoubaoLLM(AbstractLLM):
             finish_reason = None
             raw_finish_reason = raw_choice.get("finish_reason")
             if raw_finish_reason:
-                try:
+                with contextlib.suppress(ValueError):
                     finish_reason = FinishReason(raw_finish_reason)
-                except ValueError:
-                    # If the finish reason is not in our enum, we'll leave it as None
-                    pass
             
             choice = Choice(
                 index=i,

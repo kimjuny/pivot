@@ -8,10 +8,10 @@ from .scene import Scene, SceneState
 from .subscene import Subscene, SubsceneState, SubsceneType
 
 __all__ = [
+    "Connection",
     "Scene",
     "SceneState",
     "Subscene",
-    "SubsceneType",
     "SubsceneState",
-    "Connection"
+    "SubsceneType"
 ]

@@ -1,11 +1,16 @@
 import logging
-import os
 import sys
 import traceback
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# Add server directory and parent directory to the Python path BEFORE importing other modules
+server_dir = str(Path(__file__).resolve().parent.parent)
+sys.path.append(server_dir)
+sys.path.append(str(Path(server_dir).parent))
 
 # Configure logging before importing other modules
 logging.basicConfig(
@@ -19,11 +24,6 @@ logging.getLogger('core').setLevel(logging.DEBUG)
 logging.getLogger('core.agent').setLevel(logging.DEBUG)
 logging.getLogger('core.llm').setLevel(logging.DEBUG)
 
-# Add server directory and parent directory to the Python path
-server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(server_dir)
-sys.path.append(os.path.dirname(server_dir))
-
 # Import logging config to ensure core modules use of same logging setup
 from core.utils.logging_config import get_logger
 
@@ -32,11 +32,10 @@ logger = get_logger('server')
 
 # Import database session and models
 # Import WebSocket manager
-from server.websocket import websocket_endpoint
-
 # Import API routers
 from app.api.agents import router as agents_router
 from app.db.session import init_db
+from server.websocket import websocket_endpoint
 
 app = FastAPI(title="Agent Visualization API", version="1.0.0")
 
@@ -72,12 +71,12 @@ async def shutdown_event():
 # Global exception handler for better error logging
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled exception on {request.url}: {str(exc)}")
+    logger.error(f"Unhandled exception on {request.url}: {exc!s}")
     logger.error(f"Exception traceback:\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
         content={
-            "detail": f"Internal server error: {str(exc)}",
+            "detail": f"Internal server error: {exc!s}",
             "type": type(exc).__name__,
             "path": str(request.url)
         }

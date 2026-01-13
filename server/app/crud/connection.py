@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar
+from typing import Generic, Optional, TypeVar
 
 from sqlmodel import Session, SQLModel, select
 
@@ -11,7 +11,7 @@ class CRUDBase(Generic[ModelType]):
     def __init__(self, model: type[ModelType]):
         self.model = model
 
-    def get(self, id: int, session: Session) -> ModelType | None:
+    def get(self, id: int, session: Session) -> Optional[ModelType]:
         return session.get(self.model, id)
 
     def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[ModelType]:
@@ -25,7 +25,7 @@ class CRUDBase(Generic[ModelType]):
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> ModelType | None:
+    def update(self, id: int, session: Session, **kwargs) -> Optional[ModelType]:
         db_obj = self.get(id, session)
         if db_obj:
             for key, value in kwargs.items():

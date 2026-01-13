@@ -62,7 +62,7 @@ class Scene:
         scene.state = SceneState(data["state"].lower())
         
         # Create subscenes from dict data
-        if "subscenes" in data and data["subscenes"]:
+        if data.get("subscenes"):
             scene.subscenes = [Subscene.from_dict(subscene_data) for subscene_data in data["subscenes"]]
         
         return scene

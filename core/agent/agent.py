@@ -1,6 +1,7 @@
 
 from core.llm.abstract_llm import AbstractLLM, Response
 from core.utils.logging_config import get_logger
+from typing import Optional
 
 from .input_message import InputMessage
 from .plan.scene import Scene, SceneState
@@ -17,12 +18,12 @@ class Agent:
     """
 
     def __init__(self):
-        self.model: AbstractLLM | None = None
+        self.model: Optional[AbstractLLM] = None
         self.is_started: bool = False
         self.history: list[dict[str, str]] = []
         self.scenes: list[Scene] = []
-        self.current_scene: Scene | None = None
-        self.current_subscene: Subscene | None = None
+        self.current_scene: Optional[Scene] = None
+        self.current_subscene: Optional[Subscene] = None
 
     def add_action(self) -> 'Agent':
         """
@@ -96,28 +97,26 @@ class Agent:
         self.is_started = False
 
     def print_scene_graph(self) -> None:
-        """
-        Print the current scene graph in text format.
-        """
-        logger.info("\n=== 当前场景图状态 ===")
+        """Print the current scene graph in text format."""
+        logger.info("\n=== Current Scene Graph State ===")
         for i, scene in enumerate(self.scenes):
             status = "ACTIVE" if scene.state == SceneState.ACTIVE else "INACTIVE"
             current_marker = " <-- CURRENT" if scene == self.current_scene else ""
-            logger.info(f"场景 {i+1}: {scene.name} [{status}]{current_marker}")
+            logger.info(f"Scene {i+1}: {scene.name} [{status}]{current_marker}")
             
             # Print subscenes
             for j, subscene in enumerate(scene.subscenes):
                 status = "ACTIVE" if subscene.state == SubsceneState.ACTIVE else "INACTIVE"
                 current_marker = " <-- CURRENT" if subscene == self.current_subscene else ""
                 type_marker = f" ({subscene.type.value})"
-                logger.info(f"  子场景 {j+1}: {subscene.name}{type_marker} [{status}]{current_marker}")
+                logger.info(f"  Subscene {j+1}: {subscene.name}{type_marker} [{status}]{current_marker}")
                 
                 # Print connections
                 if subscene.connections:
-                    logger.info("    连接:")
+                    logger.info("    Connections:")
                     for k, connection in enumerate(subscene.connections):
                         to_subscene_name = connection.to_subscene  # Using explicit attribute name
-                        to_scene_name = "未知"
+                        to_scene_name = "Unknown"
                         
                         # Find the target scene name
                         for s in self.scenes:

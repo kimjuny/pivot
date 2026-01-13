@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 
 from .plan.scene import Scene
 from .plan.subscene import Subscene
@@ -14,8 +15,8 @@ class InputMessage:
                  user_message: str,
                  history: list[dict[str, str]],
                  scenes: list[Scene],
-                 current_scene: Scene | None = None,
-                 current_subscene: Subscene | None = None):
+                 current_scene: Optional[Scene] = None,
+                 current_subscene: Optional[Subscene] = None):
         """
         Initialize an InputMessage.
         
@@ -101,6 +102,6 @@ class InputMessage:
                             "2. When the agent currently has selected scene and subscene, you should first iterate through all connections in the current subscene based on the user message to see if any connection's condition description is met."
                             "If a connection's condition description is met, the agent should jump from this connection's from_subscene to the specified to_subscene. The from_subscene's state should be set to INACTIVE, and the to_subscene's state should be set to ACTIVE. Based on this principle, the updated_scenes in OutputMessage should be updated by you. You should organize your reply according to the to_subscene's objective and put it into OutputMessage's response. OutputMessage's match_connection should be filled with the connection you just matched, and your analysis reason should be put into OutputMessage's reason. In particular, if the to_subscene you arrive at is a node with type=end, then all scene and subscene states in OutputMessage's updated_scenes should be reset to inactive, and your analysis reason should be put into OutputMessage's reason."
                             "If no connection is met, you should continue to organize your guiding speech according to the current subscene's objective and put it into OutputMessage's response, put your analysis reason into OutputMessage's reason, and do not fill in other content that is not updated in OutputMessage")
-        prompt_parts.append("\n- 特别地，当你发现用户刻意在规避你提供的选择，这时，你需要在理解原graph的基础上，特别是你的最终目标是什么的前提下，你需要重新制定你的策略，谋划和创造出一条新的最终可以通向End节点的路径（包含subscene和connection），把你的新策略更新到OutputMessage的updated_scenes中。")
+        prompt_parts.append("\n- Specifically, when you discover that the user is deliberately avoiding the choices you provide, you need to re-formulate your strategy based on understanding the original graph, especially what your ultimate goal is, and plan and create a new path that can eventually lead to the End node (including subscene and connection), and update your new strategy to the updated_scenes of OutputMessage.")
         
         return "\n".join(prompt_parts)

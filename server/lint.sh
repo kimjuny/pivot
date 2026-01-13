@@ -6,7 +6,7 @@ RUFF_EXIT=$?
 
 echo ""
 echo "Running Pyright..."
-python3 -m pyright .
+python3 -m pyright . ../core
 PYRIGHT_EXIT=$?
 
 if [ $RUFF_EXIT -eq 0 ] && [ $PYRIGHT_EXIT -eq 0 ]; then

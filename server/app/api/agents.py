@@ -4,26 +4,17 @@ import os
 import sys
 import traceback
 from datetime import timezone
+from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-# Add parent directory to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
-# Get logger for this module
-logger = logging.getLogger(__name__)
+# Add parent directory to Python path BEFORE importing core modules
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 # Import core modules
-from core.agent.agent import Agent as CoreAgent
-from core.agent.plan.connection import Connection as CoreConnection
-from core.agent.plan.scene import Scene as CoreScene
-from core.agent.plan.subscene import Subscene as CoreSubscene
-from core.agent.plan.subscene import SubsceneType
-from core.llm.doubao_llm import DoubaoLLM
-from server.websocket import manager
-
 from app.crud.agent import agent as agent_crud
 from app.crud.chat_history import chat_history as chat_history_crud
 from app.crud.connection import connection as connection_crud
@@ -46,11 +37,20 @@ from app.schemas.schemas import (
     SubsceneUpdate,
     SubsceneWithConnectionsResponse,
 )
+from core.agent.agent import Agent as CoreAgent
+from core.agent.plan.connection import Connection as CoreConnection
+from core.agent.plan.scene import Scene as CoreScene
+from core.agent.plan.subscene import Subscene as CoreSubscene, SubsceneType
+from core.llm.doubao_llm import DoubaoLLM
+from server.websocket import manager
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # Global agent instance
-agent_instance: CoreAgent | None = None
+agent_instance: Optional[CoreAgent] = None
 
 
 def get_db():
@@ -553,15 +553,15 @@ async def chat_with_agent_by_id(
         # Check if it's an API key related error
         error_str = str(e).lower()
         if "api key" in error_str or "authentication" in error_str or "unauthorized" in error_str:
-            logger.warning(f"API key error detected: {str(e)}, returning mock response")
+            logger.warning(f"API key error detected: {e!s}, returning mock response")
             return {
                 "response": "I understand your request. Due to a configuration issue with the API, I'm providing a simulated response to assist you.",
                 "reason": "API key error - returning mock response",
                 "graph": None
             }
-        logger.error(f"Error chatting with agent: {str(e)}")
+        logger.error(f"Error chatting with agent: {e!s}")
         logger.error(f"Exception traceback:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Error chatting with agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error chatting with agent: {e!s}") from e
 
 
 @router.get("/agents/{agent_id}/chat-history")
@@ -768,6 +768,6 @@ async def chat_with_agent(request: ChatRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error chatting with agent: {str(e)}")
+        logger.error(f"Error chatting with agent: {e!s}")
         logger.error(f"Exception traceback:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Error chatting with agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error chatting with agent: {e!s}") from e

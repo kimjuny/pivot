@@ -1,71 +1,125 @@
-# Python Development Rules
+## Python Development Rules
 
-## Code Quality Standards
+### Code Quality Standards
 
-All Python code must follow the quality standards defined in `server/pyproject.toml`:
+All Python code must strictly adhere to the configuration defined in `server/pyproject.toml`:
 
 ### Ruff Configuration
-- Line length: 88 characters
-- Target Python version: 3.10
-- Enabled rule sets: E (errors), F (pyflakes), I (import sorting), B (bugbear), UP (pyupgrade)
+
+-**Line Length**: 88 characters.
+
+-**Target Version**: Python 3.10 (for maximum open-source compatibility).
+
+-**Rule Sets Enabled**:
+
+-`E`, `F`: Basic errors and standard lints.
+
+-`I`: Automated import sorting.
+
+-`B`: Bugbear (detects common design flaws).
+
+-`UP`: Pyupgrade (ensures modern 3.10 syntax).
+
+-`N`: Naming conventions (enforces `snake_case` for functions/variables).
+
+-`C4`: Comprehensions (optimizes list/dict/set creation).
+
+-`PTH`: Pathlib (mandates `pathlib.Path` over `os.path`).
+
+-`SIM`: Simplify (suggests simpler code structures).
+
+-`TCH`: Type-checking blocks (manages imports used only for types).
+
+-**Formatting**: Use double quotes (`"`) and 4-space indentation.
 
 ### Pyright Configuration
-- Type checking mode: standard
-- Python version: 3.10
-- Platform: All
-- Extra paths: ["../"] (for core module imports)
 
-## Development Workflow
+-**Type Checking Mode**: `standard`.
 
-Before committing any Python code changes, you MUST:
+-**Python Version**: 3.10.
 
-1. Run the lint script from the server directory:
-   ```bash
-   cd server
-   make lint
-   # or
-   ./lint.sh
-   ```
+-**Strict Rules**:
 
-2. Ensure all checks pass:
-   - Ruff: 0 errors (auto-fixable issues should be fixed automatically)
-   - Pyright: 0 errors (all type issues must be resolved)
+    -`reportOptionalMemberAccess`: **Error** (Explicit None-checks are mandatory).
 
-## Type Hints Requirements
+    -`reportGeneralTypeIssues`: **Error**.
 
-- All functions and methods must have complete type hints
-- Use `Optional[T]` or `T | None` for nullable types
-- Avoid using `Any` type unless absolutely necessary
-- Handle Optional types explicitly with proper None checks
+    -`reportUnusedImport`: **Warning**.
 
-## Import Organization
+    -`reportUnusedVariable`: **Warning**.
 
-- Imports must be sorted alphabetically within groups
-- Standard library imports first, then third-party, then local imports
-- Separate groups with blank lines
-- Ruff will automatically fix import order issues
+### Development Workflow
 
-## Error Handling
+Before committing or completing a task, you MUST perform these steps in the `server` directory:
 
-- Use specific exception types instead of generic Exception
-- Include meaningful error messages
-- Log errors appropriately using the configured logger
+1. Run `ruff check . --fix` to resolve linting and import issues.
+2. Run `ruff format .` to ensure consistent code styling.
+3. Run `pyright .` to verify type integrity.
 
-## Core Module Integration
+### Strategic Coding Requirements
 
-When working with core modules:
-- Import from `core.agent`, `core.llm`, `core.utils` as needed
-- Respect the existing type definitions in core modules
-- The `extraPaths` configuration ensures proper type checking across modules
+-**Type Hints**: Mandatory for all function signatures and class members.
 
-## Testing
+-**None-Safety**: You MUST handle `Optional` types explicitly. Never access attributes of an object that could be `None` without a guard (e.g., `if object is not None:`).
 
-- All new features should include tests
-- Run tests before committing
-- Ensure test coverage is maintained
+-**Modern Syntax**: Prefer `T | None` over `Optional[T]` for Union types (Python 3.10 style).
 
-## Documentation
+-**Naming**: Use `snake_case` for variables/functions and `PascalCase` for classes.
 
-- Use docstrings for all public functions and classes
-- Follow Google-style or NumPy-style docstring format
-- Include type information in docstrings when helpful
+-**Path Handling**: Always use `pathlib.Path`. String-based path manipulation is discouraged.
+
+### Import Organization
+
+-**Order**: Follow `isort` rules (Standard library > Third-party > First-party).
+
+-**First-party**: `core` and `server` are recognized as local modules.
+
+-**Circular Dependencies**: Use `if TYPE_CHECKING:` blocks for imports required only for type annotations.
+
+### Core Module Integration
+
+- The project uses a multi-module structure with `./core/` and `./server/`.
+- Access shared logic via `import core.xxx`.
+- The `extraPaths = ["../"]` setting in `pyproject.toml` ensures that `server` can resolve types from `core`. Do not break this resolution.
+
+### Testing
+
+-**Testing**: New features should include unit tests. Ensure existing tests pass before finishing.
+
+### Documentation & Style
+
+#### Docstring Standards
+
+- **Format**: Follow **Google Style Docstrings** for all public functions, classes, and methods.
+- **Mandatory Fields**:
+  - `Args`: List all parameters with their purposes.
+  - `Returns`: Describe the return value and its type.
+  - `Raises`: Document all exceptions that are explicitly raised.
+- **Example Pattern**:
+  ```python
+  def get_agent_status(agent_id: str, verbose: bool = False) -> dict | None:
+      """Fetches the current status of a specific agent.
+
+      Args:
+          agent_id: The unique identifier of the agent.
+          verbose: If True, returns detailed metadata.
+
+      Returns:
+          A dictionary containing status info, or None if the agent doesn't exist.
+
+      Raises:
+          ConnectionError: If the core database is unreachable.
+      """
+  ```
+
+#### AI Commentary Rules
+
+- **No Redundancy**: Do not write comments that state the obvious (e.g., `# Increment i by 1`).
+- **Explain "Why", Not "What"**: Use comments to explain complex logic, business rules, or "hacks" that aren't immediately clear from the code itself.
+- **Side Effects**: Clearly document any side effects (e.g., if a function modifies a global state or writes to a file).
+- **TODO Management**: Use `TODO(username): description` for temporary hacks or planned features.
+
+#### Project Context
+
+- All documentation must be in **English** as this is an international open-source project.
+- Ensure that descriptions of `core` module integrations are clear enough for external contributors to understand the data flow.

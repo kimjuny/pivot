@@ -8,7 +8,7 @@ ruff:
 
 pyright:
 	@echo "Running Pyright..."
-	python3 -m pyright .
+	python3 -m pyright . ../core
 
 check-all: ruff pyright
 	@echo "All checks passed!"
