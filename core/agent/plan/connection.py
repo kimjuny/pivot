@@ -1,5 +1,5 @@
-from typing import Dict, Any
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+from typing import Any
 
 
 @dataclass
@@ -14,7 +14,7 @@ class Connection:
     to_subscene: str # The name of the destination subscene
     condition: str = "" # Text description of conditions for transitioning
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the connection to a dictionary representation with proper JSON keys.
         
         Returns:
@@ -23,7 +23,7 @@ class Connection:
         return asdict(self)
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
+    def from_dict(cls, data: dict[str, Any]):
         """Create a Connection from a dictionary representation with proper JSON keys.
         
         Args:

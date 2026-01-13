@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Any, Optional
+
 from .plan.scene import Scene
 from .plan.subscene import Subscene
 
@@ -12,10 +12,10 @@ class InputMessage:
 
     def __init__(self, 
                  user_message: str,
-                 history: List[Dict[str, str]],
-                 scenes: List[Scene],
-                 current_scene: Optional[Scene] = None,
-                 current_subscene: Optional[Subscene] = None):
+                 history: list[dict[str, str]],
+                 scenes: list[Scene],
+                 current_scene: Scene | None = None,
+                 current_subscene: Subscene | None = None):
         """
         Initialize an InputMessage.
         

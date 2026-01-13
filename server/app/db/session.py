@@ -1,7 +1,8 @@
+import os
+from collections.abc import Generator
+
 from sqlalchemy import create_engine
 from sqlmodel import Session, SQLModel
-from typing import Generator
-import os
 
 
 def get_engine():
@@ -17,6 +18,5 @@ def get_session() -> Generator[Session, None, None]:
 
 def init_db():
     engine = get_engine()
-    from app.models.agent import Agent, Scene, Subscene, Connection
     SQLModel.metadata.create_all(engine)
     print("Database initialized successfully")

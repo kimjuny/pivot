@@ -1,22 +1,40 @@
 import { useState, useRef, useEffect, FormEvent } from 'react';
-import { useAgentStore } from '../store/agentStore';
+import { useChatStore } from '../store/chatStore';
 import { formatTimestamp } from '../utils/timestamp';
+import type { ChatHistory } from '../types';
 
+/**
+ * Props for ChatInterface component.
+ */
 interface ChatInterfaceProps {
+  /** Unique identifier of the agent */
   agentId: number;
 }
 
+/**
+ * Chat interface component for interacting with an agent.
+ * Displays chat history and allows sending new messages.
+ * Shows agent reasoning in expandable sections.
+ */
 function ChatInterface({ agentId }: ChatInterfaceProps) {
-  const { chatHistory, chatWithAgentById, isChatting, error, clearError, loadChatHistory, clearChatHistory } = useAgentStore();
+  const { chatHistory, chatWithAgentById, isChatting, error, clearError, loadChatHistory, clearChatHistory } = useChatStore();
   const [inputMessage, setInputMessage] = useState<string>('');
   const [hasLoadedHistory, setHasLoadedHistory] = useState<boolean>(false);
   const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * Scroll chat view to bottom.
+   * Ensures latest messages are visible.
+   */
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  /**
+   * Load chat history when agentId changes.
+   * Prevents duplicate loading with hasLoadedHistory flag.
+   */
   useEffect(() => {
     if (agentId && !hasLoadedHistory) {
       void loadChatHistory(agentId, 'preview-user');
@@ -24,10 +42,18 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
     }
   }, [agentId, hasLoadedHistory, loadChatHistory]);
 
+  /**
+   * Auto-scroll to bottom when chat history updates.
+   * Ensures user sees latest messages.
+   */
   useEffect(() => {
     scrollToBottom();
   }, [chatHistory]);
 
+  /**
+   * Clear chat history and reload.
+   * Resets expanded thinking states and fetches fresh history.
+   */
   const handleClearHistory = async () => {
     try {
       await clearChatHistory(agentId, 'preview-user');
@@ -41,6 +67,12 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
   useEffect(() => {
   }, [agentId]);
 
+  /**
+   * Handle form submission to send message.
+   * Validates input and prevents duplicate submissions.
+   * 
+   * @param e - Form event from submit
+   */
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputMessage.trim() || isChatting) return;
@@ -53,10 +85,19 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
     }
   };
 
+  /**
+   * Handle reset agent button click.
+   * TODO: Implement agent reset functionality.
+   */
   const handleReset = () => {
     window.confirm('Are you sure you want to reset the agent?');
   };
 
+  /**
+   * Toggle visibility of agent reasoning for a message.
+   * 
+   * @param index - Index of message in chat history
+   */
   const toggleThinking = (index: number) => {
     setExpandedThinking(prev => ({
       ...prev,
@@ -93,7 +134,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
             </div>
           </div>
         ) : (
-          chatHistory.map((message, index) => (
+          chatHistory.map((message: ChatHistory, index: number) => (
             <div 
               key={index} 
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-slide-up`}

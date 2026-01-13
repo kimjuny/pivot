@@ -1,6 +1,7 @@
-from typing import List, TYPE_CHECKING
 from enum import Enum
+
 from .connection import Connection
+
 
 class SubsceneType(Enum):
     START = "start"
@@ -36,7 +37,7 @@ class Subscene:
         self.mandatory = mandatory
         self.objective = objective
         self.state = SubsceneState.INACTIVE
-        self.connections: List[Connection] = []
+        self.connections: list[Connection] = []
         
     def activate(self):
         """Set the subscene state to active."""

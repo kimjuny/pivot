@@ -4,16 +4,29 @@ import { getAgents } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
 
+/**
+ * Agent list component.
+ * Displays all available agents with their details.
+ * Allows navigation to agent visualization view.
+ */
 function AgentList() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  /**
+   * Load agents from server on component mount.
+   * Fetches all available agents and updates state.
+   */
   useEffect(() => {
     void loadAgents();
   }, []);
 
+  /**
+   * Fetch agents from API and update state.
+   * Handles loading and error states.
+   */
   const loadAgents = async () => {
     try {
       setLoading(true);
@@ -28,9 +41,18 @@ function AgentList() {
     }
   };
 
+  /**
+   * Handle create agent button click.
+   * TODO: Implement agent creation functionality.
+   */
   const handleCreateAgent = () => {
   };
 
+  /**
+   * Navigate to agent visualization view.
+   * 
+   * @param agent - Agent to navigate to
+   */
   const handleAgentClick = (agent: Agent) => {
     navigate(`/agent/${agent.id}`);
   };
@@ -74,7 +96,7 @@ function AgentList() {
             title="创建新的 Agent"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H8m8 8v16m8-8h-8m8 8v16m8-8H8m8 8v16" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H8m8 8v16m8-8H8m8 8v16m8-8H8m8 8v16" />
             </svg>
             <span>创建 Agent</span>
           </button>

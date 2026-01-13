@@ -1,0 +1,71 @@
+# Python Development Rules
+
+## Code Quality Standards
+
+All Python code must follow the quality standards defined in `server/pyproject.toml`:
+
+### Ruff Configuration
+- Line length: 88 characters
+- Target Python version: 3.10
+- Enabled rule sets: E (errors), F (pyflakes), I (import sorting), B (bugbear), UP (pyupgrade)
+
+### Pyright Configuration
+- Type checking mode: standard
+- Python version: 3.10
+- Platform: All
+- Extra paths: ["../"] (for core module imports)
+
+## Development Workflow
+
+Before committing any Python code changes, you MUST:
+
+1. Run the lint script from the server directory:
+   ```bash
+   cd server
+   make lint
+   # or
+   ./lint.sh
+   ```
+
+2. Ensure all checks pass:
+   - Ruff: 0 errors (auto-fixable issues should be fixed automatically)
+   - Pyright: 0 errors (all type issues must be resolved)
+
+## Type Hints Requirements
+
+- All functions and methods must have complete type hints
+- Use `Optional[T]` or `T | None` for nullable types
+- Avoid using `Any` type unless absolutely necessary
+- Handle Optional types explicitly with proper None checks
+
+## Import Organization
+
+- Imports must be sorted alphabetically within groups
+- Standard library imports first, then third-party, then local imports
+- Separate groups with blank lines
+- Ruff will automatically fix import order issues
+
+## Error Handling
+
+- Use specific exception types instead of generic Exception
+- Include meaningful error messages
+- Log errors appropriately using the configured logger
+
+## Core Module Integration
+
+When working with core modules:
+- Import from `core.agent`, `core.llm`, `core.utils` as needed
+- Respect the existing type definitions in core modules
+- The `extraPaths` configuration ensures proper type checking across modules
+
+## Testing
+
+- All new features should include tests
+- Run tests before committing
+- Ensure test coverage is maintained
+
+## Documentation
+
+- Use docstrings for all public functions and classes
+- Follow Google-style or NumPy-style docstring format
+- Include type information in docstrings when helpful

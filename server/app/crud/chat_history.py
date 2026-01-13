@@ -1,19 +1,20 @@
-from typing import Optional, List, TypeVar, Generic, Type
-from sqlmodel import Session, select, SQLModel
-from app.models.agent import ChatHistory
+from typing import Generic, TypeVar
 
+from sqlmodel import Session, SQLModel, select
+
+from app.models.agent import ChatHistory
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
 
 
 class CRUDBase(Generic[ModelType]):
-    def __init__(self, model: Type[ModelType]):
+    def __init__(self, model: type[ModelType]):
         self.model = model
 
-    def get(self, id: int, session: Session) -> Optional[ModelType]:
+    def get(self, id: int, session: Session) -> ModelType | None:
         return session.get(self.model, id)
 
-    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> List[ModelType]:
+    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[ModelType]:
         statement = select(self.model).offset(skip).limit(limit)
         return session.exec(statement).all()
 
@@ -24,7 +25,7 @@ class CRUDBase(Generic[ModelType]):
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> Optional[ModelType]:
+    def update(self, id: int, session: Session, **kwargs) -> ModelType | None:
         db_obj = self.get(id, session)
         if db_obj:
             for key, value in kwargs.items():
@@ -51,7 +52,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         session: Session,
         skip: int = 0, 
         limit: int = 100
-    ) -> List[ChatHistory]:
+    ) -> list[ChatHistory]:
         """
         Get chat history for a specific agent and user, ordered by creation time.
         """
@@ -70,7 +71,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         agent_id: int, 
         user: str, 
         session: Session
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Get the latest update_scene from chat history for a specific agent and user.
         Returns the update_scene JSON string or None if not found.
@@ -79,8 +80,8 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
             select(ChatHistory)
             .where(ChatHistory.agent_id == agent_id)
             .where(ChatHistory.user == user)
-            .where(ChatHistory.update_scene.isnot(None))
-            .order_by(ChatHistory.create_time.desc())
+            .where(ChatHistory.update_scene.isnot(None))  # type: ignore[arg-type]
+            .order_by(ChatHistory.create_time.desc())  # type: ignore[attr-defined]
             .limit(1)
         )
         result = session.exec(statement).first()
@@ -109,8 +110,8 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         agent_id: int, 
         user: str, 
         message: str, 
-        reason: Optional[str],
-        update_scene: Optional[str],
+        reason: str | None,
+        update_scene: str | None,
         session: Session
     ) -> ChatHistory:
         """

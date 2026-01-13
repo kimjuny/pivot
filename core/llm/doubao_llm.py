@@ -1,9 +1,17 @@
-import os
-import requests
 import time
 import uuid
-from typing import List, Dict, Any, Optional
-from .abstract_llm import AbstractLLM, Response, Choice, ChatMessage, UsageInfo, FinishReason
+from typing import Any
+
+import requests
+
+from .abstract_llm import (
+    AbstractLLM,
+    ChatMessage,
+    Choice,
+    FinishReason,
+    Response,
+    UsageInfo,
+)
 
 
 class DoubaoLLM(AbstractLLM):
@@ -35,7 +43,7 @@ class DoubaoLLM(AbstractLLM):
         self.api_key = api_key
         self.timeout = timeout or self.DEFAULT_TIMEOUT
 
-    def chat(self, messages: List[Dict[str, str]], **kwargs) -> Response:
+    def chat(self, messages: list[dict[str, str]], **kwargs) -> Response:
         """
         Process a conversation with the Doubao LLM.
         
@@ -110,7 +118,7 @@ class DoubaoLLM(AbstractLLM):
         # This should never be reached, but just in case
         raise RuntimeError("Unexpected error in chat method")
 
-    def _convert_response(self, raw_response: Dict[str, Any]) -> Response:
+    def _convert_response(self, raw_response: dict[str, Any]) -> Response:
         """
         Convert the raw API response to our structured Response.
         

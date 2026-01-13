@@ -1,0 +1,49 @@
+[tool.ruff]
+# Target Python 3.10 to ensure maximum compatibility for open-source users.
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+# E/F: Basic errors, I: Import sorting, B: Bugbear (potential bugs), 
+# UP: Upgrade syntax, N: Naming conventions, C4: Comprehensions, 
+# PTH: Use pathlib, RUF: Ruff-specific rules, SIM: Simplify code, 
+# TCH: Manage type-checking imports.
+select = ["E", "F", "I", "B", "UP", "N", "C4", "PTH", "RUF", "SIM", "TCH"]
+ignore = [
+    "E501", # Allow long lines, handled by formatter.
+    "B008", # Allow function calls in default arguments (common in FastAPI/Pydantic).
+]
+
+[tool.ruff.lint.isort]
+# Group imports automatically and ensure consistent sorting for PRs.
+combine-as-imports = true
+known-first-party = ["core", "server"]
+
+[tool.pyright]
+# Include current directory and ensure cross-module resolution for './core'.
+include = ["."]
+extraPaths = ["../"]
+
+# Standard mode is recommended for open-source to avoid overly aggressive errors 
+# while maintaining high type safety.
+typeCheckingMode = "standard"
+pythonVersion = "3.10"
+pythonPlatform = "All"
+
+# Rules to keep AI-generated code clean and prevent common runtime crashes.
+reportUnusedImport = "warning"
+reportUnusedVariable = "warning"
+reportOptionalMemberAccess = "error" # Enforce None-checks (crucial for stability).
+reportGeneralTypeIssues = "error"
+reportIncompatibleMethodOverride = "error"
+
+# If using a virtual environment locally, you can uncomment these:
+# venvPath = "."
+# venv = ".venv"
+
+[tool.ruff.format]
+# Standardize code style to reduce "diff noise" in open-source contributions.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

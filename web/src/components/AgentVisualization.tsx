@@ -17,7 +17,7 @@ import {
   Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { useAgentStore } from '../store/agentStore';
+import { useSceneGraphStore } from '../store/sceneGraphStore';
 import ChatInterface from './ChatInterface';
 import EditPanel from './EditPanel';
 import { getSceneGraph } from '../utils/api';
@@ -102,7 +102,7 @@ const edgeTypes = {
 };
 
 function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph, onSceneSelect }: AgentVisualizationProps) {
-  const { sceneGraph, refreshSceneGraph } = useAgentStore();
+  const { sceneGraph, refreshSceneGraph } = useSceneGraphStore();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);

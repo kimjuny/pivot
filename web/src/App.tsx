@@ -4,7 +4,13 @@ import AgentList from './components/AgentList';
 import AgentVisualization from './components/AgentVisualization';
 import { getAgentById, getScenes } from './utils/api';
 import type { Agent, Scene } from './types';
+import { useSceneGraphStore } from './store/sceneGraphStore';
 
+/**
+ * Main application component.
+ * Manages routing between agent list and agent visualization views.
+ * Handles loading agent details, scenes, and scene graph state.
+ */
 function App() {
   const [isInitializing, setIsInitializing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -14,6 +20,11 @@ function App() {
   const { agentId } = useParams<{ agentId?: string }>();
   const navigate = useNavigate();
 
+  /**
+   * Load agent details and associated scenes from server.
+   * Filters scenes to only those belonging to the current agent.
+   * Automatically selects the first scene if available.
+   */
   const loadAgentDetails = useCallback(async () => {
     if (!agentId) return;
 
@@ -38,6 +49,10 @@ function App() {
     }
   }, [agentId]);
 
+  /**
+   * Load agent details when agentId changes.
+   * Also applies dark mode class to document body.
+   */
   useEffect(() => {
     if (agentId) {
       void loadAgentDetails();
@@ -45,9 +60,13 @@ function App() {
     document.body.classList.add('dark');
   }, [agentId, loadAgentDetails]);
 
+  /**
+   * Refresh the scene graph from the server.
+   * Used to manually trigger a scene graph update.
+   */
   const handleResetSceneGraph = async () => {
     try {
-      const { refreshSceneGraph } = await import('./store/agentStore').then(m => m.useAgentStore());
+      const { refreshSceneGraph } = useSceneGraphStore.getState();
       await refreshSceneGraph();
     } catch (err) {
       setError((err as Error).message || 'Failed to refresh scene graph');

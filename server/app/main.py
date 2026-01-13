@@ -1,11 +1,11 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+import logging
+import os
+import sys
+import traceback
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-import sys
-import os
-import logging
-import traceback
 
 # Configure logging before importing other modules
 logging.basicConfig(
@@ -31,15 +31,12 @@ from core.utils.logging_config import get_logger
 logger = get_logger('server')
 
 # Import database session and models
-from app.db.session import get_session, init_db
-from app.db.base import __all__
-from app.models.agent import Agent, Scene, Subscene, Connection
+# Import WebSocket manager
+from server.websocket import websocket_endpoint
 
 # Import API routers
 from app.api.agents import router as agents_router
-
-# Import WebSocket manager
-from server.websocket import manager, websocket_endpoint
+from app.db.session import init_db
 
 app = FastAPI(title="Agent Visualization API", version="1.0.0")
 

@@ -1,19 +1,20 @@
-from typing import Optional, List, TypeVar, Generic, Type
-from sqlmodel import Session, select, SQLModel
-from app.models.agent import Agent, Scene, Subscene, Connection
+from typing import Generic, TypeVar
 
+from sqlmodel import Session, SQLModel, select
+
+from app.models.agent import Agent, Connection, Scene, Subscene
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
 
 
 class CRUDBase(Generic[ModelType]):
-    def __init__(self, model: Type[ModelType]):
+    def __init__(self, model: type[ModelType]):
         self.model = model
 
-    def get(self, id: int, session: Session) -> Optional[ModelType]:
+    def get(self, id: int, session: Session) -> ModelType | None:
         return session.get(self.model, id)
 
-    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> List[ModelType]:
+    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[ModelType]:
         statement = select(self.model).offset(skip).limit(limit)
         return session.exec(statement).all()
 
@@ -24,7 +25,7 @@ class CRUDBase(Generic[ModelType]):
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> Optional[ModelType]:
+    def update(self, id: int, session: Session, **kwargs) -> ModelType | None:
         db_obj = self.get(id, session)
         if db_obj:
             for key, value in kwargs.items():
@@ -48,15 +49,15 @@ class AgentCRUD(CRUDBase[Agent]):
 
 
 class SceneCRUD(CRUDBase[Scene]):
-    def get_by_agent_id(self, agent_id: int, session: Session) -> List[Scene]:
+    def get_by_agent_id(self, agent_id: int, session: Session) -> list[Scene]:
         statement = select(Scene).where(Scene.agent_id == agent_id)
         return session.exec(statement).all()
 
-    def get_by_name(self, name: str, session: Session) -> Optional[Scene]:
+    def get_by_name(self, name: str, session: Session) -> Scene | None:
         statement = select(Scene).where(Scene.name == name)
         return session.exec(statement).first()
 
-    def get_with_subscenes(self, id: int, session: Session) -> Optional[Scene]:
+    def get_with_subscenes(self, id: int, session: Session) -> Scene | None:
         scene = self.get(id, session)
         if scene:
             session.refresh(scene)
@@ -64,11 +65,11 @@ class SceneCRUD(CRUDBase[Scene]):
 
 
 class SubsceneCRUD(CRUDBase[Subscene]):
-    def get_by_scene_id(self, scene_id: int, session: Session) -> List[Subscene]:
+    def get_by_scene_id(self, scene_id: int, session: Session) -> list[Subscene]:
         statement = select(Subscene).where(Subscene.scene_id == scene_id)
         return session.exec(statement).all()
 
-    def get_by_name(self, name: str, scene_id: int, session: Session) -> Optional[Subscene]:
+    def get_by_name(self, name: str, scene_id: int, session: Session) -> Subscene | None:
         statement = select(Subscene).where(
             (Subscene.name == name) & (Subscene.scene_id == scene_id)
         )
@@ -76,7 +77,7 @@ class SubsceneCRUD(CRUDBase[Subscene]):
 
 
 class ConnectionCRUD(CRUDBase[Connection]):
-    def get_by_from_subscene(self, from_subscene: str, session: Session) -> List[Connection]:
+    def get_by_from_subscene(self, from_subscene: str, session: Session) -> list[Connection]:
         statement = select(Connection).where(Connection.from_subscene == from_subscene)
         return session.exec(statement).all()
 

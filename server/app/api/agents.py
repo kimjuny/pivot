@@ -1,13 +1,13 @@
-from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel, Field
-import sys
-import os
 import json
 import logging
+import os
+import sys
 import traceback
-from datetime import datetime, timezone
+from datetime import timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlmodel import Session
 
 # Add parent directory to Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -15,37 +15,42 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
-from app.db.session import get_session
-from app.db.base import __all__
-from app.models.agent import Agent
-from app.schemas.schemas import (
-    AgentCreate, AgentUpdate, AgentResponse,
-    SceneCreate, SceneUpdate, SceneResponse,
-    SubsceneCreate, SubsceneUpdate, SubsceneResponse,
-    ConnectionCreate, ConnectionUpdate, ConnectionResponse,
-    SubsceneWithConnectionsResponse, SceneGraphResponse,
-    ChatHistoryCreate, ChatHistoryResponse, ChatHistoryWithGraphResponse
-)
-from app.crud.agent import agent as agent_crud
-from app.crud.scene import scene as scene_crud
-from app.crud.subscene import subscene as subscene_crud
-from app.crud.connection import connection as connection_crud
-from app.crud.chat_history import chat_history as chat_history_crud
-from server.websocket import manager
-
 # Import core modules
 from core.agent.agent import Agent as CoreAgent
-from core.agent.plan.scene import Scene as CoreScene, SceneState
-from core.agent.plan.subscene import Subscene as CoreSubscene, SubsceneType, SubsceneState
 from core.agent.plan.connection import Connection as CoreConnection
+from core.agent.plan.scene import Scene as CoreScene
+from core.agent.plan.subscene import Subscene as CoreSubscene
+from core.agent.plan.subscene import SubsceneType
 from core.llm.doubao_llm import DoubaoLLM
-from example.sleep_companion_example import create_sleep_companion_scenario
+from server.websocket import manager
 
+from app.crud.agent import agent as agent_crud
+from app.crud.chat_history import chat_history as chat_history_crud
+from app.crud.connection import connection as connection_crud
+from app.crud.scene import scene as scene_crud
+from app.crud.subscene import subscene as subscene_crud
+from app.db.session import get_session
+from app.schemas.schemas import (
+    AgentCreate,
+    AgentResponse,
+    AgentUpdate,
+    ConnectionCreate,
+    ConnectionResponse,
+    ConnectionUpdate,
+    SceneCreate,
+    SceneGraphResponse,
+    SceneResponse,
+    SceneUpdate,
+    SubsceneCreate,
+    SubsceneResponse,
+    SubsceneUpdate,
+    SubsceneWithConnectionsResponse,
+)
 
 router = APIRouter()
 
 # Global agent instance
-agent_instance: Optional[CoreAgent] = None
+agent_instance: CoreAgent | None = None
 
 
 def get_db():
@@ -65,7 +70,7 @@ async def create_agent(
     return AgentResponse.from_orm(db_agent)
 
 
-@router.get("/agents", response_model=List[AgentResponse])
+@router.get("/agents", response_model=list[AgentResponse])
 async def get_agents(
     skip: int = 0,
     limit: int = 100,
@@ -126,7 +131,7 @@ async def create_scene(
     return SceneResponse.from_orm(db_scene)
 
 
-@router.get("/scenes", response_model=List[SceneResponse])
+@router.get("/scenes", response_model=list[SceneResponse])
 async def get_scenes(
     skip: int = 0,
     limit: int = 100,
@@ -175,7 +180,7 @@ async def delete_scene(
     return {"message": "Scene deleted successfully"}
 
 
-@router.get("/scenes/{scene_id}/subscenes", response_model=List[SubsceneResponse])
+@router.get("/scenes/{scene_id}/subscenes", response_model=list[SubsceneResponse])
 async def get_scene_subscenes(
     scene_id: int,
     db: Session = Depends(get_db)
@@ -271,13 +276,13 @@ async def delete_subscene(
     return {"message": "Subscene deleted successfully"}
 
 
-@router.get("/subscenes/{subscene_id}/connections", response_model=List[ConnectionResponse])
+@router.get("/subscenes/{subscene_id}/connections", response_model=list[ConnectionResponse])
 async def get_subscene_connections(
     subscene_id: int,
     db: Session = Depends(get_db)
 ):
     """Get all Connections for specified Subscene"""
-    connections = connection_crud.get_by_from_subscene(subscene_id, db)
+    connections = connection_crud.get_by_from_subscene_id(subscene_id, db)
     return [ConnectionResponse.from_orm(connection) for connection in connections]
 
 
@@ -335,7 +340,7 @@ def convert_db_to_core_scene(db_scene, db_subscenes, db_connections):
         CoreScene: Core scene model with subscenes and connections
     """
     # Create a map of subscene name to subscene object
-    subscene_map = {db_subscene.name: db_subscene for db_subscene in db_subscenes}
+    {db_subscene.name: db_subscene for db_subscene in db_subscenes}
     
     # Create core subscenes with connections
     core_subscenes = []
@@ -435,10 +440,10 @@ async def chat_with_agent_by_id(
     # Check if there's a latest update_scene in chat history
     latest_update_scene = chat_history_crud.get_latest_update_scene(agent_id, request.user, db)
     if latest_update_scene:
-        logger.info(f"Found latest update_scene in chat history, loading saved scene state")
+        logger.info("Found latest update_scene in chat history, loading saved scene state")
         try:
             # Parse the update_scene JSON to restore scene state
-            saved_scene_data = json.loads(latest_update_scene)
+            json.loads(latest_update_scene)
             # TODO: Implement logic to restore scene state from saved data
             # For now, we'll use the default scene
             logger.warning("Scene state restoration not fully implemented, using default scene")
@@ -501,7 +506,7 @@ async def chat_with_agent_by_id(
             # Extract only the fields we need
             chat_response = parsed_response.get("response", "")
             reason = parsed_response.get("reason", "")
-            logger.info(f"Parsed response and reason")
+            logger.info("Parsed response and reason")
         except json.JSONDecodeError:
             # Fallback if response is not JSON format
             chat_response = first_choice.message.content
@@ -620,7 +625,7 @@ async def get_chat_history(
     if latest_update_scene:
         try:
             latest_graph = json.loads(latest_update_scene)
-            logger.info(f"Found latest update_scene in chat history")
+            logger.info("Found latest update_scene in chat history")
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse latest update_scene: {latest_update_scene}")
     
@@ -732,7 +737,7 @@ async def chat_with_agent(request: ChatRequest):
             # Extract only the fields we need
             chat_response = parsed_response.get("response", "")
             reason = parsed_response.get("reason", "")
-            logger.info(f"Parsed response and reason")
+            logger.info("Parsed response and reason")
         except json.JSONDecodeError:
             # Fallback if response is not JSON format
             chat_response = first_choice.message.content

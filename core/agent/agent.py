@@ -1,11 +1,10 @@
 
-from typing import List, Dict, Any, Optional
 from core.llm.abstract_llm import AbstractLLM, Response
+from core.utils.logging_config import get_logger
+
+from .input_message import InputMessage
 from .plan.scene import Scene, SceneState
 from .plan.subscene import Subscene, SubsceneState
-from .plan.connection import Connection
-from .input_message import InputMessage
-from core.utils.logging_config import get_logger
 
 # Get logger for this module
 logger = get_logger('agent')
@@ -18,12 +17,12 @@ class Agent:
     """
 
     def __init__(self):
-        self.model: Optional[AbstractLLM] = None
+        self.model: AbstractLLM | None = None
         self.is_started: bool = False
-        self.history: List[Dict[str, str]] = []
-        self.scenes: List[Scene] = []
-        self.current_scene: Optional[Scene] = None
-        self.current_subscene: Optional[Subscene] = None
+        self.history: list[dict[str, str]] = []
+        self.scenes: list[Scene] = []
+        self.current_scene: Scene | None = None
+        self.current_subscene: Subscene | None = None
 
     def add_action(self) -> 'Agent':
         """
@@ -115,7 +114,7 @@ class Agent:
                 
                 # Print connections
                 if subscene.connections:
-                    logger.info(f"    连接:")
+                    logger.info("    连接:")
                     for k, connection in enumerate(subscene.connections):
                         to_subscene_name = connection.to_subscene  # Using explicit attribute name
                         to_scene_name = "未知"
@@ -213,7 +212,6 @@ class Agent:
         self.history.append({"role": "user", "content": message})
         
         # Prepare assistant response based on OutputMessage
-        assistant_response = None
         if response.choices:
             first_choice = response.first()
             
@@ -230,15 +228,13 @@ class Agent:
                 })
                 
                 # Use OutputMessage response as the assistant response
-                assistant_response = output_message.response
                 
-            except Exception as e:
+            except Exception:
                 # Fallback to raw response if parsing fails
                 self.history.append({
                     "role": first_choice.message.role,
                     "content": first_choice.message.content
                 })
-                assistant_response = first_choice.message.content
         
         # Log chat completion
         logger.info("Chat completed successfully")

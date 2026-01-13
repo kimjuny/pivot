@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
+
 from core.utils.logging_config import get_logger
 
 # Get logger for this module
@@ -47,7 +47,7 @@ class Choice:
     """
     index: int
     message: ChatMessage
-    finish_reason: Optional[FinishReason] = None
+    finish_reason: FinishReason | None = None
 
 
 @dataclass
@@ -72,10 +72,10 @@ class Response:
         object (str): Object type, typically "chat.completion"
     """
     id: str  # Unique identifier for the completion
-    choices: List[Choice]  # List of completion choices
+    choices: list[Choice]  # List of completion choices
     created: int  # Unix timestamp of when the completion was created
     model: str  # The model used for the completion
-    usage: Optional[UsageInfo] = None  # Token usage information
+    usage: UsageInfo | None = None  # Token usage information
     object: str = "chat.completion"  # Object type, typically "chat.completion"
     
     def pretty_print(self) -> None:
@@ -150,7 +150,7 @@ class AbstractLLM(ABC):
         pass
 
     @abstractmethod
-    def chat(self, messages: List[Dict[str, str]], **kwargs) -> Response:
+    def chat(self, messages: list[dict[str, str]], **kwargs) -> Response:
         """
         Process a conversation with the LLM.
         

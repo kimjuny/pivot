@@ -1,5 +1,5 @@
-from typing import List, Optional, TYPE_CHECKING
 from enum import Enum
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .subscene import Subscene
@@ -27,7 +27,7 @@ class Scene:
         self.name = name
         self.identification_condition = identification_condition
         self.state = SceneState.INACTIVE
-        self.subscenes: List['Subscene'] = []
+        self.subscenes: list[Subscene] = []
         
     def activate(self):
         """Set the scene state to active."""
