@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SceneGraph } from '../types';
-import { fetchSceneGraph } from '../utils/api';
+import { getSceneGraph } from '../utils/api';
 import websocket from '../utils/websocket';
 
 /**
@@ -14,8 +14,8 @@ interface SceneGraphStore {
   isLoadingSceneGraph: boolean;
   /** Error message from last operation */
   error: string | null;
-  /** Refresh scene graph data from server */
-  refreshSceneGraph: () => Promise<void>;
+  /** Refresh scene graph data from server for a specific scene */
+  refreshSceneGraph: (sceneId: number) => Promise<void>;
   /** Update scene graph with provided data */
   updateSceneGraph: (sceneGraph: SceneGraph | null) => void;
   /** Clear error message */
@@ -27,17 +27,17 @@ const useSceneGraphStore = create<SceneGraphStore>((set) => ({
   isLoadingSceneGraph: false,
   error: null,
 
-  refreshSceneGraph: async () => {
+  refreshSceneGraph: async (sceneId: number) => {
     set({ isLoadingSceneGraph: true, error: null });
     try {
-      const sceneGraph = await fetchSceneGraph();
+      const sceneGraph = await getSceneGraph(sceneId);
       set({ 
-        sceneGraph,
+        sceneGraph: sceneGraph as SceneGraph | null,
         isLoadingSceneGraph: false,
         error: null
       });
     } catch (error) {
-      const err = error as Error;
+      const err = error instanceof Error ? error : new Error(String(error));
       set({ 
         isLoadingSceneGraph: false, 
         error: err.message 
@@ -54,7 +54,7 @@ const useSceneGraphStore = create<SceneGraphStore>((set) => ({
 
 /**
  * Establish WebSocket connection and listen for scene updates.
- * This is called once when the module is loaded to enable real-time updates.
+ * This is called once when module is loaded to enable real-time updates.
  */
 websocket.connect();
 

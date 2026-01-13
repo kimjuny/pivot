@@ -1,4 +1,4 @@
-# Agent Visualization System
+# Pivot
 
 一个基于 FastAPI + SQLModel 的 Agent 场景可视化系统，支持 Agent 与场景图（Scene Graph）的交互。
 
@@ -82,6 +82,7 @@ pivot/
 ## 技术栈
 
 ### 后端
+
 - **FastAPI**: 现代、高性能的 Python Web 框架
 - **SQLModel**: 既是 ORM（操作数据库），又是 Pydantic 模型（验证数据）。这意味着你不需要写两套类，极大减少了代码冗余。
 - **Alembic**: 它是 SQLAlchemy 的迁移工具。通过它，你不需要手动在数据库里建表，它会自动探测代码的变化并生成迁移脚本，无论目标是 SQLite 还是 Postgres。
@@ -90,6 +91,7 @@ pivot/
 - **WebSocket**: 实时通信支持
 
 ### 前端
+
 - **React**: 现代 UI 框架
 - **React Flow**: 流程图可视化库
 - **Tailwind CSS**: 实用优先的 CSS 框架
@@ -101,6 +103,7 @@ pivot/
 ### 核心实体
 
 #### Agent
+
 - `id`: 主键
 - `name`: Agent 名称
 - `api_key`: LLM API 密钥
@@ -108,6 +111,7 @@ pivot/
 - `updated_at`: 更新时间
 
 #### Scene
+
 - `id`: 主键
 - `name`: 场景名称
 - `description`: 场景描述
@@ -116,6 +120,7 @@ pivot/
 - `agent_id`: 外键，关联到 Agent
 
 #### Subscene
+
 - `id`: 主键
 - `name`: 子场景名称
 - `type`: 类型（start, normal, end）
@@ -128,6 +133,7 @@ pivot/
 - `scene_id`: 外键，关联到 Scene
 
 #### Connection
+
 - `id`: 主键
 - `name`: 连接名称
 - `condition`: 转换条件
@@ -141,6 +147,7 @@ pivot/
 ## API 接口
 
 ### Agent 相关
+
 - `POST /api/v1/agents` - 创建 Agent
 - `GET /api/v1/agents` - 获取所有 Agent
 - `GET /api/v1/agents/{agent_id}` - 获取指定 Agent
@@ -148,6 +155,7 @@ pivot/
 - `DELETE /api/v1/agents/{agent_id}` - 删除 Agent
 
 ### Scene 相关
+
 - `POST /api/v1/scenes` - 创建 Scene
 - `GET /api/v1/scenes` - 获取所有 Scene
 - `GET /api/v1/scenes/{scene_id}` - 获取指定 Scene
@@ -156,18 +164,21 @@ pivot/
 - `GET /api/v1/scenes/{scene_id}/subscenes` - 获取 Scene 的所有 Subscene
 
 ### Subscene 相关
+
 - `POST /api/v1/scenes/{scene_id}/subscenes` - 创建 Subscene
 - `PUT /api/v1/subscenes/{subscene_id}` - 更新 Subscene
 - `DELETE /api/v1/subscenes/{subscene_id}` - 删除 Subscene
 - `GET /api/v1/subscenes/{subscene_id}` - 获取指定 Subscene
 
 ### Connection 相关
+
 - `GET /api/v1/subscenes/{subscene_id}/connections` - 获取 Subscene 的所有连接
 - `POST /api/v1/subscenes/{subscene_id}/connections` - 创建 Connection
 - `PUT /api/v1/connections/{connection_id}` - 更新 Connection
 - `DELETE /api/v1/connections/{connection_id}` - 删除 Connection
 
 ### WebSocket
+
 - `/ws` - WebSocket 端点，用于实时通信和状态更新
 
 ## 环境变量
@@ -219,24 +230,28 @@ Alembic 会自动探测 `app/models/` 下的 SQLModel 模型变化，并生成�
 ## 项目特性
 
 ### 数据层
+
 - 使用 SQLModel 统一 ORM 和 Pydantic 验证
 - 使用 Alembic 自动管理数据库迁移
 - 支持 SQLite 和 PostgreSQL 数据库
 - 自动创建表结构，无需手动建表
 
 ### API 层
+
 - RESTful API 设计
 - 完整的 CRUD 操作
 - 统一的响应格式
 - WebSocket 实时通信支持
 
 ### 前端
+
 - React Flow 流程图可视化
 - 实时状态更新
 - 响应式设计
 - 编辑功能（节点和边的属性编辑）
 
 ### 启动脚本
+
 - 支持开发和生产环境切换
 - 自动端口管理
 - 优雅的进程停止
@@ -273,16 +288,19 @@ Alembic 会自动探测 `app/models/` 下的 SQLModel 模型变化，并生成�
 ## 故障排查
 
 ### 后端无法启动
+
 - 检查端口 8003 是否被占用：`lsof -ti:8003`
 - 检查 `.env` 文件是否存在且配置正确
 - 查看日志输出了解具体错误
 
 ### 前端无法启动
+
 - 检查端口 3003 是否被占用：`lsof -ti:3003`
 - 确保已安装依赖：`npm install`
 - 查看浏览器控制台了解具体错误
 
 ### 数据库连接失败
+
 - 检查 `DATABASE_URL` 环境变量是否正确
 - 确保数据库服务正在运行（PostgreSQL 或 SQLite）
 - 查看数据库迁移是否成功执行

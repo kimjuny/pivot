@@ -1,13 +1,36 @@
 #!/bin/bash
 
-# Startup script for the Agent Visualization System
+# Startup script for Pivot
 
 echo "========================================"
-echo "Agent Visualization System Startup Script"
+echo "Pivot Startup Script"
 echo "========================================"
+
+# Add Poetry to PATH if not already present
+if ! command -v poetry &> /dev/null; then
+    if [ -f "$HOME/.local/bin/poetry" ]; then
+        export PATH="$HOME/.local/bin:$PATH"
+        echo "Added Poetry to PATH"
+    else
+        echo "Error: Poetry not found. Please install Poetry first."
+        echo "Visit: https://python-poetry.org/docs/#installation"
+        exit 1
+    fi
+fi
 
 # Default to development environment
 ENV=${ENVIRONMENT:-"dev"}
+
+# Function to initialize Poetry environment if needed
+init_poetry() {
+    if [ ! -d ".venv" ]; then
+        echo "Poetry environment not found. Installing dependencies..."
+        poetry install
+        echo "Poetry environment initialized successfully!"
+    else
+        echo "Poetry environment already exists."
+    fi
+}
 
 # Function to start backend
 start_backend() {
@@ -33,7 +56,7 @@ start_backend() {
     fi
 
     # Start backend
-    python3 -m uvicorn app.main:app --reload --port 8003 &
+    poetry run python -m uvicorn app.main:app --reload --port 8003 &
     BACKEND_PID=$!
     cd ..
     echo "Backend server started with PID $BACKEND_PID"
@@ -89,6 +112,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Initialize Poetry for dev environment
+if [ "$ENV" = "dev" ]; then
+    init_poetry
+fi
 
 # Start both servers
 start_backend

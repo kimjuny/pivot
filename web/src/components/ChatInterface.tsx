@@ -64,9 +64,6 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
     }
   };
 
-  useEffect(() => {
-  }, [agentId]);
-
   /**
    * Handle form submission to send message.
    * Validates input and prevents duplicate submissions.

@@ -1,3 +1,34 @@
+[tool.poetry]
+name = "pivot"
+version = "0.1.0"
+description = "FastAPI project with SQLModel and robust linting"
+authors = ["Eric Kim <kimjuny@foxmail.com>"]
+readme = "README.md"
+# Ensure internal modules are recognized as packages for distribution
+packages = [{include = "core"}, {include = "server"}]
+
+[tool.poetry.dependencies]
+# Target Python 3.10 to ensure maximum compatibility for open-source users.
+python = "^3.10"
+fastapi = "0.68.0"
+uvicorn = "0.15.0"
+python-multipart = "0.0.5"
+websockets = "10.0"
+sqlmodel = "0.0.8"
+sqlalchemy = "1.4.41"
+alembic = "1.8.1"
+requests = "^2.31.0"
+
+[tool.poetry.group.dev.dependencies]
+# Development tools kept separate from production environment
+ruff = "0.8.4"
+pyright = "1.1.390"
+
+[build-system]
+# Standard build-backend for Poetry projects
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
 [tool.ruff]
 # Target Python 3.10 to ensure maximum compatibility for open-source users.
 target-version = "py310"
@@ -20,9 +51,9 @@ combine-as-imports = true
 known-first-party = ["core", "server"]
 
 [tool.pyright]
-# Include current directory and ensure cross-module resolution for './core'.
+# Include current directory and ensure cross-module resolution for './core' and './server'.
 include = ["."]
-extraPaths = ["../"]
+extraPaths = ["./server", "./core"]
 
 # Standard mode is recommended for open-source to avoid overly aggressive errors 
 # while maintaining high type safety.
@@ -36,10 +67,6 @@ reportUnusedVariable = "warning"
 reportOptionalMemberAccess = "error" # Enforce None-checks (crucial for stability).
 reportGeneralTypeIssues = "error"
 reportIncompatibleMethodOverride = "error"
-
-# If using a virtual environment locally, you can uncomment these:
-# venvPath = "."
-# venv = ".venv"
 
 [tool.ruff.format]
 # Standardize code style to reduce "diff noise" in open-source contributions.

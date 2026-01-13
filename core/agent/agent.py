@@ -1,7 +1,7 @@
 
+
 from core.llm.abstract_llm import AbstractLLM, Response
 from core.utils.logging_config import get_logger
-from typing import Optional
 
 from .input_message import InputMessage
 from .plan.scene import Scene, SceneState
@@ -18,12 +18,12 @@ class Agent:
     """
 
     def __init__(self):
-        self.model: Optional[AbstractLLM] = None
+        self.model: AbstractLLM | None = None
         self.is_started: bool = False
         self.history: list[dict[str, str]] = []
         self.scenes: list[Scene] = []
-        self.current_scene: Optional[Scene] = None
-        self.current_subscene: Optional[Subscene] = None
+        self.current_scene: Scene | None = None
+        self.current_subscene: Subscene | None = None
 
     def add_action(self) -> 'Agent':
         """

@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from .plan.connection import Connection
 from .plan.scene import Scene
@@ -13,7 +12,7 @@ class OutputMessage:
     def __init__(self, 
                 response: str,
                 updated_scenes: list[Scene],
-                match_connection: Optional[Connection] = None, 
+                match_connection: Connection | None = None, 
                 reason: str = ""):
         """
         Initialize an OutputMessage.

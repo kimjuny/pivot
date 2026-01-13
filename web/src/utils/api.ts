@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatRequest, ChatResponse, ChatHistoryResponse } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse } from '../types';
 
 /**
  * API base URL from environment configuration.
@@ -82,26 +82,6 @@ export const getScenes = async (): Promise<Scene[]> => {
 };
 
 /**
- * Fetch a specific scene by ID.
- * 
- * @param sceneId - Unique identifier of the scene
- * @returns Promise resolving to Scene object
- */
-export const getSceneById = async (sceneId: number): Promise<Scene> => {
-  return apiRequest(`/scenes/${sceneId}`) as Promise<Scene>;
-};
-
-/**
- * Fetch all subscenes for a specific scene.
- * 
- * @param sceneId - Unique identifier of the scene
- * @returns Promise resolving to subscene data
- */
-export const getSceneSubscenes = async (sceneId: number): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/subscenes`);
-};
-
-/**
  * Fetch scene graph for a specific scene.
  * 
  * @param sceneId - Unique identifier of the scene
@@ -109,31 +89,6 @@ export const getSceneSubscenes = async (sceneId: number): Promise<unknown> => {
  */
 export const getSceneGraph = async (sceneId: number): Promise<unknown> => {
   return apiRequest(`/scenes/${sceneId}/graph`);
-};
-
-/**
- * Initialize the agent system on the server.
- * This prepares the agent for receiving messages.
- * 
- * @returns Promise resolving when initialization is complete
- */
-export const initializeAgent = async (): Promise<unknown> => {
-  return apiRequest('/initialize', {
-    method: 'POST',
-  });
-};
-
-/**
- * Send a message to the default agent.
- * 
- * @param message - User message to send to the agent
- * @returns Promise resolving to the agent's response
- */
-export const chatWithAgent = async (message: string): Promise<ChatResponse> => {
-  return apiRequest('/chat', {
-    method: 'POST',
-    body: JSON.stringify({ message }),
-  }) as Promise<ChatResponse>;
 };
 
 /**
@@ -182,35 +137,5 @@ export const clearChatHistory = async (
 ): Promise<void> => {
   await apiRequest(`/agents/${agentId}/chat-history?user=${user}`, {
     method: 'DELETE',
-  });
-};
-
-/**
- * Fetch the current scene graph from the server.
- * 
- * @returns Promise resolving to SceneGraph object
- */
-export const fetchSceneGraph = async (): Promise<SceneGraph> => {
-  return apiRequest('/scene-graph') as Promise<SceneGraph>;
-};
-
-/**
- * Fetch the current state of the agent system.
- * 
- * @returns Promise resolving to agent state data
- */
-export const getAgentState = async (): Promise<unknown> => {
-  return apiRequest('/state');
-};
-
-/**
- * Reset the agent system to its initial state.
- * Clears all state and history.
- * 
- * @returns Promise resolving when reset is complete
- */
-export const resetAgent = async (): Promise<unknown> => {
-  return apiRequest('/reset', {
-    method: 'POST',
   });
 };

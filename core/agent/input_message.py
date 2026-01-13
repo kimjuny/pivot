@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 
 from .plan.scene import Scene
 from .plan.subscene import Subscene
@@ -15,8 +14,8 @@ class InputMessage:
                  user_message: str,
                  history: list[dict[str, str]],
                  scenes: list[Scene],
-                 current_scene: Optional[Scene] = None,
-                 current_subscene: Optional[Subscene] = None):
+                 current_scene: Scene | None = None,
+                 current_subscene: Subscene | None = None):
         """
         Initialize an InputMessage.
         

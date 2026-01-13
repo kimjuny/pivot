@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ChatHistory, ChatResponse, SceneGraph } from '../types';
-import { chatWithAgent, chatWithAgentById, getChatHistory, clearChatHistory as apiClearChatHistory } from '../utils/api';
+import { chatWithAgentById, getChatHistory, clearChatHistory as apiClearChatHistory } from '../utils/api';
 import { useSceneGraphStore } from './sceneGraphStore';
 
 /**
@@ -22,8 +22,6 @@ interface ChatStore {
   clearChatHistory: (agentId: number, user?: string) => Promise<void>;
   /** Send message to a specific agent by ID */
   chatWithAgentById: (agentId: number, message: string, user?: string) => Promise<string>;
-  /** Send message to default agent */
-  chatWithAgent: (message: string) => Promise<string>;
   /** Clear error message */
   clearError: () => void;
 }
@@ -116,52 +114,6 @@ const useChatStore = create<ChatStore>((set) => ({
       if (response.graph) {
         useSceneGraphStore.getState().updateSceneGraph(response.graph);
       }
-      
-      return response.response;
-    } catch (error) {
-      const err = error as Error;
-      set({
-        isChatting: false,
-        error: err.message
-      });
-      throw error;
-    }
-  },
-
-  chatWithAgent: async (message: string) => {
-    set(state => {
-      const newUserMessage: ChatHistory = {
-        id: 0,
-        agent_id: 0,
-        user: 'preview-user',
-        role: 'user',
-        message,
-        create_time: new Date().toISOString()
-      };
-      return {
-        isChatting: true,
-        error: null,
-        chatHistory: [...state.chatHistory, newUserMessage]
-      };
-    });
-    try {
-      const response = await chatWithAgent(message);
-      
-      set(state => {
-        const newAgentMessage: ChatHistory = {
-          id: 0,
-          agent_id: 0,
-          user: 'preview-user',
-          role: 'agent',
-          message: response.response,
-          reason: response.reason,
-          create_time: response.create_time || new Date().toISOString()
-        };
-        return {
-          chatHistory: [...state.chatHistory, newAgentMessage],
-          isChatting: false
-        };
-      });
       
       return response.response;
     } catch (error) {

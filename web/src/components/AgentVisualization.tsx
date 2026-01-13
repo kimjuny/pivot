@@ -110,6 +110,7 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [sceneGraphData, setSceneGraphData] = useState<SceneGraph | null>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
+  const isLoadingSceneGraphRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (sceneGraph) {
@@ -118,37 +119,31 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
   }, [sceneGraph]);
 
   useEffect(() => {
-    const resetToDefaultSceneGraph = async () => {
-      if (!isPreviewMode && selectedScene) {
-        try {
-          const defaultGraph = await getSceneGraph(selectedScene.id);
-          setSceneGraphData(defaultGraph as SceneGraph);
-        } catch (error) {
-          console.error('Failed to reset scene graph:', error);
-        }
-      }
-    };
-    
-    void resetToDefaultSceneGraph();
-  }, [isPreviewMode, selectedScene]);
-
-  useEffect(() => {
     const loadSceneGraph = async () => {
       if (!selectedScene) {
         setSceneGraphData(null);
+        isLoadingSceneGraphRef.current = false;
         return;
       }
 
       if (sceneGraph) {
+        isLoadingSceneGraphRef.current = false;
         return;
       }
 
+      if (isLoadingSceneGraphRef.current) {
+        return;
+      }
+
+      isLoadingSceneGraphRef.current = true;
       try {
         const graphData = await getSceneGraph(selectedScene.id);
         setSceneGraphData(graphData as SceneGraph);
       } catch (error) {
         console.error('Failed to load scene graph:', error);
         setSceneGraphData(null);
+      } finally {
+        isLoadingSceneGraphRef.current = false;
       }
     };
     void loadSceneGraph();
@@ -418,7 +413,7 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
                 <span>Reset</span>
               </button>
               <button
-                onClick={() => void refreshSceneGraph()}
+                onClick={() => selectedScene && void refreshSceneGraph(selectedScene.id)}
                 className="flex items-center space-x-2 px-4 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-sm font-medium hover:bg-primary hover:border-primary hover:shadow-glow-sm transition-all duration-200"
                 title="Refresh"
               >

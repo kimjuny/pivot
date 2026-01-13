@@ -1,30 +1,38 @@
-# Agent Visualization System Architecture
+# Pivot Architecture
 
 ## Overview
+
 This system provides a graphical interface for visualizing and interacting with agent systems, specifically demonstrating the sleep companion example. It features a FastAPI backend and a React frontend with real-time visualization capabilities.
 
 ## System Components
 
 ### 1. Core Agent Framework (Existing)
+
 Located in `/core`, this contains the base agent framework with:
+
 - Agent management (`agent.py`)
 - Scene graph modeling (`plan/` directory with scenes, subscenes, and connections)
 - LLM integration (`llm/` directory)
 
 ### 2. Example Implementation (Existing)
+
 Located in `/example`, this contains sample agent scenarios:
+
 - Sleep companion example (`sleep_companion_example.py`)
 
 ### 3. Backend (FastAPI Server)
+
 Located in `/server`, this provides REST API and WebSocket endpoints:
 
 #### Key Files:
+
 - `main.py`: Application entry point with CORS configuration
 - `api.py`: REST API endpoints for agent interaction
 - `websocket.py`: WebSocket support for real-time updates
 - `requirements.txt`: Python dependencies
 
 #### API Endpoints:
+
 - `POST /api/initialize`: Initialize the sleep companion agent
 - `POST /api/chat`: Chat with the agent
 - `GET /api/state`: Get current agent state
@@ -33,15 +41,18 @@ Located in `/server`, this provides REST API and WebSocket endpoints:
 - `WebSocket /ws`: Real-time updates of agent state changes
 
 ### 4. Frontend (React + Vite)
+
 Located in `/web`, this provides the graphical interface:
 
 #### Key Features:
+
 - React Flow integration for visualizing agent scene graphs
 - Zustand for state management
 - TailwindCSS for styling
 - Real-time updates via WebSocket
 
 #### Key Files:
+
 - `src/App.jsx`: Main application component
 - `src/components/AgentVisualization.jsx`: React Flow visualization
 - `src/components/ChatInterface.jsx`: Chat interface
@@ -50,6 +61,7 @@ Located in `/web`, this provides the graphical interface:
 - `src/utils/websocket.js`: WebSocket client
 
 #### UI Components:
+
 - Scene graph visualization with React Flow
 - Interactive chat interface
 - Real-time updates of agent state transitions
@@ -66,11 +78,13 @@ Located in `/web`, this provides the graphical interface:
 ## Technologies Used
 
 ### Backend:
+
 - FastAPI (Python web framework)
 - Uvicorn (ASGI server)
 - WebSockets (real-time communication)
 
 ### Frontend:
+
 - React 18 (UI framework)
 - Vite (build tool)
 - React Flow (XYFlow) (graph visualization)
@@ -80,6 +94,7 @@ Located in `/web`, this provides the graphical interface:
 ## Deployment
 
 ### Backend:
+
 ```bash
 cd server
 pip install -r requirements.txt
@@ -88,6 +103,7 @@ uvicorn server.main:app --reload
 ```
 
 ### Frontend:
+
 ```bash
 cd web
 npm install
@@ -95,6 +111,7 @@ npm run dev
 ```
 
 ## URLs
+
 - Backend API: http://localhost:8000
 - Frontend: http://localhost:3000
 - WebSocket: ws://localhost:8000/ws

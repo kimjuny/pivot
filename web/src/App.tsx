@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import AgentList from './components/AgentList';
 import AgentVisualization from './components/AgentVisualization';
@@ -19,6 +19,7 @@ function App() {
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
   const { agentId } = useParams<{ agentId?: string }>();
   const navigate = useNavigate();
+  const isLoadingAgentDetailsRef = useRef<boolean>(false);
 
   /**
    * Load agent details and associated scenes from server.
@@ -28,6 +29,11 @@ function App() {
   const loadAgentDetails = useCallback(async () => {
     if (!agentId) return;
 
+    if (isLoadingAgentDetailsRef.current) {
+      return;
+    }
+
+    isLoadingAgentDetailsRef.current = true;
     setIsInitializing(true);
     setError(null);
     try {
@@ -46,6 +52,7 @@ function App() {
       setError((err as Error).message || 'Failed to load agent details');
     } finally {
       setIsInitializing(false);
+      isLoadingAgentDetailsRef.current = false;
     }
   }, [agentId]);
 
@@ -61,13 +68,17 @@ function App() {
   }, [agentId, loadAgentDetails]);
 
   /**
-   * Refresh the scene graph from the server.
+   * Refresh scene graph from server.
    * Used to manually trigger a scene graph update.
    */
   const handleResetSceneGraph = async () => {
+    if (!agentId) {
+      setError('No agent selected');
+      return;
+    }
     try {
       const { refreshSceneGraph } = useSceneGraphStore.getState();
-      await refreshSceneGraph();
+      await refreshSceneGraph(parseInt(agentId));
     } catch (err) {
       setError((err as Error).message || 'Failed to refresh scene graph');
     }

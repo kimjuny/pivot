@@ -1,31 +1,83 @@
-from typing import Generic, Optional, TypeVar
-
-from sqlmodel import Session, SQLModel, select
+from typing import Generic, TypeVar
 
 from app.models.agent import Connection
+from sqlmodel import Session, SQLModel, select
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
 
 
 class CRUDBase(Generic[ModelType]):
+    """Base CRUD operations for SQLModel objects.
+
+    Provides generic Create, Read, Update, Delete (CRUD) operations
+    for any SQLModel type. This class is designed to be inherited
+    by specific CRUD implementations for different models.
+
+    Type Args:
+        ModelType: The SQLModel class this CRUD instance operates on.
+    """
+
     def __init__(self, model: type[ModelType]):
+        """Initialize the CRUD base with a specific model.
+
+        Args:
+            model: The SQLModel class to perform CRUD operations on.
+        """
         self.model = model
 
-    def get(self, id: int, session: Session) -> Optional[ModelType]:
+    def get(self, id: int, session: Session) -> ModelType | None:
+        """Retrieve a single record by its primary key.
+
+        Args:
+            id: The primary key of the record to retrieve.
+            session: The database session to use for the query.
+
+        Returns:
+            The model instance if found, None otherwise.
+        """
         return session.get(self.model, id)
 
     def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[ModelType]:
+        """Retrieve multiple records with pagination support.
+
+        Args:
+            session: The database session to use for the query.
+            skip: Number of records to skip (for pagination).
+            limit: Maximum number of records to return.
+
+        Returns:
+            A list of model instances.
+        """
         statement = select(self.model).offset(skip).limit(limit)
         return session.exec(statement).all()
 
     def create(self, session: Session, **kwargs) -> ModelType:
+        """Create a new record in the database.
+
+        Args:
+            session: The database session to use for the transaction.
+            **kwargs: Field names and values for the new record.
+
+        Returns:
+            The created model instance with ID populated.
+        """
         db_obj = self.model(**kwargs)
         session.add(db_obj)
         session.commit()
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> Optional[ModelType]:
+    def update(self, id: int, session: Session, **kwargs) -> ModelType | None:
+        """Update an existing record by its primary key.
+
+        Args:
+            id: The primary key of the record to update.
+            session: The database session to use for the transaction.
+            **kwargs: Field names and values to update.
+
+        Returns:
+            The updated model instance if found, None otherwise.
+        """
         db_obj = self.get(id, session)
         if db_obj:
             for key, value in kwargs.items():
@@ -36,6 +88,15 @@ class CRUDBase(Generic[ModelType]):
         return None
 
     def delete(self, id: int, session: Session) -> bool:
+        """Delete a record by its primary key.
+
+        Args:
+            id: The primary key of the record to delete.
+            session: The database session to use for the transaction.
+
+        Returns:
+            True if the record was deleted, False if not found.
+        """
         db_obj = self.get(id, session)
         if db_obj:
             session.delete(db_obj)
@@ -45,11 +106,35 @@ class CRUDBase(Generic[ModelType]):
 
 
 class ConnectionCRUD(CRUDBase[Connection]):
+    """CRUD operations for Connection model.
+
+    Extends base CRUD operations with connection-specific queries
+    for filtering by source subscene name and ID.
+    """
+
     def get_by_from_subscene(self, from_subscene: str, session: Session) -> list[Connection]:
+        """Retrieve all connections originating from a specific subscene by name.
+
+        Args:
+            from_subscene: The name of the source subscene.
+            session: The database session to use for the query.
+
+        Returns:
+            A list of Connection instances originating from the subscene.
+        """
         statement = select(Connection).where(Connection.from_subscene == from_subscene)
         return session.exec(statement).all()
 
     def get_by_from_subscene_id(self, from_subscene_id: int, session: Session) -> list[Connection]:
+        """Retrieve all connections originating from a specific subscene by ID.
+
+        Args:
+            from_subscene_id: The ID of the source subscene.
+            session: The database session to use for the query.
+
+        Returns:
+            A list of Connection instances originating from the subscene.
+        """
         statement = select(Connection).where(Connection.from_subscene_id == from_subscene_id)
         return session.exec(statement).all()
 

@@ -1,7 +1,7 @@
 import contextlib
 import time
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 import requests
 
@@ -26,7 +26,7 @@ class DoubaoLLM(AbstractLLM):
     API_ENDPOINT = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
     DEFAULT_TIMEOUT = 60  # Increased timeout to 60 seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts
-    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None, timeout: Optional[int] = None):
+    def __init__(self, model: str | None = None, api_key: str | None = None, timeout: int | None = None):
         """
         Initialize the DoubaoLLM with the given model and API key.
         
