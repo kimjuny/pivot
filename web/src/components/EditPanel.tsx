@@ -1,4 +1,5 @@
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, ChangeEvent, useRef, MouseEvent } from 'react';
+import { updateSubscene, updateConnection } from '../utils/api';
 
 interface EditPanelProps {
   element: {
@@ -6,7 +7,9 @@ interface EditPanelProps {
     id: string;
     data: Record<string, unknown>;
     label?: string;
+    clickPosition?: { x: number; y: number };
   } | null;
+  sceneId: number | null;
   onClose: () => void;
   onSave: () => void;
   onNodeChange: (nodeId: string, data: Record<string, unknown>) => void;
@@ -25,7 +28,7 @@ interface EdgeFormData {
   condition: string;
 }
 
-function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: EditPanelProps) {
+function EditPanel({ element, sceneId, onClose, onSave, onNodeChange, onEdgeChange }: EditPanelProps) {
   const [formData, setFormData] = useState<NodeFormData | EdgeFormData>({
     name: '',
     type: 'normal',
@@ -33,6 +36,11 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
     objective: '',
     condition: ''
   });
+
+  const [position, setPosition] = useState(() => element?.clickPosition || { x: 20, y: 20 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (element) {
@@ -49,16 +57,87 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
           condition: (element.data.condition as string) || ''
         });
       }
+      setPosition(element.clickPosition || { x: 20, y: 20 });
     }
   }, [element]);
 
-  const handleSave = () => {
-    if (element?.type === 'node') {
-      onNodeChange(element.id, formData as unknown as Record<string, unknown>);
-    } else if (element?.type === 'edge') {
-      onEdgeChange(element.id, formData as unknown as Record<string, unknown>);
+  const handleMouseDown = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    setDragOffset({
+      x: e.clientX - position.x,
+      y: e.clientY - position.y
+    });
+  };
+
+  const handleMouseMove = (e: MouseEvent<HTMLDivElement>) => {
+    if (!isDragging) return;
+    const newX = e.clientX - dragOffset.x;
+    const newY = e.clientY - dragOffset.y;
+    setPosition({ x: newX, y: newY });
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  useEffect(() => {
+    if (isDragging) {
+      const handleGlobalMouseMove = (e: globalThis.MouseEvent) => {
+        const newX = e.clientX - dragOffset.x;
+        const newY = e.clientY - dragOffset.y;
+        setPosition({ x: newX, y: newY });
+      };
+
+      const handleGlobalMouseUp = () => {
+        setIsDragging(false);
+      };
+
+      document.addEventListener('mousemove', handleGlobalMouseMove);
+      document.addEventListener('mouseup', handleGlobalMouseUp);
+
+      return () => {
+        document.removeEventListener('mousemove', handleGlobalMouseMove);
+        document.removeEventListener('mouseup', handleGlobalMouseUp);
+      };
     }
-    onSave();
+  }, [isDragging, dragOffset]);
+
+  const handleSave = async () => {
+    if (!sceneId || !element) return;
+
+    try {
+      if (element.type === 'node') {
+        const subsceneName = element.id.replace('subscene-', '');
+        const nodeData = formData as NodeFormData;
+        
+        await updateSubscene(sceneId, subsceneName, {
+          name: nodeData.name,
+          type: nodeData.type,
+          mandatory: nodeData.mandatory,
+          objective: nodeData.objective
+        });
+        
+        onNodeChange(element.id, formData as unknown as Record<string, unknown>);
+      } else if (element.type === 'edge') {
+        const edgeData = formData as EdgeFormData;
+        const fromSubscene = element.data.from_subscene as string;
+        const toSubscene = element.data.to_subscene as string;
+        
+        if (fromSubscene && toSubscene) {
+          await updateConnection(sceneId, fromSubscene, toSubscene, {
+            name: edgeData.name,
+            condition: edgeData.condition
+          });
+        }
+        
+        onEdgeChange(element.id, formData as unknown as Record<string, unknown>);
+      }
+      onSave();
+    } catch (error) {
+      console.error('Failed to save:', error);
+      alert('Failed to save changes. Please try again.');
+    }
   };
 
   if (!element) {
@@ -66,9 +145,24 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
   }
 
   return (
-    <div className="absolute top-0 right-0 h-full w-80 bg-dark-bg border-l border-dark-border shadow-card-lg overflow-y-auto">
-      <div className="p-4">
-        <div className="flex justify-between items-center mb-4">
+    <div
+      ref={panelRef}
+      className="fixed w-80 bg-dark-bg border border-dark-border shadow-card-lg rounded-xl overflow-hidden"
+      style={{
+        left: position.x,
+        top: position.y,
+        zIndex: 40,
+        cursor: isDragging ? 'grabbing' : 'default'
+      }}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+    >
+      <div
+        className="bg-dark-bg-lighter px-4 py-3 border-b border-dark-border cursor-grab hover:bg-dark-border-light transition-colors"
+        onMouseDown={handleMouseDown}
+      >
+        <div className="flex justify-between items-center">
           <h3 className="text-lg font-semibold text-white">
             {element.type === 'node' ? 'Edit Node' : 'Edit Connection'}
           </h3>
@@ -81,6 +175,9 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
             </svg>
           </button>
         </div>
+      </div>
+      
+      <div className="p-4 max-h-[70vh] overflow-y-auto">
 
         {element.type === 'node' && (
           <div className="space-y-4">
@@ -176,7 +273,7 @@ function EditPanel({ element, onClose, onSave, onNodeChange, onEdgeChange }: Edi
             Cancel
           </button>
           <button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             className="flex-1 px-4 py-2 btn-accent rounded-lg text-sm font-medium"
           >
             Save

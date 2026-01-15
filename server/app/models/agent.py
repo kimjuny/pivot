@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -22,8 +22,8 @@ class Agent(SQLModel, table=True):
     description: str | None = Field(default=None)
     model_name: str | None = Field(default=None)
     is_active: bool = Field(default=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     scenes: list["Scene"] = Relationship(back_populates="agent")
 
 
@@ -43,8 +43,8 @@ class Scene(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     description: str | None = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     agent_id: int | None = Field(default=None, foreign_key="agent.id")
     agent: Optional["Agent"] = Relationship(back_populates="scenes")
     subscenes: list["Subscene"] = Relationship(back_populates="scene")
@@ -73,8 +73,8 @@ class Subscene(SQLModel, table=True):
     description: str | None = Field(default=None)
     mandatory: bool = Field(default=False)
     objective: str | None = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     scene_id: int | None = Field(default=None, foreign_key="scene.id")
     scene: Optional["Scene"] = Relationship(back_populates="subscenes")
 
@@ -102,8 +102,8 @@ class Connection(SQLModel, table=True):
     from_subscene_id: int | None = Field(default=None, foreign_key="subscene.id")
     to_subscene_id: int | None = Field(default=None, foreign_key="subscene.id")
     scene_id: int | None = Field(default=None, foreign_key="scene.id")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ChatHistory(SQLModel, table=True):
@@ -129,4 +129,4 @@ class ChatHistory(SQLModel, table=True):
     message: str = Field(default="", description="Message content from user or agent")
     reason: str | None = Field(default=None, description="Reason from agent response")
     update_scene: str | None = Field(default=None, description="Updated scene graph in JSON format")
-    create_time: datetime = Field(default_factory=datetime.utcnow, description="Time when the history was created")
+    create_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Time when the history was created")

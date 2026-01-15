@@ -111,7 +111,19 @@ class AgentCRUD(CRUDBase[Agent]):
     Inherits all base CRUD operations from CRUDBase.
     Specific Agent-related operations can be added here if needed.
     """
-    pass
+
+    def get_by_name(self, name: str, session: Session) -> Agent | None:
+        """Retrieve an agent by its name.
+
+        Args:
+            name: The name of the agent to retrieve.
+            session: The database session to use for the query.
+
+        Returns:
+            The Agent instance if found, None otherwise.
+        """
+        statement = select(Agent).where(Agent.name == name)
+        return session.exec(statement).first()
 
 
 class SceneCRUD(CRUDBase[Scene]):

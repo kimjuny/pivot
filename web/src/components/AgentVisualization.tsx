@@ -18,9 +18,11 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useSceneGraphStore } from '../store/sceneGraphStore';
+import { useChatStore } from '../store/chatStore';
 import ChatInterface from './ChatInterface';
 import EditPanel from './EditPanel';
-import { getSceneGraph } from '../utils/api';
+import CreateSceneModal from './CreateSceneModal';
+import { getSceneGraph, createScene } from '../utils/api';
 import type { Agent, Scene, SceneGraph, SceneNode } from '../types';
 
 interface SubsceneNodeData {
@@ -43,6 +45,7 @@ interface AgentVisualizationProps {
   agentId: number;
   onResetSceneGraph: () => Promise<void>;
   onSceneSelect: (scene: Scene) => void;
+  onRefreshScenes: () => Promise<void>;
 }
 
 interface SelectedElement {
@@ -50,6 +53,7 @@ interface SelectedElement {
   id: string;
   data: Record<string, unknown>;
   label?: string;
+  clickPosition?: { x: number; y: number };
 }
 
 function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
@@ -101,32 +105,52 @@ const edgeTypes = {
   bezier: BezierEdge,
 };
 
-function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph, onSceneSelect }: AgentVisualizationProps) {
+function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph, onSceneSelect, onRefreshScenes }: AgentVisualizationProps) {
   const { sceneGraph, refreshSceneGraph } = useSceneGraphStore();
+  const { chatHistory } = useChatStore();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [isPreviewMode, setIsPreviewMode] = useState<boolean>(false);
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  const [sceneGraphData, setSceneGraphData] = useState<SceneGraph | null>(null);
+  const [normalModeSceneGraphData, setNormalModeSceneGraphData] = useState<SceneGraph | null>(null);
+  const [previewModeSceneGraphData, setPreviewModeSceneGraphData] = useState<SceneGraph | null>(null);
+  const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   const isLoadingSceneGraphRef = useRef<boolean>(false);
 
-  useEffect(() => {
-    if (sceneGraph) {
-      setSceneGraphData(sceneGraph);
+  const handleCreateSceneModalOpen = () => {
+    setIsCreateSceneModalOpen(true);
+  };
+
+  const handleCreateScene = async (sceneData: {
+    name: string;
+    description?: string;
+    agent_id: number;
+  }) => {
+    try {
+      await createScene({
+        ...sceneData,
+        agent_id: agentId
+      });
+      await onRefreshScenes();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Failed to create scene:', error);
     }
-  }, [sceneGraph]);
+  };
+
+  const currentSceneGraphData = isPreviewMode ? previewModeSceneGraphData : normalModeSceneGraphData;
+
+  useEffect(() => {
+    if (sceneGraph && !isPreviewMode) {
+      setNormalModeSceneGraphData(sceneGraph);
+    }
+  }, [sceneGraph, isPreviewMode]);
 
   useEffect(() => {
     const loadSceneGraph = async () => {
-      if (!selectedScene) {
-        setSceneGraphData(null);
-        isLoadingSceneGraphRef.current = false;
-        return;
-      }
-
-      if (sceneGraph) {
+      if (!selectedScene || isPreviewMode) {
         isLoadingSceneGraphRef.current = false;
         return;
       }
@@ -138,23 +162,34 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
       isLoadingSceneGraphRef.current = true;
       try {
         const graphData = await getSceneGraph(selectedScene.id);
-        setSceneGraphData(graphData as SceneGraph);
+        setNormalModeSceneGraphData(graphData as SceneGraph);
       } catch (error) {
         console.error('Failed to load scene graph:', error);
-        setSceneGraphData(null);
+        setNormalModeSceneGraphData(null);
       } finally {
         isLoadingSceneGraphRef.current = false;
       }
     };
     void loadSceneGraph();
-  }, [selectedScene, sceneGraph]);
+  }, [selectedScene, isPreviewMode]);
+
+  useEffect(() => {
+    if (isPreviewMode && chatHistory.length > 0) {
+      const lastMessage = chatHistory[chatHistory.length - 1];
+      const graph = lastMessage.graph;
+      if (graph) {
+        setPreviewModeSceneGraphData(graph);
+      }
+    }
+  }, [isPreviewMode, chatHistory]);
 
   const handleElementClick = (event: React.MouseEvent, element: Node | Edge) => {
     event.stopPropagation();
+    const clickPosition = { x: event.clientX, y: event.clientY };
     if (element.id.startsWith('edge-')) {
-      setSelectedElement({ type: 'edge', id: element.id, data: (element.data as Record<string, unknown>) || {}, label: (element.data as { label?: string }).label });
+      setSelectedElement({ type: 'edge', id: element.id, data: (element.data as Record<string, unknown>) || {}, label: (element.data as { label?: string }).label, clickPosition });
     } else {
-      setSelectedElement({ type: 'node', id: element.id, data: (element.data as Record<string, unknown>) || {} });
+      setSelectedElement({ type: 'node', id: element.id, data: (element.data as Record<string, unknown>) || {}, clickPosition });
     }
   };
 
@@ -339,13 +374,38 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
   }, []);
 
   useEffect(() => {
-    if (sceneGraphData && sceneGraphData.scenes && sceneGraphData.scenes.length > 0) {
-      const { nodes: newNodes, edges: newEdges } = convertToFlowElements(sceneGraphData);
+    if (currentSceneGraphData && currentSceneGraphData.scenes && currentSceneGraphData.scenes.length > 0) {
+      const { nodes: newNodes, edges: newEdges } = convertToFlowElements(currentSceneGraphData);
       
       setNodes(newNodes);
       setEdges(newEdges);
+    } else {
+      setNodes([]);
+      setEdges([]);
     }
-  }, [sceneGraphData, convertToFlowElements, setNodes, setEdges]);
+  }, [currentSceneGraphData, convertToFlowElements, setNodes, setEdges]);
+
+  const handlePreviewModeToggle = () => {
+    if (!isPreviewMode) {
+      setIsPreviewMode(true);
+      if (chatHistory.length > 0) {
+        const lastMessage = chatHistory[chatHistory.length - 1];
+        const graph = lastMessage.graph;
+        if (graph) {
+          setPreviewModeSceneGraphData(graph);
+          if (graph.current_scene && scenes.length > 0) {
+            const activeScene = scenes.find(scene => scene.name === graph.current_scene);
+            if (activeScene) {
+              onSceneSelect(activeScene);
+            }
+          }
+        }
+      }
+    } else {
+      setIsPreviewMode(false);
+      setPreviewModeSceneGraphData(null);
+    }
+  };
 
   const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
 
@@ -381,6 +441,15 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
                   <div className="font-medium text-dark-text-primary">{scene.name}</div>
                 </div>
               ))}
+              <button
+                onClick={handleCreateSceneModalOpen}
+                className="w-full p-3 mt-4 flex items-center justify-center space-x-2 border-2 border-dashed border-primary/50 rounded-lg hover:border-primary hover:bg-primary/10 transition-all duration-200"
+              >
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H8" />
+                </svg>
+                <span className="text-sm font-medium text-primary">Add Scene</span>
+              </button>
             </div>
           </div>
         </div>
@@ -424,7 +493,7 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
               </button>
               
               <button
-                onClick={() => setIsPreviewMode(!isPreviewMode)}
+                onClick={() => void handlePreviewModeToggle()}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isPreviewMode 
                     ? 'bg-primary text-white shadow-glow-sm' 
@@ -499,6 +568,7 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
               <EditPanel
                 key={`${selectedElement.type}-${selectedElement.id}`}
                 element={selectedElement}
+                sceneId={selectedScene?.id || null}
                 onClose={() => setSelectedElement(null)}
                 onNodeChange={handleNodeUpdate}
                 onEdgeChange={handleEdgeUpdate}
@@ -512,6 +582,12 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
               <ChatInterface agentId={agentId} />
             </div>
           )}
+
+          <CreateSceneModal
+            isOpen={isCreateSceneModalOpen}
+            onClose={() => setIsCreateSceneModalOpen(false)}
+            onCreate={handleCreateScene}
+          />
         </div>
       </div>
     </div>

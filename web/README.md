@@ -1,4 +1,4 @@
-# Agent Visualization Frontend
+# Pivot Frontend
 
 This directory contains the React frontend for the agent visualization system.
 
@@ -12,11 +12,12 @@ This directory contains the React frontend for the agent visualization system.
 ## Setup
 
 1. Install dependencies:
+
    ```bash
    npm install
    ```
-
 2. Run the development server:
+
    ```bash
    npm run dev
    ```

@@ -84,6 +84,21 @@ function App() {
     }
   };
 
+  /**
+   * Refresh scenes list from server.
+   * Used to update scenes list after creating a new scene.
+   */
+  const handleRefreshScenes = async () => {
+    if (!agentId) return;
+    try {
+      const scenesData = await getScenes();
+      const agentScenes = scenesData.filter(scene => scene.agent_id === parseInt(agentId));
+      setScenes(agentScenes);
+    } catch (err) {
+      setError((err as Error).message || 'Failed to refresh scenes');
+    }
+  };
+
   if (isInitializing) {
     return (
       <div className="flex items-center justify-center h-screen bg-dark-bg">
@@ -123,6 +138,7 @@ function App() {
           agentId={parseInt(agentId)}
           onResetSceneGraph={handleResetSceneGraph}
           onSceneSelect={setSelectedScene}
+          onRefreshScenes={handleRefreshScenes}
         />
       </div>
     </div>

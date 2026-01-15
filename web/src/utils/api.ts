@@ -63,6 +63,24 @@ export const getAgents = async (): Promise<Agent[]> => {
 };
 
 /**
+ * Create a new agent.
+ * 
+ * @param agentData - Agent creation data
+ * @returns Promise resolving to created Agent object
+ */
+export const createAgent = async (agentData: {
+  name: string;
+  description?: string;
+  model_name?: string;
+  is_active?: boolean;
+}): Promise<Agent> => {
+  return apiRequest('/agents', {
+    method: 'POST',
+    body: JSON.stringify(agentData),
+  }) as Promise<Agent>;
+};
+
+/**
  * Fetch a specific agent by ID.
  * 
  * @param agentId - Unique identifier of the agent
@@ -79,6 +97,23 @@ export const getAgentById = async (agentId: number): Promise<Agent> => {
  */
 export const getScenes = async (): Promise<Scene[]> => {
   return apiRequest('/scenes') as Promise<Scene[]>;
+};
+
+/**
+ * Create a new scene.
+ * 
+ * @param sceneData - Scene creation data
+ * @returns Promise resolving to created Scene object
+ */
+export const createScene = async (sceneData: {
+  name: string;
+  description?: string;
+  agent_id: number;
+}): Promise<Scene> => {
+  return apiRequest('/scenes', {
+    method: 'POST',
+    body: JSON.stringify(sceneData),
+  }) as Promise<Scene>;
 };
 
 /**
@@ -137,5 +172,57 @@ export const clearChatHistory = async (
 ): Promise<void> => {
   await apiRequest(`/agents/${agentId}/chat-history?user=${user}`, {
     method: 'DELETE',
+  });
+};
+
+/**
+ * Update a subscene.
+ * 
+ * @param sceneId - Unique identifier of the scene
+ * @param subsceneName - Name of the subscene to update
+ * @param subsceneData - Subscene update data
+ * @returns Promise resolving to updated subscene data
+ */
+export const updateSubscene = async (
+  sceneId: number,
+  subsceneName: string,
+  subsceneData: {
+    name?: string;
+    type?: string;
+    mandatory?: boolean;
+    objective?: string;
+  }
+): Promise<unknown> => {
+  return apiRequest(`/scenes/${sceneId}/subscenes/${subsceneName}`, {
+    method: 'PUT',
+    body: JSON.stringify(subsceneData),
+  });
+};
+
+/**
+ * Update a connection.
+ * 
+ * @param sceneId - Unique identifier of the scene
+ * @param fromSubscene - Name of the source subscene
+ * @param toSubscene - Name of the target subscene
+ * @param connectionData - Connection update data
+ * @returns Promise resolving to updated connection data
+ */
+export const updateConnection = async (
+  sceneId: number,
+  fromSubscene: string,
+  toSubscene: string,
+  connectionData: {
+    name?: string;
+    condition?: string;
+  }
+): Promise<unknown> => {
+  return apiRequest(`/scenes/${sceneId}/connections`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      from_subscene: fromSubscene,
+      to_subscene: toSubscene,
+      ...connectionData,
+    }),
   });
 };

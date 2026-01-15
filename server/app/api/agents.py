@@ -1,13 +1,13 @@
 """API endpoints for agent management.
 
-This module provides read-only operations for agents.
-All CRUD operations (create, update, delete) are not used by the frontend.
+This module provides CRUD operations for agents.
 """
 import logging
+from datetime import timezone
 
 from app.api.dependencies import get_db
 from app.crud.agent import agent as agent_crud
-from app.schemas.schemas import AgentResponse
+from app.schemas.schemas import AgentCreate, AgentResponse
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
@@ -34,7 +34,57 @@ async def get_agents(
         A list of agents.
     """
     agents = agent_crud.get_all(db, skip=skip, limit=limit)
-    return [AgentResponse.from_orm(agent) for agent in agents]
+    return [
+        {
+            "id": agent.id,
+            "name": agent.name,
+            "description": agent.description,
+            "model_name": agent.model_name,
+            "is_active": agent.is_active,
+            "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
+            "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat()
+        }
+        for agent in agents
+    ]
+
+
+@router.post("/agents", response_model=AgentResponse, status_code=201)
+async def create_agent(
+    agent_data: AgentCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new agent.
+
+    Args:
+        agent_data: Agent creation data containing name, description, and model_name.
+        db: Database session.
+
+    Returns:
+        The created agent with ID populated.
+
+    Raises:
+        HTTPException: If an agent with the same name already exists (400).
+    """
+    existing_agent = agent_crud.get_by_name(agent_data.name, db)
+    if existing_agent:
+        raise HTTPException(status_code=400, detail="Agent with this name already exists")
+
+    agent = agent_crud.create(
+        db,
+        name=agent_data.name,
+        description=agent_data.description,
+        model_name=agent_data.model_name,
+        is_active=agent_data.is_active
+    )
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "description": agent.description,
+        "model_name": agent.model_name,
+        "is_active": agent.is_active,
+        "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
+        "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat()
+    }
 
 
 @router.get("/agents/{agent_id}", response_model=AgentResponse)
@@ -57,4 +107,12 @@ async def get_agent(
     agent = agent_crud.get(agent_id, db)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return AgentResponse.from_orm(agent)
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "description": agent.description,
+        "model_name": agent.model_name,
+        "is_active": agent.is_active,
+        "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
+        "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat()
+    }
