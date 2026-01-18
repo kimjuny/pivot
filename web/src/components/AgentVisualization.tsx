@@ -14,7 +14,8 @@ import {
   Edge,
   Connection,
   ReactFlowInstance,
-  Position
+  Position,
+  EdgeProps
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useSceneGraphStore } from '../store/sceneGraphStore';
@@ -22,6 +23,8 @@ import { useChatStore } from '../store/chatStore';
 import ChatInterface from './ChatInterface';
 import EditPanel from './EditPanel';
 import CreateSceneModal from './CreateSceneModal';
+import SubsceneModal from './SubsceneModal';
+import ConnectionModal from './ConnectionModal';
 import { getSceneGraph, createScene } from '../utils/api';
 import type { Agent, Scene, SceneGraph, SceneNode } from '../types';
 
@@ -106,7 +109,7 @@ const edgeTypes = {
 };
 
 function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph, onSceneSelect, onRefreshScenes }: AgentVisualizationProps) {
-  const { sceneGraph, refreshSceneGraph } = useSceneGraphStore();
+  const { sceneGraph, refreshSceneGraph: storeRefreshSceneGraph } = useSceneGraphStore();
   const { chatHistory } = useChatStore();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -116,6 +119,11 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
   const [normalModeSceneGraphData, setNormalModeSceneGraphData] = useState<SceneGraph | null>(null);
   const [previewModeSceneGraphData, setPreviewModeSceneGraphData] = useState<SceneGraph | null>(null);
   const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
+  const [isAddSubsceneModalOpen, setIsAddSubsceneModalOpen] = useState<boolean>(false);
+  const [isAddConnectionModalOpen, setIsAddConnectionModalOpen] = useState<boolean>(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [pendingConnection, setPendingConnection] = useState<{ from: string; to: string } | null>(null);
+  const [newSubscenePosition, setNewSubscenePosition] = useState<{ x: number; y: number } | null>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
   const isLoadingSceneGraphRef = useRef<boolean>(false);
 
@@ -126,19 +134,141 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
   const handleCreateScene = async (sceneData: {
     name: string;
     description?: string;
-    agent_id: number;
   }) => {
     try {
-      await createScene({
+      const createdScene = await createScene({
         ...sceneData,
         agent_id: agentId
       });
       await onRefreshScenes();
+      onSceneSelect(createdScene);
+      await storeRefreshSceneGraph(createdScene.id);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       console.error('Failed to create scene:', error);
     }
   };
+
+  const handleAddSubscene = (subsceneName?: string) => {
+    setIsAddSubsceneModalOpen(false);
+    setContextMenu(null);
+    // Refresh the scene graph to show the new subscene
+    if (selectedScene) {
+      void (async () => {
+        try {
+          const graphData = await getSceneGraph(selectedScene.id);
+          const sceneGraph = graphData as SceneGraph;
+
+          // If we have a position and the subscene name, add the node at the precise position
+          if (newSubscenePosition && subsceneName) {
+            // Find the newly created subscene in the graph
+            const newSubscene = sceneGraph.scenes?.find(s => s.name === subsceneName);
+            if (newSubscene && newSubscene.id) {
+              // Create a new node with the precise position
+              const newNode: Node = {
+                id: `subscene-${subsceneName}`,
+                type: 'subscene',
+                position: newSubscenePosition,
+                data: {
+                  label: subsceneName,
+                  type: newSubscene.type || 'normal',
+                  state: newSubscene.state || 'inactive',
+                  mandatory: newSubscene.mandatory || false,
+                  objective: newSubscene.objective || ''
+                }
+              };
+
+              // Add the new node to the existing nodes
+              setNodes((nds) => [...nds, newNode]);
+              // Update the scene graph data
+              setNormalModeSceneGraphData(sceneGraph);
+              // Clear the position
+              setNewSubscenePosition(null);
+              return;
+            }
+          }
+
+          // Fallback: just update the scene graph data
+          setNormalModeSceneGraphData(sceneGraph);
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          console.error('Failed to refresh scene graph:', error);
+        }
+      })();
+    }
+  };
+
+  const handleAddConnection = () => {
+    setIsAddConnectionModalOpen(false);
+    setPendingConnection(null);
+    // Refresh the scene graph to show the new connection
+    if (selectedScene) {
+      void (async () => {
+        try {
+          const graphData = await getSceneGraph(selectedScene.id);
+          setNormalModeSceneGraphData(graphData as SceneGraph);
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          console.error('Failed to refresh scene graph:', error);
+        }
+      })();
+    }
+  };
+
+  const handleContextMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    // Only show context menu in normal mode and when not in preview mode
+    if (!isPreviewMode && selectedScene) {
+      try {
+        const reactFlowBounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        // Calculate position in React Flow coordinates
+        const flowPosition = {
+          x: event.clientX - reactFlowBounds.left,
+          y: event.clientY - reactFlowBounds.top
+        };
+        setContextMenu({
+          x: event.clientX,
+          y: event.clientY
+        });
+        // Store the React Flow position for later node placement
+        setNewSubscenePosition({ x: flowPosition.x, y: flowPosition.y });
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        console.error('Failed to calculate position:', error);
+        // Fallback to default position
+        setContextMenu({
+          x: event.clientX,
+          y: event.clientY
+        });
+        setNewSubscenePosition({ x: 0, y: 0 });
+      }
+    }
+  };
+
+  const handleContextMenuClose = () => {
+    setContextMenu(null);
+  };
+
+  const handleAddSubsceneFromMenu = () => {
+    setContextMenu(null);
+    setIsAddSubsceneModalOpen(true);
+  };
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (contextMenu) {
+        setContextMenu(null);
+      }
+    };
+
+    if (contextMenu) {
+      document.addEventListener('click', handleClickOutside);
+      return () => {
+        document.removeEventListener('click', handleClickOutside);
+      };
+    }
+  }, [contextMenu]);
 
   const currentSceneGraphData = isPreviewMode ? previewModeSceneGraphData : normalModeSceneGraphData;
 
@@ -160,6 +290,13 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
       }
 
       isLoadingSceneGraphRef.current = true;
+      
+      setNormalModeSceneGraphData(null);
+      setPreviewModeSceneGraphData(null);
+      setNodes([]);
+      setEdges([]);
+      setSelectedElement(null);
+      
       try {
         const graphData = await getSceneGraph(selectedScene.id);
         setNormalModeSceneGraphData(graphData as SceneGraph);
@@ -171,7 +308,7 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
       }
     };
     void loadSceneGraph();
-  }, [selectedScene, isPreviewMode]);
+  }, [selectedScene, isPreviewMode, setNormalModeSceneGraphData, setPreviewModeSceneGraphData, setNodes, setEdges, setSelectedElement]);
 
   useEffect(() => {
     if (isPreviewMode && chatHistory.length > 0) {
@@ -407,13 +544,30 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
     }
   };
 
-  const onConnect = useCallback((params: Connection) => setEdges((eds) => addEdge(params, eds)), [setEdges]);
+  const onConnect = useCallback((params: Connection) => {
+    // Extract subscene names from node IDs
+    const fromSubscene = params.source.replace('subscene-', '');
+    const toSubscene = params.target.replace('subscene-', '');
+
+    // Check if it's a valid right-handle to left-handle connection
+    if (params.sourceHandle === 'right' && params.targetHandle === 'left') {
+      // Store the pending connection and show modal
+      setPendingConnection({ from: fromSubscene, to: toSubscene });
+      setIsAddConnectionModalOpen(true);
+    } else {
+      // For invalid connections, we could show an error or just not add them
+      console.warn('Invalid connection: Only right-handle to left-handle connections are allowed');
+    }
+  }, []);
 
   const onPaneClick = useCallback(() => {
     if (selectedElement) {
       setSelectedElement(null);
     }
-  }, [selectedElement]);
+    if (contextMenu) {
+      setContextMenu(null);
+    }
+  }, [selectedElement, contextMenu]);
 
   return (
     <div className="w-full h-full border border-dark-border rounded-xl bg-dark-bg flex flex-col card-subtle overflow-hidden">
@@ -482,7 +636,11 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
                 <span>Reset</span>
               </button>
               <button
-                onClick={() => selectedScene && void refreshSceneGraph(selectedScene.id)}
+                onClick={() => {
+                  if (selectedScene) {
+                    void storeRefreshSceneGraph(selectedScene.id);
+                  }
+                }}
                 className="flex items-center space-x-2 px-4 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-sm font-medium hover:bg-primary hover:border-primary hover:shadow-glow-sm transition-all duration-200"
                 title="Refresh"
               >
@@ -551,10 +709,11 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
               onEdgesChange={onEdgesChange}
               onConnect={onConnect}
               onPaneClick={onPaneClick}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
               onNodeClick={(event, node) => handleElementClick(event, node)}
               onEdgeClick={(event, edge) => handleElementClick(event, edge)}
+              onContextMenu={handleContextMenu}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onInit={(instance) => {
                 reactFlowInstanceRef.current = instance;
               }}
@@ -588,6 +747,47 @@ function AgentVisualization({ scenes, selectedScene, agentId, onResetSceneGraph,
             onClose={() => setIsCreateSceneModalOpen(false)}
             onCreate={handleCreateScene}
           />
+
+          <SubsceneModal
+            isOpen={isAddSubsceneModalOpen}
+            mode="add"
+            sceneId={selectedScene?.id || null}
+            onClose={() => setIsAddSubsceneModalOpen(false)}
+            onSave={handleAddSubscene}
+          />
+
+          <ConnectionModal
+            isOpen={isAddConnectionModalOpen}
+            mode="add"
+            sceneId={selectedScene?.id || null}
+            initialData={pendingConnection ? {
+              from_subscene: pendingConnection.from,
+              to_subscene: pendingConnection.to
+            } : undefined}
+            onClose={() => setIsAddConnectionModalOpen(false)}
+            onSave={handleAddConnection}
+          />
+
+          {contextMenu && !isPreviewMode && (
+            <div
+              className="fixed z-50 bg-dark-bg-lighter border border-dark-border rounded-lg shadow-card-lg py-1 min-w-[160px]"
+              style={{
+                left: contextMenu.x,
+                top: contextMenu.y
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={handleAddSubsceneFromMenu}
+                className="w-full px-4 py-2 text-left text-sm text-dark-text-primary hover:bg-primary hover:text-white transition-colors flex items-center space-x-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H8" />
+                </svg>
+                <span>Add Subscene</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -6,21 +6,18 @@ interface CreateSceneModalProps {
   onCreate: (sceneData: {
     name: string;
     description?: string;
-    agent_id: number;
   }) => Promise<void>;
 }
 
 interface SceneFormData {
   name: string;
   description: string;
-  agent_id: number;
 }
 
 function CreateSceneModal({ isOpen, onClose, onCreate }: CreateSceneModalProps) {
   const [formData, setFormData] = useState<SceneFormData>({
     name: '',
-    description: '',
-    agent_id: 0
+    description: ''
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,13 +39,11 @@ function CreateSceneModal({ isOpen, onClose, onCreate }: CreateSceneModalProps) 
     try {
       await onCreate({
         name: formData.name.trim(),
-        description: formData.description.trim() || undefined,
-        agent_id: formData.agent_id
+        description: formData.description.trim() || undefined
       });
       setFormData({
         name: '',
-        description: '',
-        agent_id: 0
+        description: ''
       });
       onClose();
     } catch (err) {
@@ -58,15 +53,14 @@ function CreateSceneModal({ isOpen, onClose, onCreate }: CreateSceneModalProps) 
     }
   };
 
-  const handleCreateClick = () => {
-    void handleSubmit();
+  const handleCreateClick = async () => {
+    await handleSubmit();
   };
 
   const handleCancel = () => {
     setFormData({
       name: '',
-      description: '',
-      agent_id: 0
+      description: ''
     });
     setError(null);
     onClose();
@@ -142,7 +136,7 @@ function CreateSceneModal({ isOpen, onClose, onCreate }: CreateSceneModalProps) 
               Cancel
             </button>
             <button
-              onClick={handleCreateClick}
+              onClick={() => void handleCreateClick()}
               disabled={isSubmitting || !formData.name.trim()}
               className="flex-1 px-4 py-2 btn-accent rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             >

@@ -10,11 +10,13 @@ from app.crud.connection import connection as connection_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
 from app.schemas.schemas import (
+    ConnectionCreate,
     ConnectionResponse,
     ConnectionUpdate,
     SceneCreate,
     SceneGraphResponse,
     SceneResponse,
+    SubsceneCreate,
     SubsceneResponse,
     SubsceneUpdate,
     SubsceneWithConnectionsResponse,
@@ -83,6 +85,101 @@ async def create_scene(
         "created_at": scene.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": scene.updated_at.replace(tzinfo=timezone.utc).isoformat()
     }
+
+
+@router.post("/scenes/{scene_id}/subscenes", response_model=SubsceneResponse, status_code=201)
+async def create_subscene(
+    scene_id: int,
+    subscene_data: SubsceneCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new subscene within a scene.
+
+    Args:
+        scene_id: The ID of the scene.
+        subscene_data: Subscene creation data.
+        db: Database session.
+
+    Returns:
+        The created subscene with ID populated.
+
+    Raises:
+        HTTPException: If the scene is not found (404) or subscene already exists (400).
+    """
+    scene = scene_crud.get(scene_id, db)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Check if subscene with same name already exists in this scene
+    existing_subscene = subscene_crud.get_by_name(subscene_data.name, scene_id, db)
+    if existing_subscene:
+        raise HTTPException(status_code=400, detail="Subscene with this name already exists in this scene")
+
+    subscene = subscene_crud.create(
+        db,
+        name=subscene_data.name,
+        type=subscene_data.type,
+        state=subscene_data.state,
+        description=subscene_data.description,
+        mandatory=subscene_data.mandatory,
+        objective=subscene_data.objective,
+        scene_id=scene_id
+    )
+
+    return SubsceneResponse.from_orm(subscene)
+
+
+@router.post("/scenes/{scene_id}/connections", response_model=ConnectionResponse, status_code=201)
+async def create_connection(
+    scene_id: int,
+    connection_data: ConnectionCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new connection within a scene.
+
+    Args:
+        scene_id: The ID of the scene.
+        connection_data: Connection creation data.
+        db: Database session.
+
+    Returns:
+        The created connection with ID populated.
+
+    Raises:
+        HTTPException: If the scene is not found (404), subscenes don't exist (404),
+                      or connection already exists (400).
+    """
+    scene = scene_crud.get(scene_id, db)
+    if not scene:
+        raise HTTPException(status_code=404, detail="Scene not found")
+
+    # Verify both subscenes exist
+    from_subscene = subscene_crud.get_by_name(connection_data.from_subscene, scene_id, db)
+    if not from_subscene or from_subscene.id is None:
+        raise HTTPException(status_code=404, detail="Source subscene not found")
+
+    to_subscene = subscene_crud.get_by_name(connection_data.to_subscene, scene_id, db)
+    if not to_subscene or to_subscene.id is None:
+        raise HTTPException(status_code=404, detail="Target subscene not found")
+
+    # Check if connection already exists
+    existing_connections = connection_crud.get_by_from_subscene(connection_data.from_subscene, db)
+    existing_connection = next((c for c in existing_connections if c.to_subscene == connection_data.to_subscene), None)
+    if existing_connection:
+        raise HTTPException(status_code=400, detail="Connection already exists between these subscenes")
+
+    connection = connection_crud.create(
+        db,
+        name=connection_data.name,
+        condition=connection_data.condition,
+        from_subscene=connection_data.from_subscene,
+        to_subscene=connection_data.to_subscene,
+        from_subscene_id=from_subscene.id,
+        to_subscene_id=to_subscene.id,
+        scene_id=scene_id
+    )
+
+    return ConnectionResponse.from_orm(connection)
 
 
 @router.get("/scenes/{scene_id}/graph", response_model=SceneGraphResponse)

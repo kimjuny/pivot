@@ -23,8 +23,10 @@ function App() {
 
   /**
    * Load agent details and associated scenes from server.
-   * Filters scenes to only those belonging to the current agent.
-   * Automatically selects the first scene if available.
+   * Filters scenes to only those belonging to current agent.
+   * Automatically selects first scene if available.
+   * 
+   * First clears all existing state to ensure clean loading of new agent data.
    */
   const loadAgentDetails = useCallback(async () => {
     if (!agentId) return;
@@ -34,8 +36,16 @@ function App() {
     }
 
     isLoadingAgentDetailsRef.current = true;
+    
     setIsInitializing(true);
     setError(null);
+    
+    setAgent(null);
+    setScenes([]);
+    setSelectedScene(null);
+    
+    useSceneGraphStore.getState().updateSceneGraph(null);
+    
     try {
       const agentData = await getAgentById(parseInt(agentId));
       setAgent(agentData);
@@ -54,7 +64,7 @@ function App() {
       setIsInitializing(false);
       isLoadingAgentDetailsRef.current = false;
     }
-  }, [agentId]);
+  }, [agentId, setAgent, setScenes, setSelectedScene, setIsInitializing, setError]);
 
   /**
    * Load agent details when agentId changes.

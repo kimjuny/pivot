@@ -63,16 +63,34 @@ start_backend() {
     echo "Environment variables: DOUBAO_SEED_API_KEY=${DOUBAO_SEED_API_KEY:+(set)}"
 }
 
+# Function to start all services using dev:all (frontend + backend + tests)
+start_dev_all() {
+    echo "Starting all services (frontend, backend, tests) using dev:all..."
+    cd web
+
+    # Kill any process using port 3000
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+
+    # Kill any process using port 8003
+    lsof -ti:8003 | xargs kill -9 2>/dev/null || true
+
+    # Start all services using dev:all
+    npm run dev:all &
+    DEV_ALL_PID=$!
+    cd ..
+    echo "All services started with PID $DEV_ALL_PID"
+}
+
 # Function to start frontend
 start_frontend() {
     echo "Starting frontend development server..."
     cd web
     
-    # Kill any process using port 3003
-    lsof -ti:3003 | xargs kill -9 2>/dev/null || true
+    # Kill any process using port 3000
+    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
     
     # Start frontend
-    npm run dev -- --host 127.0.0.1 --port 3003 &
+    npm run dev -- --host 127.0.0.1 &
     FRONTEND_PID=$!
     cd ..
     echo "Frontend server started with PID $FRONTEND_PID"
@@ -81,6 +99,10 @@ start_frontend() {
 # Function to stop processes
 stop_processes() {
     echo "Stopping processes..."
+    if [ ! -z "$DEV_ALL_PID" ]; then
+        kill $DEV_ALL_PID 2>/dev/null
+        echo "All services stopped"
+    fi
     if [ ! -z "$BACKEND_PID" ]; then
         kill $BACKEND_PID 2>/dev/null
         echo "Backend stopped"
@@ -118,15 +140,21 @@ if [ "$ENV" = "dev" ]; then
     init_poetry
 fi
 
-# Start both servers
-start_backend
-start_frontend
+# Start services based on environment
+if [ "$ENV" = "dev" ]; then
+    # Use dev:all for development to start frontend, backend, and tests together
+    start_dev_all
+else
+    # For production, start backend and frontend separately
+    start_backend
+    start_frontend
+fi
 
 echo ""
 echo "Servers started successfully!"
 echo "Environment: $ENV"
 echo "Backend API available at: http://localhost:8003"
-echo "Frontend available at: http://localhost:3003"
+echo "Frontend available at: http://localhost:3000"
 echo ""
 echo "Press Ctrl+C to stop both servers"
 

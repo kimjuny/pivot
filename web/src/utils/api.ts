@@ -201,7 +201,7 @@ export const updateSubscene = async (
 
 /**
  * Update a connection.
- * 
+ *
  * @param sceneId - Unique identifier of the scene
  * @param fromSubscene - Name of the source subscene
  * @param toSubscene - Name of the target subscene
@@ -224,5 +224,50 @@ export const updateConnection = async (
       to_subscene: toSubscene,
       ...connectionData,
     }),
+  });
+};
+
+/**
+ * Create a new subscene.
+ *
+ * @param sceneId - Unique identifier of the scene
+ * @param subsceneData - Subscene creation data
+ * @returns Promise resolving to created subscene data
+ */
+export const createSubscene = async (
+  sceneId: number,
+  subsceneData: {
+    name: string;
+    type?: string;
+    mandatory?: boolean;
+    objective?: string;
+    description?: string;
+  }
+): Promise<unknown> => {
+  return apiRequest(`/scenes/${sceneId}/subscenes`, {
+    method: 'POST',
+    body: JSON.stringify(subsceneData),
+  });
+};
+
+/**
+ * Create a new connection.
+ *
+ * @param sceneId - Unique identifier of the scene
+ * @param connectionData - Connection creation data
+ * @returns Promise resolving to created connection data
+ */
+export const createConnection = async (
+  sceneId: number,
+  connectionData: {
+    name: string;
+    from_subscene: string;
+    to_subscene: string;
+    condition?: string;
+  }
+): Promise<unknown> => {
+  return apiRequest(`/scenes/${sceneId}/connections`, {
+    method: 'POST',
+    body: JSON.stringify(connectionData),
   });
 };
