@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Any
 
 from .connection import Connection
 
@@ -51,7 +52,7 @@ class Subscene:
         """Add a connection from this subscene."""
         self.connections.append(connection)
         
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the subscene to a dictionary representation."""
         return {
             "name": self.name,
@@ -63,7 +64,7 @@ class Subscene:
         }
     
     @classmethod
-    def from_dict(cls, data: dict):
+    def from_dict(cls, data: dict[str, Any]):
         """Create a Subscene from a dictionary representation with connections."""
         
         subscene = cls(

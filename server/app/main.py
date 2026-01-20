@@ -15,6 +15,7 @@ sys.path.append(str(Path(server_dir).parent))
 # Import core modules after path is set up (noqa: E402 - must be after sys.path setup)
 # Import server modules (noqa: E402 - must be after sys.path setup)
 from app.api.agents import router as agents_router  # noqa: E402
+from app.api.build import router as build_router  # noqa: E402
 from app.api.chat import router as chat_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.db.session import init_db  # noqa: E402
@@ -25,17 +26,17 @@ from server.websocket import websocket_endpoint  # noqa: E402
 # Configure logging before importing other modules
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-    handlers=[logging.StreamHandler()]
+    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+    handlers=[logging.StreamHandler()],
 )
 
 # Set core module loggers to DEBUG level for development
-logging.getLogger('core').setLevel(logging.DEBUG)
-logging.getLogger('core.agent').setLevel(logging.DEBUG)
-logging.getLogger('core.llm').setLevel(logging.DEBUG)
+logging.getLogger("core").setLevel(logging.DEBUG)
+logging.getLogger("core.agent").setLevel(logging.DEBUG)
+logging.getLogger("core.llm").setLevel(logging.DEBUG)
 
 # Initialize logger for server
-logger = get_logger('server')
+logger = get_logger("server")
 
 app = FastAPI(title="Agent Visualization API", version="1.0.0")
 
@@ -52,9 +53,11 @@ app.add_middleware(
 app.include_router(agents_router, prefix="/api")
 app.include_router(scenes_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
+app.include_router(build_router, prefix="/api")
 
 # WebSocket endpoint
 app.websocket("/ws")(websocket_endpoint)
+
 
 # Startup event to initialize database
 @app.on_event("startup")
@@ -69,6 +72,7 @@ async def startup_event():
     logger.info("Database initialized successfully")
     logger.info("Application startup complete")
 
+
 # Shutdown event
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -77,6 +81,7 @@ async def shutdown_event():
     Logs shutdown notification.
     """
     logger.info("Shutting down application...")
+
 
 # Global exception handler for better error logging
 @app.exception_handler(Exception)
@@ -99,9 +104,10 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={
             "detail": f"Internal server error: {exc!s}",
             "type": type(exc).__name__,
-            "path": str(request.url)
-        }
+            "path": str(request.url),
+        },
     )
+
 
 # Health check endpoints
 @app.get("/")
@@ -113,6 +119,7 @@ async def root():
     """
     logger.info("Root endpoint accessed")
     return {"message": "Agent Visualization API"}
+
 
 @app.get("/health")
 async def health_check():

@@ -43,7 +43,7 @@ class DoubaoLLM(AbstractLLM):
         self.api_key = api_key
         self.timeout = timeout or self.DEFAULT_TIMEOUT
 
-    def chat(self, messages: list[dict[str, str]], **kwargs) -> Response:
+    def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
         """
         Process a conversation with the Doubao LLM.
         

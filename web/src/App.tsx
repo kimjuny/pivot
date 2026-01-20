@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import AgentList from './components/AgentList';
-import AgentVisualization from './components/AgentVisualization';
-import { getAgentById, getScenes } from './utils/api';
+import AgentDetail from './components/AgentDetail';
+import { getAgentById } from './utils/api';
 import type { Agent, Scene } from './types';
 import { useSceneGraphStore } from './store/sceneGraphStore';
 
@@ -50,8 +50,8 @@ function App() {
       const agentData = await getAgentById(parseInt(agentId));
       setAgent(agentData);
 
-      const scenesData = await getScenes();
-      const agentScenes = scenesData.filter(scene => scene.agent_id === parseInt(agentId));
+      // Use scenes directly from agent data (mapped from subscenes alias)
+      const agentScenes = (agentData.scenes || []) as unknown as Scene[];
       setScenes(agentScenes);
 
       if (agentScenes && agentScenes.length > 0) {
@@ -101,9 +101,10 @@ function App() {
   const handleRefreshScenes = async () => {
     if (!agentId) return;
     try {
-      const scenesData = await getScenes();
-      const agentScenes = scenesData.filter(scene => scene.agent_id === parseInt(agentId));
-      setScenes(agentScenes);
+      // Refresh full agent details to get scenes
+      const agentData = await getAgentById(parseInt(agentId));
+      setAgent(agentData);
+      setScenes((agentData.scenes || []) as unknown as Scene[]);
     } catch (err) {
       setError((err as Error).message || 'Failed to refresh scenes');
     }
@@ -141,7 +142,7 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-dark-bg text-dark-text-primary">
       <div className="flex-1 p-5 bg-dark-bg overflow-hidden">
-        <AgentVisualization 
+        <AgentDetail 
           agent={agent} 
           scenes={scenes} 
           selectedScene={selectedScene} 

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .subscene import Subscene
@@ -41,7 +41,7 @@ class Scene:
         """Add a subscene to this scene."""
         self.subscenes.append(subscene)
         
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the scene to a dictionary representation."""
         return {
             "name": self.name,
@@ -51,7 +51,7 @@ class Scene:
         }
     
     @classmethod
-    def from_dict(cls, data: dict):
+    def from_dict(cls, data: dict[str, Any]):
         """Create a Scene from a dictionary representation."""
         from .subscene import Subscene
         

@@ -3,6 +3,7 @@
 This module provides the database session dependency injection
 used across all API endpoints.
 """
+
 from collections.abc import Generator
 
 from app.db.session import get_session

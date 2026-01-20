@@ -10,6 +10,7 @@ class AgentCreate(BaseModel):
         name: Name of the agent.
         api_key: API key for LLM.
     """
+
     name: str = Field(..., description="Agent name")
     api_key: str = Field(..., description="API key for LLM")
 
@@ -23,6 +24,7 @@ class AgentUpdate(BaseModel):
         name: New name of the agent.
         api_key: New API key for LLM.
     """
+
     name: str | None = None
     api_key: str | None = None
 
@@ -37,6 +39,7 @@ class AgentResponse(BaseModel):
         created_at: UTC timestamp when the agent was created.
         updated_at: UTC timestamp when the agent was last updated.
     """
+
     id: int
     name: str
     api_key: str
@@ -55,6 +58,7 @@ class SceneCreate(BaseModel):
         description: Optional description of the scene.
         agent_id: Optional ID of the agent this scene belongs to.
     """
+
     name: str = Field(..., description="Scene name")
     description: str | None = Field(None, description="Scene description")
     agent_id: int | None = Field(None, description="Agent ID")
@@ -70,6 +74,7 @@ class SceneUpdate(BaseModel):
         description: New description of the scene.
         agent_id: New agent ID.
     """
+
     name: str | None = None
     description: str | None = None
     agent_id: int | None = None
@@ -87,6 +92,7 @@ class SceneResponse(BaseModel):
         updated_at: UTC timestamp when the scene was last updated.
         subscenes: List of subscenes belonging to this scene.
     """
+
     id: int
     name: str
     description: str | None
@@ -111,9 +117,12 @@ class SubsceneCreate(BaseModel):
         objective: Optional objective of this subscene.
         scene_id: ID of the scene this subscene belongs to.
     """
+
     name: str = Field(..., description="Subscene name")
     type: str = Field(default="normal", description="Subscene type: start, normal, end")
-    state: str = Field(default="inactive", description="Subscene state: active, inactive")
+    state: str = Field(
+        default="inactive", description="Subscene state: active, inactive"
+    )
     description: str | None = Field(None, description="Subscene description")
     mandatory: bool = Field(default=False, description="Whether subscene is mandatory")
     objective: str | None = Field(None, description="Subscene objective")
@@ -133,6 +142,7 @@ class SubsceneUpdate(BaseModel):
         mandatory: New mandatory status.
         objective: New objective of this subscene.
     """
+
     name: str | None = None
     type: str | None = None
     state: str | None = None
@@ -157,6 +167,7 @@ class SubsceneResponse(BaseModel):
         updated_at: UTC timestamp when the subscene was last updated.
         connections: List of connections from this subscene.
     """
+
     id: int
     name: str
     type: str
@@ -183,6 +194,7 @@ class ConnectionCreate(BaseModel):
         to_subscene: Name of the target subscene.
         subscene_id: ID of the subscene this connection belongs to.
     """
+
     name: str = Field(..., description="Connection name")
     condition: str | None = Field(None, description="Connection condition")
     from_subscene: str = Field(..., description="Source subscene name")
@@ -199,6 +211,7 @@ class ConnectionUpdate(BaseModel):
         name: New name of the connection.
         condition: New condition for this connection.
     """
+
     name: str | None = None
     condition: str | None = None
 
@@ -216,6 +229,7 @@ class ConnectionResponse(BaseModel):
         created_at: UTC timestamp when the connection was created.
         updated_at: UTC timestamp when the connection was last updated.
     """
+
     id: int
     name: str
     condition: str | None

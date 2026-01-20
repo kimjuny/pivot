@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -41,7 +42,7 @@ class ConnectionManager:
         """
         await websocket.send_text(message)
 
-    async def broadcast(self, message: dict):
+    async def broadcast(self, message: dict[str, Any]):
         """Broadcast a message to all active WebSocket connections.
 
         This is used to send real-time updates to all connected clients,

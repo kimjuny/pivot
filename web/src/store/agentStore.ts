@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { useSceneGraphStore } from './sceneGraphStore';
-import { useChatStore } from './chatStore';
 
 /**
  * State representing the current agent status.

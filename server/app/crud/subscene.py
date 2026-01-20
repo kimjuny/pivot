@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from app.models.agent import Subscene
 from sqlmodel import Session, SQLModel, select
@@ -37,7 +37,9 @@ class CRUDBase(Generic[ModelType]):
         """
         return session.get(self.model, id)
 
-    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[ModelType]:
+    def get_all(
+        self, session: Session, skip: int = 0, limit: int = 100
+    ) -> list[ModelType]:
         """Retrieve multiple records with pagination support.
 
         Args:
@@ -51,7 +53,7 @@ class CRUDBase(Generic[ModelType]):
         statement = select(self.model).offset(skip).limit(limit)
         return session.exec(statement).all()
 
-    def create(self, session: Session, **kwargs) -> ModelType:
+    def create(self, session: Session, **kwargs: Any) -> ModelType:
         """Create a new record in the database.
 
         Args:
@@ -67,7 +69,7 @@ class CRUDBase(Generic[ModelType]):
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> ModelType | None:
+    def update(self, id: int, session: Session, **kwargs: Any) -> ModelType | None:
         """Update an existing record by its primary key.
 
         Args:
@@ -129,7 +131,9 @@ class SubsceneCRUD(CRUDBase[Subscene]):
         statement = select(Subscene).where(Subscene.scene_id == scene_id)
         return session.exec(statement).all()
 
-    def get_by_name(self, name: str, scene_id: int, session: Session) -> Subscene | None:
+    def get_by_name(
+        self, name: str, scene_id: int, session: Session
+    ) -> Subscene | None:
         """Retrieve a subscene by name within a specific scene.
 
         Args:

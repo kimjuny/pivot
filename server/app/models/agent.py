@@ -17,6 +17,7 @@ class Agent(SQLModel, table=True):
         updated_at: UTC timestamp when the agent was last updated.
         scenes: List of scenes associated with this agent.
     """
+
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str | None = Field(default=None)
@@ -40,6 +41,7 @@ class Scene(SQLModel, table=True):
         agent: The agent that owns this scene.
         subscenes: List of subscenes within this scene.
     """
+
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     description: str | None = Field(default=None)
@@ -66,6 +68,7 @@ class Subscene(SQLModel, table=True):
         scene_id: Foreign key to the scene that contains this subscene.
         scene: The scene that contains this subscene.
     """
+
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     type: str = Field(default="normal")
@@ -94,6 +97,7 @@ class Connection(SQLModel, table=True):
         created_at: UTC timestamp when the connection was created.
         updated_at: UTC timestamp when the connection was last updated.
     """
+
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     condition: str | None = Field(default=None)
@@ -122,11 +126,19 @@ class ChatHistory(SQLModel, table=True):
         update_scene: Updated scene graph in JSON format.
         create_time: UTC timestamp when the history was created.
     """
+
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int | None = Field(default=None, foreign_key="agent.id", index=True)
     user: str = Field(index=True, description="Username of the user")
-    role: str = Field(index=True, description="Role of the message sender: 'user' or 'agent'")
+    role: str = Field(
+        index=True, description="Role of the message sender: 'user' or 'agent'"
+    )
     message: str = Field(default="", description="Message content from user or agent")
     reason: str | None = Field(default=None, description="Reason from agent response")
-    update_scene: str | None = Field(default=None, description="Updated scene graph in JSON format")
-    create_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Time when the history was created")
+    update_scene: str | None = Field(
+        default=None, description="Updated scene graph in JSON format"
+    )
+    create_time: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Time when the history was created",
+    )

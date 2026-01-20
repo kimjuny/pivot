@@ -30,7 +30,7 @@ export const mockScenes: Scene[] = [
 ]
 
 export const mockSceneGraph: SceneGraph = {
-  scenes: [
+  subscenes: [
     {
       id: 'subscene-Start',
       type: 'start',

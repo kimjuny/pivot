@@ -12,12 +12,11 @@ interface EditPanelProps {
   } | null;
   sceneId: number | null;
   onClose: () => void;
-  onSave: () => void;
-  onNodeChange: (nodeId: string, data: Record<string, unknown>) => void;
-  onEdgeChange: (edgeId: string, data: Record<string, unknown>) => void;
+  onNodeUpdate: (nodeId: string, data: SubsceneFormData) => void;
+  onEdgeUpdate: (edgeId: string, data: ConnectionFormData) => void;
 }
 
-function EditPanel({ element, sceneId, onClose, onSave, onNodeChange, onEdgeChange }: EditPanelProps) {
+function EditPanel({ element, sceneId, onClose, onNodeUpdate, onEdgeUpdate }: EditPanelProps) {
   const [isSubsceneModalOpen, setIsSubsceneModalOpen] = useState(false);
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
 
@@ -44,17 +43,22 @@ function EditPanel({ element, sceneId, onClose, onSave, onNodeChange, onEdgeChan
     onClose();
   };
 
-  const handleSubsceneSave = (subsceneName?: string) => {
+  const handleSubsceneSave = (data: SubsceneFormData) => {
+    if (element && element.type === 'node') {
+      onNodeUpdate(element.id, data);
+    }
     setIsSubsceneModalOpen(false);
-    onSave();
+    onClose();
   };
 
-  const handleConnectionSave = () => {
+  const handleConnectionSave = (data: ConnectionFormData) => {
+    if (element && element.type === 'edge') {
+      onEdgeUpdate(element.id, data);
+    }
     setIsConnectionModalOpen(false);
-    onSave();
+    onClose();
   };
 
-  // Prepare initial data for subscene editing
   const getSubsceneInitialData = (): Partial<SubsceneFormData> => {
     if (!element || element.type !== 'node') return {};
     return {
@@ -65,7 +69,6 @@ function EditPanel({ element, sceneId, onClose, onSave, onNodeChange, onEdgeChan
     };
   };
 
-  // Prepare initial data for connection editing
   const getConnectionInitialData = (): Partial<ConnectionFormData> => {
     if (!element || element.type !== 'edge') return {};
     return {

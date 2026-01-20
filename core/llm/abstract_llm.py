@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from core.utils.logging_config import get_logger
 
@@ -150,7 +151,7 @@ class AbstractLLM(ABC):
         pass
 
     @abstractmethod
-    def chat(self, messages: list[dict[str, str]], **kwargs) -> Response:
+    def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
         """
         Process a conversation with the LLM.
         

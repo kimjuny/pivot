@@ -1,6 +1,7 @@
+from typing import Any
 
-
-from core.llm.abstract_llm import AbstractLLM, Response
+from core.agent.output_message import OutputMessage
+from core.llm.abstract_llm import AbstractLLM
 from core.utils.logging_config import get_logger
 
 from .input_message import InputMessage
@@ -10,20 +11,46 @@ from .plan.subscene import Subscene, SubsceneState
 # Get logger for this module
 logger = get_logger('agent')
 
-
-
 class Agent:
     """
     Base class for all agents with scene graph functionality.
     """
 
-    def __init__(self):
+    def __init__(self, name: str = "Agent", description: str = ""):
+        self.name = name
+        self.description = description
         self.model: AbstractLLM | None = None
         self.is_started: bool = False
         self.history: list[dict[str, str]] = []
         self.scenes: list[Scene] = []
         self.current_scene: Scene | None = None
         self.current_subscene: Subscene | None = None
+
+    def set_name(self, name: str) -> 'Agent':
+        """
+        Set the name of the agent.
+        
+        Args:
+            name (str): The name of the agent
+            
+        Returns:
+            Agent: Returns self for chaining
+        """
+        self.name = name
+        return self
+
+    def set_description(self, description: str) -> 'Agent':
+        """
+        Set the description of the agent.
+        
+        Args:
+            description (str): The description of the agent
+            
+        Returns:
+            Agent: Returns self for chaining
+        """
+        self.description = description
+        return self
 
     def add_action(self) -> 'Agent':
         """
@@ -129,11 +156,45 @@ class Agent:
                         logger.info(f"      {k+1}. {connection.name} -> {to_scene_name}:{to_subscene_name}{active_marker}")
         logger.info("========================\n")
 
+    def to_dict(self) -> dict[str, Any]:
+        """
+        Convert the agent configuration to a dictionary.
+        
+        Returns:
+            dict: The agent configuration.
+        """
+        return {
+            "name": self.name,
+            "description": self.description,
+            "scenes": [scene.to_dict() for scene in self.scenes]
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> 'Agent':
+        """
+        Create an agent from a dictionary configuration.
+        
+        Args:
+            data (dict): The agent configuration.
+            
+        Returns:
+            Agent: The created agent.
+        """
+        agent = cls(
+            name=data.get("name", "Agent"),
+            description=data.get("description", "")
+        )
+        
+        if "scenes" in data:
+            for scene_data in data["scenes"]:
+                scene = Scene.from_dict(scene_data)
+                agent.add_plan(scene)
+                
+        return agent
 
 
 
-
-    def chat(self, message: str) -> Response:
+    def chat(self, message: str) -> 'OutputMessage':
         """
         Chat with the agent using the configured LLM model with scene graph awareness.
         
@@ -141,7 +202,7 @@ class Agent:
             message (str): The user's message
             
         Returns:
-            Response: The LLM response
+            OutputMessage: The structured output message
             
         Raises:
             ValueError: If the agent hasn't been started or no model is set
@@ -164,21 +225,17 @@ class Agent:
             current_subscene=self.current_subscene
         )
         
-        # Format message for LLM with scene context
-        llm_message = input_message.to_llm_string()
-        
-        # Prepare messages for LLM
-        llm_messages = [{"role": "user", "content": llm_message}]
+        # Get structured messages for LLM
+        llm_messages = input_message.get_messages()
         
         response = self.model.chat(llm_messages)
+        
 
         if response.choices:
             first_choice = response.first()
             
             # Parse the LLM response content into OutputMessage
             try:
-                from core.agent.output_message import OutputMessage
-                
                 # Create OutputMessage from LLM response content
                 output_message = OutputMessage.from_content(first_choice.message.content)
                 
@@ -202,46 +259,29 @@ class Agent:
                     
                 logger.info(f"Response: {output_message.response[:50]}...")
                 logger.info(f"Reason: {output_message.reason[:100]}...")
+                
+                return output_message
+                
             except Exception as e:
                 logger.error(f"Error parsing LLM response into OutputMessage: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
-        
-        # Add user message and assistant response to history
-        self.history.append({"role": "user", "content": message})
-        
-        # Prepare assistant response based on OutputMessage
-        if response.choices:
-            first_choice = response.first()
-            
-            try:
-                from core.agent.output_message import OutputMessage
                 
-                # Parse response content into OutputMessage
-                output_message = OutputMessage.from_content(first_choice.message.content)
-                
-                # Add structured assistant response to history
-                self.history.append({
-                    "role": "assistant",
-                    "content": output_message.response
-                })
-                
-                # Use OutputMessage response as the assistant response
-                
-            except Exception:
-                # Fallback to raw response if parsing fails
-                self.history.append({
-                    "role": first_choice.message.role,
-                    "content": first_choice.message.content
-                })
+                # Return a fallback OutputMessage
+                return OutputMessage(
+                    response=first_choice.message.content,
+                    updated_scenes=[],
+                    reason="Failed to parse structured response"
+                )
         
-        # Log chat completion
-        logger.info("Chat completed successfully")
-        
-        # Return the original response for compatibility
-        return response
+        # Fallback if no choices
+        return OutputMessage(
+            response="No response from LLM",
+            updated_scenes=[],
+            reason="No choices in LLM response"
+        )
 
-    def chat_with_print(self, message: str) -> Response:
+    def chat_with_print(self, message: str) -> 'OutputMessage':
         """
         Chat with the agent and print the scene graph after the response.
         
@@ -249,12 +289,12 @@ class Agent:
             message (str): The user's message
             
         Returns:
-            Response: The LLM response
+            OutputMessage: The structured output message
         """
         # Get the response
-        response = self.chat(message)
+        output_message = self.chat(message)
         
         # Print the scene graph in text format
         self.print_scene_graph()
         
-        return response
+        return output_message

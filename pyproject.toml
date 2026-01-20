@@ -67,6 +67,9 @@ reportUnusedVariable = "warning"
 reportOptionalMemberAccess = "error" # Enforce None-checks (crucial for stability).
 reportGeneralTypeIssues = "error"
 reportIncompatibleMethodOverride = "error"
+reportUnknownParameterType = "error"
+# reportUnknownVariableType = "error"
+# reportMissingTypeStubs = false
 
 [tool.ruff.format]
 # Standardize code style to reduce "diff noise" in open-source contributions.

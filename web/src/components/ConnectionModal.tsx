@@ -1,5 +1,4 @@
-import React, { useState, useEffect, ChangeEvent, useRef } from 'react';
-import { createConnection, updateConnection } from '../utils/api';
+import React, { useState, useEffect, ChangeEvent, MouseEvent, useRef } from 'react';
 
 export interface ConnectionFormData {
   name: string;
@@ -13,9 +12,9 @@ interface ConnectionModalProps {
   mode: 'add' | 'edit';
   sceneId: number | null;
   initialData?: Partial<ConnectionFormData>;
-  existingConnection?: { from: string; to: string }; // For edit mode
+  existingConnection?: { from: string; to: string };
   onClose: () => void;
-  onSave: () => void;
+  onSave: (data: ConnectionFormData) => void;
 }
 
 function ConnectionModal({
@@ -47,7 +46,6 @@ function ConnectionModal({
           to_subscene: initialData.to_subscene || ''
         });
       } else if (mode === 'add' && initialData) {
-        // Pre-fill from/to for add mode but allow editing name and condition
         setFormData({
           name: '',
           condition: '',
@@ -55,7 +53,6 @@ function ConnectionModal({
           to_subscene: initialData.to_subscene || ''
         });
       }
-      // Reset error when opening modal
       setServerError(null);
     }
   }, [isOpen, mode, initialData]);
@@ -75,41 +72,25 @@ function ConnectionModal({
     }
   }, [isOpen, onClose]);
 
-  const handleSubmit = async () => {
-    if (!sceneId) return;
+  const handleSubmit = () => {
     if (!formData.name.trim()) {
       setServerError('Please enter a connection name');
       return;
     }
 
-    setIsSubmitting(true);
-    setServerError(null);
-    try {
-      if (mode === 'add') {
-        await createConnection(sceneId, {
-          name: formData.name,
-          from_subscene: formData.from_subscene,
-          to_subscene: formData.to_subscene,
-          condition: formData.condition || ''
-        });
-      } else if (mode === 'edit' && existingConnection) {
-        await updateConnection(sceneId, existingConnection.from, existingConnection.to, {
-          name: formData.name,
-          condition: formData.condition
-        });
-      }
-      // Only close and call onSave after successful submission
-      onSave();
-    } catch (error) {
-      console.error('Failed to save connection:', error);
-      // Extract error message from response if available
-      const errorMessage = error instanceof Error && 'message' in error
-        ? (error as { message: string }).message
-        : 'Failed to save connection. Please try again.';
-      setServerError(errorMessage);
-    } finally {
-      setIsSubmitting(false);
-    }
+    onSave({
+      name: formData.name,
+      condition: formData.condition,
+      from_subscene: formData.from_subscene,
+      to_subscene: formData.to_subscene
+    });
+
+    setFormData({
+      name: '',
+      condition: '',
+      from_subscene: '',
+      to_subscene: ''
+    });
   };
 
   if (!isOpen) {
@@ -125,7 +106,6 @@ function ConnectionModal({
           </h3>
         </div>
 
-        {/* Server Error Display */}
         {serverError && (
           <div className="px-6 py-3 bg-red-500/10 border-b border-red-500/20">
             <p className="text-sm text-red-400">{serverError}</p>
@@ -179,7 +159,7 @@ function ConnectionModal({
               </div>
 
               <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
-                <p className="text-sm text-dark-text-secondary mb-1">To Subscene</p>
+                <p className="text-sm font-medium text-dark-text-secondary mb-1">To Subscene</p>
                 <p className="text-xs text-dark-text-muted">{existingConnection.to || 'Not specified'}</p>
               </div>
             </>
@@ -197,9 +177,9 @@ function ConnectionModal({
           <button
             onClick={() => void handleSubmit()}
             className="flex-1 px-4 py-2 btn-accent rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !formData.name.trim()}
           >
-            {isSubmitting ? 'Saving...' : mode === 'add' ? 'Add' : 'Save'}
+            {mode === 'add' ? 'Add' : 'Save'}
           </button>
         </div>
       </div>

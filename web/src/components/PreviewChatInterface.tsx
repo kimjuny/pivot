@@ -1,81 +1,61 @@
 import { useState, useRef, useEffect, FormEvent } from 'react';
-import { useChatStore } from '../store/chatStore';
+import { usePreviewChatStore } from '../store/previewChatStore';
+import { useAgentWorkStore } from '../store/agentWorkStore';
 import { formatTimestamp } from '../utils/timestamp';
 import type { ChatHistory } from '../types';
 
 /**
- * Props for ChatInterface component.
+ * Props for PreviewChatInterface component.
  */
-interface ChatInterfaceProps {
+interface PreviewChatInterfaceProps {
   /** Unique identifier of the agent */
   agentId: number;
 }
 
 /**
- * Chat interface component for interacting with an agent.
+ * Preview Chat interface component for testing agent conversations.
  * Displays chat history and allows sending new messages.
- * Shows agent reasoning in expandable sections.
+ * Uses ephemeral PreviewChatStore and works with PreviewAgentDetail.
  */
-function ChatInterface({ agentId }: ChatInterfaceProps) {
-  const { chatHistory, chatWithAgentById, isChatting, error, clearError, loadChatHistory, clearChatHistory } = useChatStore();
+function PreviewChatInterface({ agentId }: PreviewChatInterfaceProps) {
+  const { chatHistory, sendMessage, isChatting, error, clearError, clearHistory } = usePreviewChatStore();
+  const { previewAgent } = useAgentWorkStore();
+  
   const [inputMessage, setInputMessage] = useState<string>('');
-  const [hasLoadedHistory, setHasLoadedHistory] = useState<boolean>(false);
   const [expandedThinking, setExpandedThinking] = useState<Record<number, boolean>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   /**
    * Scroll chat view to bottom.
-   * Ensures latest messages are visible.
    */
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   /**
-   * Load chat history when agentId changes.
-   * Prevents duplicate loading with hasLoadedHistory flag.
+   * Initialize chat when entering preview mode.
+   * Clears history on mount (or when agentId changes).
    */
   useEffect(() => {
-    if (agentId && !hasLoadedHistory) {
-      void loadChatHistory(agentId, 'preview-user');
-      setHasLoadedHistory(true);
-    }
-  }, [agentId, hasLoadedHistory, loadChatHistory]);
+    clearHistory();
+  }, [agentId, clearHistory]);
 
   /**
    * Auto-scroll to bottom when chat history updates.
-   * Ensures user sees latest messages.
    */
   useEffect(() => {
     scrollToBottom();
   }, [chatHistory]);
 
   /**
-   * Clear chat history and reload.
-   * Resets expanded thinking states and fetches fresh history.
-   */
-  const handleClearHistory = async () => {
-    try {
-      await clearChatHistory(agentId, 'preview-user');
-      setExpandedThinking({});
-      await loadChatHistory(agentId, 'preview-user');
-    } catch (err) {
-      void err;
-    }
-  };
-
-  /**
    * Handle form submission to send message.
-   * Validates input and prevents duplicate submissions.
-   * 
-   * @param e - Form event from submit
    */
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputMessage.trim() || isChatting) return;
 
     try {
-      await chatWithAgentById(agentId, inputMessage, 'preview-user');
+      await sendMessage(inputMessage);
       setInputMessage('');
     } catch (err) {
       void err;
@@ -83,17 +63,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
   };
 
   /**
-   * Handle reset agent button click.
-   * TODO: Implement agent reset functionality.
-   */
-  const handleReset = () => {
-    window.confirm('Are you sure you want to reset the agent?');
-  };
-
-  /**
    * Toggle visibility of agent reasoning for a message.
-   * 
-   * @param index - Index of message in chat history
    */
   const toggleThinking = (index: number) => {
     setExpandedThinking(prev => ({
@@ -102,18 +72,26 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
     }));
   };
 
+  if (!previewAgent) {
+      return (
+          <div className="flex items-center justify-center h-full text-dark-text-muted">
+              Preview not available.
+          </div>
+      );
+  }
+
   return (
     <div className="flex flex-col h-full bg-dark-bg text-dark-text-primary overflow-hidden">
       <div className="px-5 py-4 border-b border-dark-border bg-dark-bg flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white flex items-center tracking-tight">
           <span className="w-2 h-2 bg-primary rounded-full mr-2.5 animate-pulse"></span>
-          Chat with Agent
+          Preview Chat
         </h2>
         <button
-          onClick={() => void handleClearHistory()}
+          onClick={() => clearHistory()}
           className="text-xs font-medium text-dark-text-secondary hover:text-primary transition-colors px-3 py-1.5 rounded-lg hover:bg-dark-bg-lighter border border-transparent hover:border-dark-border"
         >
-          Clear
+          Reset
         </button>
       </div>
       
@@ -126,8 +104,8 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                 </svg>
               </div>
-              <p className="text-base font-medium text-dark-text-secondary mb-2">Start a conversation with agent</p>
-              <p className="text-sm opacity-70">Try saying: &quot;I want to sleep&quot; or &quot;Tell me a story&quot;</p>
+              <p className="text-base font-medium text-dark-text-secondary mb-2">Start previewing your agent</p>
+              <p className="text-sm opacity-70">Changes in Workspace are reflected here.</p>
             </div>
           </div>
         ) : (
@@ -143,7 +121,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
                   : 'bg-dark-bg-lighter text-dark-text-primary border border-dark-border rounded-bl-none'}`}
               >
                 <div className="font-semibold text-xs mb-1.5 opacity-90 tracking-wide uppercase">
-                  {message.role === 'user' ? 'You' : 'Agent'}
+                  {message.role === 'user' ? 'You' : 'Preview Agent'}
                 </div>
                 <div className="text-[10px] mb-1.5 opacity-70 font-mono">
                   {formatTimestamp(message.create_time)}
@@ -181,7 +159,7 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
         {isChatting && (
           <div className="flex justify-start animate-fade-in">
             <div className="bg-dark-bg-lighter border border-dark-border px-4 py-3 rounded-xl shadow-md rounded-bl-none">
-              <div className="font-semibold text-xs mb-1.5 opacity-90 tracking-wide uppercase">Agent</div>
+              <div className="font-semibold text-xs mb-1.5 opacity-90 tracking-wide uppercase">Preview Agent</div>
               <div className="flex items-center space-x-1.5">
                 <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
                 <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
@@ -226,11 +204,11 @@ function ChatInterface({ agentId }: ChatInterfaceProps) {
           </button>
         </div>
         <div className="mt-3 text-xs text-dark-text-muted text-center opacity-70">
-          Try: &quot;I want to sleep&quot; / &quot;I&apos;m tired today&quot; / &quot;Tell me a story&quot;
+          Stateless preview mode - changes here are not saved to chat history.
         </div>
       </form>
     </div>
   );
 }
 
-export default ChatInterface;
+export default PreviewChatInterface;

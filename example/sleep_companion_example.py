@@ -1,3 +1,4 @@
+import json
 import sys
 import os
 
@@ -141,9 +142,8 @@ def main():
                 break
                 
             # Use chat_with_print to get response and print graph
-            response = agent.chat_with_print(user_input)
-            first_choice = response.first()
-            print(f"女友: {first_choice.message.content}")
+            output_message = agent.chat_with_print(user_input)
+            print(f"女友: {output_message.response}")
             print()
             conversation_count += 1
         

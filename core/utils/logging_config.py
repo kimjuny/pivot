@@ -20,7 +20,7 @@ stream_handler.setFormatter(formatter)
 core_logger.addHandler(stream_handler)
 
 # Make the logger accessible to other modules
-def get_logger(name=None):
+def get_logger(name: str | None = None):
     """
     Get a logger instance with the given name. If no name is provided,
     returns the core logger instance.

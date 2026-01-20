@@ -1,4 +1,4 @@
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from app.models.agent import ChatHistory
 from sqlmodel import Session, SQLModel, select
@@ -37,7 +37,9 @@ class CRUDBase(Generic[ModelType]):
         """
         return session.get(self.model, id)
 
-    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[ModelType]:
+    def get_all(
+        self, session: Session, skip: int = 0, limit: int = 100
+    ) -> list[ModelType]:
         """Retrieve multiple records with pagination support.
 
         Args:
@@ -51,7 +53,7 @@ class CRUDBase(Generic[ModelType]):
         statement = select(self.model).offset(skip).limit(limit)
         return session.exec(statement).all()
 
-    def create(self, session: Session, **kwargs) -> ModelType:
+    def create(self, session: Session, **kwargs: Any) -> ModelType:
         """Create a new record in the database.
 
         Args:
@@ -67,7 +69,7 @@ class CRUDBase(Generic[ModelType]):
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> ModelType | None:
+    def update(self, id: int, session: Session, **kwargs: Any) -> ModelType | None:
         """Update an existing record by its primary key.
 
         Args:
@@ -118,7 +120,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         user: str,
         session: Session,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
     ) -> list[ChatHistory]:
         """Get chat history for a specific agent and user, ordered by creation time.
 
@@ -143,10 +145,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         return session.exec(statement).all()
 
     def get_latest_update_scene(
-        self,
-        agent_id: int,
-        user: str,
-        session: Session
+        self, agent_id: int, user: str, session: Session
     ) -> str | None:
         """Get the latest update_scene from chat history for a specific agent and user.
 
@@ -173,11 +172,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         return result.update_scene if result else None
 
     def create_user_message(
-        self,
-        agent_id: int,
-        user: str,
-        message: str,
-        session: Session
+        self, agent_id: int, user: str, message: str, session: Session
     ) -> ChatHistory:
         """Create a user message in chat history.
 
@@ -191,11 +186,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
             The created ChatHistory instance.
         """
         return self.create(
-            session,
-            agent_id=agent_id,
-            user=user,
-            role="user",
-            message=message
+            session, agent_id=agent_id, user=user, role="user", message=message
         )
 
     def create_agent_message(
@@ -205,7 +196,7 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
         message: str,
         reason: str | None,
         update_scene: str | None,
-        session: Session
+        session: Session,
     ) -> ChatHistory:
         """Create an agent message in chat history.
 
@@ -227,14 +218,11 @@ class ChatHistoryCRUD(CRUDBase[ChatHistory]):
             role="agent",
             message=message,
             reason=reason,
-            update_scene=update_scene
+            update_scene=update_scene,
         )
 
     def delete_by_agent_and_user(
-        self,
-        agent_id: int,
-        user: str,
-        session: Session
+        self, agent_id: int, user: str, session: Session
     ) -> bool:
         """Delete all chat history for a specific agent and user.
 

@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse } from '../types';
 
 /**
  * API base URL from environment configuration.
@@ -93,10 +93,12 @@ export const getAgentById = async (agentId: number): Promise<Agent> => {
 /**
  * Fetch all scenes from server.
  * 
+ * @param agentId - Optional agent ID to filter scenes
  * @returns Promise resolving to array of Scene objects
  */
-export const getScenes = async (): Promise<Scene[]> => {
-  return apiRequest('/scenes') as Promise<Scene[]>;
+export const getScenes = async (agentId?: number): Promise<Scene[]> => {
+  const queryParams = agentId ? `?agent_id=${agentId}` : '';
+  return apiRequest(`/scenes${queryParams}`) as Promise<Scene[]>;
 };
 
 /**
@@ -270,4 +272,96 @@ export const createConnection = async (
     method: 'POST',
     body: JSON.stringify(connectionData),
   });
+};
+
+/**
+ * Bulk update scene graph with all subscenes and connections.
+ * This replaces the entire scene graph with the provided data.
+ *
+ * @param sceneId - Unique identifier of the scene
+ * @param graphData - Complete scene graph data with all subscenes and connections
+ * @returns Promise resolving to updated scene graph data
+ */
+export const updateSceneGraph = async (
+  sceneId: number,
+  graphData: {
+    scenes: Array<{
+      name: string;
+      type?: string;
+      state?: string;
+      description?: string;
+      mandatory?: boolean;
+      objective?: string;
+      connections?: Array<{
+        name?: string;
+        condition?: string;
+        to_subscene: string;
+      }>;
+    }>;
+    agent_id?: number;
+  }
+): Promise<unknown> => {
+  return apiRequest(`/scenes/${sceneId}/graph`, {
+    method: 'PUT',
+    body: JSON.stringify(graphData),
+  });
+};
+
+/**
+ * Bulk update agent scenes list.
+ * 
+ * @param agentId - Unique identifier of the agent
+ * @param scenes - List of scenes to sync
+ * @returns Promise resolving to updated list of Scene objects
+ */
+export const updateAgentScenes = async (
+  agentId: number,
+  scenes: Array<{
+    name: string;
+    description?: string;
+    graph?: Array<{
+      name: string;
+      type?: string;
+      state?: string;
+      description?: string;
+      mandatory?: boolean;
+      objective?: string;
+      connections?: Array<{
+        name?: string;
+        condition?: string;
+        to_subscene: string;
+      }>;
+    }>;
+  }>
+): Promise<Scene[]> => {
+  return apiRequest(`/agents/${agentId}/scenes`, {
+    method: 'PUT',
+    body: JSON.stringify({ scenes }),
+  }) as Promise<Scene[]>;
+};
+
+/**
+ * Send a message to the Build Agent for agent editing assistance.
+ * 
+ * @param request - Build chat request containing message and optional session/agent info
+ * @returns Promise resolving to Build Agent's response with updated agent data
+ */
+export const chatWithBuildAgent = async (request: BuildChatRequest): Promise<BuildChatResponse> => {
+  return apiRequest('/build/chat', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  }) as Promise<BuildChatResponse>;
+};
+
+/**
+ * Send a message to the Preview Agent (stateless).
+ * 
+ * @param request - Preview chat request containing message, agent definition, and state
+ * @returns Promise resolving to Preview Agent's response
+ */
+export const previewChat = async (request: PreviewChatRequest): Promise<PreviewChatResponse> => {
+  return apiRequest('/preview/chat', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  }) as Promise<PreviewChatResponse>;
 };

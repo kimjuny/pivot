@@ -1,5 +1,4 @@
 import React, { useState, useEffect, ChangeEvent, MouseEvent, useRef } from 'react';
-import { createSubscene, updateSubscene } from '../utils/api';
 
 export interface SubsceneFormData {
   name: string;
@@ -13,9 +12,9 @@ interface SubsceneModalProps {
   mode: 'add' | 'edit';
   sceneId: number | null;
   initialData?: Partial<SubsceneFormData>;
-  existingSubsceneName?: string; // For edit mode
+  existingSubsceneName?: string;
   onClose: () => void;
-  onSave: (subsceneName?: string) => void;
+  onSave: (data: SubsceneFormData) => void;
 }
 
 function SubsceneModal({
@@ -47,7 +46,6 @@ function SubsceneModal({
           objective: initialData.objective || ''
         });
       } else {
-        // Reset form for add mode
         setFormData({
           name: '',
           type: 'normal',
@@ -55,7 +53,6 @@ function SubsceneModal({
           objective: ''
         });
       }
-      // Reset error when opening modal
       setServerError(null);
     }
   }, [isOpen, mode, initialData]);
@@ -75,44 +72,25 @@ function SubsceneModal({
     }
   }, [isOpen, onClose]);
 
-  const handleSubmit = async () => {
-    if (!sceneId) return;
+  const handleSubmit = () => {
     if (!formData.name.trim()) {
       setServerError('Please enter a subscene name');
       return;
     }
 
-    setIsSubmitting(true);
-    setServerError(null);
-    try {
-      if (mode === 'add') {
-        await createSubscene(sceneId, {
-          name: formData.name,
-          type: formData.type,
-          mandatory: formData.mandatory,
-          objective: formData.objective || ''
-        });
-      } else if (mode === 'edit' && existingSubsceneName) {
-        await updateSubscene(sceneId, existingSubsceneName, {
-          name: formData.name,
-          type: formData.type,
-          mandatory: formData.mandatory,
-          objective: formData.objective
-        });
-      }
-      // Only close and call onSave after successful submission
-      // Pass the subscene name in add mode for precise positioning
-      onSave(mode === 'add' ? formData.name : undefined);
-    } catch (error) {
-      console.error('Failed to save subscene:', error);
-      // Extract error message from response if available
-      const errorMessage = error instanceof Error && 'message' in error
-        ? (error as { message: string }).message
-        : 'Failed to save subscene. Please try again.';
-      setServerError(errorMessage);
-    } finally {
-      setIsSubmitting(false);
-    }
+    onSave({
+      name: formData.name,
+      type: formData.type,
+      mandatory: formData.mandatory,
+      objective: formData.objective
+    });
+
+    setFormData({
+      name: '',
+      type: 'normal',
+      mandatory: false,
+      objective: ''
+    });
   };
 
   if (!isOpen) {
@@ -128,7 +106,6 @@ function SubsceneModal({
           </h3>
         </div>
 
-        {/* Server Error Display */}
         {serverError && (
           <div className="px-6 py-3 bg-red-500/10 border-b border-red-500/20">
             <p className="text-sm text-red-400">{serverError}</p>
@@ -198,9 +175,9 @@ function SubsceneModal({
           <button
             onClick={() => void handleSubmit()}
             className="flex-1 px-4 py-2 btn-accent rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !formData.name.trim()}
           >
-            {isSubmitting ? 'Saving...' : mode === 'add' ? 'Add' : 'Save'}
+            {mode === 'add' ? 'Add' : 'Save'}
           </button>
         </div>
       </div>

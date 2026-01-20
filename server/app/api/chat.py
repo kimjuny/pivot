@@ -3,28 +3,33 @@
 This module provides endpoints for chatting with agents and managing
 chat history, including conversation state persistence.
 """
-import json
+
 import logging
 import os
 import traceback
-from datetime import timezone
+import uuid
+from datetime import datetime, timezone
 
-from app.api.dependencies import get_db
-from app.crud.agent import agent as agent_crud
-from app.crud.chat_history import chat_history as chat_history_crud
-from app.crud.connection import connection as connection_crud
-from app.crud.scene import scene as scene_crud
-from app.crud.subscene import subscene as subscene_crud
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from sqlmodel import Session
+from app.models.agent import (
+    Connection as DBConnection,
+    Scene as DBScene,
+    Subscene as DBSubscene,
+)
+from app.schemas.schemas import (
+    AgentDetailResponse,
+    ConnectionResponse,
+    PreviewChatRequest,
+    PreviewChatResponse,
+    SceneGraphResponse,
+    SubsceneWithConnectionsResponse,
+)
+from fastapi import APIRouter, HTTPException
 
 from core.agent.agent import Agent as CoreAgent
 from core.agent.plan.connection import Connection as CoreConnection
 from core.agent.plan.scene import Scene as CoreScene
 from core.agent.plan.subscene import Subscene as CoreSubscene, SubsceneType
 from core.llm.doubao_llm import DoubaoLLM
-from server.websocket import manager
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -32,7 +37,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def convert_db_to_core_scene(db_scene, db_subscenes, db_connections):
+def convert_db_to_core_scene(db_scene: DBScene, db_subscenes: list[DBSubscene], db_connections: list[DBConnection]) -> CoreScene:
     """Convert database models to core scene models.
 
     This function transforms database models (SQLModel) into core domain models
@@ -58,16 +63,16 @@ def convert_db_to_core_scene(db_scene, db_subscenes, db_connections):
             name=db_subscene.name,
             subscene_type=SubsceneType(db_subscene.type),
             mandatory=db_subscene.mandatory,
-            objective=db_subscene.objective
+            objective=db_subscene.objective or "",
         )
 
         # Get all connections for this subscene
         subscene_connections = [
             CoreConnection(
                 name=conn.name,
-                condition=conn.condition,
+                condition=conn.condition or "",
                 from_subscene=conn.from_subscene,
-                to_subscene=conn.to_subscene
+                to_subscene=conn.to_subscene,
             )
             for conn in db_connections
             if conn.from_subscene == db_subscene.name
@@ -81,8 +86,7 @@ def convert_db_to_core_scene(db_scene, db_subscenes, db_connections):
 
     # Create core scene
     core_scene = CoreScene(
-        name=db_scene.name,
-        identification_condition=db_scene.description
+        name=db_scene.name, identification_condition=db_scene.description or ""
     )
 
     # Add subscenes to scene
@@ -91,344 +95,239 @@ def convert_db_to_core_scene(db_scene, db_subscenes, db_connections):
 
     return core_scene
 
-
-class ChatRequest(BaseModel):
-    """Schema for chat request.
-
-    Attributes:
-        message: The user's message.
-        user: The username of the user (default: preview-user).
-    """
-    message: str = Field(..., description="User message")
-    user: str = Field(default="preview-user", description="Username of the user")
-
-
-@router.post("/agents/{agent_id}/chat")
-async def chat_with_agent_by_id(
-    agent_id: int,
-    request: ChatRequest,
-    db: Session = Depends(get_db)
-):
-    """Chat with specific agent by loading its configuration from database.
-
-    This endpoint:
-    1. Loads chat history and finds latest update_scene
-    2. Loads agent configuration from database
-    3. Converts database models to core models
-    4. Creates and initializes agent instance
-    5. Prints scene graph for verification
-    6. Stores user message in chat history
-    7. Chats with the agent
-    8. Stores agent response in chat history
-    9. Returns response to frontend with updated graph
+def merge_graph_with_input(
+    updated_scenes: list[CoreScene], input_agent_detail: AgentDetailResponse
+) -> list[SceneGraphResponse]:
+    """Merge updated core scenes with input agent detail to preserve IDs and structure.
 
     Args:
-        agent_id: The ID of the agent to chat with.
-        request: Chat request containing message and user.
-        db: Database session.
+        updated_scenes: List of CoreScene objects from LLM output.
+        input_agent_detail: The original input agent detail with IDs.
 
     Returns:
-        Agent response with reasoning and updated scene graph.
-
-    Raises:
-        HTTPException: If agent or scenes are not found (404), or if an error occurs (500).
+        List of SceneGraphResponse with IDs and timestamps populated.
     """
-    logger.info(f"Received chat request for agent {agent_id} from user {request.user}: {request.message[:50]}...")
+    # Create lookup maps for input data
+    input_scene_map = {s.name: s for s in input_agent_detail.scenes}
+    input_subscene_map: dict[str, dict[str, SubsceneWithConnectionsResponse]] = {}
+    input_connection_map: dict[str, dict[str, dict[str, ConnectionResponse]]] = {}
 
-    # Get agent from database
-    db_agent = agent_crud.get(agent_id, db)
-    if not db_agent:
-        logger.warning(f"Agent {agent_id} not found")
-        raise HTTPException(status_code=404, detail="Agent not found")
+    for scene in input_agent_detail.scenes:
+        input_subscene_map[scene.name] = {ss.name: ss for ss in scene.subscenes}
+        input_connection_map[scene.name] = {}
+        for ss in scene.subscenes:
+            # Map connections by to_subscene (assuming unique connection per target for simplicity)
+            # Or better, key by (from_subscene, to_subscene, name)
+            input_connection_map[scene.name][ss.name] = {}
+            for conn in ss.connections:
+                # Key by to_subscene and name to be more specific
+                conn_key = f"{conn.to_subscene}|{conn.name}"
+                input_connection_map[scene.name][ss.name][conn_key] = conn
 
-    # Get scenes for this agent
-    db_scenes = scene_crud.get_by_agent_id(agent_id, db)
-    if not db_scenes or len(db_scenes) == 0:
-        logger.warning(f"No scenes found for agent {agent_id}")
-        raise HTTPException(status_code=404, detail="No scenes found for this agent")
+    merged_scenes: list[SceneGraphResponse] = []
+    current_time = datetime.now(timezone.utc)
 
-    # Use the first scene
-    db_scene = db_scenes[0]
+    for core_scene in updated_scenes:
+        # Match Scene
+        input_scene = input_scene_map.get(core_scene.name)
+        
+        scene_id = input_scene.id if input_scene else f"new-{uuid.uuid4().hex[:8]}"
+        created_at = input_scene.created_at if input_scene else current_time
+        updated_at = current_time # Always update updated_at? Or only if changed? Simplified to now.
+        agent_id = input_scene.agent_id if input_scene else input_agent_detail.id # Fallback to agent ID
+        
+        # Process Subscenes
+        merged_subscenes: list[SubsceneWithConnectionsResponse] = []
+        
+        for core_subscene in core_scene.subscenes:
+            input_subscene = None
+            if input_scene:
+                input_subscene = input_subscene_map.get(core_scene.name, {}).get(core_subscene.name)
+            
+            subscene_id = input_subscene.id if input_subscene else f"new-{uuid.uuid4().hex[:8]}"
+            sub_created_at = input_subscene.created_at if input_subscene else current_time
+            
+            # Process Connections
+            merged_connections: list[ConnectionResponse] = []
+            for core_conn in core_subscene.connections:
+                input_conn = None
+                if input_scene and input_subscene:
+                    conn_key = f"{core_conn.to_subscene}|{core_conn.name}"
+                    input_conn = input_connection_map.get(core_scene.name, {}).get(core_subscene.name, {}).get(conn_key)
+                    # Fallback: try matching just by to_subscene if name is empty in core
+                    if not input_conn and not core_conn.name:
+                        # Find first connection with matching to_subscene
+                        conns = input_connection_map.get(core_scene.name, {}).get(core_subscene.name, {})
+                        for _, v in conns.items():
+                            if v.to_subscene == core_conn.to_subscene:
+                                input_conn = v
+                                break
 
-    # Get all subscenes for this scene
-    db_subscenes = subscene_crud.get_by_scene_id(db_scene.id, db)
+                conn_id = input_conn.id if input_conn else f"new-{uuid.uuid4().hex[:8]}"
+                conn_created_at = input_conn.created_at if input_conn else current_time
+                
+                merged_connections.append(
+                    ConnectionResponse(
+                        id=conn_id,
+                        name=core_conn.name,
+                        condition=core_conn.condition,
+                        from_subscene=core_conn.from_subscene,
+                        to_subscene=core_conn.to_subscene,
+                        from_subscene_id=input_conn.from_subscene_id if input_conn else None, # We don't have easy access to ID here for new ones
+                        to_subscene_id=input_conn.to_subscene_id if input_conn else None,
+                        scene_id=input_conn.scene_id if input_conn else scene_id,
+                        created_at=conn_created_at,
+                        updated_at=current_time
+                    )
+                )
 
-    # Get all connections for this scene
-    db_connections = []
-    for db_subscene in db_subscenes:
-        connections = connection_crud.get_by_from_subscene(db_subscene.name, db)
-        db_connections.extend(connections)
+            merged_subscenes.append(
+                SubsceneWithConnectionsResponse(
+                    id=subscene_id,
+                    name=core_subscene.name,
+                    type=core_subscene.type.value,
+                    state=core_subscene.state.value,
+                    description=input_subscene.description if input_subscene else None, # Preserve description if not in Core
+                    mandatory=core_subscene.mandatory,
+                    objective=core_subscene.objective,
+                    scene_id=scene_id,
+                    connections=merged_connections,
+                    created_at=sub_created_at,
+                    updated_at=current_time
+                )
+            )
 
-    logger.info(f"Loaded {len(db_subscenes)} subscenes and {len(db_connections)} connections from database")
+        merged_scenes.append(
+            SceneGraphResponse(
+                id=scene_id,
+                name=core_scene.name,
+                description=core_scene.identification_condition, # Core uses identification_condition as description-like
+                state=core_scene.state.value,
+                agent_id=agent_id,
+                subscenes=merged_subscenes,
+                created_at=created_at,
+                updated_at=updated_at
+            )
+        )
+    
+    return merged_scenes
 
-    # Check if there's a latest update_scene in chat history
-    latest_update_scene = chat_history_crud.get_latest_update_scene(agent_id, request.user, db)
-    if latest_update_scene:
-        logger.info("Found latest update_scene in chat history, loading saved scene state")
-        try:
-            # Parse the update_scene JSON to restore scene state
-            json.loads(latest_update_scene)
-            # TODO: Implement logic to restore scene state from saved data
-            # For now, we'll use the default scene
-            logger.warning("Scene state restoration not fully implemented, using default scene")
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse update_scene JSON: {latest_update_scene}")
 
-    # Convert database models to core models
-    core_scene = convert_db_to_core_scene(db_scene, db_subscenes, db_connections)
-
-    # Store user message in chat history
-    logger.info("Storing user message in chat history...")
-    user_message = chat_history_crud.create_user_message(
-        agent_id=agent_id,
-        user=request.user,
-        message=request.message,
-        session=db
-    )
-
-    # Create agent instance
-    agent = CoreAgent()
-
-    # Set LLM model
+def build_core_agent_from_detail(agent_detail: AgentDetailResponse, current_scene_name: str | None = None, current_subscene_name: str | None = None) -> CoreAgent:
+    """Build a CoreAgent instance from AgentDetailResponse."""
+    core_agent = CoreAgent()
+    
+    # Configure LLM (use env var or agent setting)
     api_key = os.getenv("DOUBAO_SEED_API_KEY")
-    if not api_key:
-        logger.warning("DOUBAO_SEED_API_KEY not set, using mock response")
-        # Return mock response for testing
-        return {
-            "response": "I understand you want to sleep. Let me help you relax and prepare for a good night's rest.",
-            "reason": "User expressed desire to sleep, suggesting relaxation techniques",
-            "graph": None,
-            "create_time": user_message.create_time.replace(tzinfo=timezone.utc).isoformat()
-        }
+    if api_key:
+        llm_model = DoubaoLLM(api_key=api_key)
+        core_agent.set_model(llm_model)
+    else:
+        logger.warning("DOUBAO_SEED_API_KEY not set")
 
-    llm_model = DoubaoLLM(api_key=api_key)
-    agent.set_model(llm_model)
+    # Build Scenes
+    for scene_resp in agent_detail.scenes:
+        core_scene = CoreScene(
+            name=scene_resp.name, 
+            identification_condition=scene_resp.description or ""
+        )
+        
+        # Build Subscenes
+        subscene_map = {}
+        for sub_resp in scene_resp.subscenes: # scenes field in SceneGraphResponse is actually list[SubsceneWithConnectionsResponse]
+            core_subscene = CoreSubscene(
+                name=sub_resp.name,
+                subscene_type=SubsceneType(sub_resp.type),
+                mandatory=sub_resp.mandatory,
+                objective=sub_resp.objective or "",
+            )
+            # Add connections
+            for conn_resp in sub_resp.connections:
+                core_connection = CoreConnection(
+                    name=conn_resp.name,
+                    condition=conn_resp.condition or "",
+                    from_subscene=conn_resp.from_subscene,
+                    to_subscene=conn_resp.to_subscene,
+                )
+                core_subscene.add_connection(core_connection)
+            
+            core_scene.add_subscene(core_subscene)
+            subscene_map[sub_resp.name] = core_subscene
+            
+        core_agent.add_plan(core_scene)
 
-    # Add scene to agent
-    agent.add_plan(core_scene)
+    # Set initial state if provided
+    # Note: CoreAgent logic usually starts from the first scene/start subscene 
+    # unless we explicitly set current_scene/current_subscene
+    
+    if current_scene_name:
+        for scene in core_agent.scenes:
+            if scene.name == current_scene_name:
+                core_agent.current_scene = scene
+                break
+    
+    if current_subscene_name and core_agent.current_scene:
+        for subscene in core_agent.current_scene.subscenes:
+            if subscene.name == current_subscene_name:
+                core_agent.current_subscene = subscene
+                break
 
-    # Start agent
-    agent.is_started = True
+    core_agent.is_started = True
+    return core_agent
 
-    # Print scene graph for verification
-    logger.info("Printing scene graph for verification...")
-    agent.print_scene_graph()
 
+@router.post("/preview/chat", response_model=PreviewChatResponse)
+def preview_chat(request: PreviewChatRequest):
+    """Stateless chat for preview mode using provided agent definition.
+    
+    Does not use database persistence for agent state or chat history.
+    Takes the full agent definition and current state, executes one turn,
+    and returns the response and new state.
+    """
     try:
-        # Get response from agent
-        logger.info("Getting response from agent...")
-        response = agent.chat(request.message)
-        first_choice = response.first()
+        # Build agent from request data
+        agent = build_core_agent_from_detail(
+            request.agent_detail, 
+            request.current_scene_name, 
+            request.current_subscene_name
+        )
+        
+        if not agent.model:
+             return PreviewChatResponse(
+                response="API Key not configured. Using mock response.",
+                reason="Configuration Error",
+                graph=None,
+                current_scene_name=request.current_scene_name,
+                current_subscene_name=request.current_subscene_name,
+                create_time=datetime.now(timezone.utc).isoformat()
+            )
 
-        # Parse response content to extract only response and reason
-        response_content = first_choice.message.content
-        logger.info(f"Agent response received: {response_content[:100]}...")
+        # Chat
+        output_message = agent.chat(request.message)
+            
+        # Extract graph state
+        # For preview, we want to return the updated state of the scene
+        # The frontend will update its PreviewAgentDetail based on this.
+        # However, the Agent logic might modify the *structure* (unlikely in chat) 
+        # or just the *pointer* (current subscene).
+        # We mainly need to know the new current_scene/subscene.
+        
+        current_scene_name = agent.current_scene.name if agent.current_scene else None
+        current_subscene_name = agent.current_subscene.name if agent.current_subscene else None
 
-        try:
-            parsed_response = json.loads(response_content)
+        # Merge graph with input to preserve IDs
+        updated_graph = merge_graph_with_input(output_message.updated_scenes, request.agent_detail)
 
-            # Extract only the fields we need
-            chat_response = parsed_response.get("response", "")
-            reason = parsed_response.get("reason", "")
-            logger.info("Parsed response and reason")
-        except json.JSONDecodeError:
-            # Fallback if response is not JSON format
-            chat_response = first_choice.message.content
-            reason = ""
-            logger.warning("Response is not in JSON format, using raw content")
-
-        # Get current scene graph
-        logger.info("Getting current scene graph...")
-        scene_graph = {
-            "scenes": [scene.to_dict() for scene in agent.scenes],
-            "current_scene": agent.current_scene.name if agent.current_scene else None,
-            "current_subscene": agent.current_subscene.name if agent.current_subscene else None
-        }
-        logger.info(f"Current scene: {scene_graph['current_scene']}, Current subscene: {scene_graph['current_subscene']}")
-
-        # Store agent message in chat history with update_scene
-        logger.info("Storing agent message in chat history...")
-        agent_message = chat_history_crud.create_agent_message(
-            agent_id=agent_id,
-            user=request.user,
-            message=chat_response,
-            reason=reason,
-            update_scene=json.dumps(scene_graph),
-            session=db
+        return PreviewChatResponse(
+            response=output_message.response,
+            reason=output_message.reason,
+            graph=updated_graph,
+            current_scene_name=current_scene_name,
+            current_subscene_name=current_subscene_name,
+            create_time=datetime.now(timezone.utc).isoformat()
         )
 
-        # Broadcast update to all connected WebSocket clients
-        logger.info("Broadcasting scene update via WebSocket...")
-        await manager.broadcast({
-            "type": "scene_update",
-            "data": scene_graph
-        })
-
-        logger.info("Chat request completed successfully")
-        return {
-            "response": chat_response,
-            "reason": reason,
-            "graph": scene_graph,
-            "create_time": agent_message.create_time.replace(tzinfo=timezone.utc).isoformat()
-        }
-    except HTTPException:
-        raise
     except Exception as e:
-        # Check if it's an API key related error
-        error_str = str(e).lower()
-        if "api key" in error_str or "authentication" in error_str or "unauthorized" in error_str:
-            logger.warning(f"API key error detected: {e!s}, returning mock response")
-            return {
-                "response": "I understand your request. Due to a configuration issue with the API, I'm providing a simulated response to assist you.",
-                "reason": "API key error - returning mock response",
-                "graph": None
-            }
-        logger.error(f"Error chatting with agent: {e!s}")
-        logger.error(f"Exception traceback:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Error chatting with agent: {e!s}") from e
-
-
-@router.get("/agents/{agent_id}/chat-history")
-async def get_chat_history(
-    agent_id: int,
-    user: str = "preview-user",
-    db: Session = Depends(get_db)
-):
-    """Get chat history for a specific agent and user.
-
-    Args:
-        agent_id: Agent ID
-        user: Username of the user (default: preview-user)
-        db: Database session
-
-    Returns:
-        List of chat history with latest graph state
-
-    Raises:
-        HTTPException: If agent or scenes are not found (404).
-    """
-    logger.info(f"Getting chat history for agent {agent_id} and user {user}...")
-
-    # Get agent from database
-    db_agent = agent_crud.get(agent_id, db)
-    if not db_agent:
-        logger.warning(f"Agent {agent_id} not found")
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    # Get chat history
-    chat_history_list = chat_history_crud.get_by_agent_and_user(agent_id, user, db)
-
-    # Get latest update_scene
-    latest_update_scene = chat_history_crud.get_latest_update_scene(agent_id, user, db)
-
-    # Get default scene graph
-    db_scenes = scene_crud.get_by_agent_id(agent_id, db)
-    if not db_scenes or len(db_scenes) == 0:
-        logger.warning(f"No scenes found for agent {agent_id}")
-        raise HTTPException(status_code=404, detail="No scenes found for this agent")
-
-    db_scene = db_scenes[0]
-    db_subscenes = subscene_crud.get_by_scene_id(db_scene.id, db)
-
-    # Get all connections for this scene
-    db_connections = []
-    for db_subscene in db_subscenes:
-        connections = connection_crud.get_by_from_subscene(db_subscene.name, db)
-        db_connections.extend(connections)
-
-    # Convert database models to core models
-    core_scene = convert_db_to_core_scene(db_scene, db_subscenes, db_connections)
-
-    # Get default scene graph
-    default_scene_graph = {
-        "scenes": [scene.to_dict() for scene in core_scene.subscenes],
-        "current_scene": core_scene.name,
-        "current_subscene": None
-    }
-
-    # Parse latest update_scene if exists
-    latest_graph = None
-    if latest_update_scene:
-        try:
-            latest_graph = json.loads(latest_update_scene)
-            logger.info("Found latest update_scene in chat history")
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse latest update_scene: {latest_update_scene}")
-
-    # Prepare response
-    response_data = []
-    for history_item in chat_history_list:
-        # Return ISO format UTC time with timezone indicator to ensure proper parsing
-        iso_time = history_item.create_time.replace(tzinfo=timezone.utc).isoformat()
-
-        # Determine if this item has graph
-        graph = None
-        if history_item.update_scene:
-            try:
-                graph = json.loads(history_item.update_scene)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse update_scene for history item {history_item.id}")
-
-        response_data.append({
-            "id": history_item.id,
-            "agent_id": history_item.agent_id,
-            "user": history_item.user,
-            "role": history_item.role,
-            "message": history_item.message,
-            "reason": history_item.reason,
-            "update_scene": history_item.update_scene,
-            "create_time": iso_time,
-            "graph": graph
-        })
-
-    logger.info(f"Returning {len(response_data)} chat history items")
-    return {
-        "history": response_data,
-        "latest_graph": latest_graph if latest_graph else default_scene_graph
-    }
-
-
-@router.delete("/agents/{agent_id}/chat-history")
-async def clear_chat_history(
-    agent_id: int,
-    user: str = "preview-user",
-    db: Session = Depends(get_db)
-):
-    """Clear chat history for a specific agent and user.
-
-    Args:
-        agent_id: Agent ID
-        user: Username of the user (default: preview-user)
-        db: Database session
-
-    Returns:
-        Success message
-
-    Raises:
-        HTTPException: If agent is not found (404).
-    """
-    logger.info(f"Clearing chat history for agent {agent_id} and user {user}...")
-
-    # Get agent from database
-    db_agent = agent_crud.get(agent_id, db)
-    if not db_agent:
-        logger.warning(f"Agent {agent_id} not found")
-        raise HTTPException(status_code=404, detail="Agent not found")
-
-    # Delete all chat history for this agent and user
-    success = chat_history_crud.delete_by_agent_and_user(agent_id, user, db)
-
-    if success:
-        logger.info(f"Successfully cleared chat history for agent {agent_id} and user {user}")
-        return {
-            "message": "Chat history cleared successfully",
-            "agent_id": agent_id,
-            "user": user
-        }
-    else:
-        logger.warning(f"No chat history found for agent {agent_id} and user {user}")
-        return {
-            "message": "No chat history found to clear",
-            "agent_id": agent_id,
-            "user": user
-        }
+        logger.error(f"Error in preview chat: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e)) from e

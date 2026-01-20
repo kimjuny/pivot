@@ -57,7 +57,9 @@ class SceneResponse(BaseModel):
 class SubsceneCreate(BaseModel):
     name: str = Field(..., description="Subscene name")
     type: str = Field(default="normal", description="Subscene type: start, normal, end")
-    state: str = Field(default="inactive", description="Subscene state: active, inactive")
+    state: str = Field(
+        default="inactive", description="Subscene state: active, inactive"
+    )
     description: str | None = Field(None, description="Subscene description")
     mandatory: bool = Field(default=False, description="Whether subscene is mandatory")
     objective: str | None = Field(None, description="Subscene objective")
@@ -109,14 +111,14 @@ class ConnectionUpdate(BaseModel):
 
 
 class ConnectionResponse(BaseModel):
-    id: int
+    id: int | str
     name: str
     condition: str | None
     from_subscene: str
     to_subscene: str
-    from_subscene_id: int | None
-    to_subscene_id: int | None
-    scene_id: int | None
+    from_subscene_id: int | str | None
+    to_subscene_id: int | str | None
+    scene_id: int | str | None
     created_at: datetime
     updated_at: datetime
 
@@ -125,14 +127,14 @@ class ConnectionResponse(BaseModel):
 
 
 class SubsceneWithConnectionsResponse(BaseModel):
-    id: int | None
+    id: int | str | None
     name: str
     type: str
     state: str
     description: str | None
     mandatory: bool
     objective: str | None
-    scene_id: int | None
+    scene_id: int | str | None
     connections: list[ConnectionResponse]
     created_at: datetime
     updated_at: datetime
@@ -142,16 +144,23 @@ class SubsceneWithConnectionsResponse(BaseModel):
 
 
 class SceneGraphResponse(BaseModel):
-    id: int
+    id: int | str
     name: str
     description: str | None
-    agent_id: int
-    scenes: list[SubsceneWithConnectionsResponse]
+    state: str
+    agent_id: int | str
+    subscenes: list[SubsceneWithConnectionsResponse]
     created_at: datetime
     updated_at: datetime
 
     class Config:
         orm_mode = True
+        allow_population_by_field_name = True
+
+
+class AgentDetailResponse(AgentResponse):
+    """Agent response with full details including scenes and their graphs."""
+    scenes: list[SceneGraphResponse] = []
 
 
 class ChatHistoryCreate(BaseModel):
@@ -160,7 +169,27 @@ class ChatHistoryCreate(BaseModel):
     role: str = Field(..., description="Role: 'user' or 'agent'")
     message: str = Field(..., description="Message content")
     reason: str | None = Field(None, description="Reason from agent response")
-    update_scene: str | None = Field(None, description="Updated scene graph in JSON format")
+    update_scene: str | None = Field(
+        None, description="Updated scene graph in JSON format"
+    )
+
+
+class PreviewChatRequest(BaseModel):
+    """Schema for preview chat request."""
+    message: str = Field(..., description="User message")
+    agent_detail: AgentDetailResponse = Field(..., description="Full agent detail definition")
+    current_scene_name: str | None = Field(None, description="Name of the currently active scene")
+    current_subscene_name: str | None = Field(None, description="Name of the currently active subscene")
+
+
+class PreviewChatResponse(BaseModel):
+    """Schema for preview chat response."""
+    response: str
+    reason: str | None
+    graph: list[SceneGraphResponse] | None = Field(None, description="Updated scene graph")
+    current_scene_name: str | None = Field(None, description="Updated active scene")
+    current_subscene_name: str | None = Field(None, description="Updated active subscene")
+    create_time: str
 
 
 class ChatHistoryResponse(BaseModel):
@@ -190,3 +219,52 @@ class ChatHistoryWithGraphResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class SceneGraphUpdate(BaseModel):
+    """Schema for bulk updating scene graph data."""
+
+    subscenes: list[dict] = Field(
+        ..., description="List of subscenes with their connections"
+    )
+    agent_id: int | None = Field(None, description="Agent ID")
+
+
+class ConnectionGraphItem(BaseModel):
+    """Schema for a connection within a subscene update."""
+
+    name: str = Field(default="", description="Connection name")
+    condition: str | None = Field(None, description="Condition for transition")
+    to_subscene: str = Field(..., description="Target subscene name")
+
+
+class SubsceneGraphItem(BaseModel):
+    """Schema for a subscene within a graph update."""
+
+    name: str = Field(..., description="Subscene name")
+    type: str = Field(default="normal", description="Type: start, normal, end")
+    state: str = Field(default="inactive", description="State: active, inactive")
+    description: str | None = Field(None, description="Description of the subscene")
+    mandatory: bool = Field(default=False, description="Is completion mandatory")
+    objective: str | None = Field(None, description="Objective of the subscene")
+    connections: list[ConnectionGraphItem] = Field(
+        default=[], description="Outbound connections"
+    )
+
+
+class SceneWithGraphUpdate(BaseModel):
+    """Schema for scene update including nested graph."""
+
+    name: str = Field(..., description="Scene name")
+    description: str | None = Field(None, description="Scene description")
+    graph: list[SubsceneGraphItem] | None = Field(
+        None, description="Scene graph data (subscenes and connections)"
+    )
+
+
+class AgentSceneListUpdate(BaseModel):
+    """Schema for bulk updating agent scenes list with optional graph content."""
+
+    scenes: list[SceneWithGraphUpdate] = Field(
+        ..., description="List of scenes to update"
+    )
