@@ -20,7 +20,7 @@ import { useBuildChatStore } from '../store/buildChatStore';
 import BuildChatInterface from './BuildChatInterface';
 import PreviewChatInterface from './PreviewChatInterface';
 import EditPanel from './EditPanel';
-import CreateSceneModal from './CreateSceneModal';
+import SceneModal from './SceneModal';
 import SubsceneModal from './SubsceneModal';
 import ConnectionModal from './ConnectionModal';
 import SubsceneNode from './SubsceneNode';
@@ -84,6 +84,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [previewModeSceneGraphData, setPreviewModeSceneGraphData] = useState<SceneGraph | null>(null);
   const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
+  const [isEditSceneModalOpen, setIsEditSceneModalOpen] = useState<boolean>(false);
   const [isAddSubsceneModalOpen, setIsAddSubsceneModalOpen] = useState<boolean>(false);
   const [isAddConnectionModalOpen, setIsAddConnectionModalOpen] = useState<boolean>(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -121,14 +122,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   }) => {
     if (!workspaceAgent) return;
 
-    // Local create only
-    const newSceneId = -Date.now(); // Temporary negative ID
+    const newSceneId = -Date.now();
     const newScene: SceneGraph = {
       id: newSceneId,
       name: sceneData.name,
       description: sceneData.description || '',
       agent_id: agentId,
-      subscenes: [], // Empty subscenes list
+      subscenes: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -141,6 +141,28 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
     setIsCreateSceneModalOpen(false);
     onSceneSelect(newScene as unknown as Scene);
+    await Promise.resolve();
+  };
+
+  const handleEditScene = async (sceneData: {
+    name: string;
+    description?: string;
+  }) => {
+    if (!workspaceAgent || !selectedScene) return;
+
+    const newAgent = deepCopyAgent(workspaceAgent);
+    if (newAgent && newAgent.scenes) {
+      const sceneIndex = newAgent.scenes.findIndex(s => s.id === selectedScene.id);
+      if (sceneIndex !== -1) {
+        const scene = newAgent.scenes[sceneIndex] as unknown as SceneGraph;
+        scene.name = sceneData.name;
+        scene.description = sceneData.description || '';
+        scene.updated_at = new Date().toISOString();
+        setWorkspaceAgent(newAgent);
+      }
+    }
+
+    setIsEditSceneModalOpen(false);
     await Promise.resolve();
   };
 
@@ -668,7 +690,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   };
 
   return (
-    <div className="w-full h-full border border-dark-border rounded-xl bg-dark-bg flex flex-col card-subtle overflow-hidden">
+    <div className="w-full h-full bg-dark-bg flex flex-col overflow-hidden">
       <div className="flex flex-1 overflow-hidden relative">
         <SceneSidebar
           scenes={workingScenes}
@@ -750,10 +772,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             </div>
           )}
 
-          <CreateSceneModal
+          <SceneModal
             isOpen={isCreateSceneModalOpen}
+            mode="create"
             onClose={() => setIsCreateSceneModalOpen(false)}
-            onCreate={handleCreateScene}
+            onSave={handleCreateScene}
           />
 
           <SubsceneModal

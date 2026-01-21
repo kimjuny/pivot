@@ -1,4 +1,22 @@
-import React, { useState, useEffect, ChangeEvent, MouseEvent, useRef } from 'react';
+import React, { useState, useEffect, MouseEvent, useRef } from 'react';
+import { Input } from '@base-ui/react/input';
+import { Button } from '@base-ui/react/button';
+import { Select } from '@base-ui/react/select';
+import { Field } from '@base-ui/react/field';
+import { ChevronUp, ChevronDown, Check } from 'lucide-react';
+
+function ChevronUpDownIcon() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-0.5">
+      <ChevronUp className="w-3 h-3" />
+      <ChevronDown className="w-3 h-3" />
+    </div>
+  );
+}
+
+function CheckIcon() {
+  return <Check className="size-3" />;
+}
 
 export interface SubsceneFormData {
   name: string;
@@ -34,6 +52,7 @@ function SubsceneModal({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [isSelectOpen, setIsSelectOpen] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,6 +78,10 @@ function SubsceneModal({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      if (isSelectOpen) {
+        return;
+      }
+
       if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
         onClose();
       }
@@ -70,7 +93,7 @@ function SubsceneModal({
         document.removeEventListener('mousedown', handleClickOutside as unknown as EventListener);
       };
     }
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, isSelectOpen]);
 
   const handleSubmit = () => {
     if (!formData.name.trim()) {
@@ -100,10 +123,19 @@ function SubsceneModal({
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
       <div ref={modalRef} className="bg-dark-bg border border-dark-border rounded-xl shadow-card-lg w-full max-w-md mx-4 overflow-hidden">
-        <div className="px-6 py-4 border-b border-dark-border bg-dark-bg-lighter">
+        <div className="px-6 py-4 border-b border-dark-border flex items-center justify-between">
           <h3 className="text-lg font-semibold text-white">
             {mode === 'add' ? 'Add Subscene' : 'Edit Subscene'}
           </h3>
+          <Button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="nav-hover-effect p-2 h-auto bg-transparent border-0 text-dark-text-secondary hover:text-dark-text-primary data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </Button>
         </div>
 
         {serverError && (
@@ -113,38 +145,78 @@ function SubsceneModal({
         )}
 
         <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-dark-text-secondary mb-2">Name</label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-dark-text-primary input-dark"
-              placeholder="Enter subscene name"
-              disabled={isSubmitting}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-dark-text-secondary mb-2">Type</label>
-            <select
-              value={formData.type}
-              onChange={(e: ChangeEvent<HTMLSelectElement>) => setFormData({ ...formData, type: e.target.value as 'start' | 'normal' | 'end' })}
-              className="w-full px-3 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-dark-text-primary input-dark"
-              disabled={isSubmitting}
+          <Field.Root>
+            <Field.Label
+              className="block text-sm font-medium text-dark-text-secondary mb-2"
+              nativeLabel={false}
+              render={<div />}
             >
-              <option value="start">Start</option>
-              <option value="normal">Normal</option>
-              <option value="end">End</option>
-            </select>
-          </div>
+              Name
+            </Field.Label>
+            <Input
+              value={formData.name}
+              onValueChange={(value) => setFormData({ ...formData, name: value })}
+              disabled={isSubmitting}
+              className="h-10 w-full px-3.5 rounded-md border border-gray-200 bg-dark-bg-lighter text-base text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary"
+              placeholder="Enter subscene name"
+            />
+          </Field.Root>
+
+          <Field.Root>
+            <Field.Label
+              className="block text-sm font-medium text-dark-text-secondary mb-2"
+              nativeLabel={false}
+              render={<div />}
+            >
+              Type
+            </Field.Label>
+            <Select.Root
+              items={[
+                { value: 'start', label: 'Start' },
+                { value: 'normal', label: 'Normal' },
+                { value: 'end', label: 'End' }
+              ]}
+              value={formData.type}
+              onValueChange={(value) => setFormData({ ...formData, type: value as 'start' | 'normal' | 'end' })}
+              onOpenChange={setIsSelectOpen}
+              disabled={isSubmitting}
+              modal={false}
+            >
+              <Select.Trigger className="flex h-10 w-full items-center justify-between gap-3 rounded-md border border-gray-200 bg-dark-bg-lighter px-3.5 text-base text-dark-text-primary placeholder-dark-text-muted select-none hover:bg-dark-border-light focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-primary data-[popup-open]:bg-dark-border-light">
+                <Select.Value className="data-[placeholder]:opacity-60" placeholder="Select type" />
+                <Select.Icon className="flex">
+                  <ChevronUpDownIcon />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Positioner className="outline-none select-none z-[100]" sideOffset={8} alignItemWithTrigger={false}>
+                  <Select.Popup className="group min-w-[var(--anchor-width)] origin-[var(--transform-origin)] bg-clip-padding rounded-md bg-dark-bg-lighter text-dark-text-primary shadow-lg outline outline-1 outline-dark-border transition-[transform,scale,opacity] overflow-y-auto data-[ending-style]:scale-90 data-[ending-style]:opacity-0 data-[starting-style]:scale-90 data-[starting-style]:opacity-0 data-[side=none]:min-w-[calc(var(--anchor-width)+1rem)]">
+                    <Select.List className="relative py-1 scroll-py-6 max-h-[var(--available-height)]">
+                      {['start', 'normal', 'end'].map((type) => (
+                        <Select.Item
+                          key={type}
+                          value={type}
+                          className="grid cursor-default grid-cols-[0.75rem_1fr] items-center gap-2 py-2 pr-4 pl-2.5 text-sm leading-4 outline-none select-none data-[highlighted]:relative data-[highlighted]:z-0 data-[highlighted]:text-white data-[highlighted]:before:absolute data-[highlighted]:before:inset-x-1 data-[highlighted]:before:inset-y-0 data-[highlighted]:before:z-[-1] data-[highlighted]:before:rounded-sm data-[highlighted]:before:bg-primary pointer-coarse:py-2.5 pointer-coarse:text-[0.925rem]"
+                        >
+                          <Select.ItemIndicator className="col-start-1">
+                            <CheckIcon />
+                          </Select.ItemIndicator>
+                          <Select.ItemText className="col-start-2">{type.charAt(0).toUpperCase() + type.slice(1)}</Select.ItemText>
+                        </Select.Item>
+                      ))}
+                    </Select.List>
+                  </Select.Popup>
+                </Select.Positioner>
+              </Select.Portal>
+            </Select.Root>
+          </Field.Root>
 
           <div className="flex items-center space-x-2">
             <input
               type="checkbox"
               id="mandatory"
               checked={formData.mandatory}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setFormData({ ...formData, mandatory: e.target.checked })}
+              onChange={(e) => setFormData({ ...formData, mandatory: e.target.checked })}
               className="w-4 h-4 rounded border-dark-border bg-dark-bg-lighter"
               disabled={isSubmitting}
             />
@@ -152,11 +224,13 @@ function SubsceneModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-dark-text-secondary mb-2">Objective</label>
+            <label htmlFor="objective" className="block text-sm font-medium text-dark-text-secondary mb-2">Objective</label>
             <textarea
+              id="objective"
+              name="objective"
               value={formData.objective}
-              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setFormData({ ...formData, objective: e.target.value })}
-              className="w-full px-3 py-2 bg-dark-bg-lighter border border-dark-border rounded-lg text-dark-text-primary input-dark resize-none"
+              onChange={(e) => setFormData({ ...formData, objective: e.target.value })}
+              className="w-full px-3.5 py-2.5 bg-dark-bg-lighter border border-gray-200 rounded-md text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary resize-none"
               rows={3}
               placeholder="Enter objective"
               disabled={isSubmitting}
@@ -164,21 +238,21 @@ function SubsceneModal({
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-dark-border bg-dark-bg-lighter flex space-x-3">
-          <button
+        <div className="px-6 py-4 border-t border-dark-border flex space-x-3">
+          <Button
             onClick={onClose}
-            className="flex-1 px-4 py-2 bg-dark-bg border border-dark-border rounded-lg text-sm font-medium hover:bg-dark-border-light transition-colors"
             disabled={isSubmitting}
+            className="flex-1 h-10 px-4 bg-dark-bg border border-dark-border rounded-md text-sm font-medium hover:bg-dark-border-light data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
           >
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => void handleSubmit()}
-            className="flex-1 px-4 py-2 btn-accent rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={isSubmitting || !formData.name.trim()}
+            className="flex-1 h-10 px-4 btn-accent rounded-md text-sm font-medium data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
           >
             {mode === 'add' ? 'Add' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

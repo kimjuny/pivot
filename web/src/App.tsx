@@ -148,7 +148,7 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-dark-bg text-dark-text-primary">
       <Navigation />
-      <div className="flex-1 p-5 bg-dark-bg overflow-hidden">
+      <div className="flex-1 bg-dark-bg overflow-hidden">
         <AgentDetail 
           agent={agent} 
           scenes={scenes} 
