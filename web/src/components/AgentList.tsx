@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAgents, createAgent } from '../utils/api';
+import { Plus, User, MoreHorizontal, Search } from 'lucide-react';
+import { Input } from '@base-ui/react/input';
+import { Button } from '@base-ui/react/button';
+import { getAgents, deleteAgent, updateAgent, createAgent } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
-import CreateAgentModal from './CreateAgentModal';
+import AgentModal from './AgentModal';
 
 /**
  * Agent list component.
@@ -14,7 +17,12 @@ function AgentList() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [menuOpenAgentId, setMenuOpenAgentId] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   /**
@@ -24,6 +32,24 @@ function AgentList() {
   useEffect(() => {
     void loadAgents();
   }, []);
+
+  /**
+   * Close menu when clicking outside.
+   */
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpenAgentId(null);
+      }
+    };
+
+    if (menuOpenAgentId !== null) {
+      document.addEventListener('mousedown', handleClickOutside as unknown as EventListener);
+      return () => {
+        document.removeEventListener('mousedown', handleClickOutside as unknown as EventListener);
+      };
+    }
+  }, [menuOpenAgentId]);
 
   /**
    * Fetch agents from API and update state.
@@ -45,38 +71,86 @@ function AgentList() {
 
   /**
    * Handle create agent button click.
-   * Opens the create agent modal.
+   * Opens the agent modal in create mode.
    */
   const handleCreateAgent = () => {
-    setIsCreateModalOpen(true);
+    setModalMode('create');
+    setEditingAgent(null);
+    setIsModalOpen(true);
   };
 
   /**
-   * Handle create agent form submission.
-   * Creates a new agent and navigates to its visualization view.
-   * 
-   * @param agentData - Agent data from the create modal
+   * Handle edit agent button click.
+   * Opens the agent modal in edit mode.
    */
-  const handleCreateAgentSubmit = async (agentData: {
+  const handleEditAgent = (agent: Agent, e: MouseEvent) => {
+    e.stopPropagation();
+    setModalMode('edit');
+    setEditingAgent(agent);
+    setIsModalOpen(true);
+    setMenuOpenAgentId(null);
+  };
+
+  /**
+   * Handle delete agent button click.
+   * Deletes the agent and reloads the list.
+   */
+  const handleDeleteAgent = async (agent: Agent, e: MouseEvent) => {
+    e.stopPropagation();
+    
+    // We must ensure the event doesn't propagate to the card click handler
+    // and that we wait for confirmation.
+    
+    // Using window.confirm inside an async function is blocking in browser main thread,
+    // but we need to be careful about React event pooling or other side effects.
+    
+    const confirmed = window.confirm(`Are you sure you want to delete agent "${agent.name}"? This will also delete all associated scenes, subscenes, connections, and chat history.`);
+    
+    if (confirmed) {
+      try {
+        await deleteAgent(agent.id);
+        setMenuOpenAgentId(null);
+        await loadAgents();
+      } catch (err) {
+        const error = err as Error;
+        alert(`Failed to delete agent: ${error.message}`);
+      }
+    } else {
+      // If cancelled, just close the menu
+      setMenuOpenAgentId(null);
+    }
+  };
+
+  /**
+   * Handle modal save.
+   * Creates or updates agent and reloads list.
+   */
+  const handleModalSave = async (agentData: {
     name: string;
     description?: string;
     model_name?: string;
     is_active?: boolean;
   }) => {
-    const newAgent = await createAgent(agentData);
-    setIsCreateModalOpen(false);
-    await loadAgents();
-    navigate(`/agent/${newAgent.id}`);
+    if (modalMode === 'create') {
+      const newAgent = await createAgent(agentData);
+      navigate(`/agent/${newAgent.id}`);
+    } else if (modalMode === 'edit' && editingAgent) {
+      await updateAgent(editingAgent.id, agentData);
+      await loadAgents();
+    }
   };
 
   /**
    * Navigate to agent visualization view.
-   * 
-   * @param agent - Agent to navigate to
    */
   const handleAgentClick = (agent: Agent) => {
     navigate(`/agent/${agent.id}`);
   };
+
+  const filteredAgents = agents.filter((agent) =>
+    agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (agent.description && agent.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   if (loading) {
     return (
@@ -104,26 +178,37 @@ function AgentList() {
   }
 
   return (
-    <div className="min-h-screen bg-dark-bg text-dark-text-primary">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-dark-text-primary">Agent List</h1>
-            <p className="text-dark-text-secondary mt-2">Manage all your agent instances</p>
+    <div className="flex-1 bg-dark-bg text-dark-text-primary">
+      <div className="w-full px-4 py-8">
+        <div className="flex items-center justify-between mb-8 gap-4">
+          <div className="flex-1 max-w-md relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-text-muted pointer-events-none" />
+            <Input
+              placeholder="Search agents..."
+              value={searchQuery}
+              onValueChange={(value) => setSearchQuery(value)}
+              className="h-10 w-full pl-10 pr-4 rounded-md border border-gray-200 bg-dark-bg-lighter text-base text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary"
+            />
           </div>
-          <button
+          <Button
             onClick={handleCreateAgent}
-            className="flex items-center space-x-2 px-4 py-2 btn-accent rounded-lg font-medium"
+            className="flex items-center space-x-2 h-10 px-4 btn-accent rounded-md font-medium whitespace-nowrap"
             title="Create a new agent"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H8" />
-            </svg>
+            <Plus className="w-5 h-5" />
             <span>Create Agent</span>
-          </button>
+          </Button>
         </div>
 
-        {agents.length === 0 ? (
+        {filteredAgents.length === 0 && agents.length > 0 ? (
+          <div className="text-center py-16">
+            <div className="text-6xl text-dark-text-muted mb-4">🔍</div>
+            <h3 className="text-xl font-semibold text-dark-text-secondary mb-2">No Results</h3>
+            <p className="text-dark-text-muted">
+              Try adjusting your search query
+            </p>
+          </div>
+        ) : agents.length === 0 ? (
           <div className="text-center py-16">
             <div className="text-6xl text-dark-text-muted mb-4">📭</div>
             <h3 className="text-xl font-semibold text-dark-text-secondary mb-2">No Agents</h3>
@@ -133,18 +218,17 @@ function AgentList() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {agents.map((agent) => (
+            {filteredAgents.map((agent) => (
               <div
                 key={agent.id}
                 onClick={() => handleAgentClick(agent)}
-                className="card-subtle rounded-xl p-6 cursor-pointer hover:shadow-lg transition-all duration-200"
+                className="card-subtle rounded-xl p-6 cursor-pointer hover:shadow-lg transition-all duration-200 relative group"
+                onMouseEnter={() => setMenuOpenAgentId(null)}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center">
-                      <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1H8l-1 1h8l-1 1H9l.75 17z" />
-                      </svg>
+                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center p-2">
+                      <User className="w-6 h-6 text-primary" />
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-dark-text-primary">{agent.name}</h3>
@@ -156,46 +240,61 @@ function AgentList() {
                       </div>
                     </div>
                   </div>
-                  <div className="text-xs text-dark-text-muted">
-                    ID: {agent.id}
+                  <div className="relative">
+                    <div className="text-xs text-dark-text-muted">
+                      ID: {agent.id}
+                    </div>
+                    <button
+                      onClick={(e: MouseEvent) => {
+                        e.stopPropagation();
+                        setMenuOpenAgentId(menuOpenAgentId === agent.id ? null : agent.id);
+                      }}
+                      className="nav-hover-effect absolute -right-2 -top-1 p-1 rounded text-dark-text-secondary hover:text-dark-text-primary transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <MoreHorizontal className="w-5 h-5 text-dark-text-secondary" />
+                    </button>
+                    {menuOpenAgentId === agent.id && (
+                      <div
+                        ref={menuRef}
+                        className="absolute right-0 top-6 z-10 bg-dark-bg-lighter border border-dark-border rounded-lg shadow-card-lg py-1 min-w-[120px]"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={(e) => handleEditAgent(agent, e)}
+                          className="w-full px-4 py-2 text-left text-sm text-dark-text-primary hover:bg-dark-border-light transition-colors flex items-center space-x-2"
+                        >
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            void handleDeleteAgent(agent, e);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500 hover:text-white transition-colors flex items-center space-x-2"
+                        >
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <div className="flex items-center space-x-2 text-sm">
-                    <svg className="w-4 h-4 text-dark-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16m-7 6h7" />
-                    </svg>
                     <span className="text-dark-text-secondary">Model:</span>
                     <span className="text-dark-text-primary font-medium">{agent.model_name || 'N/A'}</span>
                   </div>
 
                   <div className="flex items-center space-x-2 text-sm">
-                    <svg className="w-4 h-4 text-dark-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3l3-3" />
-                    </svg>
-                    <span className="text-dark-text-secondary">Created:</span>
-                    <span className="text-dark-text-primary font-medium">{formatTimestamp(agent.created_at)}</span>
+                    <span className="text-dark-text-secondary">Updated:</span>
+                    <span className="text-dark-text-primary font-medium">{formatTimestamp(agent.updated_at)}</span>
                   </div>
 
                   {agent.description && (
                     <div className="flex items-start space-x-2 text-sm">
-                      <svg className="w-4 h-4 text-dark-text-muted mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                      </svg>
                       <p className="text-dark-text-secondary line-clamp-2">{agent.description}</p>
                     </div>
                   )}
-                </div>
-
-                <div className="mt-4 pt-4 border-t border-dark-border">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-dark-text-muted">Click to view details</span>
-                    <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
                 </div>
               </div>
             ))}
@@ -203,10 +302,17 @@ function AgentList() {
         )}
       </div>
 
-      <CreateAgentModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onCreate={handleCreateAgentSubmit}
+      <AgentModal
+        isOpen={isModalOpen}
+        mode={modalMode}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleModalSave}
+        initialData={editingAgent ? {
+          name: editingAgent.name,
+          description: editingAgent.description,
+          model_name: editingAgent.model_name,
+          is_active: editingAgent.is_active
+        } : undefined}
       />
     </div>
   );

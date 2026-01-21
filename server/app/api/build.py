@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import traceback
 from typing import Any
 
@@ -11,6 +10,7 @@ from app.crud.agent import agent as agent_crud
 from app.crud.connection import connection as connection_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
+from app.llm_globals import get_default_llm, get_llm
 from app.schemas.build import BuildChatRequest, BuildChatResponse
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -18,7 +18,6 @@ from sqlmodel import Session
 from core.agent.agent import Agent as CoreAgent
 from core.agent.builder import AgentBuilder
 from core.agent.system_prompt import get_build_prompt
-from core.llm.doubao_llm import DoubaoLLM
 
 logger = logging.getLogger(__name__)
 
@@ -27,14 +26,13 @@ router = APIRouter()
 
 def get_agent_builder() -> AgentBuilder:
     """Initialize AgentBuilder with LLM."""
-    api_key = os.getenv("DOUBAO_SEED_API_KEY")
-    if not api_key:
-        logger.warning("DOUBAO_SEED_API_KEY not set")
-        # In production, this should likely raise an error or use a mock
-        # For now, we proceed but LLM calls will fail if not handled
-        raise HTTPException(status_code=500, detail="LLM API key not configured")
+    # Prefer GLM-4 for building if available, else Doubao, else default
+    llm = get_llm("glm-4") or get_llm("doubao") or get_default_llm()
+    
+    if not llm:
+        logger.error("No LLM available for AgentBuilder")
+        raise HTTPException(status_code=500, detail="No LLM configured for Builder")
 
-    llm = DoubaoLLM(api_key=api_key, timeout=120)
     return AgentBuilder(llm)
 
 

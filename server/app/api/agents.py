@@ -12,18 +12,21 @@ from app.crud.agent import agent as agent_crud
 from app.crud.connection import connection as connection_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
+from app.llm_globals import get_all_names
+from app.models.agent import ChatHistory, Connection
 from app.schemas.schemas import (
     AgentCreate,
     AgentDetailResponse,
     AgentResponse,
     AgentSceneListUpdate,
+    AgentUpdate,
     ConnectionResponse,
     SceneGraphResponse,
     SceneResponse,
     SubsceneWithConnectionsResponse,
 )
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -70,8 +73,15 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)) -
         The created agent with ID populated.
 
     Raises:
-        HTTPException: If an agent with the same name already exists (400).
+        HTTPException: If an agent with the same name already exists (400) or if the model_name is not valid (400).
     """
+    # Validate model_name if provided
+    if agent_data.model_name and agent_data.model_name not in get_all_names():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}"
+        )
+
     existing_agent = agent_crud.get_by_name(agent_data.name, db)
     if existing_agent:
         raise HTTPException(
@@ -93,6 +103,66 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)) -
         "is_active": agent.is_active,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+    }
+
+
+@router.put("/agents/{agent_id}", response_model=AgentResponse)
+async def update_agent(agent_id: int, agent_data: AgentUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Update an existing agent.
+
+    Args:
+        agent_id: The ID of the agent to update.
+        agent_data: Agent update data containing optional fields to update.
+        db: Database session.
+
+    Returns:
+        The updated agent.
+
+    Raises:
+        HTTPException: If the agent is not found (404) or if the new name already exists (400).
+    """
+    agent = agent_crud.get(agent_id, db)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Validate model_name if provided
+    if agent_data.model_name and agent_data.model_name not in get_all_names():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}"
+        )
+
+    # Check if name change conflicts with existing agent
+    if agent_data.name and agent_data.name != agent.name:
+        existing_agent = agent_crud.get_by_name(agent_data.name, db)
+        if existing_agent:
+            raise HTTPException(
+                status_code=400, detail="Agent with this name already exists"
+            )
+
+    # Update only provided fields
+    update_data: dict[str, Any] = {}
+    if agent_data.name is not None:
+        update_data["name"] = agent_data.name
+    if agent_data.description is not None:
+        update_data["description"] = agent_data.description
+    if agent_data.model_name is not None:
+        update_data["model_name"] = agent_data.model_name
+    if agent_data.is_active is not None:
+        update_data["is_active"] = agent_data.is_active
+
+    updated_agent = agent_crud.update(agent_id, db, **update_data)
+    if not updated_agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    return {
+        "id": updated_agent.id,
+        "name": updated_agent.name,
+        "description": updated_agent.description,
+        "model_name": updated_agent.model_name,
+        "is_active": updated_agent.is_active,
+        "created_at": updated_agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
+        "updated_at": updated_agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
 
 
@@ -293,3 +363,60 @@ async def update_agent_scenes(
         }
         for scene in scenes
     ]
+
+
+@router.delete("/agents/{agent_id}", status_code=204)
+async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
+    """Delete an agent and all associated data.
+
+    Recursively deletes:
+    1. Connections associated with the agent's scenes
+    2. Subscenes associated with the agent's scenes
+    3. Scenes associated with the agent
+    4. Chat history associated with the agent
+    5. The agent itself
+
+    Args:
+        agent_id: The ID of the agent to delete.
+        db: Database session.
+
+    Raises:
+        HTTPException: If the agent is not found (404).
+    """
+    # Check if agent exists
+    agent = agent_crud.get(agent_id, db)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Get all scenes
+    scenes = scene_crud.get_by_agent_id(agent_id, db)
+
+    for scene in scenes:
+        if not scene.id:
+            continue
+
+        # 1. Delete Connections
+        # We need to find connections by scene_id.
+        connections = db.exec(select(Connection).where(Connection.scene_id == scene.id)).all()
+        for conn in connections:
+            db.delete(conn)
+
+        # 2. Delete Subscenes
+        subscenes = subscene_crud.get_by_scene_id(scene.id, db)
+        for subscene in subscenes:
+            db.delete(subscene)
+
+        # 3. Delete Scene
+        db.delete(scene)
+
+    # 4. Delete Chat History
+    chat_histories = db.exec(select(ChatHistory).where(ChatHistory.agent_id == agent_id)).all()
+    for history in chat_histories:
+        db.delete(history)
+
+    # 5. Delete Agent
+    db.delete(agent)
+
+    db.commit()
+    # Explicitly return None to ensure empty body for 204
+    return None

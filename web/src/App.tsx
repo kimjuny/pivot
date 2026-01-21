@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import AgentList from './components/AgentList';
 import AgentDetail from './components/AgentDetail';
+import Navigation from './components/Navigation';
 import { getAgentById } from './utils/api';
 import type { Agent, Scene } from './types';
 import { useSceneGraphStore } from './store/sceneGraphStore';
@@ -136,11 +137,17 @@ function App() {
   }
 
   if (!agentId) {
-    return <AgentList />;
+    return (
+      <div className="min-h-screen bg-dark-bg text-dark-text-primary">
+        <Navigation />
+        <AgentList />
+      </div>
+    );
   }
 
   return (
     <div className="h-screen flex flex-col bg-dark-bg text-dark-text-primary">
+      <Navigation />
       <div className="flex-1 p-5 bg-dark-bg overflow-hidden">
         <AgentDetail 
           agent={agent} 

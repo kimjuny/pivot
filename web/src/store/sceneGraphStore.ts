@@ -1,11 +1,10 @@
 import { create } from 'zustand';
 import type { SceneGraph } from '../types';
 import { getSceneGraph } from '../utils/api';
-import websocket from '../utils/websocket';
 
 /**
  * Store for managing SceneGraph state and operations.
- * Handles scene graph data fetching, updates, and WebSocket synchronization.
+ * Handles scene graph data fetching and updates.
  */
 interface SceneGraphStore {
   /** Current scene graph data */
@@ -51,22 +50,5 @@ const useSceneGraphStore = create<SceneGraphStore>((set) => ({
 
   clearError: () => set({ error: null })
 }));
-
-/**
- * Establish WebSocket connection and listen for scene updates.
- * This is called once when module is loaded to enable real-time updates.
- */
-websocket.connect();
-
-/**
- * Handle WebSocket messages for scene graph updates.
- * When a scene_update message is received, update the scene graph state.
- */
-websocket.on('message', (data) => {
-  if ((data as { type?: string }).type === 'scene_update') {
-    const sceneGraphCopy = JSON.parse(JSON.stringify((data as { data?: unknown }).data)) as SceneGraph;
-    useSceneGraphStore.setState({ sceneGraph: sceneGraphCopy });
-  }
-});
 
 export { useSceneGraphStore };

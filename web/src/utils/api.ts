@@ -46,6 +46,10 @@ const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promi
       throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
     }
 
+    if (response.status === 204) {
+      return null;
+    }
+
     return await response.json();
   } catch (error) {
     console.error(`API request failed for ${url}:`, error);
@@ -354,7 +358,7 @@ export const chatWithBuildAgent = async (request: BuildChatRequest): Promise<Bui
 };
 
 /**
- * Send a message to the Preview Agent (stateless).
+ * Send a message to Preview Agent (stateless).
  * 
  * @param request - Preview chat request containing message, agent definition, and state
  * @returns Promise resolving to Preview Agent's response
@@ -364,4 +368,48 @@ export const previewChat = async (request: PreviewChatRequest): Promise<PreviewC
     method: 'POST',
     body: JSON.stringify(request),
   }) as Promise<PreviewChatResponse>;
+};
+
+/**
+ * Delete an agent by ID.
+ * 
+ * @param agentId - Unique identifier of agent to delete
+ * @returns Promise resolving when agent is deleted
+ */
+export const deleteAgent = async (agentId: number): Promise<void> => {
+  await apiRequest(`/agents/${agentId}`, {
+    method: 'DELETE',
+  });
+};
+
+/**
+ * Update an agent.
+ * 
+ * @param agentId - Unique identifier of agent
+ * @param agentData - Agent update data
+ * @returns Promise resolving to updated Agent object
+ */
+export const updateAgent = async (
+  agentId: number,
+  agentData: {
+    name?: string;
+    description?: string;
+    model_name?: string;
+    is_active?: boolean;
+  }
+): Promise<Agent> => {
+  return apiRequest(`/agents/${agentId}`, {
+    method: 'PUT',
+    body: JSON.stringify(agentData),
+  }) as Promise<Agent>;
+};
+
+/**
+ * Get all available LLM models.
+ * 
+ * @returns Promise resolving to list of available model names
+ */
+export const getModels = async (): Promise<string[]> => {
+  const response = await apiRequest('/models') as { models: string[]; count: number };
+  return response.models;
 };

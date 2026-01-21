@@ -5,11 +5,11 @@ chat history, including conversation state persistence.
 """
 
 import logging
-import os
 import traceback
 import uuid
 from datetime import datetime, timezone
 
+from app.llm_globals import get_default_llm, get_llm
 from app.models.agent import (
     Connection as DBConnection,
     Scene as DBScene,
@@ -29,7 +29,6 @@ from core.agent.agent import Agent as CoreAgent
 from core.agent.plan.connection import Connection as CoreConnection
 from core.agent.plan.scene import Scene as CoreScene
 from core.agent.plan.subscene import Subscene as CoreSubscene, SubsceneType
-from core.llm.doubao_llm import DoubaoLLM
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -218,12 +217,13 @@ def build_core_agent_from_detail(agent_detail: AgentDetailResponse, current_scen
     core_agent = CoreAgent()
     
     # Configure LLM (use env var or agent setting)
-    api_key = os.getenv("DOUBAO_SEED_API_KEY")
-    if api_key:
-        llm_model = DoubaoLLM(api_key=api_key)
+    model_name = agent_detail.model_name
+    llm_model = get_llm(model_name) if model_name else get_default_llm()
+    
+    if llm_model:
         core_agent.set_model(llm_model)
     else:
-        logger.warning("DOUBAO_SEED_API_KEY not set")
+        logger.warning(f"No LLM found for model name '{model_name}' and no default available.")
 
     # Build Scenes
     for scene_resp in agent_detail.scenes:
