@@ -64,7 +64,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         });
       }
       setServerError(null);
-      
+
       // Load available models
       void loadModels();
     }

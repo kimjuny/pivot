@@ -21,8 +21,8 @@ class DoubaoLLM(AbstractLLM):
     Communicates with the Doubao API via REST interface.
     """
 
-    # DEFAULT_MODEL = "doubao-seed-1-6-250615"
-    DEFAULT_MODEL = "doubao-seed-1-8-251228"
+    DEFAULT_MODEL = "doubao-seed-1-6-250615"
+    # DEFAULT_MODEL = "doubao-seed-1-8-251228"
     API_ENDPOINT = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
     DEFAULT_TIMEOUT = 60  # Increased timeout to 60 seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts
