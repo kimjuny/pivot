@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import type { ChatHistory, PreviewChatRequest, Agent, SceneGraph } from '../types';
-import { previewChat } from '../utils/api';
+import type { ChatHistory, PreviewChatRequest, Agent, SceneGraph, StreamEvent } from '../types';
+import { StreamEventType } from '../types';
+import { previewChatStream } from '../utils/api';
 import { useAgentWorkStore } from './agentWorkStore';
 
 /**
@@ -77,10 +78,21 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
       create_time: utcTimestamp
     };
 
+    // Initial agent message placeholder
+    const agentMessageId = -Date.now() - 1;
+    const initialAgentMessage: ChatHistory = {
+        id: agentMessageId,
+        agent_id: previewAgent.id,
+        user: 'preview-user',
+        role: 'agent',
+        message: '',
+        create_time: utcTimestamp
+    };
+
     set(state => ({
       isChatting: true,
       error: null,
-      chatHistory: [...state.chatHistory, userMessage]
+      chatHistory: [...state.chatHistory, userMessage, initialAgentMessage]
     }));
 
     try {
@@ -91,54 +103,59 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
         current_subscene_name: currentSubsceneName
       };
 
-      const response = await previewChat(request);
+      await previewChatStream(request, (event: StreamEvent) => {
+          set(state => {
+              const currentHistory = [...state.chatHistory];
+              const msgIndex = currentHistory.findIndex(m => m.id === agentMessageId);
+              if (msgIndex === -1) return {};
 
-      let targetGraph: SceneGraph | undefined;
+              const currentMsg = currentHistory[msgIndex];
+              const updatedMsg = { ...currentMsg };
 
-      if (response.graph && Array.isArray(response.graph) && response.graph.length > 0) {
-        // Find the active scene
-        const activeSceneName = response.current_scene_name;
-        targetGraph = response.graph.find(g => g.name === activeSceneName) || response.graph[0];
-        
-        // Inject active state
-        if (targetGraph) {
-          targetGraph.current_scene = response.current_scene_name || undefined;
-          targetGraph.current_subscene = response.current_subscene_name || undefined;
-        }
-      } else if (response.graph && !Array.isArray(response.graph)) {
-        // Fallback for potential legacy response or single object
-        targetGraph = response.graph as SceneGraph;
-        if (targetGraph) {
-          targetGraph.current_scene = response.current_scene_name || undefined;
-          targetGraph.current_subscene = response.current_subscene_name || undefined;
-        }
-      }
+              switch (event.type) {
+                  case StreamEventType.REASONING:
+                      updatedMsg.reason = (updatedMsg.reason || '') + (event.delta || '');
+                      break;
+                  case StreamEventType.REASON:
+                      updatedMsg.reason = (updatedMsg.reason || '') + (event.delta || '');
+                      break;
+                  case StreamEventType.RESPONSE:
+                      updatedMsg.message = (updatedMsg.message || '') + (event.delta || '');
+                      updatedMsg.create_time = event.create_time;
+                      break;
+                  case StreamEventType.UPDATED_SCENES:
+                      if (event.updated_scenes && event.updated_scenes.length > 0) {
+                          const targetGraph = event.updated_scenes[0];
+                          if (targetGraph) {
+                              updatedMsg.graph = targetGraph;
+                          }
+                      }
+                      break;
+                  case StreamEventType.MATCH_CONNECTION:
+                      break;
+                  case StreamEventType.ERROR:
+                      console.error('Stream error:', event.error);
+                      break;
+                  default:
+                      break;
+              }
 
-      const agentMessage: ChatHistory = {
-        id: -Date.now() - 1, // Temporary ID
-        agent_id: previewAgent.id,
-        user: 'preview-user',
-        role: 'agent',
-        message: response.response,
-        reason: response.reason,
-        create_time: response.create_time,
-        graph: targetGraph
-      };
+              currentHistory[msgIndex] = updatedMsg;
+              return { chatHistory: currentHistory };
+          });
+      });
 
-      set(state => ({
-        chatHistory: [...state.chatHistory, agentMessage],
-        isChatting: false
-      }));
+      set({ isChatting: false });
 
-      // TODO: If the backend returns updated state (current scene/subscene), 
-      // we should probably update our local state tracking if we want continuity.
-      // But for "Preview", maybe we just want to see the flow.
-      
     } catch (error) {
       const err = error as Error;
-      set({
-        isChatting: false,
-        error: err.message
+      set(state => {
+          const currentHistory = state.chatHistory.filter(m => m.id !== agentMessageId);
+          return {
+            chatHistory: currentHistory,
+            isChatting: false,
+            error: err.message
+          };
       });
     }
   },

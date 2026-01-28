@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent } from '../types';
 
 /**
  * API base URL from environment configuration.
@@ -358,16 +358,62 @@ export const chatWithBuildAgent = async (request: BuildChatRequest): Promise<Bui
 };
 
 /**
- * Send a message to Preview Agent (stateless).
+ * Send a message to Preview Agent (stateless) with streaming response.
  * 
  * @param request - Preview chat request containing message, agent definition, and state
- * @returns Promise resolving to Preview Agent's response
+ * @param onEvent - Callback for handling stream events
+ * @returns Promise resolving when stream completes
  */
-export const previewChat = async (request: PreviewChatRequest): Promise<PreviewChatResponse> => {
-  return apiRequest('/preview/chat', {
+export const previewChatStream = async (
+  request: PreviewChatRequest, 
+  onEvent: (event: StreamEvent) => void
+): Promise<void> => {
+  const url = `${API_BASE_URL}/preview/chat/stream`;
+  
+  const response = await fetch(url, {
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(request),
-  }) as Promise<PreviewChatResponse>;
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json() as { detail?: string };
+    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error('ReadableStream not supported');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6)) as StreamEvent;
+            onEvent(data);
+          } catch (e) {
+            console.error('Error parsing SSE data:', e);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 };
 
 /**

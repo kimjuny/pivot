@@ -5,7 +5,7 @@ from core.llm.abstract_llm import AbstractLLM
 from core.utils.logging_config import get_logger
 
 from .agent import Agent
-from .system_prompt import get_build_prompt
+from .base.system_prompt import get_build_prompt
 
 logger = get_logger('agent_builder')
 

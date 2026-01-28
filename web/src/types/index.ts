@@ -316,3 +316,33 @@ export interface PreviewChatResponse {
   /** UTC timestamp of the response */
   create_time: string;
 }
+
+/**
+ * Enum for SSE stream event types.
+ */
+export enum StreamEventType {
+  REASONING = 'reasoning',
+  REASON = 'reason',
+  RESPONSE = 'response',
+  UPDATED_SCENES = 'updated_scenes',
+  MATCH_CONNECTION = 'match_connection',
+  ERROR = 'error',
+}
+
+/**
+ * SSE stream event from Preview Chat API.
+ */
+export interface StreamEvent {
+  /** Type of the stream event */
+  type: StreamEventType;
+  /** Delta content for text-based events */
+  delta?: string | null;
+  /** Updated scenes for scene update events */
+  updated_scenes?: SceneGraph[] | null;
+  /** Matched connection for connection match events */
+  matched_connection?: Connection | null;
+  /** Error message for error events */
+  error?: string | null;
+  /** UTC timestamp when the event was created */
+  create_time: string;
+}

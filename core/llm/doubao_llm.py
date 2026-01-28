@@ -1,6 +1,8 @@
 import contextlib
+import json
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 import requests
@@ -118,6 +120,96 @@ class DoubaoLLM(AbstractLLM):
         # This should never be reached, but just in case
         raise RuntimeError("Unexpected error in chat method")
 
+    def chat_stream(self, messages: list[dict[str, str]], **kwargs: Any) -> Iterator[Response]:
+        """
+        Process a conversation with the Doubao LLM in streaming mode.
+        
+        Args:
+            messages (List[Dict[str, str]]): List of message dictionaries with 'role' and 'content'
+            **kwargs: Additional arguments for the chat completion
+            
+        Yields:
+            Response: A chunk of the structured response from the LLM
+            
+        Raises:
+            ValueError: If API key is not provided
+            RuntimeError: If the API request fails
+        """
+        # Validate API key
+        if not self.api_key:
+            raise ValueError("API key is required for Doubao LLM")
+        
+        # Prepare the request payload
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            **kwargs  # Include any additional arguments
+        }
+        
+        # Prepare headers
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Try up to MAX_RETRIES times for the initial connection
+        response = None
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                # Make the API request with stream=True
+                response = requests.post(
+                    self.API_ENDPOINT,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                    stream=True
+                )
+                
+                # Raise an exception for bad status codes
+                response.raise_for_status()
+                break
+                
+            except requests.exceptions.Timeout:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise RuntimeError(f"API request timed out after {self.MAX_RETRIES} attempts.") from None
+            except requests.exceptions.RequestException as e:
+                if attempt < self.MAX_RETRIES - 1:
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise RuntimeError(f"API request failed after {self.MAX_RETRIES} attempts: {e!s}") from e
+        
+        if response is None:
+             raise RuntimeError("Failed to establish connection for streaming")
+
+        # Process the stream
+        try:
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                    
+                decoded_line = line.decode('utf-8')
+                if decoded_line.startswith('data: '):
+                    data_str = decoded_line[6:]  # Skip "data: "
+                    
+                    if data_str.strip() == '[DONE]':
+                        break
+                        
+                    try:
+                        raw_response = json.loads(data_str)
+                        yield self._convert_response(raw_response)
+                    except json.JSONDecodeError:
+                        continue
+                        
+        except Exception as e:
+            raise RuntimeError(f"Error processing stream: {e!s}") from e
+
     def _convert_response(self, raw_response: dict[str, Any]) -> Response:
         """
         Convert the raw API response to our structured Response.
@@ -137,11 +229,12 @@ class DoubaoLLM(AbstractLLM):
         choices = []
         raw_choices = raw_response.get("choices", [])
         for i, raw_choice in enumerate(raw_choices):
-            # Extract message
-            raw_message = raw_choice.get("message", {})
+            # Extract message or delta (for streaming)
+            raw_message = raw_choice.get("message") or raw_choice.get("delta", {})
             role = raw_message.get("role", "assistant")
             content = raw_message.get("content", "")
-            message = ChatMessage(role=role, content=content)
+            reasoning_content = raw_message.get("reasoning_content", None)
+            message = ChatMessage(role=role, content=content, reasoning_content=reasoning_content)
             
             # Extract finish reason
             finish_reason = None

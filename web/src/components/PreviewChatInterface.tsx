@@ -151,22 +151,19 @@ function PreviewChatInterface({ agentId }: PreviewChatInterfaceProps) {
                     </div>
                   </div>
                 )}
-                <div className="text-sm leading-relaxed">{message.message}</div>
+                <div className="text-sm leading-relaxed">
+                  {message.message}
+                  {message.role === 'agent' && isChatting && index === chatHistory.length - 1 && !message.message && !message.reason && (
+                    <div className="flex items-center space-x-1.5 py-1">
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           ))
-        )}
-        {isChatting && (
-          <div className="flex justify-start animate-fade-in">
-            <div className="bg-dark-bg-lighter border border-dark-border px-4 py-3 rounded-xl shadow-md rounded-bl-none">
-              <div className="font-semibold text-xs mb-1.5 opacity-90 tracking-wide uppercase">Preview Agent</div>
-              <div className="flex items-center space-x-1.5">
-                <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
-                <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
-              </div>
-            </div>
-          </div>
         )}
         <div ref={messagesEndRef} />
       </div>

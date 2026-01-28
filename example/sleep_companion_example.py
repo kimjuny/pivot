@@ -7,6 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.llm.doubao_llm import DoubaoLLM
 from core.agent.agent import Agent
+from core.agent.base.stream import AgentResponseChunkType
 from core.agent.plan.scene import Scene
 from core.agent.plan.subscene import Subscene, SubsceneType
 from core.agent.plan.connection import Connection
@@ -141,10 +142,39 @@ def main():
             if user_input.lower() in ['退出', 'exit', 'quit']:
                 break
                 
-            # Use chat_with_print to get response and print graph
-            output_message = agent.chat_with_print(user_input)
-            print(f"女友: {output_message.response}")
-            print()
+            # Use chat_stream to get response
+            print("女友 (Streaming): ", end="", flush=True)
+            reasoning_printed = False
+            reason_printed = False
+            response_printed = False
+            updated_scenes_printed = False
+            match_connection_printed = False
+            
+            for chunk in agent.chat_stream(user_input):
+                if chunk.type == AgentResponseChunkType.REASONING:
+                    if not reasoning_printed and (reasoning_printed := True):
+                        print("\n[Reasoning]: ", end="", flush=True)
+                    print(chunk.delta, end="", flush=True)
+                elif chunk.type == AgentResponseChunkType.REASON:
+                    if not reason_printed and (reason_printed := True):
+                        print("\n[Reason]: ", end="", flush=True)
+                    print(chunk.delta, end="", flush=True)
+                elif chunk.type == AgentResponseChunkType.RESPONSE:
+                    if not response_printed and (response_printed := True):
+                        print("\n[Response]: ", end="", flush=True)
+                    print(chunk.delta, end="", flush=True)
+                elif chunk.type == AgentResponseChunkType.UPDATED_SCENES:
+                    if not updated_scenes_printed and (updated_scenes_printed := True):
+                        print("\n[Updated Scenes]: ", end="", flush=True)
+                    print(json.dumps([s.to_dict() for s in chunk.updated_scenes], ensure_ascii=False, indent=2), end="", flush=True)
+                elif chunk.type == AgentResponseChunkType.MATCH_CONNECTION:
+                    if not match_connection_printed and (match_connection_printed := True):
+                        print("\n[Match Connection]: ", end="", flush=True)
+                    print(json.dumps([s.to_dict() for s in chunk.matched_connection], ensure_ascii=False, indent=2), end="", flush=True)
+                elif chunk.type == AgentResponseChunkType.ERROR:
+                    print(f"\nError: {chunk.delta}")
+
+            # Print scene graph state
             conversation_count += 1
         
         # Stop the agent

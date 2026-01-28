@@ -1,6 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from enum import Enum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from core.agent.base.stream import AgentResponseChunk
 
 
 class AgentCreate(BaseModel):
@@ -190,6 +195,63 @@ class PreviewChatResponse(BaseModel):
     current_scene_name: str | None = Field(None, description="Updated active scene")
     current_subscene_name: str | None = Field(None, description="Updated active subscene")
     create_time: str
+
+
+class StreamEventType(str, Enum):
+    """Enum for SSE stream event types."""
+    REASONING = "reasoning"
+    REASON = "reason"
+    RESPONSE = "response"
+    UPDATED_SCENES = "updated_scenes"
+    MATCH_CONNECTION = "match_connection"
+    ERROR = "error"
+
+
+class StreamEvent(BaseModel):
+    """Schema for SSE stream event data."""
+    type: StreamEventType = Field(..., description="Event type: 'reasoning', 'reason', 'response', 'updated_scenes', 'match_connection', 'error'")
+    delta: str | None = Field(default=None, description="Incremental content update")
+    updated_scenes: list[SceneGraphResponse] | None = Field(default=None, description="Updated scene graph")
+    matched_connection: ConnectionResponse | None = Field(default=None, description="Matched connection details")
+    error: str | None = Field(default=None, description="Error message")
+    create_time: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Creation timestamp")
+
+    @classmethod
+    def from_core_response_chunk(
+        cls, 
+        chunk: "AgentResponseChunk", 
+        create_time: str,
+        updated_scenes: list[SceneGraphResponse] | None = None, 
+        matched_connection: ConnectionResponse | None = None
+    ) -> "StreamEvent":
+        """Create a StreamEvent from an AgentResponseChunk.
+        
+        Args:
+            chunk: The AgentResponseChunk from core agent.
+            create_time: The creation timestamp for this event.
+            updated_scenes: Converted SceneGraphResponse list (required if chunk.type is UPDATED_SCENES).
+            matched_connection: Converted ConnectionResponse (required if chunk.type is MATCH_CONNECTION).
+        """
+        # Note: We use string values for type because AgentResponseChunkType is defined in core,
+        # and we want to keep schemas decoupled from core types if possible, or just use the string value.
+        # chunk.type is an Enum, so chunk.type.value gives the string.
+        
+        chunk_type = getattr(chunk, 'type', "")
+        chunk_delta = getattr(chunk, 'delta', None)
+        
+        # Use getattr to safely check for 'value' attribute, assuming it might be an Enum
+        type_str = getattr(chunk_type, 'value', str(chunk_type))
+        
+        # Map core enum values to schema enum values if needed, but they are currently aligned
+        
+        return cls(
+            type=StreamEventType(type_str),
+            delta=chunk_delta,
+            updated_scenes=updated_scenes,
+            matched_connection=matched_connection,
+            error=chunk_delta if type_str == "error" else None, # Error chunk stores message in delta
+            create_time=create_time
+        )
 
 
 class ChatHistoryResponse(BaseModel):

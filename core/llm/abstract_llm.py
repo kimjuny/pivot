@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -31,6 +32,7 @@ class ChatMessage:
     """A single message in a chat."""
     role: str  # "system", "user", "assistant", etc.
     content: str  # The message content
+    reasoning_content: str | None = None  # The reasoning content for CoT models
 
 @dataclass
 class Choice:
@@ -90,6 +92,8 @@ class Response:
             logger.info(f"    Choice {choice.index}:")
             logger.info(f"      Role: {choice.message.role}")
             logger.info(f"      Content: {choice.message.content}")
+            if choice.message.reasoning_content:
+                logger.info(f"      Reasoning: {choice.message.reasoning_content}")
         if self.usage:
             logger.info("  Usage:")
             logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
@@ -108,6 +112,8 @@ class Response:
             logger.info(f"    Choice {choice.index}:")
             logger.info(f"      Role: {choice.message.role}")
             logger.info(f"      Content: {choice.message.content}")
+            if choice.message.reasoning_content:
+                logger.info(f"      Reasoning: {choice.message.reasoning_content}")
             logger.info(f"      Finish Reason: {choice.finish_reason.value if choice.finish_reason else None}")
         if self.usage:
             logger.info("  Usage:")
@@ -161,5 +167,19 @@ class AbstractLLM(ABC):
             
         Returns:
             Response: The structured response from the LLM
+        """
+        pass
+
+    @abstractmethod
+    def chat_stream(self, messages: list[dict[str, str]], **kwargs: Any) -> Iterator[Response]:
+        """
+        Process a conversation with the LLM in streaming mode.
+        
+        Args:
+            messages (List[Dict[str, str]]): List of message dictionaries with 'role' and 'content'
+            **kwargs: Additional arguments for the chat completion
+            
+        Yields:
+            Response: A chunk of the structured response from the LLM
         """
         pass

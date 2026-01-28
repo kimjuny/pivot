@@ -1,10 +1,13 @@
+import re
+from collections.abc import Iterator
 from typing import Any
 
-from core.agent.output_message import OutputMessage
+from core.agent.base.output_message import OutputMessage
+from core.agent.base.stream import AgentResponseChunk, AgentResponseChunkType
 from core.llm.abstract_llm import AbstractLLM
 from core.utils.logging_config import get_logger
 
-from .input_message import InputMessage
+from .base.input_message import InputMessage
 from .plan.scene import Scene, SceneState
 from .plan.subscene import Subscene, SubsceneState
 
@@ -229,14 +232,13 @@ class Agent:
         llm_messages = input_message.get_messages()
         
         response = self.model.chat(llm_messages)
-        
 
         if response.choices:
             first_choice = response.first()
             
             # Parse the LLM response content into OutputMessage
             try:
-                # Create OutputMessage from LLM response content
+                # Create OutputMessage from LLM response content (Markdown format)
                 output_message = OutputMessage.from_content(first_choice.message.content)
                 
                 # If updated_scenes is provided, update the agent's scenes
@@ -298,3 +300,166 @@ class Agent:
         self.print_scene_graph()
         
         return output_message
+
+    def chat_stream(self, message: str) -> Iterator[AgentResponseChunk]:
+        """
+        Chat with the agent using the configured LLM model with scene graph awareness in streaming mode.
+        
+        Args:
+            message (str): The user's message
+            
+        Yields:
+            AgentResponseChunk: Streamed chunks and final result.
+            
+        Raises:
+            ValueError: If the agent hasn't been started or no model is set
+        """
+        if not self.is_started:
+            raise ValueError("Agent must be started before chatting")
+            
+        if self.model is None:
+            raise ValueError("Model must be set before chatting")
+            
+        # Log chat start
+        logger.info(f"Starting chat stream with message: {message}")
+        
+        # Create structured input message with context
+        input_message = InputMessage(
+            user_message=message,
+            history=self.history,
+            scenes=self.scenes,
+            current_scene=self.current_scene,
+            current_subscene=self.current_subscene
+        )
+        
+        full_content = ""
+        current_section = AgentResponseChunkType.REASON  # Default assumption: starts with reasoning or reason
+        buffer = ""
+        
+        # Stream response from LLM
+        for chunk in self.model.chat_stream(input_message.get_messages()):
+            if not chunk.choices:
+                continue
+                
+            choice = chunk.choices[0]
+            delta = choice.message.content
+            reasoning = choice.message.reasoning_content
+            
+            # Yield reasoning delta if available
+            if reasoning:
+                yield AgentResponseChunk(
+                    type=AgentResponseChunkType.REASONING,
+                    delta=reasoning
+                )
+            
+            # Yield content delta if available
+            if delta:
+                full_content += delta
+                buffer += delta
+                
+                while True:
+                    # Check for section transitions
+                    # Allow 'Update Scenes' or 'Updated Scenes', 'Match Connection' or 'Matched Connection'
+                    split_match = re.search(r'##\s*(Reason|Response|Update(?:d)? Scenes|Match(?:ed)? Connection)', buffer, re.IGNORECASE)
+                    
+                    if split_match:
+                        header_type = split_match.group(1).lower()
+                        pre_header = buffer[:split_match.start()]
+                        
+                        # Yield pre-header content
+                        if pre_header and current_section != AgentResponseChunkType.PARSING:
+                            yield AgentResponseChunk(
+                                type=current_section, # type: ignore
+                                delta=pre_header
+                            )
+                        
+                        # Switch section
+                        if "reason" in header_type:
+                            current_section = AgentResponseChunkType.REASON
+                        elif "response" in header_type:
+                            current_section = AgentResponseChunkType.RESPONSE
+                        else:
+                            current_section = AgentResponseChunkType.PARSING
+                            
+                        # Update buffer to start after the match
+                        buffer = buffer[split_match.end():]
+                    else:
+                        break
+                
+                # After processing all complete headers, check for potential partial header at the end
+                # We want to ensure we don't split a header like "## Reason".
+                # We look for the FIRST '#' in the "danger zone" (last 50 chars) and hold everything from there.
+                safe_len = max(0, len(buffer) - 50)
+                danger_zone = buffer[safe_len:]
+                first_hash_in_danger = danger_zone.find('#')
+                
+                if first_hash_in_danger != -1:
+                    # Found a hash in the danger zone, hold from there
+                    split_idx = safe_len + first_hash_in_danger
+                    to_yield = buffer[:split_idx]
+                    buffer = buffer[split_idx:]
+                    
+                    if to_yield and current_section != AgentResponseChunkType.PARSING:
+                        yield AgentResponseChunk(
+                            type=current_section, # type: ignore
+                            delta=to_yield
+                        )
+                else:
+                    # No potential header in danger zone, yield everything
+                    if buffer and current_section != AgentResponseChunkType.PARSING:
+                        yield AgentResponseChunk(
+                            type=current_section, # type: ignore
+                            delta=buffer
+                        )
+                    buffer = ""
+        
+        # Yield any remaining buffer content
+        if buffer and current_section != AgentResponseChunkType.PARSING:
+            yield AgentResponseChunk(
+                type=current_section, # type: ignore
+                delta=buffer
+            )
+        
+        # After stream finishes, try to parse the full content and update state
+        try:
+            # Create OutputMessage from LLM response content (Markdown format)
+            output_message = OutputMessage.from_content(full_content)
+            
+            # If updated_scenes is provided, update the agent's scenes
+            if output_message.updated_scenes and len(output_message.updated_scenes) > 0:
+                # Clear existing scenes and add updated ones
+                self.scenes.clear()
+                self.scenes.extend(output_message.updated_scenes)
+                
+                # Update current_scene and current_subscene based on updated_scenes
+                for scene in output_message.updated_scenes:
+                    if scene.state.value == 'active':
+                        self.current_scene = scene
+                        for subscene in scene.subscenes:
+                            if subscene.state.value == 'active':
+                                self.current_subscene = subscene
+                                break
+                        break
+            
+            # Yield the final result with ONLY structural data
+            if output_message.updated_scenes:
+                yield AgentResponseChunk(
+                    type=AgentResponseChunkType.UPDATED_SCENES,
+                    updated_scenes=output_message.updated_scenes
+                )
+            
+            if output_message.match_connection:
+                yield AgentResponseChunk(
+                    type=AgentResponseChunkType.MATCH_CONNECTION,
+                    matched_connection=output_message.match_connection
+                )
+            
+        except Exception as e:
+            logger.error(f"Error parsing LLM response into OutputMessage during stream: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            yield AgentResponseChunk(
+                type=AgentResponseChunkType.ERROR,
+                delta=str(e)
+            )

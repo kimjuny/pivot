@@ -16,8 +16,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from core.agent.agent import Agent as CoreAgent
+from core.agent.base.system_prompt import get_build_prompt
 from core.agent.builder import AgentBuilder
-from core.agent.system_prompt import get_build_prompt
 
 logger = logging.getLogger(__name__)
 
