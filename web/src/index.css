@@ -259,3 +259,33 @@ body.dark {
   position: relative;
   z-index: 1;
 }
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.active {
+    animation: none;
+  }
+
+  .spinner {
+    animation: spin 2s linear infinite;
+  }
+
+  .card-subtle,
+  .btn-accent,
+  .input-dark,
+  .nav-hover-effect,
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* Focus-visible utilities */
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid rgb(24, 91, 233);
+  outline-offset: 2px;
+}

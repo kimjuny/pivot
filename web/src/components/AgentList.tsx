@@ -7,6 +7,7 @@ import { getAgents, deleteAgent, updateAgent, createAgent } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
 import AgentModal from './AgentModal';
+import ConfirmationModal from './ConfirmationModal';
 
 /**
  * Agent list component.
@@ -22,6 +23,10 @@ function AgentList() {
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [menuOpenAgentId, setMenuOpenAgentId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean;
+    agent: Agent | null;
+  }>({ isOpen: false, agent: null });
   const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -93,32 +98,37 @@ function AgentList() {
 
   /**
    * Handle delete agent button click.
+   * Opens confirmation modal instead of using window.confirm.
+   */
+  const handleDeleteAgent = (agent: Agent, e: MouseEvent) => {
+    e.stopPropagation();
+    setDeleteConfirmation({ isOpen: true, agent });
+    setMenuOpenAgentId(null);
+  };
+
+  /**
+   * Confirm agent deletion.
    * Deletes the agent and reloads the list.
    */
-  const handleDeleteAgent = async (agent: Agent, e: MouseEvent) => {
-    e.stopPropagation();
-    
-    // We must ensure the event doesn't propagate to the card click handler
-    // and that we wait for confirmation.
-    
-    // Using window.confirm inside an async function is blocking in browser main thread,
-    // but we need to be careful about React event pooling or other side effects.
-    
-    const confirmed = window.confirm(`Are you sure you want to delete agent "${agent.name}"? This will also delete all associated scenes, subscenes, connections, and chat history.`);
-    
-    if (confirmed) {
-      try {
-        await deleteAgent(agent.id);
-        setMenuOpenAgentId(null);
-        await loadAgents();
-      } catch (err) {
-        const error = err as Error;
-        alert(`Failed to delete agent: ${error.message}`);
-      }
-    } else {
-      // If cancelled, just close the menu
-      setMenuOpenAgentId(null);
+  const confirmDeleteAgent = async () => {
+    if (!deleteConfirmation.agent) return;
+
+    try {
+      await deleteAgent(deleteConfirmation.agent.id);
+      setDeleteConfirmation({ isOpen: false, agent: null });
+      await loadAgents();
+    } catch (err) {
+      const error = err as Error;
+      alert(`Failed to delete agent: ${error.message}`);
+      setDeleteConfirmation({ isOpen: false, agent: null });
     }
+  };
+
+  /**
+   * Cancel agent deletion.
+   */
+  const cancelDeleteAgent = () => {
+    setDeleteConfirmation({ isOpen: false, agent: null });
   };
 
   /**
@@ -147,6 +157,17 @@ function AgentList() {
     navigate(`/agent/${agent.id}`);
   };
 
+  /**
+   * Handle keyboard navigation for agent cards.
+   * Allows Enter and Space to navigate to agent.
+   */
+  const handleCardKeyDown = (e: React.KeyboardEvent, agent: Agent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleAgentClick(agent);
+    }
+  };
+
   const filteredAgents = agents.filter((agent) =>
     agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (agent.description && agent.description.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -157,7 +178,7 @@ function AgentList() {
       <div className="flex items-center justify-center h-screen bg-dark-bg">
         <div className="flex flex-col items-center space-y-4">
           <div className="spinner"></div>
-          <div className="text-lg text-dark-text-secondary font-medium">Loading...</div>
+          <div className="text-lg text-dark-text-secondary font-medium">Loading…</div>
         </div>
       </div>
     );
@@ -169,7 +190,7 @@ function AgentList() {
         <div className="text-xl text-red-400 mb-4 font-medium">Error: {error}</div>
         <button
           onClick={() => void loadAgents()}
-          className="px-6 py-3 btn-accent rounded-lg font-medium"
+          className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
         >
           Retry
         </button>
@@ -182,20 +203,24 @@ function AgentList() {
       <div className="w-full px-4 py-8">
         <div className="flex items-center justify-between mb-8 gap-4">
           <div className="flex-1 max-w-md relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-text-muted pointer-events-none" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-text-muted pointer-events-none" aria-hidden="true" />
             <Input
-              placeholder="Search agents..."
+              placeholder="Search agents…"
               value={searchQuery}
               onValueChange={(value) => setSearchQuery(value)}
               className="h-10 w-full pl-10 pr-4 rounded-md border border-gray-200 bg-dark-bg-lighter text-base text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary"
+              autoComplete="off"
+              inputMode="search"
+              name="search"
+              aria-label="Search agents"
             />
           </div>
           <Button
             onClick={handleCreateAgent}
-            className="flex items-center space-x-2 h-10 px-4 btn-accent rounded-md font-medium whitespace-nowrap"
-            title="Create a new agent"
+            className="flex items-center space-x-2 h-10 px-4 btn-accent rounded-md font-medium whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+            aria-label="Create a new agent"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-5 h-5" aria-hidden="true" />
             <span>Create Agent</span>
           </Button>
         </div>
@@ -213,7 +238,7 @@ function AgentList() {
             <div className="text-6xl text-dark-text-muted mb-4">📭</div>
             <h3 className="text-xl font-semibold text-dark-text-secondary mb-2">No Agents</h3>
             <p className="text-dark-text-muted mb-6">
-              Click the 'Create Agent' button to create your first agent
+              Click the "Create Agent" button to create your first agent
             </p>
           </div>
         ) : (
@@ -222,25 +247,29 @@ function AgentList() {
               <div
                 key={agent.id}
                 onClick={() => handleAgentClick(agent)}
-                className="card-subtle rounded-xl p-6 cursor-pointer hover:shadow-lg transition-all duration-200 relative group"
+                onKeyDown={(e) => handleCardKeyDown(e, agent)}
+                className="card-subtle rounded-xl p-6 cursor-pointer transition-shadow duration-200 motion-reduce:transition-none relative group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
                 onMouseEnter={() => setMenuOpenAgentId(null)}
+                role="button"
+                tabIndex={0}
+                aria-label={`View agent ${agent.name}`}
               >
                 <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center p-2">
-                      <User className="w-6 h-6 text-primary" />
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
+                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center p-2 flex-shrink-0">
+                      <User className="w-6 h-6 text-primary" aria-hidden="true" />
                     </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-dark-text-primary">{agent.name}</h3>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-lg font-semibold text-dark-text-primary truncate">{agent.name}</h3>
                       <div className="flex items-center space-x-2 mt-1">
-                        <span className={`status-dot ${agent.is_active ? 'active' : ''}`}></span>
+                        <span className={`status-dot ${agent.is_active ? 'active' : ''}`} aria-hidden="true"></span>
                         <span className="text-sm text-dark-text-secondary">
                           {agent.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </div>
                     </div>
                   </div>
-                  <div className="relative">
+                  <div className="relative flex-shrink-0">
                     <div className="text-xs text-dark-text-muted">
                       ID: {agent.id}
                     </div>
@@ -249,9 +278,10 @@ function AgentList() {
                         e.stopPropagation();
                         setMenuOpenAgentId(menuOpenAgentId === agent.id ? null : agent.id);
                       }}
-                      className="nav-hover-effect absolute -right-2 -top-1 p-1 rounded text-dark-text-secondary hover:text-dark-text-primary transition-colors opacity-0 group-hover:opacity-100"
+                      className="nav-hover-effect absolute -right-2 -top-1 p-1 rounded text-dark-text-secondary hover:text-dark-text-primary transition-colors motion-reduce:transition-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg-lighter"
+                      aria-label="Agent options"
                     >
-                      <MoreHorizontal className="w-5 h-5 text-dark-text-secondary" />
+                      <MoreHorizontal className="w-5 h-5 text-dark-text-secondary" aria-hidden="true" />
                     </button>
                     {menuOpenAgentId === agent.id && (
                       <div
@@ -261,16 +291,16 @@ function AgentList() {
                       >
                         <button
                           onClick={(e) => handleEditAgent(agent, e)}
-                          className="w-full px-4 py-2 text-left text-sm text-dark-text-primary hover:bg-dark-border-light transition-colors flex items-center space-x-2"
+                          className="w-full px-4 py-2 text-left text-sm text-dark-text-primary hover:bg-dark-border-light transition-colors motion-reduce:transition-none flex items-center space-x-2 focus-visible:outline-none focus-visible:bg-dark-border-light"
                         >
                           <span>Edit</span>
                         </button>
                         <button
                           onClick={(e) => {
                             e.preventDefault();
-                            void handleDeleteAgent(agent, e);
+                            handleDeleteAgent(agent, e);
                           }}
-                          className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500 hover:text-white transition-colors flex items-center space-x-2"
+                          className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500 hover:text-white transition-colors motion-reduce:transition-none flex items-center space-x-2 focus-visible:outline-none focus-visible:bg-red-500 focus-visible:text-white"
                         >
                           <span>Delete</span>
                         </button>
@@ -292,7 +322,7 @@ function AgentList() {
 
                   {agent.description && (
                     <div className="flex items-start space-x-2 text-sm">
-                      <p className="text-dark-text-secondary line-clamp-2">{agent.description}</p>
+                      <p className="text-dark-text-secondary line-clamp-2 break-words">{agent.description}</p>
                     </div>
                   )}
                 </div>
@@ -314,8 +344,20 @@ function AgentList() {
           is_active: editingAgent.is_active
         } : undefined}
       />
+
+      <ConfirmationModal
+        isOpen={deleteConfirmation.isOpen}
+        title="Delete Agent"
+        message={`Are you sure you want to delete agent "${deleteConfirmation.agent?.name}"? This will also delete all associated scenes, subscenes, connections, and chat history.`}
+        confirmText="Delete Agent"
+        cancelText="Cancel"
+        onConfirm={() => void confirmDeleteAgent()}
+        onCancel={cancelDeleteAgent}
+        variant="danger"
+      />
     </div>
   );
 }
 
 export default AgentList;
+

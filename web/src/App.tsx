@@ -37,16 +37,16 @@ function App() {
     }
 
     isLoadingAgentDetailsRef.current = true;
-    
+
     setIsInitializing(true);
     setError(null);
-    
+
     setAgent(null);
     setScenes([]);
     setSelectedScene(null);
-    
+
     useSceneGraphStore.getState().updateSceneGraph(null);
-    
+
     try {
       const agentData = await getAgentById(parseInt(agentId));
       setAgent(agentData);
@@ -116,7 +116,7 @@ function App() {
       <div className="flex items-center justify-center h-screen bg-dark-bg">
         <div className="flex flex-col items-center space-y-4">
           <div className="spinner"></div>
-          <div className="text-lg text-dark-text-secondary font-medium">Loading agent details...</div>
+          <div className="text-lg text-dark-text-secondary font-medium">Loading agent details…</div>
         </div>
       </div>
     );
@@ -128,7 +128,7 @@ function App() {
         <div className="text-xl text-red-400 mb-4 font-medium">Error: {error}</div>
         <button
           onClick={() => void loadAgentDetails()}
-          className="px-6 py-3 btn-accent rounded-lg font-medium"
+          className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
         >
           Retry
         </button>
@@ -149,10 +149,10 @@ function App() {
     <div className="h-screen flex flex-col bg-dark-bg text-dark-text-primary">
       <Navigation />
       <div className="flex-1 bg-dark-bg overflow-hidden">
-        <AgentDetail 
-          agent={agent} 
-          scenes={scenes} 
-          selectedScene={selectedScene} 
+        <AgentDetail
+          agent={agent}
+          scenes={scenes}
+          selectedScene={selectedScene}
           agentId={parseInt(agentId)}
           onResetSceneGraph={handleResetSceneGraph}
           onSceneSelect={setSelectedScene}
