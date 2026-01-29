@@ -139,8 +139,8 @@ function SubsceneModal({
         </div>
 
         {serverError && (
-          <div className="px-6 py-3 bg-red-500/10 border-b border-red-500/20">
-            <p className="text-sm text-red-400">{serverError}</p>
+          <div className="px-6 py-3 bg-danger-100 border-b border-danger-200">
+            <p className="text-sm text-danger">{serverError}</p>
           </div>
         )}
 

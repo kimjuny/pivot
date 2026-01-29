@@ -187,7 +187,7 @@ function AgentList() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-dark-bg">
-        <div className="text-xl text-red-400 mb-4 font-medium">Error: {error}</div>
+        <div className="text-xl text-danger mb-4 font-medium">Error: {error}</div>
         <button
           onClick={() => void loadAgents()}
           className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
@@ -300,7 +300,7 @@ function AgentList() {
                             e.preventDefault();
                             handleDeleteAgent(agent, e);
                           }}
-                          className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-red-500 hover:text-white transition-colors motion-reduce:transition-none flex items-center space-x-2 focus-visible:outline-none focus-visible:bg-red-500 focus-visible:text-white"
+                          className="w-full px-4 py-2 text-left text-sm text-danger hover:bg-danger hover:text-white transition-colors motion-reduce:transition-none flex items-center space-x-2 focus-visible:outline-none focus-visible:bg-danger focus-visible:text-white"
                         >
                           <span>Delete</span>
                         </button>

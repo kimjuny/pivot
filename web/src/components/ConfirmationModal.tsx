@@ -80,14 +80,14 @@ function ConfirmationModal({
 
     const variantStyles = {
         danger: {
-            icon: 'text-red-400',
-            iconBg: 'bg-red-500/10',
-            button: 'bg-red-500 hover:bg-red-600 focus-visible:ring-red-500',
+            icon: 'text-danger',
+            iconBg: 'bg-danger-100',
+            button: 'bg-danger hover:bg-danger-600 focus-visible:ring-danger',
         },
         warning: {
-            icon: 'text-yellow-400',
-            iconBg: 'bg-yellow-500/10',
-            button: 'bg-yellow-500 hover:bg-yellow-600 focus-visible:ring-yellow-500',
+            icon: 'text-warning',
+            iconBg: 'bg-warning-100',
+            button: 'bg-warning hover:bg-warning-600 focus-visible:ring-warning',
         },
     };
 
@@ -107,46 +107,46 @@ function ConfirmationModal({
                 className="bg-dark-bg-lighter border border-dark-border rounded-lg shadow-card-lg max-w-md w-full mx-4 motion-reduce:transition-none motion-reduce:transform-none transition-all duration-200 animate-slide-up"
                 style={{ overscrollBehavior: 'contain' }}
             >
-                {/* Header */}
-                <div className="flex items-start justify-between p-6 pb-4">
-                    <div className="flex items-start space-x-3">
+                {/* Header - Fixed alignment issue by using items-center instead of items-start */}
+                <div className="flex items-center justify-between p-6 pb-4">
+                    <div className="flex items-center space-x-3 flex-1">
                         <div className={`w-10 h-10 rounded-lg ${styles.iconBg} flex items-center justify-center flex-shrink-0`}>
                             <AlertTriangle className={`w-5 h-5 ${styles.icon}`} aria-hidden="true" />
                         </div>
-                        <div>
-                            <h2 id="modal-title" className="text-lg font-semibold text-dark-text-primary">
-                                {title}
-                            </h2>
-                        </div>
+                        <h2 id="modal-title" className="text-lg font-semibold text-dark-text-primary">
+                            {title}
+                        </h2>
                     </div>
                     <button
                         onClick={onCancel}
-                        className="text-dark-text-muted hover:text-dark-text-primary transition-colors p-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg-lighter"
+                        className="text-dark-text-muted hover:text-dark-text-primary transition-colors p-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg-lighter ml-4 flex-shrink-0"
                         aria-label="Close modal"
                     >
                         <X className="w-5 h-5" aria-hidden="true" />
                     </button>
                 </div>
 
-                {/* Content */}
+                {/* Content - Fixed padding to match header */}
                 <div className="px-6 pb-6">
                     <p id="modal-description" className="text-dark-text-secondary">
                         {message}
                     </p>
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center justify-end space-x-3 px-6 py-4 bg-dark-bg border-t border-dark-border rounded-b-lg">
+                {/* Actions - Unified background color by removing bg-dark-bg */}
+                <div className="flex items-center justify-end space-x-3 px-6 py-4 border-t border-dark-border rounded-b-lg">
                     <button
                         onClick={onCancel}
-                        className="px-4 py-2 rounded-md text-dark-text-primary bg-dark-bg-lighter border border-dark-border hover:bg-dark-border-light transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg font-medium"
+                        className="px-4 py-2 rounded-md text-dark-text-primary bg-dark-bg border border-dark-border hover:bg-dark-border-light transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg-lighter font-medium"
+                        tabIndex={0}
                     >
                         {cancelText}
                     </button>
                     <button
                         ref={confirmButtonRef}
                         onClick={onConfirm}
-                        className={`px-4 py-2 rounded-md text-white font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg ${styles.button}`}
+                        className={`px-4 py-2 rounded-md text-white font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg-lighter ${styles.button}`}
+                        tabIndex={0}
                     >
                         {confirmText}
                     </button>
@@ -157,3 +157,4 @@ function ConfirmationModal({
 }
 
 export default ConfirmationModal;
+

@@ -60,12 +60,12 @@ interface AgentDetailProps {
 
 function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes }: AgentDetailProps) {
   const { chatHistory } = usePreviewChatStore();
-  const { 
+  const {
     workspaceAgent,
     currentSceneId,
-    hasUnsavedChanges, 
+    hasUnsavedChanges,
     isSubmitting,
-    initialize, 
+    initialize,
     setWorkspaceAgent,
     updateSceneInWorkspace,
     setCurrentSceneId,
@@ -316,19 +316,19 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
   const handleRemoveNode = (nodeId: string) => {
     if (!workingSceneGraph || !currentSceneId) return;
-    
+
     const newGraph = deepCopySceneGraph(workingSceneGraph);
     if (!newGraph) return;
 
     const subsceneName = nodeId.replace('subscene-', '');
-    
+
     // Remove subscene from subscenes array
     newGraph.subscenes = newGraph.subscenes.filter(s => s.name !== subsceneName);
-    
+
     // Remove all connections pointing to/from this subscene
     newGraph.subscenes.forEach(subscene => {
       if (subscene.connections) {
-        subscene.connections = subscene.connections.filter(c => 
+        subscene.connections = subscene.connections.filter(c =>
           c.to_subscene !== subsceneName && c.from_subscene !== subsceneName
         );
       }
@@ -340,7 +340,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
   const handleRemoveEdge = (edgeId: string) => {
     if (!workingSceneGraph || !currentSceneId) return;
-    
+
     const newGraph = deepCopySceneGraph(workingSceneGraph);
     if (!newGraph) return;
 
@@ -352,7 +352,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
     const fromSubscene = newGraph.subscenes.find(s => s.name === fromSubsceneName);
     if (fromSubscene && fromSubscene.connections) {
-      fromSubscene.connections = fromSubscene.connections.filter(c => 
+      fromSubscene.connections = fromSubscene.connections.filter(c =>
         c.to_subscene !== toSubsceneName
       );
     }
@@ -407,17 +407,17 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
     const subsceneName = nodeId.replace('subscene-', '');
     const subscene = newGraph.subscenes.find(s => s.name === subsceneName);
-    
+
     if (subscene) {
       subscene.name = formData.name;
       subscene.type = formData.type;
       subscene.mandatory = formData.mandatory;
       subscene.objective = formData.objective;
-      
+
       updateSceneInWorkspace(currentSceneId, newGraph);
     }
 
-    setNodes((nodes) => nodes.map((node) => 
+    setNodes((nodes) => nodes.map((node) =>
       node.id === nodeId ? { ...node, data: { ...node.data, label: formData.name, type: formData.type, mandatory: formData.mandatory, objective: formData.objective } } : node
     ));
   };
@@ -437,7 +437,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       if (connection) {
         connection.name = formData.name;
         connection.condition = formData.condition;
-        
+
         updateSceneInWorkspace(currentSceneId, newGraph);
       }
     }
@@ -460,22 +460,22 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (data.subscenes && data.subscenes.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        subscenes = data.subscenes;
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+      subscenes = data.subscenes;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     } else if (data.scenes && data.scenes.length > 0) {
-        // Handle Agent structure (list of scenes)
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-        if (data.scenes[0].subscenes) {
-             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-             subscenes = data.scenes[0].subscenes;
-        } else {
-             // Handle legacy where scenes = subscenes
-             // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-             subscenes = data.scenes;
-        }
+      // Handle Agent structure (list of scenes)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      if (data.scenes[0].subscenes) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        subscenes = data.scenes[0].subscenes;
+      } else {
+        // Handle legacy where scenes = subscenes
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+        subscenes = data.scenes;
+      }
     }
-    
+
     if (!subscenes || subscenes.length === 0) {
       return { nodes: [], edges: [] };
     }
@@ -509,23 +509,23 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     };
 
     const processSubscene = (subscene: typeof subscenes[0], index: number, offset: number) => {
-        const subsceneNodeId = `subscene-${subscene.name}`;
-        nodes.push({
-          id: subsceneNodeId,
-          type: 'subscene',
-          position: { 
-            x: offset, 
-            y: yPosition + index * nodeSpacing 
-          },
-          data: {
-            label: subscene.name || '',
-            type: subscene.type,
-            state: subscene.state,
-            mandatory: subscene.mandatory || false,
-            objective: subscene.objective || ''
-          }
-        });
-        subsceneNameToId[subscene.name || ''] = subsceneNodeId;
+      const subsceneNodeId = `subscene-${subscene.name}`;
+      nodes.push({
+        id: subsceneNodeId,
+        type: 'subscene',
+        position: {
+          x: offset,
+          y: yPosition + index * nodeSpacing
+        },
+        data: {
+          label: subscene.name || '',
+          type: subscene.type,
+          state: subscene.state,
+          mandatory: subscene.mandatory || false,
+          objective: subscene.objective || ''
+        }
+      });
+      subsceneNameToId[subscene.name || ''] = subsceneNodeId;
     };
 
     startSubscenes.forEach((s, i) => processSubscene(s, i, xOffsets.start));
@@ -534,11 +534,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
     subscenes.forEach((subscene) => {
       const subsceneNodeId = subsceneNameToId[subscene.name || ''];
-      
+
       if (subscene.connections) {
         subscene.connections.forEach((connection, connIndex) => {
           const targetNodeId = subsceneNameToId[connection.to_subscene || ''];
-          
+
           if (targetNodeId) {
             edges.push({
               id: `edge-${edgeId++}`,
@@ -571,7 +571,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                 whiteSpace: 'nowrap'
               },
               className: 'hover:stroke-opacity-100 hover:stroke-width-3 transition-all duration-200',
-              data: { 
+              data: {
                 offset: connIndex * 20,
                 from_subscene: subscene.name,
                 to_subscene: connection.to_subscene,
@@ -600,13 +600,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
   const handleModeChange = (newMode: 'edit' | 'preview') => {
     setMode(newMode);
-    
+
     if (newMode === 'preview') {
       enterPreviewMode();
-      
+
       // Initialize preview graph with current working graph
       if (workingSceneGraph) {
-          setPreviewModeSceneGraphData(workingSceneGraph);
+        setPreviewModeSceneGraphData(workingSceneGraph);
       }
     } else {
       setMode('edit');
@@ -646,37 +646,37 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
           name: scene.name || '',
           description: scene.description || undefined,
           graph: scene.subscenes.map((subscene) => ({
-             name: subscene.name || subscene.data?.label || '',
-             type: subscene.type || subscene.data?.type || 'normal',
-             state: subscene.state || subscene.data?.state || 'inactive',
-             description: subscene.data?.description || '',
-             mandatory: subscene.mandatory ?? subscene.data?.mandatory ?? false,
-             objective: subscene.objective ?? subscene.data?.objective ?? '',
-             connections: subscene.connections?.map((conn) => ({
-                 name: conn.name || '',
-                 condition: conn.condition,
-                 to_subscene: conn.to_subscene
-             })) || []
+            name: subscene.name || subscene.data?.label || '',
+            type: subscene.type || subscene.data?.type || 'normal',
+            state: subscene.state || subscene.data?.state || 'inactive',
+            description: subscene.data?.description || '',
+            mandatory: subscene.mandatory ?? subscene.data?.mandatory ?? false,
+            objective: subscene.objective ?? subscene.data?.objective ?? '',
+            connections: subscene.connections?.map((conn) => ({
+              name: conn.name || '',
+              condition: conn.condition,
+              to_subscene: conn.to_subscene
+            })) || []
           }))
         };
       });
 
       // 1. Single API Call to sync everything
       const updatedScenes = await updateAgentScenes(agentId, scenesPayload);
-      
+
       // 2. Mark everything as committed (update Original to match Workspace)
       // Ideally we should update originalAgent with the response from server (updatedScenes).
       // But updateAgentScenes only returns Scene[] (with updated IDs).
       // We might need to fetch full agent again to be perfectly safe, or just merge IDs.
       // For now, let's fetch full agent to be safe.
-      
+
       // Notify parent to refresh
       await onRefreshScenes(); // This now fetches full agent in App.tsx
-      
+
       // We don't strictly need to call markAsCommitted here if onRefreshScenes triggers initialization.
       // But markAsCommitted clears the dirty flag.
-      markAsCommitted(); 
-      
+      markAsCommitted();
+
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       console.error('Failed to submit changes:', error);
@@ -701,18 +701,17 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
           onCreateScene={handleCreateSceneModalOpen}
           onDeleteScene={handleDeleteScene}
         />
-        
+
         <div className="flex-1 overflow-hidden bg-dark-bg relative">
           <div
-            className={`absolute inset-0 transition-all duration-300 ease-in-out ${
-              mode === 'preview' ? 'right-96' : 'right-0'
-            }`}
+            className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
+              }`}
           >
             {mode === 'preview' && (
               <div className="absolute top-4 left-4 z-10 flex items-center space-x-2 px-4 py-2 bg-primary/20 border border-primary rounded-lg shadow-glow-sm">
                 <div className="relative">
-                  <div className="w-2 h-2 bg-red-500 rounded-full animate-ping absolute -left-1 -top-1"></div>
-                  <div className="w-2 h-2 bg-red-500 rounded-full relative"></div>
+                  <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute -left-1 -top-1"></div>
+                  <div className="w-2 h-2 bg-danger rounded-full relative"></div>
                 </div>
                 <span className="text-sm font-semibold text-white">Realtime Graph</span>
               </div>
@@ -724,7 +723,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               isSidebarCollapsed={isSidebarCollapsed}
               onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             />
-            
+
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -747,7 +746,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               <MiniMap />
               <Background />
             </ReactFlow>
-            
+
             {selectedElement && mode === 'edit' && (
               <EditPanel
                 key={`${selectedElement.type}-${selectedElement.id}`}

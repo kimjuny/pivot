@@ -13,27 +13,25 @@ interface SceneSidebarProps {
 
 function SceneSidebar({ scenes, selectedScene, isCollapsed, onSceneSelect, onToggleCollapse, onCreateScene, onDeleteScene }: SceneSidebarProps) {
   return (
-    <div 
-      className={`border-r border-dark-border bg-dark-bg overflow-hidden relative ${
-        isCollapsed ? 'w-0' : 'w-64'
-      } transition-all duration-300 ease-in-out`}
+    <div
+      className={`border-r border-dark-border bg-dark-bg overflow-hidden relative ${isCollapsed ? 'w-0' : 'w-64'
+        } transition-all duration-300 ease-in-out`}
     >
-      <div 
-        className={`p-4 overflow-y-auto h-full transition-opacity duration-150 ease-in-out ${
-          isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
-        }`}
+      <div
+        className={`p-4 overflow-y-auto h-full transition-opacity duration-150 ease-in-out ${isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
       >
         <h3 className="text-md font-semibold mb-3 text-dark-text-secondary tracking-tight">Scenes</h3>
         <div className="space-y-2">
           {scenes && scenes.map((scene, index) => (
-            <div 
+            <div
               key={`scene-${index}`}
               className="group"
             >
-              <div 
+              <div
                 onClick={() => onSceneSelect(scene)}
-                className={`p-3 rounded-lg cursor-pointer transition-all flex justify-between items-center ${selectedScene?.name === scene.name 
-                  ? 'bg-primary/20 border border-primary shadow-glow-sm' 
+                className={`p-3 rounded-lg cursor-pointer transition-all flex justify-between items-center ${selectedScene?.name === scene.name
+                  ? 'bg-primary/20 border border-primary shadow-glow-sm'
                   : 'bg-dark-bg-lighter border border-dark-border hover:bg-dark-border-light hover:border-dark-border'}`}
               >
                 <div className="font-medium text-dark-text-primary">{scene.name}</div>
@@ -42,7 +40,7 @@ function SceneSidebar({ scenes, selectedScene, isCollapsed, onSceneSelect, onTog
                     e.stopPropagation();
                     onDeleteScene(scene);
                   }}
-                  className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-500 transition-opacity p-1"
+                  className="opacity-0 group-hover:opacity-100 text-danger hover:text-danger-600 transition-opacity p-1"
                   title="Delete scene"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

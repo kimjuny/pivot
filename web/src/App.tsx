@@ -125,7 +125,7 @@ function App() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-dark-bg">
-        <div className="text-xl text-red-400 mb-4 font-medium">Error: {error}</div>
+        <div className="text-xl text-danger mb-4 font-medium">Error: {error}</div>
         <button
           onClick={() => void loadAgentDetails()}
           className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"

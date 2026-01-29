@@ -17,8 +17,8 @@ interface SubsceneNodeProps {
 function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
   const getTypeColor = (type: string): string => {
     switch (type) {
-      case 'start': return 'bg-dark-bg border-green-500 text-white';
-      case 'end': return 'bg-dark-bg border-red-500 text-white';
+      case 'start': return 'bg-dark-bg border-success text-white';
+      case 'end': return 'bg-dark-bg border-danger text-white';
       case 'normal': return 'bg-dark-bg border-primary text-white';
       default: return 'bg-dark-bg border-dark-border text-white';
     }

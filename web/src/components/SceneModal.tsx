@@ -112,7 +112,7 @@ function SceneModal({ isOpen, mode, initialData, onClose, onSave }: SceneModalPr
                 nativeLabel={false}
                 render={<div />}
               >
-                Scene Name <span className="text-red-400">*</span>
+                Scene Name <span className="text-danger">*</span>
               </Field.Label>
               <Input
                 value={formData.name}
@@ -141,8 +141,8 @@ function SceneModal({ isOpen, mode, initialData, onClose, onSave }: SceneModalPr
           </div>
 
           {error && (
-            <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-              <p className="text-sm text-red-400">{error}</p>
+            <div className="mt-4 p-3 bg-danger-100 border border-danger-300 rounded-lg">
+              <p className="text-sm text-danger">{error}</p>
             </div>
           )}
         </div>
