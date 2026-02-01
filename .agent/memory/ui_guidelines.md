@@ -193,6 +193,37 @@ Component files (*.tsx, *.css) (consumes only)
 - Buttons/links need `hover:` state (visual feedback)
 - Interactive states increase contrast: hover/active/focus more prominent than rest
 
+### Standard Navigation Hover Effect (`.nav-hover-effect`)
+
+For interactive elements in navigation bars and toolbars, use the `.nav-hover-effect` class defined in `index.css`. This provides a consistent, animated hover state that expands from the center of the element.
+
+**Implementation Details:**
+- Uses a pseudo-element (`::before`) that scales from 0 to 100% width/height on hover
+- Animation duration: 0.15s (fast, responsive feel)
+- Background color: `rgb(50, 50, 50)` (dark-border-light)
+- Border radius: 4px (matches rounded corners)
+- Respects `prefers-reduced-motion` for accessibility
+
+**Usage:**
+```tsx
+// ✅ Correct: Apply to interactive navigation elements
+<button className="nav-hover-effect px-2 py-1 rounded ...">
+  <Icon className="w-4 h-4" />
+  <span>Label</span>
+</button>
+
+// ✅ Correct: Apply to navigation links
+<a href="..." className="nav-hover-effect px-2 py-1 rounded ...">
+  Content
+</a>
+```
+
+**Sizing Consistency:**
+- Use `px-2 py-1` for compact navigation items (navigation bar)
+- Use `gap-1.5` for spacing between icon and text within items
+- Use `gap-1` or `gap-2` for spacing between navigation items
+- Maintain consistent height across all navigation elements
+
 ## Content & Copy
 
 - Active voice: "Install the CLI" not "The CLI will be installed"
