@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-from core.utils.logging_config import get_logger
+from app.utils.logging_config import get_logger
 
 # Get logger for this module
 logger = get_logger('llm')

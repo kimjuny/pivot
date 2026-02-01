@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from core.agent.base.stream import AgentResponseChunk
+    from app.orchestration.base.stream import AgentResponseChunk
 
 
 class AgentCreate(BaseModel):

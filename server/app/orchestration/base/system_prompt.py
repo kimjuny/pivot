@@ -2,8 +2,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.agent.plan.scene import Scene
-from core.agent.plan.subscene import Subscene
+from app.models.agent import Scene, Subscene
 
 
 class SystemPrompt:

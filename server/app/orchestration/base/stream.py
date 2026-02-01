@@ -1,9 +1,7 @@
 from enum import Enum
 
+from app.models.agent import Connection, Scene
 from pydantic import BaseModel
-
-from core.agent.plan.connection import Connection
-from core.agent.plan.scene import Scene
 
 
 class AgentResponseChunkType(str, Enum):

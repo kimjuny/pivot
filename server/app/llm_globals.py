@@ -1,5 +1,5 @@
 
-from core.llm.abstract_llm import AbstractLLM
+from app.llm.abstract_llm import AbstractLLM
 
 # Global registry for LLM instances
 # Key: model_name (e.g., "doubao", "glm-4"), Value: AbstractLLM instance

@@ -22,11 +22,10 @@ from app.api.models import router as models_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import init_db  # noqa: E402
+from app.llm.doubao_llm import DoubaoLLM  # noqa: E402
+from app.llm.glm_llm import GlmLLM  # noqa: E402
 from app.llm_globals import register_llm  # noqa: E402
-
-from core.llm.doubao_llm import DoubaoLLM  # noqa: E402
-from core.llm.glm_llm import GlmLLM  # noqa: E402
-from core.utils.logging_config import get_logger  # noqa: E402
+from app.utils.logging_config import get_logger  # noqa: E402
 
 # Configure logging before importing other modules
 logging.basicConfig(

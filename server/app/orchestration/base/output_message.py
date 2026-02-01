@@ -2,8 +2,7 @@ import json
 import re
 from typing import Any
 
-from core.agent.plan.connection import Connection
-from core.agent.plan.scene import Scene
+from app.models.agent import Connection, Scene
 
 
 class OutputMessage:

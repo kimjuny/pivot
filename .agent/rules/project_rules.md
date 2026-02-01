@@ -6,7 +6,8 @@ trigger: always_on
 
 ## Project Overview
 
-**Name**: pivot
+**Name**: Pivot
+**简介**: 这是一款Agent开发框架，与传统workflow式僵硬地一问一答Agent不同，Pivot的目的是让Agent在一些对话场景中围绕目的而展开更具策略性的对话方式（主动、被动），让Agent更像一个会自主思考的真人。
 
 ## Directory Structure
 

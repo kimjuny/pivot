@@ -1,7 +1,6 @@
 import json
 
-from core.agent.plan.scene import Scene
-from core.agent.plan.subscene import Subscene
+from app.models.agent import Scene, Subscene
 
 from .system_prompt import get_chat_prompt
 
