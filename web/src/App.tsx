@@ -69,13 +69,11 @@ function App() {
 
   /**
    * Load agent details when agentId changes.
-   * Also applies dark mode class to document body.
    */
   useEffect(() => {
     if (agentId) {
       void loadAgentDetails();
     }
-    document.body.classList.add('dark');
   }, [agentId, loadAgentDetails]);
 
   /**
@@ -113,10 +111,10 @@ function App() {
 
   if (isInitializing) {
     return (
-      <div className="flex items-center justify-center h-screen bg-dark-bg">
+      <div className="flex items-center justify-center h-screen bg-background">
         <div className="flex flex-col items-center space-y-4">
           <div className="spinner"></div>
-          <div className="text-lg text-dark-text-secondary font-medium">Loading agent details…</div>
+          <div className="text-lg text-muted-foreground font-medium">Loading agent details…</div>
         </div>
       </div>
     );
@@ -124,11 +122,11 @@ function App() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-dark-bg">
+      <div className="flex flex-col items-center justify-center h-screen bg-background">
         <div className="text-xl text-danger mb-4 font-medium">Error: {error}</div>
         <button
           onClick={() => void loadAgentDetails()}
-          className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+          className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Retry
         </button>
@@ -138,7 +136,7 @@ function App() {
 
   if (!agentId) {
     return (
-      <div className="min-h-screen bg-dark-bg text-dark-text-primary">
+      <div className="min-h-screen bg-background text-foreground">
         <Navigation />
         <AgentList />
       </div>
@@ -146,9 +144,9 @@ function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-dark-bg text-dark-text-primary">
+    <div className="h-screen flex flex-col bg-background text-foreground">
       <Navigation />
-      <div className="flex-1 bg-dark-bg overflow-hidden">
+      <div className="flex-1 bg-background overflow-hidden">
         <AgentDetail
           agent={agent}
           scenes={scenes}

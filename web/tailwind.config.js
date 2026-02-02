@@ -8,68 +8,90 @@ export default {
   theme: {
     extend: {
       colors: {
+        // shadcn CSS variable based colors
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
         primary: {
-          DEFAULT: 'rgb(24, 91, 233)',
-          50: 'rgba(24, 91, 233, 0.05)',
-          100: 'rgba(24, 91, 233, 0.1)',
-          200: 'rgba(24, 91, 233, 0.2)',
-          300: 'rgba(24, 91, 233, 0.3)',
-          400: 'rgba(24, 91, 233, 0.4)',
-          500: 'rgba(24, 91, 233, 0.5)',
-          600: 'rgba(24, 91, 233, 0.6)',
-          700: 'rgba(24, 91, 233, 0.7)',
-          800: 'rgba(24, 91, 233, 0.8)',
-          900: 'rgba(24, 91, 233, 0.9)',
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
         },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+        // Legacy custom colors (keep for backward compatibility)
         danger: {
-          DEFAULT: 'rgb(239, 68, 68)', // red-500
+          DEFAULT: 'rgb(239, 68, 68)',
           50: 'rgba(239, 68, 68, 0.05)',
           100: 'rgba(239, 68, 68, 0.1)',
           200: 'rgba(239, 68, 68, 0.2)',
           300: 'rgba(239, 68, 68, 0.3)',
           400: 'rgba(239, 68, 68, 0.4)',
           500: 'rgba(239, 68, 68, 0.5)',
-          600: 'rgb(220, 38, 38)', // red-600
-          700: 'rgb(185, 28, 28)', // red-700
+          600: 'rgb(220, 38, 38)',
+          700: 'rgb(185, 28, 28)',
           800: 'rgba(239, 68, 68, 0.8)',
           900: 'rgba(239, 68, 68, 0.9)',
         },
         warning: {
-          DEFAULT: 'rgb(234, 179, 8)', // yellow-500
+          DEFAULT: 'rgb(234, 179, 8)',
           50: 'rgba(234, 179, 8, 0.05)',
           100: 'rgba(234, 179, 8, 0.1)',
           200: 'rgba(234, 179, 8, 0.2)',
           300: 'rgba(234, 179, 8, 0.3)',
           400: 'rgba(234, 179, 8, 0.4)',
           500: 'rgba(234, 179, 8, 0.5)',
-          600: 'rgb(202, 138, 4)', // yellow-600
-          700: 'rgb(161, 98, 7)', // yellow-700
+          600: 'rgb(202, 138, 4)',
+          700: 'rgb(161, 98, 7)',
           800: 'rgba(234, 179, 8, 0.8)',
           900: 'rgba(234, 179, 8, 0.9)',
         },
         success: {
-          DEFAULT: 'rgb(34, 197, 94)', // green-500
+          DEFAULT: 'rgb(34, 197, 94)',
           50: 'rgba(34, 197, 94, 0.05)',
           100: 'rgba(34, 197, 94, 0.1)',
           200: 'rgba(34, 197, 94, 0.2)',
           300: 'rgba(34, 197, 94, 0.3)',
           400: 'rgba(34, 197, 94, 0.4)',
           500: 'rgba(34, 197, 94, 0.5)',
-          600: 'rgb(22, 163, 74)', // green-600
-          700: 'rgb(21, 128, 61)', // green-700
+          600: 'rgb(22, 163, 74)',
+          700: 'rgb(21, 128, 61)',
           800: 'rgba(34, 197, 94, 0.8)',
           900: 'rgba(34, 197, 94, 0.9)',
         },
         info: {
-          DEFAULT: 'rgb(59, 130, 246)', // blue-500
+          DEFAULT: 'rgb(59, 130, 246)',
           50: 'rgba(59, 130, 246, 0.05)',
           100: 'rgba(59, 130, 246, 0.1)',
           200: 'rgba(59, 130, 246, 0.2)',
           300: 'rgba(59, 130, 246, 0.3)',
           400: 'rgba(59, 130, 246, 0.4)',
           500: 'rgba(59, 130, 246, 0.5)',
-          600: 'rgb(37, 99, 235)', // blue-600
-          700: 'rgb(29, 78, 216)', // blue-700
+          600: 'rgb(37, 99, 235)',
+          700: 'rgb(29, 78, 216)',
           800: 'rgba(59, 130, 246, 0.8)',
           900: 'rgba(59, 130, 246, 0.9)',
         },
@@ -90,6 +112,11 @@ export default {
             muted: '#94a3b8',
           },
         },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
       spacing: {
         '18': '4.5rem',
@@ -119,5 +146,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [require("tailwindcss-animate")],
 }

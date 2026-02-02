@@ -1,8 +1,18 @@
 import { Github, Inbox, ChevronDown, Bot } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { getAgents } from '../utils/api';
 import type { Agent } from '../types';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import { ModeToggle } from '@/components/ui/mode-toggle';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 
 /**
  * Navigation bar component.
@@ -14,8 +24,6 @@ function Navigation() {
   const { agentId } = useParams<{ agentId?: string }>();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
-  const [isAgentDropdownOpen, setIsAgentDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   /**
    * Fetch all agents for the dropdown selector.
@@ -40,46 +48,8 @@ function Navigation() {
     }
   }, [agentId]);
 
-  /**
-   * Close dropdown when clicking outside.
-   */
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsAgentDropdownOpen(false);
-      }
-    };
-
-    if (isAgentDropdownOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-      };
-    }
-  }, [isAgentDropdownOpen]);
-
-  /**
-   * Handle keyboard navigation for interactive elements.
-   * Ensures buttons respond to Enter and Space keys.
-   */
-  const handleKeyDown = (e: React.KeyboardEvent, action: () => void) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      action();
-    }
-  };
-
-  const handleInboxClick = () => {
-    // TODO: Implement inbox functionality
-  };
-
-  const handleUserMenuClick = () => {
-    // TODO: Implement user menu functionality
-  };
-
   const handleAgentSelect = (agent: Agent) => {
     navigate(`/agent/${agent.id}`);
-    setIsAgentDropdownOpen(false);
   };
 
   const handleNavigateToAgents = () => {
@@ -87,13 +57,13 @@ function Navigation() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 bg-dark-bg border-b border-dark-border">
+    <nav className="sticky top-0 z-50 bg-background border-b border-border">
       <div className="flex items-center justify-between h-12 px-4 sm:px-6 lg:px-8">
         {/* Left: Logo */}
         <div className="flex items-center">
           <button
             onClick={handleNavigateToAgents}
-            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg rounded"
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded"
             aria-label="Go to home"
           >
             <img
@@ -107,134 +77,144 @@ function Navigation() {
         {/* Center: Navigation Items */}
         <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1">
           {/* Agents navigation with optional agent selector dropdown */}
-          <div className="relative flex items-center" ref={dropdownRef}>
+          <div className="relative flex items-center gap-1">
             {/* Icon + Agents: Always navigates to agents list */}
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleNavigateToAgents}
-              onKeyDown={(e) => handleKeyDown(e, handleNavigateToAgents)}
-              className="nav-hover-effect flex items-center gap-1.5 px-2 py-1 text-sm font-medium text-dark-text-primary rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+              className="flex items-center gap-1.5"
               aria-label="Go to Agents list"
             >
               <Bot className="w-4 h-4" aria-hidden="true" />
               <span>Agents</span>
-            </button>
+            </Button>
 
-            {/* Separator: Independent visual divider, not interactive */}
+            {/* Separator and agent name dropdown when on agent detail page */}
             {agentId && currentAgent && (
-              <span className="text-dark-text-secondary text-sm select-none" aria-hidden="true">/</span>
-            )}
+              <>
+                <span className="text-muted-foreground text-sm select-none" aria-hidden="true">/</span>
 
-            {/* Agent name with dropdown trigger: Only shows on agent detail page */}
-            {agentId && currentAgent && (
-              <div className="relative">
-                <button
-                  onClick={() => setIsAgentDropdownOpen(!isAgentDropdownOpen)}
-                  onKeyDown={(e) => handleKeyDown(e, () => setIsAgentDropdownOpen(!isAgentDropdownOpen))}
-                  className="nav-hover-effect flex items-center gap-1.5 px-2 py-1 text-sm font-medium text-dark-text-primary rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
-                  aria-label={`Current agent: ${currentAgent.name}. Click to switch agent`}
-                  aria-expanded={isAgentDropdownOpen}
-                  aria-haspopup="listbox"
-                >
-                  <span>{currentAgent.name}</span>
-                  <ChevronDown className={`w-4 h-4 transition-transform ${isAgentDropdownOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-                </button>
-
-                {/* Agent Dropdown: Positioned relative to agent name button */}
-                {isAgentDropdownOpen && agents.length > 0 && (
-                  <div className="absolute top-full mt-2 left-0 w-64 bg-dark-bg border border-dark-border rounded-lg shadow-lg overflow-hidden">
-                    <div className="max-h-96 overflow-y-auto">
-                      {agents.map((agent) => (
-                        <button
-                          key={agent.id}
-                          onClick={() => handleAgentSelect(agent)}
-                          className={`w-full flex items-center space-x-3 px-4 py-3 text-left hover:bg-dark-border-light transition-colors ${agent.id === parseInt(agentId) ? 'bg-dark-border-light' : ''}`}
-                          aria-label={`Switch to agent: ${agent.name}`}
-                        >
-                          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                            <Bot className="w-4 h-4 text-primary" aria-hidden="true" />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="flex items-center gap-1.5"
+                      aria-label={`Current agent: ${currentAgent.name}. Click to switch agent`}
+                    >
+                      <span>{currentAgent.name}</span>
+                      <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-64 max-h-96 overflow-y-auto">
+                    {agents.map((agent) => (
+                      <DropdownMenuItem
+                        key={agent.id}
+                        onClick={() => handleAgentSelect(agent)}
+                        className={`flex items-center gap-3 py-2 ${agent.id === parseInt(agentId) ? 'bg-accent' : ''}`}
+                      >
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Bot className="w-4 h-4 text-primary" aria-hidden="true" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">
+                            {agent.name}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-dark-text-primary truncate">
-                              {agent.name}
+                          {agent.description && (
+                            <div className="text-xs text-muted-foreground truncate">
+                              {agent.description}
                             </div>
-                            {agent.description && (
-                              <div className="text-xs text-dark-text-secondary truncate">
-                                {agent.description}
-                              </div>
-                            )}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </>
             )}
           </div>
 
+          <Separator orientation="vertical" className="h-4 mx-2" />
+
           {/* Future navigation items - disabled for now */}
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             disabled
-            className="px-2 py-1 text-sm font-medium text-dark-text-secondary cursor-not-allowed opacity-50 rounded"
+            className="opacity-50"
             aria-label="Skills (coming soon)"
           >
             Skills
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             disabled
-            className="px-2 py-1 text-sm font-medium text-dark-text-secondary cursor-not-allowed opacity-50 rounded"
+            className="opacity-50"
             aria-label="MCP (coming soon)"
           >
             MCP
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             disabled
-            className="px-2 py-1 text-sm font-medium text-dark-text-secondary cursor-not-allowed opacity-50 rounded"
+            className="opacity-50"
             aria-label="Tools (coming soon)"
           >
             Tools
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             disabled
-            className="px-2 py-1 text-sm font-medium text-dark-text-secondary cursor-not-allowed opacity-50 rounded"
+            className="opacity-50"
             aria-label="Knowledge (coming soon)"
           >
             Knowledge
-          </button>
+          </Button>
         </div>
 
         {/* Right: User Actions */}
         <div className="flex items-center gap-2">
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="nav-hover-effect flex items-center gap-1.5 text-dark-text-secondary hover:text-dark-text-primary transition-colors px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
-            aria-label="View on GitHub, 23.4K stars"
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
           >
-            <Github className="w-4 h-4" aria-hidden="true" />
-            <span className="text-sm font-medium">23.4K</span>
-          </a>
+            <a
+              href="https://github.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5"
+              aria-label="View on GitHub, 23.4K stars"
+            >
+              <Github className="w-4 h-4" aria-hidden="true" />
+              <span>23.4K</span>
+            </a>
+          </Button>
 
-          <button
-            onClick={handleInboxClick}
-            onKeyDown={(e) => handleKeyDown(e, handleInboxClick)}
-            className="nav-hover-effect flex items-center text-dark-text-secondary hover:text-dark-text-primary transition-colors px-2 py-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="View notifications"
           >
             <Inbox className="w-4 h-4" aria-hidden="true" />
-          </button>
+          </Button>
 
-          <button
-            onClick={handleUserMenuClick}
-            onKeyDown={(e) => handleKeyDown(e, handleUserMenuClick)}
-            className="flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg rounded-full"
+          <ModeToggle />
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full"
             aria-label="User menu"
           >
-            <div className="w-8 h-8 rounded-full bg-dark-border-light flex items-center justify-center text-dark-text-secondary hover:bg-dark-border transition-colors">
+            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
               <span className="text-sm font-medium">U</span>
             </div>
-          </button>
+          </Button>
         </div>
       </div>
     </nav>
@@ -242,4 +222,3 @@ function Navigation() {
 }
 
 export default Navigation;
-

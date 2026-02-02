@@ -1,13 +1,21 @@
-import React, { useState, useEffect, useRef, MouseEvent } from 'react';
+import { useState, useEffect, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, User, MoreHorizontal, Search } from 'lucide-react';
-import { Input } from '@base-ui/react/input';
-import { Button } from '@base-ui/react/button';
+import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
 import AgentModal from './AgentModal';
 import ConfirmationModal from './ConfirmationModal';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 /**
  * Agent list component.
@@ -21,13 +29,11 @@ function AgentList() {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
-  const [menuOpenAgentId, setMenuOpenAgentId] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     agent: Agent | null;
   }>({ isOpen: false, agent: null });
-  const menuRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   /**
@@ -37,24 +43,6 @@ function AgentList() {
   useEffect(() => {
     void loadAgents();
   }, []);
-
-  /**
-   * Close menu when clicking outside.
-   */
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpenAgentId(null);
-      }
-    };
-
-    if (menuOpenAgentId !== null) {
-      document.addEventListener('mousedown', handleClickOutside as unknown as EventListener);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside as unknown as EventListener);
-      };
-    }
-  }, [menuOpenAgentId]);
 
   /**
    * Fetch agents from API and update state.
@@ -93,7 +81,6 @@ function AgentList() {
     setModalMode('edit');
     setEditingAgent(agent);
     setIsModalOpen(true);
-    setMenuOpenAgentId(null);
   };
 
   /**
@@ -103,7 +90,6 @@ function AgentList() {
   const handleDeleteAgent = (agent: Agent, e: MouseEvent) => {
     e.stopPropagation();
     setDeleteConfirmation({ isOpen: true, agent });
-    setMenuOpenAgentId(null);
   };
 
   /**
@@ -116,10 +102,11 @@ function AgentList() {
     try {
       await deleteAgent(deleteConfirmation.agent.id);
       setDeleteConfirmation({ isOpen: false, agent: null });
+      toast.success('Agent deleted successfully');
       await loadAgents();
     } catch (err) {
       const error = err as Error;
-      alert(`Failed to delete agent: ${error.message}`);
+      toast.error(`Failed to delete agent: ${error.message}`);
       setDeleteConfirmation({ isOpen: false, agent: null });
     }
   };
@@ -143,9 +130,11 @@ function AgentList() {
   }) => {
     if (modalMode === 'create') {
       const newAgent = await createAgent(agentData);
+      toast.success('Agent created successfully');
       navigate(`/agent/${newAgent.id}`);
     } else if (modalMode === 'edit' && editingAgent) {
       await updateAgent(editingAgent.id, agentData);
+      toast.success('Agent updated successfully');
       await loadAgents();
     }
   };
@@ -175,10 +164,10 @@ function AgentList() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-dark-bg">
+      <div className="flex items-center justify-center h-screen bg-background">
         <div className="flex flex-col items-center space-y-4">
           <div className="spinner"></div>
-          <div className="text-lg text-dark-text-secondary font-medium">Loading…</div>
+          <div className="text-lg text-muted-foreground font-medium">Loading…</div>
         </div>
       </div>
     );
@@ -186,29 +175,29 @@ function AgentList() {
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-dark-bg">
-        <div className="text-xl text-danger mb-4 font-medium">Error: {error}</div>
-        <button
+      <div className="flex flex-col items-center justify-center h-screen bg-background">
+        <div className="text-xl text-destructive mb-4 font-medium">Error: {error}</div>
+        <Button
           onClick={() => void loadAgents()}
-          className="px-6 py-3 btn-accent rounded-lg font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+          className="font-medium"
         >
           Retry
-        </button>
+        </Button>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 bg-dark-bg text-dark-text-primary">
+    <div className="flex-1 bg-background text-foreground">
       <div className="w-full px-4 py-8">
         <div className="flex items-center justify-between mb-8 gap-4">
           <div className="flex-1 max-w-md relative">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-text-muted pointer-events-none" aria-hidden="true" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
             <Input
               placeholder="Search agents…"
               value={searchQuery}
-              onValueChange={(value) => setSearchQuery(value)}
-              className="h-10 w-full pl-10 pr-4 rounded-md border border-gray-200 bg-dark-bg-lighter text-base text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary"
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
               autoComplete="off"
               inputMode="search"
               name="search"
@@ -217,7 +206,7 @@ function AgentList() {
           </div>
           <Button
             onClick={handleCreateAgent}
-            className="flex items-center space-x-2 h-10 px-4 btn-accent rounded-md font-medium whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
+            className="flex items-center gap-2"
             aria-label="Create a new agent"
           >
             <Plus className="w-5 h-5" aria-hidden="true" />
@@ -227,106 +216,97 @@ function AgentList() {
 
         {filteredAgents.length === 0 && agents.length > 0 ? (
           <div className="text-center py-16">
-            <div className="text-6xl text-dark-text-muted mb-4">🔍</div>
-            <h3 className="text-xl font-semibold text-dark-text-secondary mb-2">No Results</h3>
-            <p className="text-dark-text-muted">
+            <div className="text-6xl text-muted-foreground mb-4">🔍</div>
+            <h3 className="text-xl font-semibold text-foreground mb-2">No Results</h3>
+            <p className="text-muted-foreground">
               Try adjusting your search query
             </p>
           </div>
         ) : agents.length === 0 ? (
           <div className="text-center py-16">
-            <div className="text-6xl text-dark-text-muted mb-4">📭</div>
-            <h3 className="text-xl font-semibold text-dark-text-secondary mb-2">No Agents</h3>
-            <p className="text-dark-text-muted mb-6">
+            <div className="text-6xl text-muted-foreground mb-4">📭</div>
+            <h3 className="text-xl font-semibold text-foreground mb-2">No Agents</h3>
+            <p className="text-muted-foreground mb-6">
               Click the "Create Agent" button to create your first agent
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredAgents.map((agent) => (
-              <div
+              <Card
                 key={agent.id}
                 onClick={() => handleAgentClick(agent)}
                 onKeyDown={(e) => handleCardKeyDown(e, agent)}
-                className="card-subtle rounded-xl p-6 cursor-pointer transition-shadow duration-200 motion-reduce:transition-none relative group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg"
-                onMouseEnter={() => setMenuOpenAgentId(null)}
+                className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:scale-[1.02] motion-reduce:transition-none motion-reduce:hover:scale-100 relative group"
                 role="button"
                 tabIndex={0}
                 aria-label={`View agent ${agent.name}`}
               >
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center space-x-3 min-w-0 flex-1">
-                    <div className="w-12 h-12 rounded-lg bg-primary/20 flex items-center justify-center p-2 flex-shrink-0">
-                      <User className="w-6 h-6 text-primary" aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-lg font-semibold text-dark-text-primary truncate">{agent.name}</h3>
-                      <div className="flex items-center space-x-2 mt-1">
-                        <span className={`status-dot ${agent.is_active ? 'active' : ''}`} aria-hidden="true"></span>
-                        <span className="text-sm text-dark-text-secondary">
-                          {agent.is_active ? 'Active' : 'Inactive'}
-                        </span>
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
+                      <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center p-2 flex-shrink-0">
+                        <User className="w-5 h-5 text-primary" aria-hidden="true" />
                       </div>
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-lg truncate">{agent.name}</CardTitle>
+                        <div className="flex items-center space-x-2 mt-1">
+                          <span className={`w-2 h-2 rounded-full ${agent.is_active ? 'bg-primary animate-pulse' : 'bg-muted-foreground'}`} aria-hidden="true"></span>
+                          <span className="text-sm text-muted-foreground">
+                            {agent.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                      <span className="text-xs text-muted-foreground">
+                        ID: {agent.id}
+                      </span>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Agent options"
+                          >
+                            <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenuItem onClick={(e) => handleEditAgent(agent, e as unknown as MouseEvent)}>
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => handleDeleteAgent(agent, e as unknown as MouseEvent)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
-                  <div className="relative flex-shrink-0">
-                    <div className="text-xs text-dark-text-muted">
-                      ID: {agent.id}
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-muted-foreground">Model:</span>
+                      <span className="font-medium">{agent.model_name || 'N/A'}</span>
                     </div>
-                    <button
-                      onClick={(e: MouseEvent) => {
-                        e.stopPropagation();
-                        setMenuOpenAgentId(menuOpenAgentId === agent.id ? null : agent.id);
-                      }}
-                      className="nav-hover-effect absolute -right-2 -top-1 p-1 rounded text-dark-text-secondary hover:text-dark-text-primary transition-colors motion-reduce:transition-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-dark-bg-lighter"
-                      aria-label="Agent options"
-                    >
-                      <MoreHorizontal className="w-5 h-5 text-dark-text-secondary" aria-hidden="true" />
-                    </button>
-                    {menuOpenAgentId === agent.id && (
-                      <div
-                        ref={menuRef}
-                        className="absolute right-0 top-6 z-10 bg-dark-bg-lighter border border-dark-border rounded-lg shadow-card-lg py-1 min-w-[120px]"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          onClick={(e) => handleEditAgent(agent, e)}
-                          className="w-full px-4 py-2 text-left text-sm text-dark-text-primary hover:bg-dark-border-light transition-colors motion-reduce:transition-none flex items-center space-x-2 focus-visible:outline-none focus-visible:bg-dark-border-light"
-                        >
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleDeleteAgent(agent, e);
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-danger hover:bg-danger hover:text-white transition-colors motion-reduce:transition-none flex items-center space-x-2 focus-visible:outline-none focus-visible:bg-danger focus-visible:text-white"
-                        >
-                          <span>Delete</span>
-                        </button>
-                      </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-muted-foreground">Updated:</span>
+                      <span className="font-medium">{formatTimestamp(agent.updated_at)}</span>
+                    </div>
+                    {agent.description && (
+                      <CardDescription className="line-clamp-2 break-words mt-2">
+                        {agent.description}
+                      </CardDescription>
                     )}
                   </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2 text-sm">
-                    <span className="text-dark-text-secondary">Model:</span>
-                    <span className="text-dark-text-primary font-medium">{agent.model_name || 'N/A'}</span>
-                  </div>
-
-                  <div className="flex items-center space-x-2 text-sm">
-                    <span className="text-dark-text-secondary">Updated:</span>
-                    <span className="text-dark-text-primary font-medium">{formatTimestamp(agent.updated_at)}</span>
-                  </div>
-
-                  {agent.description && (
-                    <div className="flex items-start space-x-2 text-sm">
-                      <p className="text-dark-text-secondary line-clamp-2 break-words">{agent.description}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
@@ -360,4 +340,3 @@ function AgentList() {
 }
 
 export default AgentList;
-
