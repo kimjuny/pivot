@@ -9,6 +9,7 @@ import {
     Plus,
     X,
 } from 'lucide-react';
+import { useSidebar } from '@/hooks/use-sidebar';
 import {
     Sidebar,
     SidebarContent,
@@ -65,6 +66,7 @@ function AgentDetailSidebar({
     onOpenBuildChat,
     onAgentUpdate,
 }: AgentDetailSidebarProps) {
+    const { state, setOpen } = useSidebar();
     const [isScenesOpen, setIsScenesOpen] = useState(true);
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isMCPOpen, setIsMCPOpen] = useState(false);
@@ -86,11 +88,33 @@ function AgentDetailSidebar({
         }
     };
 
+    /**
+     * Handle section icon click in collapsed mode.
+     * Expands sidebar and opens the clicked section while closing others.
+     */
+    const handleSectionClick = (section: 'scenes' | 'tools' | 'mcp') => {
+        if (state === 'collapsed') {
+            // Expand sidebar first
+            setOpen(true);
+            // Delay section state update to ensure sidebar expansion completes
+            setTimeout(() => {
+                setIsScenesOpen(section === 'scenes');
+                setIsToolsOpen(section === 'tools');
+                setIsMCPOpen(section === 'mcp');
+            }, 100);
+        } else {
+            // In expanded mode, toggle section immediately
+            setIsScenesOpen(section === 'scenes');
+            setIsToolsOpen(section === 'tools');
+            setIsMCPOpen(section === 'mcp');
+        }
+    };
+
     return (
         <>
             <Sidebar collapsible="icon" className="border-r border-sidebar-border">
                 {/* Agent Header */}
-                <SidebarHeader className="p-3">
+                <SidebarHeader className="p-2">
                     <SidebarMenu>
                         <SidebarMenuItem>
                             <SidebarMenuButton
@@ -120,16 +144,35 @@ function AgentDetailSidebar({
 
                 <SidebarSeparator />
 
-                <SidebarContent>
+                <SidebarContent className="gap-0.5 pt-2">
                     {/* Scenes Section */}
                     <Collapsible
                         open={isScenesOpen}
                         onOpenChange={setIsScenesOpen}
                         className="group/collapsible"
                     >
-                        <SidebarGroup>
-                            <SidebarGroupLabel asChild>
-                                <CollapsibleTrigger className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent rounded-md transition-colors">
+                        <SidebarGroup className="py-0">
+                            {/* Icon button for collapsed mode */}
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('scenes')}
+                                        tooltip="Scenes"
+                                        isActive={isScenesOpen}
+                                        className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Layers className="size-4" />
+                                        <span>Scenes</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            {/* Full header for expanded mode */}
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('scenes')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
                                     <Layers className="size-4" />
                                     <span className="flex-1 text-left">Scenes</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent text-sidebar-accent-foreground">
@@ -138,7 +181,7 @@ function AgentDetailSidebar({
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
-                            <CollapsibleContent>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
                                     <SidebarMenu>
                                         {scenes.map((scene) => (
@@ -148,6 +191,7 @@ function AgentDetailSidebar({
                                                     onClick={() => onSceneSelect(scene)}
                                                     tooltip={scene.name}
                                                     size="sm"
+                                                    className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
                                                 >
                                                     <span className="truncate">{scene.name}</span>
                                                 </SidebarMenuButton>
@@ -167,7 +211,7 @@ function AgentDetailSidebar({
                                         <SidebarMenuItem>
                                             <SidebarMenuButton
                                                 onClick={onCreateScene}
-                                                className="border border-dashed border-sidebar-border hover:border-sidebar-primary hover:text-sidebar-primary"
+                                                className="border border-dashed border-sidebar-border text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent hover:border-sidebar-primary"
                                                 size="sm"
                                             >
                                                 <Plus className="size-3.5" />
@@ -186,9 +230,28 @@ function AgentDetailSidebar({
                         onOpenChange={setIsToolsOpen}
                         className="group/collapsible"
                     >
-                        <SidebarGroup>
-                            <SidebarGroupLabel asChild>
-                                <CollapsibleTrigger className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent rounded-md transition-colors">
+                        <SidebarGroup className="py-0">
+                            {/* Icon button for collapsed mode */}
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('tools')}
+                                        tooltip="Tools"
+                                        isActive={isToolsOpen}
+                                        className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Wrench className="size-4" />
+                                        <span>Tools</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            {/* Full header for expanded mode */}
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('tools')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
@@ -197,7 +260,7 @@ function AgentDetailSidebar({
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
-                            <CollapsibleContent>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
                                 <SidebarGroupContent>
                                     <div className="px-2 py-3 text-xs text-muted-foreground text-center">
                                         Tools management coming soon…
@@ -213,9 +276,28 @@ function AgentDetailSidebar({
                         onOpenChange={setIsMCPOpen}
                         className="group/collapsible"
                     >
-                        <SidebarGroup>
-                            <SidebarGroupLabel asChild>
-                                <CollapsibleTrigger className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent rounded-md transition-colors">
+                        <SidebarGroup className="py-0">
+                            {/* Icon button for collapsed mode */}
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('mcp')}
+                                        tooltip="MCP"
+                                        isActive={isMCPOpen}
+                                        className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Plug className="size-4" />
+                                        <span>MCP</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            {/* Full header for expanded mode */}
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('mcp')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
                                     <Plug className="size-4" />
                                     <span className="flex-1 text-left">MCP</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
@@ -224,7 +306,7 @@ function AgentDetailSidebar({
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
-                            <CollapsibleContent>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
                                 <SidebarGroupContent>
                                     <div className="px-2 py-3 text-xs text-muted-foreground text-center">
                                         MCP integration coming soon…

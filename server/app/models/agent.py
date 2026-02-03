@@ -83,6 +83,9 @@ class Scene(SQLModel, table=True):
     @property
     def state(self) -> SceneState:
         """Get runtime state of the scene."""
+        # Lazy initialization for PrivateAttr compatibility with SQLModel
+        if not hasattr(self, "_state"):
+            object.__setattr__(self, "_state", SceneState.INACTIVE)
         return self._state
 
     @property
@@ -92,11 +95,11 @@ class Scene(SQLModel, table=True):
 
     def activate(self) -> None:
         """Set the scene state to active."""
-        self._state = SceneState.ACTIVE
+        object.__setattr__(self, "_state", SceneState.ACTIVE)
 
     def deactivate(self) -> None:
         """Set the scene state to inactive."""
-        self._state = SceneState.INACTIVE
+        object.__setattr__(self, "_state", SceneState.INACTIVE)
 
     def add_subscene(self, subscene: "Subscene") -> None:
         """Add a subscene to this scene.
@@ -115,7 +118,7 @@ class Scene(SQLModel, table=True):
         return {
             "name": self.name,
             "identification_condition": self.identification_condition,
-            "state": self._state.value,
+            "state": (self._state if hasattr(self, "_state") else SceneState.INACTIVE).value,
             "subscenes": [ss.to_dict() for ss in self.subscenes],
         }
 
@@ -133,7 +136,7 @@ class Scene(SQLModel, table=True):
             name=data.get("name", ""),
             description=data.get("identification_condition", ""),
         )
-        scene._state = SceneState(data.get("state", "inactive").lower())
+        object.__setattr__(scene, "_state", SceneState(data.get("state", "inactive").lower()))
 
         # Create subscenes from dict data
         if data.get("subscenes"):
@@ -181,12 +184,16 @@ class Subscene(SQLModel, table=True):
     @property
     def connections(self) -> list["Connection"]:
         """Get list of outgoing connections from this subscene."""
+        # Lazy initialization for PrivateAttr compatibility with SQLModel
+        if not hasattr(self, "_connections"):
+            object.__setattr__(self, "_connections", [])
         return self._connections
 
     @connections.setter
     def connections(self, value: list["Connection"]) -> None:
         """Set list of outgoing connections."""
-        self._connections = value
+        # Use object.__setattr__ to bypass property and set the private attr directly
+        object.__setattr__(self, "_connections", value)
 
     @property
     def subscene_type(self) -> SubsceneType:
@@ -207,6 +214,9 @@ class Subscene(SQLModel, table=True):
         Args:
             connection: The connection to add.
         """
+        # Lazy initialization for PrivateAttr compatibility with SQLModel
+        if not hasattr(self, "_connections"):
+            object.__setattr__(self, "_connections", [])
         self._connections.append(connection)
 
     def to_dict(self) -> dict[str, Any]:
@@ -221,7 +231,7 @@ class Subscene(SQLModel, table=True):
             "mandatory": self.mandatory,
             "objective": self.objective or "",
             "state": self.state,
-            "connections": [conn.to_dict() for conn in self._connections],
+            "connections": [conn.to_dict() for conn in (self._connections if hasattr(self, "_connections") else [])],
         }
 
     @classmethod
@@ -241,11 +251,13 @@ class Subscene(SQLModel, table=True):
             mandatory=data.get("mandatory", False),
             objective=data.get("objective"),
         )
-        # Process connections
+        # Process connections - use object.__setattr__ for PrivateAttr
         if data.get("connections"):
-            subscene._connections = [
-                Connection.from_dict(conn_data) for conn_data in data["connections"]
-            ]
+            object.__setattr__(
+                subscene,
+                "_connections",
+                [Connection.from_dict(conn_data) for conn_data in data["connections"]],
+            )
         return subscene
 
 
