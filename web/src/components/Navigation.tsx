@@ -1,4 +1,4 @@
-import { Github, Inbox, ChevronDown, Bot } from 'lucide-react';
+import { Github, Inbox, ChevronDown, Bot, ArrowLeft } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { getAgents } from '../utils/api';
@@ -23,6 +23,7 @@ function Navigation() {
   const navigate = useNavigate();
   const { agentId } = useParams<{ agentId?: string }>();
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [isAgentsButtonHovered, setIsAgentsButtonHovered] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
 
   /**
@@ -83,10 +84,32 @@ function Navigation() {
               variant="ghost"
               size="sm"
               onClick={handleNavigateToAgents}
+              onMouseEnter={() => setIsAgentsButtonHovered(true)}
+              onMouseLeave={() => setIsAgentsButtonHovered(false)}
               className="flex items-center gap-1.5"
               aria-label="Go to Agents list"
             >
-              <Bot className="w-4 h-4" aria-hidden="true" />
+              {/* Overlapping icons with fade + rotation transition */}
+              <div className="relative w-4 h-4">
+                {/* Bot icon - fades out and rotates on hover */}
+                <Bot
+                  className={`absolute inset-0 w-4 h-4 transition-all duration-300 ${agentId && isAgentsButtonHovered
+                    ? 'opacity-0 rotate-180'
+                    : 'opacity-100 rotate-0'
+                    }`}
+                  aria-hidden="true"
+                />
+                {/* ArrowLeft icon - fades in from opposite rotation on hover */}
+                {agentId && (
+                  <ArrowLeft
+                    className={`absolute inset-0 w-4 h-4 transition-all duration-300 ${isAgentsButtonHovered
+                      ? 'opacity-100 rotate-0'
+                      : 'opacity-0 rotate-180'
+                      }`}
+                    aria-hidden="true"
+                  />
+                )}
+              </div>
               <span>Agents</span>
             </Button>
 
@@ -107,22 +130,22 @@ function Navigation() {
                       <ChevronDown className="w-4 h-4" aria-hidden="true" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-64 max-h-96 overflow-y-auto">
+                  <DropdownMenuContent align="start" className="w-48 max-h-96 overflow-y-auto p-0.5">
                     {agents.map((agent) => (
                       <DropdownMenuItem
                         key={agent.id}
                         onClick={() => handleAgentSelect(agent)}
-                        className={`flex items-center gap-3 py-2 ${agent.id === parseInt(agentId) ? 'bg-accent' : ''}`}
+                        className={`flex items-center gap-2 py-1.5 my-0.5 min-h-[44px] ${agent.id === parseInt(agentId) ? 'bg-accent' : ''}`}
                       >
-                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                          <Bot className="w-4 h-4 text-primary" aria-hidden="true" />
+                        <div className="w-6 h-6 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                          <Bot className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <div className="text-xs font-medium truncate">
                             {agent.name}
                           </div>
                           {agent.description && (
-                            <div className="text-xs text-muted-foreground truncate">
+                            <div className="text-[11px] text-muted-foreground truncate leading-tight">
                               {agent.description}
                             </div>
                           )}
