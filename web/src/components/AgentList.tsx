@@ -9,7 +9,7 @@ import AgentModal from './AgentModal';
 import ConfirmationModal from './ConfirmationModal';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -206,11 +206,12 @@ function AgentList() {
           </div>
           <Button
             onClick={handleCreateAgent}
+            size="sm"
             className="flex items-center gap-2"
             aria-label="Create a new agent"
           >
-            <Plus className="w-5 h-5" aria-hidden="true" />
-            <span>Create Agent</span>
+            <Plus className="w-4 h-4" aria-hidden="true" />
+            <span>New Agent</span>
           </Button>
         </div>
 
@@ -231,81 +232,72 @@ function AgentList() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {filteredAgents.map((agent) => (
               <Card
                 key={agent.id}
                 onClick={() => handleAgentClick(agent)}
                 onKeyDown={(e) => handleCardKeyDown(e, agent)}
-                className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:scale-[1.02] motion-reduce:transition-none motion-reduce:hover:scale-100 relative group"
+                className="cursor-pointer transition-all duration-200 hover:bg-accent/50 motion-reduce:transition-none relative group p-3 flex flex-col"
                 role="button"
                 tabIndex={0}
                 aria-label={`View agent ${agent.name}`}
               >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-3 min-w-0 flex-1">
-                      <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center p-2 flex-shrink-0">
-                        <User className="w-5 h-5 text-primary" aria-hidden="true" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <CardTitle className="text-lg truncate">{agent.name}</CardTitle>
-                        <div className="flex items-center space-x-2 mt-1">
-                          <span className={`w-2 h-2 rounded-full ${agent.is_active ? 'bg-primary animate-pulse' : 'bg-muted-foreground'}`} aria-hidden="true"></span>
-                          <span className="text-sm text-muted-foreground">
-                            {agent.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </div>
-                      </div>
+                {/* Top row: Icon + Name + Menu */}
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-md bg-primary/20 flex items-center justify-center flex-shrink-0">
+                    <User className="w-4 h-4 text-primary" aria-hidden="true" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-sm truncate">{agent.name}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${agent.is_active ? 'bg-primary' : 'bg-muted-foreground/50'}`} aria-hidden="true" />
                     </div>
-                    <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                      <span className="text-xs text-muted-foreground">
-                        ID: {agent.id}
-                      </span>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="Agent options"
-                          >
-                            <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                          <DropdownMenuItem onClick={(e) => handleEditAgent(agent, e as unknown as MouseEvent)}>
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => handleDeleteAgent(agent, e as unknown as MouseEvent)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {formatTimestamp(agent.updated_at)}
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-muted-foreground">Model:</span>
-                      <span className="font-medium">{agent.model_name || 'N/A'}</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-muted-foreground">Updated:</span>
-                      <span className="font-medium">{formatTimestamp(agent.updated_at)}</span>
-                    </div>
-                    {agent.description && (
-                      <CardDescription className="line-clamp-2 break-words mt-2">
-                        {agent.description}
-                      </CardDescription>
-                    )}
-                  </div>
-                </CardContent>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Agent options"
+                      >
+                        <MoreHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem onClick={(e) => handleEditAgent(agent, e as unknown as MouseEvent)}>
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => handleDeleteAgent(agent, e as unknown as MouseEvent)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Description (if exists) - with flex-1 to push tag to bottom */}
+                <div className="flex-1 mt-2">
+                  {agent.description && (
+                    <p className="text-xs text-muted-foreground line-clamp-2 break-words">
+                      {agent.description}
+                    </p>
+                  )}
+                </div>
+
+                {/* Bottom row: Model tag - always at bottom */}
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
+                    {agent.model_name || 'N/A'}
+                  </span>
+                </div>
               </Card>
             ))}
           </div>

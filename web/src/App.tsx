@@ -144,9 +144,9 @@ function App() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
+    <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
       <Navigation />
-      <div className="flex-1 bg-background overflow-hidden">
+      <div className="flex-1 min-h-0 bg-background overflow-hidden">
         <AgentDetail
           agent={agent}
           scenes={scenes}
@@ -155,6 +155,7 @@ function App() {
           onResetSceneGraph={handleResetSceneGraph}
           onSceneSelect={setSelectedScene}
           onRefreshScenes={handleRefreshScenes}
+          onAgentUpdate={setAgent}
         />
       </div>
     </div>

@@ -117,7 +117,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {mode === 'create' ? 'Create New Agent' : 'Edit Agent'}
+            {mode === 'create' ? 'New Agent' : 'Edit Agent'}
           </DialogTitle>
         </DialogHeader>
 

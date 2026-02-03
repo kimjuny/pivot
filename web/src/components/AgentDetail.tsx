@@ -17,6 +17,13 @@ import '@xyflow/react/dist/style.css';
 import { usePreviewChatStore } from '../store/previewChatStore';
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useBuildChatStore } from '../store/buildChatStore';
+import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import BuildChatInterface from './BuildChatInterface';
 import PreviewChatInterface from './PreviewChatInterface';
 import EditPanel from './EditPanel';
@@ -24,7 +31,7 @@ import SceneModal from './SceneModal';
 import SubsceneModal from './SubsceneModal';
 import ConnectionModal from './ConnectionModal';
 import SubsceneNode from './SubsceneNode';
-import SceneSidebar from './SceneSidebar';
+import AgentDetailSidebar from './AgentDetailSidebar';
 import ControlButtons from './ControlButtons';
 import SceneContextMenu, { ContextMenuContext } from './SceneContextMenu';
 import SubmitArea from './SubmitArea';
@@ -56,9 +63,10 @@ interface AgentDetailProps {
   onResetSceneGraph: () => Promise<void>;
   onSceneSelect: (scene: Scene) => void;
   onRefreshScenes: () => Promise<void>;
+  onAgentUpdate?: (agent: Agent) => void;
 }
 
-function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes }: AgentDetailProps) {
+function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes, onAgentUpdate }: AgentDetailProps) {
   const { chatHistory } = usePreviewChatStore();
   const {
     workspaceAgent,
@@ -79,7 +87,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isBuildChatOpen, setIsBuildChatOpen] = useState<boolean>(false);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [previewModeSceneGraphData, setPreviewModeSceneGraphData] = useState<SceneGraph | null>(null);
@@ -690,39 +698,41 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   };
 
   return (
-    <div className="w-full h-full bg-dark-bg flex flex-col overflow-hidden">
-      <div className="flex flex-1 overflow-hidden relative">
-        <SceneSidebar
-          scenes={workingScenes}
-          selectedScene={selectedScene}
-          isCollapsed={isSidebarCollapsed}
-          onSceneSelect={onSceneSelect}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          onCreateScene={handleCreateSceneModalOpen}
-          onDeleteScene={handleDeleteScene}
-        />
+    <SidebarProvider defaultOpen={true}>
+      <AgentDetailSidebar
+        agent={agent}
+        scenes={workingScenes}
+        selectedScene={selectedScene}
+        onSceneSelect={onSceneSelect}
+        onCreateScene={handleCreateSceneModalOpen}
+        onDeleteScene={handleDeleteScene}
+        onOpenBuildChat={() => setIsBuildChatOpen(true)}
+        onAgentUpdate={onAgentUpdate}
+      />
 
-        <div className="flex-1 overflow-hidden bg-dark-bg relative">
+      <SidebarInset className="flex flex-col bg-background overflow-hidden">
+        {/* Main Content Area */}
+        <div className="flex-1 relative overflow-hidden">
+          {/* React Flow Canvas */}
           <div
             className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
               }`}
           >
             {mode === 'preview' && (
-              <div className="absolute top-4 left-4 z-10 flex items-center space-x-2 px-4 py-2 bg-primary/20 border border-primary rounded-lg shadow-glow-sm">
+              <div className="absolute top-3 left-3 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
                 <div className="relative">
-                  <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute -left-1 -top-1"></div>
-                  <div className="w-2 h-2 bg-danger rounded-full relative"></div>
+                  <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
+                  <div className="w-2 h-2 bg-danger rounded-full relative" />
                 </div>
-                <span className="text-sm font-semibold text-white">Realtime Graph</span>
+                <span className="text-xs font-medium text-foreground">Realtime Graph</span>
               </div>
             )}
 
             <ControlButtons
               mode={mode}
               onModeChange={handleModeChange}
-              isSidebarCollapsed={isSidebarCollapsed}
-              onToggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             />
+
 
             <ReactFlow
               nodes={nodes}
@@ -738,6 +748,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               onEdgeContextMenu={handleEdgeContextMenu}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
+              fitView
+              fitViewOptions={{ padding: 0.2 }}
               onInit={(instance) => {
                 reactFlowInstanceRef.current = instance;
               }}
@@ -759,45 +771,14 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             )}
           </div>
 
-          {mode === 'edit' && (
-            <div className="absolute top-0 right-0 h-full w-96 bg-dark-bg border-l border-dark-border transition-all duration-300 ease-in-out overflow-hidden translate-x-0 opacity-100">
-              <BuildChatInterface agentId={agentId} />
-            </div>
-          )}
-
+          {/* Preview Chat Panel */}
           {mode === 'preview' && (
-            <div className="absolute top-0 right-0 h-full w-96 bg-dark-bg border-l border-dark-border transition-all duration-300 ease-in-out overflow-hidden translate-x-0 opacity-100">
+            <div className="absolute top-0 right-0 h-full w-96 bg-background border-l border-border transition-all duration-300 ease-in-out overflow-hidden">
               <PreviewChatInterface agentId={agentId} />
             </div>
           )}
 
-          <SceneModal
-            isOpen={isCreateSceneModalOpen}
-            mode="create"
-            onClose={() => setIsCreateSceneModalOpen(false)}
-            onSave={handleCreateScene}
-          />
-
-          <SubsceneModal
-            isOpen={isAddSubsceneModalOpen}
-            mode="add"
-            sceneId={currentSceneId}
-            onClose={() => setIsAddSubsceneModalOpen(false)}
-            onSave={handleAddSubscene}
-          />
-
-          <ConnectionModal
-            isOpen={isAddConnectionModalOpen}
-            mode="add"
-            sceneId={currentSceneId}
-            initialData={pendingConnection ? {
-              from_subscene: pendingConnection.from,
-              to_subscene: pendingConnection.to
-            } : undefined}
-            onClose={() => setIsAddConnectionModalOpen(false)}
-            onSave={handleAddConnection}
-          />
-
+          {/* Context Menu */}
           <SceneContextMenu
             position={contextMenu}
             context={contextMenuContext}
@@ -807,17 +788,60 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             onRemoveEdge={handleRemoveEdge}
           />
         </div>
-      </div>
 
-      {mode === 'edit' && (
-        <SubmitArea
-          hasUnsavedChanges={hasUnsavedChanges}
-          isSubmitting={isSubmitting}
-          onSubmit={handleSubmit}
-          onDiscard={handleDiscard}
-        />
-      )}
-    </div>
+        {/* Submit Area */}
+        {mode === 'edit' && (
+          <SubmitArea
+            hasUnsavedChanges={hasUnsavedChanges}
+            isSubmitting={isSubmitting}
+            onSubmit={handleSubmit}
+            onDiscard={handleDiscard}
+          />
+        )}
+      </SidebarInset>
+
+      {/* Build Chat Dialog */}
+      <Dialog open={isBuildChatOpen} onOpenChange={setIsBuildChatOpen}>
+        <DialogContent className="sm:max-w-2xl h-[80vh] p-0 flex flex-col">
+          <DialogHeader className="px-4 pt-4 pb-0">
+            <DialogTitle className="sr-only">Build Assistant</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-hidden">
+            <BuildChatInterface agentId={agentId} />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scene Modal */}
+      <SceneModal
+        isOpen={isCreateSceneModalOpen}
+        mode="create"
+        onClose={() => setIsCreateSceneModalOpen(false)}
+        onSave={handleCreateScene}
+      />
+
+      {/* Subscene Modal */}
+      <SubsceneModal
+        isOpen={isAddSubsceneModalOpen}
+        mode="add"
+        sceneId={currentSceneId}
+        onClose={() => setIsAddSubsceneModalOpen(false)}
+        onSave={handleAddSubscene}
+      />
+
+      {/* Connection Modal */}
+      <ConnectionModal
+        isOpen={isAddConnectionModalOpen}
+        mode="add"
+        sceneId={currentSceneId}
+        initialData={pendingConnection ? {
+          from_subscene: pendingConnection.from,
+          to_subscene: pendingConnection.to
+        } : undefined}
+        onClose={() => setIsAddConnectionModalOpen(false)}
+        onSave={handleAddConnection}
+      />
+    </SidebarProvider>
   );
 }
 

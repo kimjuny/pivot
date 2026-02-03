@@ -1,7 +1,15 @@
-import React, { useState, useEffect, MouseEvent, useRef } from 'react';
-import { Input } from '@base-ui/react/input';
-import { Button } from '@base-ui/react/button';
-import { Field } from '@base-ui/react/field';
+import { useState, useEffect } from 'react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
 export interface ConnectionFormData {
   name: string;
@@ -20,6 +28,10 @@ interface ConnectionModalProps {
   onSave: (data: ConnectionFormData) => void;
 }
 
+/**
+ * Modal for adding or editing a connection between subscenes.
+ * Uses shadcn Dialog with form inputs for connection properties.
+ */
 function ConnectionModal({
   isOpen,
   mode,
@@ -37,7 +49,6 @@ function ConnectionModal({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -60,149 +71,137 @@ function ConnectionModal({
     }
   }, [isOpen, mode, initialData]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (modalRef.current && !modalRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside as unknown as EventListener);
-      return () => {
-        document.removeEventListener('mousedown', handleClickOutside as unknown as EventListener);
-      };
-    }
-  }, [isOpen, onClose]);
-
   const handleSubmit = () => {
     if (!formData.name.trim()) {
-      setServerError('Please enter a connection name');
+      setServerError('Connection name is required');
       return;
     }
 
-    onSave({
-      name: formData.name,
-      condition: formData.condition,
-      from_subscene: formData.from_subscene,
-      to_subscene: formData.to_subscene
-    });
+    setIsSubmitting(true);
+    setServerError(null);
 
-    setFormData({
-      name: '',
-      condition: '',
-      from_subscene: '',
-      to_subscene: ''
-    });
+    try {
+      onSave({
+        name: formData.name.trim(),
+        condition: formData.condition.trim(),
+        from_subscene: formData.from_subscene,
+        to_subscene: formData.to_subscene
+      });
+      onClose();
+    } catch (err) {
+      const error = err as Error;
+      setServerError(error.message || 'Failed to save connection');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  if (!isOpen) {
-    return null;
-  }
-
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div ref={modalRef} className="bg-dark-bg border border-dark-border rounded-xl shadow-card-lg w-full max-w-md mx-4 overflow-hidden">
-        <div className="px-6 py-4 border-b border-dark-border flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-white">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
             {mode === 'add' ? 'Add Connection' : 'Edit Connection'}
-          </h3>
-          <Button
-            onClick={onClose}
-            disabled={isSubmitting}
-            className="nav-hover-effect p-2 h-auto bg-transparent border-0 text-dark-text-secondary hover:text-dark-text-primary data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </Button>
-        </div>
+          </DialogTitle>
+        </DialogHeader>
 
         {serverError && (
-          <div className="px-6 py-3 bg-danger-100 border-b border-danger-200">
-            <p className="text-sm text-danger">{serverError}</p>
+          <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3">
+            <p className="text-sm text-destructive">{serverError}</p>
           </div>
         )}
 
-        <div className="p-6 space-y-4">
-          <Field.Root>
-            <Field.Label
-              className="block text-sm font-medium text-dark-text-secondary mb-2"
-              nativeLabel={false}
-              render={<div />}
-            >
-              Connection Name
-            </Field.Label>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">
+              Connection Name <span className="text-destructive">*</span>
+            </Label>
             <Input
+              id="name"
               value={formData.name}
-              onValueChange={(value) => setFormData({ ...formData, name: value })}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               disabled={isSubmitting}
-              className="h-10 w-full px-3.5 rounded-md border border-gray-200 bg-dark-bg-lighter text-base text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary"
-              placeholder="Enter connection name"
+              placeholder="Enter connection name…"
+              autoComplete="off"
             />
-          </Field.Root>
+          </div>
 
-          <div>
-            <label htmlFor="condition" className="block text-sm font-medium text-dark-text-secondary mb-2">Condition</label>
-            <textarea
+          <div className="space-y-2">
+            <Label htmlFor="condition">Condition</Label>
+            <Textarea
               id="condition"
-              name="condition"
               value={formData.condition}
               onChange={(e) => setFormData({ ...formData, condition: e.target.value })}
-              className="w-full px-3.5 py-2.5 bg-dark-bg-lighter border border-gray-200 rounded-md text-dark-text-primary placeholder-dark-text-muted focus:outline focus:outline-2 focus:-outline-offset-1 focus:outline-primary resize-none"
-              rows={3}
-              placeholder="Enter condition"
               disabled={isSubmitting}
+              rows={3}
+              placeholder="Enter condition (optional)…"
             />
           </div>
 
           {mode === 'add' && (
             <>
-              <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
-                <p className="text-sm text-dark-text-secondary mb-1">From Subscene</p>
-                <p className="text-xs text-dark-text-muted">{formData.from_subscene || 'Not specified'}</p>
+              <div className="space-y-2">
+                <Label>From Subscene</Label>
+                <div className="rounded-md border border-input bg-muted px-3 py-2">
+                  <p className="text-sm text-muted-foreground">
+                    {formData.from_subscene || 'Not specified'}
+                  </p>
+                </div>
               </div>
 
-              <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
-                <p className="text-sm text-dark-text-secondary mb-1">To Subscene</p>
-                <p className="text-xs text-dark-text-muted">{formData.to_subscene || 'Not specified'}</p>
+              <div className="space-y-2">
+                <Label>To Subscene</Label>
+                <div className="rounded-md border border-input bg-muted px-3 py-2">
+                  <p className="text-sm text-muted-foreground">
+                    {formData.to_subscene || 'Not specified'}
+                  </p>
+                </div>
               </div>
             </>
           )}
 
           {mode === 'edit' && existingConnection && (
             <>
-              <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
-                <p className="text-sm text-dark-text-secondary mb-1">From Subscene</p>
-                <p className="text-xs text-dark-text-muted">{existingConnection.from || 'Not specified'}</p>
+              <div className="space-y-2">
+                <Label>From Subscene</Label>
+                <div className="rounded-md border border-input bg-muted px-3 py-2">
+                  <p className="text-sm text-muted-foreground">
+                    {existingConnection.from || 'Not specified'}
+                  </p>
+                </div>
               </div>
 
-              <div className="p-3 bg-dark-bg-lighter border border-dark-border rounded-lg">
-                <p className="text-sm font-medium text-dark-text-secondary mb-1">To Subscene</p>
-                <p className="text-xs text-dark-text-muted">{existingConnection.to || 'Not specified'}</p>
+              <div className="space-y-2">
+                <Label>To Subscene</Label>
+                <div className="rounded-md border border-input bg-muted px-3 py-2">
+                  <p className="text-sm text-muted-foreground">
+                    {existingConnection.to || 'Not specified'}
+                  </p>
+                </div>
               </div>
             </>
           )}
         </div>
 
-        <div className="px-6 py-4 border-t border-dark-border flex space-x-3">
+        <DialogFooter className="gap-2 sm:gap-0">
           <Button
+            type="button"
+            variant="outline"
             onClick={onClose}
             disabled={isSubmitting}
-            className="flex-1 h-10 px-4 bg-dark-bg border border-dark-border rounded-md text-sm font-medium hover:bg-dark-border-light data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
           >
             Cancel
           </Button>
           <Button
+            type="button"
             onClick={() => void handleSubmit()}
             disabled={isSubmitting || !formData.name.trim()}
-            className="flex-1 h-10 px-4 btn-accent rounded-md text-sm font-medium data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
           >
-            {mode === 'add' ? 'Add' : 'Save'}
+            {isSubmitting ? 'Saving…' : mode === 'add' ? 'Add' : 'Save'}
           </Button>
-        </div>
-      </div>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
