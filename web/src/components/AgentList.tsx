@@ -238,7 +238,7 @@ function AgentList() {
                 key={agent.id}
                 onClick={() => handleAgentClick(agent)}
                 onKeyDown={(e) => handleCardKeyDown(e, agent)}
-                className="cursor-pointer transition-all duration-200 hover:bg-accent/50 motion-reduce:transition-none relative group p-3 flex flex-col"
+                className="cursor-pointer transition-all duration-200 hover:bg-accent/50 motion-reduce:transition-none relative group p-3 flex flex-col min-h-[130px]"
                 role="button"
                 tabIndex={0}
                 aria-label={`View agent ${agent.name}`}
@@ -254,7 +254,7 @@ function AgentList() {
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${agent.is_active ? 'bg-primary' : 'bg-muted-foreground/50'}`} aria-hidden="true" />
                     </div>
                     <div className="text-xs text-muted-foreground truncate">
-                      {formatTimestamp(agent.updated_at)}
+                      Edited: {formatTimestamp(agent.updated_at)}
                     </div>
                   </div>
                   <DropdownMenu>

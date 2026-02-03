@@ -166,7 +166,15 @@ class ChatService:
 
             merged_subscenes: list[SubsceneWithConnectionsResponse] = []
 
-            for subscene in scene.subscenes:
+            # Safely access subscenes - Scene from LLM may not have SQLAlchemy instrumentation
+            # Use __dict__ to bypass SQLAlchemy descriptors that trigger UnmappedInstanceError
+            if hasattr(scene, "_sa_instance_state"):
+                # This is a DB-backed Scene, safe to use normal attribute access
+                subscenes_list = scene.subscenes
+            else:
+                # This is a runtime Scene from LLM, access __dict__ directly
+                subscenes_list = scene.__dict__.get("subscenes", [])
+            for subscene in subscenes_list:
                 input_subscene = None
                 if input_scene:
                     input_subscene = input_subscene_map.get(scene.name, {}).get(
