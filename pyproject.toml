@@ -5,7 +5,7 @@ description = "FastAPI project with SQLModel and robust linting"
 authors = ["Eric Kim <kimjuny@foxmail.com>"]
 readme = "README.md"
 # Ensure internal modules are recognized as packages for distribution
-packages = [{include = "core"}, {include = "server"}]
+packages = [{include = "server"}]
 
 [tool.poetry.dependencies]
 # Target Python 3.10 to ensure maximum compatibility for open-source users.
@@ -18,6 +18,7 @@ sqlalchemy = "1.4.41"
 alembic = "1.8.1"
 requests = "^2.31.0"
 python-dotenv = "^1.0.0"
+openai = "^1.0.0"
 
 [tool.poetry.group.dev.dependencies]
 # Development tools kept separate from production environment
@@ -48,12 +49,12 @@ ignore = [
 [tool.ruff.lint.isort]
 # Group imports automatically and ensure consistent sorting for PRs.
 combine-as-imports = true
-known-first-party = ["core", "server"]
+known-first-party = ["server"]
 
 [tool.pyright]
-# Include current directory and ensure cross-module resolution for './core' and './server'.
+# Include current directory and ensure cross-module resolution for './server'.
 include = ["."]
-extraPaths = ["./server", "./core"]
+extraPaths = ["./server"]
 
 # Standard mode is recommended for open-source to avoid overly aggressive errors 
 # while maintaining high type safety.

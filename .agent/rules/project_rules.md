@@ -11,17 +11,6 @@ trigger: always_on
 
 ## Directory Structure
 
-### Core Module
-- **Purpose**: Agent development framework core library
-- **Design Principle**: Can be used standalone (without `server` or `web`) to create working examples
-
-```
-core/
-├── agent/      # Core framework for agent development
-├── llm/         # LLM integration for the agent framework
-└── utils/       # Utility classes for the agent framework
-```
-
 ### Server Module
 - **Purpose**: Backend service providing agent orchestration and conversational agent instances
 - **Key Features**:
@@ -50,9 +39,6 @@ web/
 ```
 
 ## Technology Stack
-
-### Core
-- **Language**: Pure Python
 
 ### Server
 - **Framework**: FastAPI

@@ -43,7 +43,7 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
 
   sendMessage: async (message: string) => {
     const { previewAgent, currentSceneId } = useAgentWorkStore.getState();
-    
+
     if (!previewAgent) {
       set({ error: 'No preview agent available. Please try entering preview mode again.' });
       return;
@@ -55,14 +55,14 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
 
     // For now, let's assume we start from the current scene in view, or the first one if none selected
     if (previewAgent.scenes) {
-        const scene = previewAgent.scenes.find(s => s.id === currentSceneId) || previewAgent.scenes[0];
-        if (scene) {
-            currentSceneName = scene.name || null;
-            // currentSubsceneName - we don't track this in store explicitly yet, 
-            // but the backend will default to start/first subscene if not provided.
-            // If we want to support continuing from a specific state, we need to store it.
-            // For now, let's leave subscene null and let backend decide.
-        }
+      const scene = previewAgent.scenes.find(s => s.id === currentSceneId) || previewAgent.scenes[0];
+      if (scene) {
+        currentSceneName = scene.name || null;
+        // currentSubsceneName - we don't track this in store explicitly yet, 
+        // but the backend will default to start/first subscene if not provided.
+        // If we want to support continuing from a specific state, we need to store it.
+        // For now, let's leave subscene null and let backend decide.
+      }
     }
 
     const now = new Date();
@@ -81,12 +81,12 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
     // Initial agent message placeholder
     const agentMessageId = -Date.now() - 1;
     const initialAgentMessage: ChatHistory = {
-        id: agentMessageId,
-        agent_id: previewAgent.id,
-        user: 'preview-user',
-        role: 'agent',
-        message: '',
-        create_time: utcTimestamp
+      id: agentMessageId,
+      agent_id: previewAgent.id,
+      user: 'preview-user',
+      role: 'agent',
+      message: '',
+      create_time: utcTimestamp
     };
 
     set(state => ({
@@ -104,45 +104,59 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
       };
 
       await previewChatStream(request, (event: StreamEvent) => {
-          set(state => {
-              const currentHistory = [...state.chatHistory];
-              const msgIndex = currentHistory.findIndex(m => m.id === agentMessageId);
-              if (msgIndex === -1) return {};
+        set(state => {
+          const currentHistory = [...state.chatHistory];
+          const msgIndex = currentHistory.findIndex(m => m.id === agentMessageId);
+          if (msgIndex === -1) return {};
 
-              const currentMsg = currentHistory[msgIndex];
-              const updatedMsg = { ...currentMsg };
+          const currentMsg = currentHistory[msgIndex];
+          const updatedMsg = { ...currentMsg };
 
-              switch (event.type) {
-                  case StreamEventType.REASONING:
-                      updatedMsg.reason = (updatedMsg.reason || '') + (event.delta || '');
-                      break;
-                  case StreamEventType.REASON:
-                      updatedMsg.reason = (updatedMsg.reason || '') + (event.delta || '');
-                      break;
-                  case StreamEventType.RESPONSE:
-                      updatedMsg.message = (updatedMsg.message || '') + (event.delta || '');
-                      updatedMsg.create_time = event.create_time;
-                      break;
-                  case StreamEventType.UPDATED_SCENES:
-                      if (event.updated_scenes && event.updated_scenes.length > 0) {
-                          const targetGraph = event.updated_scenes[0];
-                          if (targetGraph) {
-                              updatedMsg.graph = targetGraph;
-                          }
-                      }
-                      break;
-                  case StreamEventType.MATCH_CONNECTION:
-                      break;
-                  case StreamEventType.ERROR:
-                      console.error('Stream error:', event.error);
-                      break;
-                  default:
-                      break;
+          switch (event.type) {
+            case StreamEventType.REASONING:
+              updatedMsg.reason = (updatedMsg.reason || '') + (event.delta || '');
+              break;
+            case StreamEventType.REASON:
+              updatedMsg.reason = (updatedMsg.reason || '') + (event.delta || '');
+              break;
+            case StreamEventType.RESPONSE:
+              updatedMsg.message = (updatedMsg.message || '') + (event.delta || '');
+              updatedMsg.create_time = event.create_time;
+              break;
+            case StreamEventType.UPDATED_SCENES:
+              // Critical: Update previewAgent in agentWorkStore with the new scene states
+              // This is the source of truth for graph rendering in preview mode
+              if (event.updated_scenes && event.updated_scenes.length > 0) {
+                const { previewAgent } = useAgentWorkStore.getState();
+
+                if (previewAgent) {
+                  // Update the previewAgent with the new scenes from backend
+                  // This includes all subscene state changes (active/inactive)
+                  useAgentWorkStore.getState().updatePreviewAgent({
+                    ...previewAgent,
+                    scenes: event.updated_scenes
+                  });
+                }
+
+                // Also store in chat history for reference
+                const targetGraph = event.updated_scenes[0];
+                if (targetGraph) {
+                  updatedMsg.graph = targetGraph;
+                }
               }
+              break;
+            case StreamEventType.MATCH_CONNECTION:
+              break;
+            case StreamEventType.ERROR:
+              console.error('Stream error:', event.error);
+              break;
+            default:
+              break;
+          }
 
-              currentHistory[msgIndex] = updatedMsg;
-              return { chatHistory: currentHistory };
-          });
+          currentHistory[msgIndex] = updatedMsg;
+          return { chatHistory: currentHistory };
+        });
       });
 
       set({ isChatting: false });
@@ -150,12 +164,12 @@ const usePreviewChatStore = create<PreviewChatStore>((set, get) => ({
     } catch (error) {
       const err = error as Error;
       set(state => {
-          const currentHistory = state.chatHistory.filter(m => m.id !== agentMessageId);
-          return {
-            chatHistory: currentHistory,
-            isChatting: false,
-            error: err.message
-          };
+        const currentHistory = state.chatHistory.filter(m => m.id !== agentMessageId);
+        return {
+          chatHistory: currentHistory,
+          isChatting: false,
+          error: err.message
+        };
       });
     }
   },

@@ -7,12 +7,12 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo "Running Ruff..."
-cd server && poetry run ruff check . ../core --fix
+cd server && poetry run ruff check . --fix
 RUFF_EXIT=$?
 
 echo ""
 echo "Running Pyright..."
-poetry run pyright . ../core
+poetry run pyright .
 PYRIGHT_EXIT=$?
 
 if [ $RUFF_EXIT -eq 0 ] && [ $PYRIGHT_EXIT -eq 0 ]; then

@@ -183,3 +183,74 @@ class AbstractLLM(ABC):
             Response: A chunk of the structured response from the LLM
         """
         pass
+
+    def _convert_response(self, raw_response: Any, model: str) -> Response:
+        """
+        Convert an OpenAI-compatible API response to our structured Response format.
+        
+        This is a helper method that can be used by LLM implementations that use
+        OpenAI-compatible APIs (via the OpenAI client library).
+        
+        Args:
+            raw_response: Response from the OpenAI client (ChatCompletion or stream chunk)
+            model: The model name to use as fallback if not present in response
+            
+        Returns:
+            Response: Structured response in our standard format
+        """
+        import contextlib
+        import time
+        import uuid
+
+        # Extract basic information
+        response_id = getattr(raw_response, "id", str(uuid.uuid4()))
+        created = getattr(raw_response, "created", int(time.time()))
+        response_model = getattr(raw_response, "model", model)
+
+        # Extract choices
+        choices = []
+        raw_choices = getattr(raw_response, "choices", [])
+        for i, raw_choice in enumerate(raw_choices):
+            # Extract message or delta (for streaming)
+            raw_message = getattr(raw_choice, "message", None) or getattr(
+                raw_choice, "delta", None
+            )
+
+            if raw_message:
+                role = getattr(raw_message, "role", "assistant")
+                content = getattr(raw_message, "content", "") or ""
+                reasoning_content = getattr(raw_message, "reasoning_content", None)
+                message = ChatMessage(
+                    role=role, content=content, reasoning_content=reasoning_content
+                )
+            else:
+                # Fallback for empty delta
+                message = ChatMessage(role="assistant", content="")
+
+            # Extract finish reason
+            finish_reason = None
+            raw_finish_reason = getattr(raw_choice, "finish_reason", None)
+            if raw_finish_reason:
+                with contextlib.suppress(ValueError):
+                    finish_reason = FinishReason(raw_finish_reason)
+
+            choice = Choice(index=i, message=message, finish_reason=finish_reason)
+            choices.append(choice)
+
+        # Extract usage information
+        usage = None
+        raw_usage = getattr(raw_response, "usage", None)
+        if raw_usage:
+            usage = UsageInfo(
+                prompt_tokens=getattr(raw_usage, "prompt_tokens", 0),
+                completion_tokens=getattr(raw_usage, "completion_tokens", 0),
+                total_tokens=getattr(raw_usage, "total_tokens", 0),
+            )
+
+        return Response(
+            id=response_id,
+            choices=choices,
+            created=created,
+            model=response_model,
+            usage=usage,
+        )

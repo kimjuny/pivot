@@ -24,9 +24,9 @@ function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
     }
   };
 
-  const isActive = data.state === 'active';
+  const isActive = data.state?.toLowerCase() === 'active';
   const typeClasses = getTypeColor(data.type);
-  const activeClass = isActive ? 'ring-2 ring-primary shadow-glow-sm' : '';
+  const activeClass = isActive ? 'ring-2 ring-danger shadow-glow-sm' : '';
 
   return (
     <div
@@ -47,8 +47,8 @@ function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
       />
       <div className="font-semibold text-sm truncate">{data.label}</div>
       <div className="text-xs mt-1 capitalize opacity-80">{data.type}</div>
-      {isActive && <div className="text-xs text-primary font-bold mt-1.5 flex items-center">
-        <span className="inline-block w-2 h-2 bg-primary rounded-full animate-pulse mr-1.5"></span>
+      {isActive && <div className="text-xs text-danger font-bold mt-1.5 flex items-center">
+        <span className="inline-block w-2 h-2 bg-danger rounded-full animate-pulse mr-1.5"></span>
         ACTIVE
       </div>}
     </div>

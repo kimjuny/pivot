@@ -70,6 +70,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const { chatHistory } = usePreviewChatStore();
   const {
     workspaceAgent,
+    previewAgent,
     currentSceneId,
     hasUnsavedChanges,
     isSubmitting,
@@ -90,7 +91,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [isBuildChatOpen, setIsBuildChatOpen] = useState<boolean>(false);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  const [previewModeSceneGraphData, setPreviewModeSceneGraphData] = useState<SceneGraph | null>(null);
+  // Removed: previewModeSceneGraphData - now using previewAgent from store
   const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
   const [isEditSceneModalOpen, setIsEditSceneModalOpen] = useState<boolean>(false);
   const [isAddSubsceneModalOpen, setIsAddSubsceneModalOpen] = useState<boolean>(false);
@@ -102,9 +103,10 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [newSubscenePosition, setNewSubscenePosition] = useState<{ x: number; y: number } | null>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
-  // Derived state from workspaceAgent
+  // Derived state: workspaceAgent for edit mode, previewAgent for preview mode
   const workingScenes = (workspaceAgent?.scenes || []) as unknown as Scene[];
   const workingSceneGraph = workspaceAgent?.scenes?.find(s => s.id === currentSceneId) || null;
+  const previewSceneGraph = previewAgent?.scenes?.find(s => s.id === currentSceneId) || null;
 
   // Initialize store with agent data
   useEffect(() => {
@@ -384,18 +386,10 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     }
   }, [contextMenu]);
 
-  const currentSceneGraphData = mode === 'preview' ? previewModeSceneGraphData : workingSceneGraph;
-
-  // Preview mode sync
-  useEffect(() => {
-    if (mode === 'preview' && chatHistory.length > 0) {
-      const lastMessage = chatHistory[chatHistory.length - 1];
-      const graph = lastMessage.graph;
-      if (graph) {
-        setPreviewModeSceneGraphData(graph);
-      }
-    }
-  }, [mode, chatHistory]);
+  // Critical: Read from the correct state based on mode
+  // - Preview mode: Read from previewAgent (updated via SSE events)
+  // - Edit mode: Read from workspaceAgent (user's working copy)
+  const currentSceneGraphData = mode === 'preview' ? previewSceneGraph : workingSceneGraph;
 
   const handleElementClick = (event: React.MouseEvent, element: Node | Edge) => {
     event.stopPropagation();
@@ -610,16 +604,10 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     setMode(newMode);
 
     if (newMode === 'preview') {
+      // Copy workspaceAgent to previewAgent in store
       enterPreviewMode();
-
-      // Initialize preview graph with current working graph
-      if (workingSceneGraph) {
-        setPreviewModeSceneGraphData(workingSceneGraph);
-      }
-    } else {
-      setMode('edit');
-      setPreviewModeSceneGraphData(null);
     }
+    // When exiting preview, graph automatically reverts to workspaceAgent
   };
 
   const onConnect = useCallback((params: Connection) => {
@@ -749,7 +737,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               fitView
-              fitViewOptions={{ padding: 0.2 }}
+              fitViewOptions={{ padding: 0.2, maxZoom: 0.9 }}
               onInit={(instance) => {
                 reactFlowInstanceRef.current = instance;
               }}

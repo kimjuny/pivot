@@ -286,7 +286,7 @@ class AgentRuntime:
             output_message = OutputMessage.from_content(full_content)
 
             if output_message.updated_scenes:
-                self._update_scenes_from_output(output_message)
+                # self._update_scenes_from_output(output_message)
 
                 yield AgentResponseChunk(
                     type=AgentResponseChunkType.UPDATED_SCENES,

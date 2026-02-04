@@ -2,18 +2,17 @@
 Chat service module.
 
 Provides business logic for agent chat operations, including
-preview chat streaming and agent runtime orchestration.
+preview chat streaming directly with LLM.
 """
 
 import logging
+import re
 import uuid
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
 from app.llm_globals import get_default_llm, get_llm
 from app.models.agent import Connection, Scene, Subscene
-from app.orchestration.base.stream import AgentResponseChunkType
-from app.orchestration.runtime import AgentRuntime
 from app.schemas.schemas import (
     AgentDetailResponse,
     ConnectionResponse,
@@ -30,7 +29,7 @@ class ChatService:
     """
     Service class for chat operations.
 
-    Handles agent runtime creation, streaming chat, and response processing.
+    Handles agent streaming chat and response processing.
     """
 
     @staticmethod
@@ -69,59 +68,6 @@ class ChatService:
             scene.subscenes.append(subscene)
 
         return scene
-
-    @staticmethod
-    def build_agent_runtime(
-        agent_detail: AgentDetailResponse,
-        current_scene_name: str | None = None,
-        current_subscene_name: str | None = None,
-    ) -> AgentRuntime:
-        """Build an AgentRuntime instance from AgentDetailResponse.
-
-        Args:
-            agent_detail: Agent detail response with scenes and configuration.
-            current_scene_name: Optional name of active scene.
-            current_subscene_name: Optional name of active subscene.
-
-        Returns:
-            Configured AgentRuntime instance ready to chat.
-        """
-        agent_runtime = AgentRuntime(
-            name=agent_detail.name,
-            description=agent_detail.description or "",
-        )
-
-        # Configure LLM
-        model_name = agent_detail.model_name
-        llm_model = get_llm(model_name) if model_name else get_default_llm()
-
-        if llm_model:
-            agent_runtime.set_model(llm_model)
-        else:
-            logger.warning(
-                f"No LLM found for model name '{model_name}' and no default available."
-            )
-
-        # Build scenes from response data
-        for scene_resp in agent_detail.scenes:
-            scene = ChatService.build_scene_from_response(scene_resp)
-            agent_runtime.add_plan(scene)
-
-        # Set initial state if provided
-        if current_scene_name:
-            for scene in agent_runtime.scenes:
-                if scene.name == current_scene_name:
-                    agent_runtime.current_scene = scene
-                    break
-
-        if current_subscene_name and agent_runtime.current_scene:
-            for subscene in agent_runtime.current_scene.subscenes:
-                if subscene.name == current_subscene_name:
-                    agent_runtime.current_subscene = subscene
-                    break
-
-        agent_runtime.is_started = True
-        return agent_runtime
 
     @staticmethod
     def merge_graph_with_input(
@@ -279,6 +225,8 @@ class ChatService:
     ) -> Iterator[StreamEvent]:
         """Stream chat responses for preview mode.
 
+        Directly processes LLM streaming responses without using AgentRuntime.
+
         Args:
             agent_detail: Full agent definition.
             message: User message to process.
@@ -288,13 +236,11 @@ class ChatService:
         Yields:
             StreamEvent objects for SSE streaming.
         """
-        agent_runtime = ChatService.build_agent_runtime(
-            agent_detail,
-            current_scene_name,
-            current_subscene_name,
-        )
+        # Get LLM model
+        model_name = agent_detail.model_name
+        llm_model = get_llm(model_name) if model_name else get_default_llm()
 
-        if not agent_runtime.model:
+        if not llm_model:
             yield StreamEvent(
                 type=StreamEventType.ERROR,
                 error="API Key not configured.",
@@ -302,28 +248,152 @@ class ChatService:
             )
             return
 
-        for chunk in agent_runtime.chat_stream(message):
-            updated_graph = None
-            matched_connection = None
+        # Build scenes for context
+        scenes = [
+            ChatService.build_scene_from_response(scene_resp)
+            for scene_resp in agent_detail.scenes
+        ]
 
-            if (
-                chunk.type == AgentResponseChunkType.UPDATED_SCENES
-                and chunk.updated_scenes
-            ):
-                updated_graph = ChatService.merge_graph_with_input(
-                    chunk.updated_scenes, agent_detail
+        # Find current scene and subscene
+        current_scene = None
+        current_subscene = None
+
+        if current_scene_name:
+            for scene in scenes:
+                if scene.name == current_scene_name:
+                    current_scene = scene
+                    break
+
+        if current_subscene_name and current_scene:
+            for subscene in current_scene.subscenes:
+                if subscene.name == current_subscene_name:
+                    current_subscene = subscene
+                    break
+
+        # Build input message
+        from app.orchestration.base.input_message import InputMessage
+        from app.orchestration.base.output_message import OutputMessage
+
+        input_message = InputMessage(
+            user_message=message,
+            history=[],
+            scenes=scenes,
+            current_scene=current_scene,
+            current_subscene=current_subscene,
+        )
+
+        # Stream LLM response and parse incrementally
+        full_content = ""
+        current_section = StreamEventType.REASON
+        buffer = ""
+
+        for chunk in llm_model.chat_stream(input_message.get_messages()):
+            if not chunk.choices:
+                continue
+
+            choice = chunk.choices[0]
+            delta = choice.message.content
+            reasoning = choice.message.reasoning_content
+
+            # Yield reasoning delta if available
+            if reasoning:
+                yield StreamEvent(
+                    type=StreamEventType.REASONING,
+                    delta=reasoning,
+                    create_time=datetime.now(timezone.utc).isoformat(),
                 )
 
-            elif (
-                chunk.type == AgentResponseChunkType.MATCH_CONNECTION
-                and chunk.matched_connection
-            ):
+            if delta:
+                full_content += delta
+                buffer += delta
+
+                while True:
+                    # Check for section transitions
+                    split_match = re.search(
+                        r"##\s*(Reason|Response|Update(?:d)? Scenes|Match(?:ed)? Connection)",
+                        buffer,
+                        re.IGNORECASE,
+                    )
+
+                    if split_match:
+                        header_type = split_match.group(1).lower()
+                        pre_header = buffer[: split_match.start()]
+
+                        # Yield pre-header content
+                        if pre_header and current_section != "parsing":
+                            yield StreamEvent(
+                                type=current_section,
+                                delta=pre_header,
+                                create_time=datetime.now(timezone.utc).isoformat(),
+                            )
+
+                        # Switch section
+                        if "reason" in header_type:
+                            current_section = StreamEventType.REASON
+                        elif "response" in header_type:
+                            current_section = StreamEventType.RESPONSE
+                        else:
+                            current_section = "parsing"  # type: ignore
+
+                        buffer = buffer[split_match.end() :]
+                    else:
+                        break
+
+                # Handle potential partial header at end of buffer
+                safe_len = max(0, len(buffer) - 50)
+                danger_zone = buffer[safe_len:]
+                first_hash_in_danger = danger_zone.find("#")
+
+                if first_hash_in_danger != -1:
+                    split_idx = safe_len + first_hash_in_danger
+                    to_yield = buffer[:split_idx]
+                    buffer = buffer[split_idx:]
+
+                    if to_yield and current_section != "parsing":
+                        yield StreamEvent(
+                            type=current_section,  # type: ignore
+                            delta=to_yield,
+                            create_time=datetime.now(timezone.utc).isoformat(),
+                        )
+                else:
+                    if buffer and current_section != "parsing":
+                        yield StreamEvent(
+                            type=current_section,  # type: ignore
+                            delta=buffer,
+                            create_time=datetime.now(timezone.utc).isoformat(),
+                        )
+                    buffer = ""
+
+        # Yield any remaining buffer
+        if buffer and current_section != "parsing":
+            yield StreamEvent(
+                type=current_section,  # type: ignore
+                delta=buffer,
+                create_time=datetime.now(timezone.utc).isoformat(),
+            )
+
+        # Parse final output and yield scene updates
+        try:
+            output_message = OutputMessage.from_content(full_content)
+
+            if output_message.updated_scenes:
+                updated_graph = ChatService.merge_graph_with_input(
+                    output_message.updated_scenes, agent_detail
+                )
+
+                yield StreamEvent(
+                    type=StreamEventType.UPDATED_SCENES,
+                    updated_scenes=updated_graph,
+                    create_time=datetime.now(timezone.utc).isoformat(),
+                )
+
+            if output_message.match_connection:
                 matched_connection = ConnectionResponse(
                     id=f"preview-{uuid.uuid4().hex[:8]}",
-                    name=chunk.matched_connection.name,
-                    condition=chunk.matched_connection.condition,
-                    from_subscene=chunk.matched_connection.from_subscene,
-                    to_subscene=chunk.matched_connection.to_subscene,
+                    name=output_message.match_connection.name,
+                    condition=output_message.match_connection.condition,
+                    from_subscene=output_message.match_connection.from_subscene,
+                    to_subscene=output_message.match_connection.to_subscene,
                     from_subscene_id=None,
                     to_subscene_id=None,
                     scene_id=None,
@@ -331,10 +401,20 @@ class ChatService:
                     updated_at=datetime.now(timezone.utc),
                 )
 
-            event = StreamEvent.from_core_response_chunk(
-                chunk,
+                yield StreamEvent(
+                    type=StreamEventType.MATCH_CONNECTION,
+                    matched_connection=matched_connection,
+                    create_time=datetime.now(timezone.utc).isoformat(),
+                )
+
+        except Exception as e:
+            logger.error(f"Error parsing stream output: {e}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+
+            yield StreamEvent(
+                type=StreamEventType.ERROR,
+                error=str(e),
                 create_time=datetime.now(timezone.utc).isoformat(),
-                updated_scenes=updated_graph,
-                matched_connection=matched_connection,
             )
-            yield event

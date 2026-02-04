@@ -55,30 +55,11 @@ start_backend() {
         echo "Using SQLite database (Development)"
     fi
 
-    # Start backend
-    poetry run python -m uvicorn app.main:app --reload --port 8003 &
+    # Start backend with proper output prefix
+    poetry run python -m uvicorn app.main:app --reload --port 8003 2>&1 | sed 's/^/[BACKEND] /' &
     BACKEND_PID=$!
     cd ..
     echo "Backend server started with PID $BACKEND_PID"
-    echo "Environment variables: DOUBAO_SEED_API_KEY=${DOUBAO_SEED_API_KEY:+(set)}"
-}
-
-# Function to start all services using dev:all (frontend + backend + tests)
-start_dev_all() {
-    echo "Starting all services (frontend, backend, tests) using dev:all..."
-    cd web
-
-    # Kill any process using port 3000
-    lsof -ti:3000 | xargs kill -9 2>/dev/null || true
-
-    # Kill any process using port 8003
-    lsof -ti:8003 | xargs kill -9 2>/dev/null || true
-
-    # Start all services using dev:all
-    npm run dev:all &
-    DEV_ALL_PID=$!
-    cd ..
-    echo "All services started with PID $DEV_ALL_PID"
 }
 
 # Function to start frontend
@@ -89,20 +70,29 @@ start_frontend() {
     # Kill any process using port 3000
     lsof -ti:3000 | xargs kill -9 2>/dev/null || true
     
-    # Start frontend
-    npm run dev -- --host 127.0.0.1 &
+    # Start frontend with proper output prefix
+    npm run dev 2>&1 | sed 's/^/[FRONTEND] /' &
     FRONTEND_PID=$!
     cd ..
     echo "Frontend server started with PID $FRONTEND_PID"
 }
 
+# Function to start tests
+start_tests() {
+    echo "Starting test watcher..."
+    cd web
+    
+    # Start test watcher with proper output prefix
+    npm run test:watch 2>&1 | sed 's/^/[TEST] /' &
+    TEST_PID=$!
+    cd ..
+    echo "Test watcher started with PID $TEST_PID"
+}
+
 # Function to stop processes
 stop_processes() {
+    echo ""
     echo "Stopping processes..."
-    if [ ! -z "$DEV_ALL_PID" ]; then
-        kill $DEV_ALL_PID 2>/dev/null
-        echo "All services stopped"
-    fi
     if [ ! -z "$BACKEND_PID" ]; then
         kill $BACKEND_PID 2>/dev/null
         echo "Backend stopped"
@@ -111,10 +101,15 @@ stop_processes() {
         kill $FRONTEND_PID 2>/dev/null
         echo "Frontend stopped"
     fi
+    if [ ! -z "$TEST_PID" ]; then
+        kill $TEST_PID 2>/dev/null
+        echo "Test watcher stopped"
+    fi
+    exit 0
 }
 
 # Trap Ctrl+C to stop processes
-trap stop_processes INT
+trap stop_processes INT TERM
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -142,8 +137,16 @@ fi
 
 # Start services based on environment
 if [ "$ENV" = "dev" ]; then
-    # Use dev:all for development to start frontend, backend, and tests together
-    start_dev_all
+    echo ""
+    echo "Starting development services..."
+    echo ""
+    
+    # Start all services separately with output prefixes
+    start_backend
+    sleep 1
+    start_frontend
+    sleep 1
+    start_tests
 else
     # For production, start backend and frontend separately
     start_backend
@@ -151,12 +154,16 @@ else
 fi
 
 echo ""
+echo "========================================="
 echo "Servers started successfully!"
+echo "========================================="
 echo "Environment: $ENV"
-echo "Backend API available at: http://localhost:8003"
-echo "Frontend available at: http://localhost:3000"
+echo "Backend API: http://localhost:8003"
+echo "Frontend:    http://localhost:3000"
 echo ""
-echo "Press Ctrl+C to stop both servers"
+echo "Press Ctrl+C to stop all servers"
+echo "========================================="
+echo ""
 
 # Wait for processes to complete
 wait
