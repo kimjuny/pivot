@@ -17,10 +17,14 @@ interface SubsceneNodeProps {
 function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
   const getTypeColor = (type: string): string => {
     switch (type) {
-      case 'start': return 'bg-dark-bg border-success text-white';
-      case 'end': return 'bg-dark-bg border-danger text-white';
-      case 'normal': return 'bg-dark-bg border-primary text-white';
-      default: return 'bg-dark-bg border-dark-border text-white';
+      case 'start':
+        return 'bg-white dark:bg-dark-bg border-success text-gray-900 dark:text-white';
+      case 'end':
+        return 'bg-white dark:bg-dark-bg border-danger text-gray-900 dark:text-white';
+      case 'normal':
+        return 'bg-white dark:bg-dark-bg border-primary text-gray-900 dark:text-white';
+      default:
+        return 'bg-white dark:bg-dark-bg border-gray-300 dark:border-dark-border text-gray-900 dark:text-white';
     }
   };
 
@@ -37,13 +41,13 @@ function SubsceneNode({ data, onClick }: SubsceneNodeProps) {
         type="source"
         position={Position.Right}
         id="right"
-        className="w-4 h-4 bg-primary hover:bg-primary/90 rounded-full border-2 border-white shadow-md"
+        className="w-4 h-4 bg-primary hover:bg-primary/90 rounded-full border-2 border-gray-200 dark:border-white shadow-md"
       />
       <Handle
         type="target"
         position={Position.Left}
         id="left"
-        className="w-4 h-4 bg-primary hover:bg-primary/90 rounded-full border-2 border-white shadow-md"
+        className="w-4 h-4 bg-primary hover:bg-primary/90 rounded-full border-2 border-gray-200 dark:border-white shadow-md"
       />
       <div className="font-semibold text-sm truncate">{data.label}</div>
       <div className="text-xs mt-1 capitalize opacity-80">{data.type}</div>

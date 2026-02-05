@@ -18,12 +18,7 @@ import { usePreviewChatStore } from '../store/previewChatStore';
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useBuildChatStore } from '../store/buildChatStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import DraggableDialog from './DraggableDialog';
 import BuildChatInterface from './BuildChatInterface';
 import PreviewChatInterface from './PreviewChatInterface';
 import EditPanel from './EditPanel';
@@ -108,6 +103,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const workingSceneGraph = workspaceAgent?.scenes?.find(s => s.id === currentSceneId) || null;
   const previewSceneGraph = previewAgent?.scenes?.find(s => s.id === currentSceneId) || null;
 
+  // Detect current theme for graph styling
+  const [isDarkMode, setIsDarkMode] = useState(() =>
+    document.documentElement.classList.contains('dark')
+  );
+
   // Initialize store with agent data
   useEffect(() => {
     if (agent) {
@@ -121,6 +121,20 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       setCurrentSceneId(selectedScene.id);
     }
   }, [selectedScene, setCurrentSceneId]);
+
+  // Monitor theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class']
+    });
+
+    return () => observer.disconnect();
+  }, []);
 
   const handleCreateSceneModalOpen = () => {
     setIsCreateSceneModalOpen(true);
@@ -552,24 +566,24 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               animated: true,
               markerEnd: { type: MarkerType.ArrowClosed },
               style: {
-                stroke: '#6366f1',
+                stroke: isDarkMode ? '#6366f1' : '#818cf8',
                 strokeWidth: 2,
-                strokeOpacity: 0.8,
+                strokeOpacity: isDarkMode ? 0.8 : 0.6,
                 strokeLinecap: 'round'
               },
               type: 'bezier',
               labelBgPadding: [8, 5],
               labelBgBorderRadius: 4,
               labelBgStyle: {
-                fill: 'rgba(30, 30, 30, 0.85)',
-                stroke: 'rgba(24, 91, 233, 0.3)',
+                fill: isDarkMode ? 'rgba(30, 30, 30, 0.85)' : 'rgba(255, 255, 255, 0.9)',
+                stroke: isDarkMode ? 'rgba(24, 91, 233, 0.3)' : 'rgba(99, 102, 241, 0.3)',
                 strokeWidth: 1,
-                boxShadow: '0 2px 8px rgba(0, 0, 0, 0.3)'
+                boxShadow: isDarkMode ? '0 2px 8px rgba(0, 0, 0, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.1)'
               },
               labelStyle: {
                 fontSize: 11,
                 fontWeight: 500,
-                fill: '#f1f5f9',
+                fill: isDarkMode ? '#f1f5f9' : '#1e293b',
                 whiteSpace: 'nowrap'
               },
               className: 'hover:stroke-opacity-100 hover:stroke-width-3 transition-all duration-200',
@@ -587,7 +601,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     });
 
     return { nodes, edges };
-  }, []);
+  }, [isDarkMode]);
 
   useEffect(() => {
     if (currentSceneGraphData) {
@@ -788,17 +802,14 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         )}
       </SidebarInset>
 
-      {/* Build Chat Dialog */}
-      <Dialog open={isBuildChatOpen} onOpenChange={setIsBuildChatOpen}>
-        <DialogContent className="sm:max-w-2xl h-[80vh] p-0 flex flex-col">
-          <DialogHeader className="px-4 pt-4 pb-0">
-            <DialogTitle className="sr-only">Build Assistant</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-hidden">
-            <BuildChatInterface agentId={agentId} />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Build Chat Draggable Dialog */}
+      <DraggableDialog
+        open={isBuildChatOpen}
+        onOpenChange={setIsBuildChatOpen}
+        title="Build Assistant"
+      >
+        <BuildChatInterface agentId={agentId} />
+      </DraggableDialog>
 
       {/* Scene Modal */}
       <SceneModal
