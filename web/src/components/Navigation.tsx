@@ -93,7 +93,7 @@ function Navigation() {
               <div className="relative w-4 h-4">
                 {/* Bot icon - fades out and rotates on hover */}
                 <Bot
-                  className={`absolute inset-0 w-4 h-4 transition-all duration-300 ${agentId && isAgentsButtonHovered
+                  className={`absolute inset-0 w-4 h-4 transition-all duration-150 ${agentId && isAgentsButtonHovered
                     ? 'opacity-0 rotate-180'
                     : 'opacity-100 rotate-0'
                     }`}
@@ -102,7 +102,7 @@ function Navigation() {
                 {/* ArrowLeft icon - fades in from opposite rotation on hover */}
                 {agentId && (
                   <ArrowLeft
-                    className={`absolute inset-0 w-4 h-4 transition-all duration-300 ${isAgentsButtonHovered
+                    className={`absolute inset-0 w-4 h-4 transition-all duration-150 ${isAgentsButtonHovered
                       ? 'opacity-100 rotate-0'
                       : 'opacity-0 rotate-180'
                       }`}

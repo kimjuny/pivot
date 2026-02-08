@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { BuildHistory, BuildChatRequest, SceneGraph, Scene, SceneNode, Connection } from '../types';
+import { StreamEventType } from '../types';
 import { chatWithBuildAgent } from '../utils/api';
 import { useAgentWorkStore } from './agentWorkStore';
 
@@ -37,30 +38,30 @@ interface BuildSceneData {
  * Helper to convert backend scene data to frontend SceneGraph format
  */
 const convertToSceneGraph = (
-  sceneData: BuildSceneData, 
-  sceneId: number, 
+  sceneData: BuildSceneData,
+  sceneId: number,
   agentId: number
 ): SceneGraph => {
   // Map connections to their source subscenes
   const subscenes = (sceneData.subscenes || []).map((sub) => {
     // Ensure name exists
     const subName = sub.name || '';
-    
+
     // Find all connections originating from this subscene
     // Check top-level connections first (standard)
     let relevantConnections: BuildConnectionData[] = [];
-    
+
     if (sceneData.connections && Array.isArray(sceneData.connections)) {
       relevantConnections = sceneData.connections.filter(
         (conn) => conn.from_subscene === subName
       );
     }
-    
+
     // Fallback: check if connections are nested (non-standard but possible)
     if (relevantConnections.length === 0 && sub.connections && Array.isArray(sub.connections)) {
-        relevantConnections = sub.connections;
+      relevantConnections = sub.connections;
     }
-    
+
     return {
       ...sub,
       id: `subscene-${subName}`, // Ensure ID format matches frontend expectation
@@ -161,12 +162,27 @@ const useBuildChatStore = create<BuildChatStore>((set, get) => ({
         content,
         created_at: utcTimestamp
       };
+      // Also create an empty assistant message to avoid duplicate messages during streaming
+      const emptyAssistantMessage: BuildHistory = {
+        id: 0,
+        session_id: state.currentBuildSession || '',
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString()
+      };
       return {
         isChatting: true,
         error: null,
-        buildChatHistory: [...state.buildChatHistory, newUserMessage]
+        buildChatHistory: [...state.buildChatHistory, newUserMessage, emptyAssistantMessage]
       };
     });
+
+    // Prepare accumulator for streaming response
+    let responseText = '';
+    let reasonText = '';
+    let thinkingText = '';
+    let agentJson = '';
+    let error: string | null = null;
 
     try {
       const request: BuildChatRequest = {
@@ -175,25 +191,94 @@ const useBuildChatStore = create<BuildChatStore>((set, get) => ({
         agent_id: agentId.toString()
       };
 
-      const response = await chatWithBuildAgent(request);
+      // Import streaming API
+      const { buildChatStream } = await import('../utils/api');
+
+      await buildChatStream(request, (event) => {
+        switch (event.type) {
+          case StreamEventType.REASONING:
+            // Accumulate thinking/reasoning content
+            if (event.delta) {
+              thinkingText += event.delta;
+              // Update the assistant message in real-time
+              set(state => {
+                const history = [...state.buildChatHistory];
+                const lastMsg = history[history.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant') {
+                  lastMsg.thinking = thinkingText;
+                }
+                return { buildChatHistory: history };
+              });
+            }
+            break;
+
+          case StreamEventType.RESPONSE:
+            // Accumulate response text
+            if (event.delta) {
+              responseText += event.delta;
+              // Update the assistant message in real-time
+              set(state => {
+                const history = [...state.buildChatHistory];
+                const lastMsg = history[history.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant') {
+                  lastMsg.content = responseText;
+                }
+                return { buildChatHistory: history };
+              });
+            }
+            break;
+
+          case StreamEventType.REASON:
+            // Store reason separately
+            if (event.delta) {
+              reasonText += event.delta;
+            }
+            break;
+
+          case StreamEventType.UPDATED_SCENES:
+            // Receive the complete agent JSON
+            if (event.delta) {
+              agentJson = event.delta;
+            }
+            break;
+
+          case StreamEventType.ERROR:
+            error = event.error || 'Unknown error';
+            break;
+        }
+      });
+
+      // After stream completes, finalize the message
+      if (error) {
+        throw new Error(error);
+      }
+
+      // Parse the agent JSON and extract scenes
+      let parsedAgent: { scenes?: BuildSceneData[] } = {};
+      if (agentJson) {
+        try {
+          parsedAgent = JSON.parse(agentJson) as { scenes?: BuildSceneData[] };
+        } catch (e) {
+          console.error('Failed to parse agent JSON:', e);
+        }
+      }
 
       set(state => {
-        const newAssistantMessage: BuildHistory = {
-          id: 0,
-          session_id: response.session_id,
-          role: 'assistant',
-          content: response.response,
-          agent_snapshot: JSON.stringify(response.updated_agent),
-          created_at: new Date().toISOString()
-        };
+        const history = [...state.buildChatHistory];
+        const lastMsg = history[history.length - 1];
+        if (lastMsg && lastMsg.role === 'assistant') {
+          // Update the final message with agent snapshot
+          lastMsg.agent_snapshot = agentJson;
+        }
+
         return {
-          currentBuildSession: response.session_id,
-          buildChatHistory: [...state.buildChatHistory, newAssistantMessage],
+          buildChatHistory: history,
           isChatting: false,
-          pendingBuildChanges: response.updated_agent.scenes as BuildSceneData[] || null,
+          pendingBuildChanges: parsedAgent.scenes || null,
           error: null
         };
       });
+
     } catch (error) {
       const err = error as Error;
       set({
@@ -209,21 +294,21 @@ const useBuildChatStore = create<BuildChatStore>((set, get) => ({
     if (pendingBuildChanges && Array.isArray(pendingBuildChanges)) {
       const agentWorkStore = useAgentWorkStore.getState();
       const { workspaceAgent, currentSceneId } = agentWorkStore;
-      
+
       if (!workspaceAgent) return;
 
       const workingScenes = (workspaceAgent.scenes || []) as unknown as Scene[];
-      
+
       // 1. Update Scenes List
       // We map BuildSceneData to SceneGraph objects
       const newScenes: SceneGraph[] = pendingBuildChanges.map((sceneData) => {
         // Try to match existing scene to preserve ID
         const existingScene = workingScenes.find(s => s.name === sceneData.name);
-        
+
         // Calculate IDs
         const sceneId = existingScene ? existingScene.id : (-Date.now() - Math.floor(Math.random() * 1000));
         const agentId = existingScene?.agent_id || workspaceAgent.id;
-        
+
         // Generate graph data
         const graphData = convertToSceneGraph(sceneData, sceneId, agentId);
 
@@ -231,10 +316,10 @@ const useBuildChatStore = create<BuildChatStore>((set, get) => ({
         // Since convertToSceneGraph returns a full SceneGraph, we can just use it.
         // But we might want to preserve some fields from existingScene if they are not in graphData?
         // Actually convertToSceneGraph creates a fresh one.
-        
+
         return graphData;
       });
-      
+
       // Update the agent with new scenes
       const newAgent = { ...workspaceAgent, scenes: newScenes };
       agentWorkStore.setWorkspaceAgent(newAgent);
@@ -244,16 +329,16 @@ const useBuildChatStore = create<BuildChatStore>((set, get) => ({
       if (currentSceneId) {
         const currentSceneExists = newScenes.some(s => s.id === currentSceneId);
         if (!currentSceneExists) {
-           if (newScenes.length > 0) {
-             // Switch to first scene if current was deleted
-             agentWorkStore.setCurrentSceneId(newScenes[0].id || null);
-           } else {
-             agentWorkStore.setCurrentSceneId(null);
-           }
+          if (newScenes.length > 0) {
+            // Switch to first scene if current was deleted
+            agentWorkStore.setCurrentSceneId(newScenes[0].id || null);
+          } else {
+            agentWorkStore.setCurrentSceneId(null);
+          }
         }
       } else if (newScenes.length > 0) {
-         // If no scene was selected, select the first one
-         agentWorkStore.setCurrentSceneId(newScenes[0].id || null);
+        // If no scene was selected, select the first one
+        agentWorkStore.setCurrentSceneId(newScenes[0].id || null);
       }
 
       set({

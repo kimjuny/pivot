@@ -141,7 +141,7 @@ export interface SceneGraph {
   created_at?: string;
   /** Update timestamp */
   updated_at?: string;
-  
+
   /** Array of scene nodes in the graph */
   subscenes: SceneNode[];
   /** ID of the currently active scene */
@@ -279,6 +279,8 @@ export interface BuildHistory {
   role: 'user' | 'assistant';
   /** Content of the message */
   content: string;
+  /** Optional thinking/reasoning content (for streaming) */
+  thinking?: string;
   /** Optional agent snapshot after this message */
   agent_snapshot?: string;
   /** UTC timestamp when the message was created */

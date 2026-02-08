@@ -6,12 +6,14 @@ using LLM-powered natural language interactions.
 
 import logging
 import traceback
-from typing import Any
+from datetime import datetime, timezone
 
 from app.api.dependencies import get_db
-from app.schemas.build import BuildChatRequest, BuildChatResponse
-from app.services.build_service import BuildService, BuildServiceError
-from fastapi import APIRouter, Depends, HTTPException
+from app.schemas.build import BuildChatRequest
+from app.schemas.schemas import StreamEvent, StreamEventType
+from app.services.build_service import BuildService
+from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 logger = logging.getLogger(__name__)
@@ -19,42 +21,146 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/build/chat", response_model=BuildChatResponse)
-async def chat_build(
+@router.post("/build/chat/stream")
+async def build_chat_stream(
     request: BuildChatRequest, db: Session = Depends(get_db)
-) -> dict[str, Any]:
-    """Chat endpoint for building/modifying agents.
+):
+    """Streaming endpoint for building/modifying agents.
+
+    Returns a Server-Sent Events (SSE) stream with events:
+    - reasoning: Chain-of-Thought updates (for thinking models)
+    - response: Response text from LLM
+    - reason: Reason for the changes
+    - updated_scenes: Complete updated agent JSON configuration in delta field
+    - error: Error details
 
     Args:
-        request: Build chat request with content and optional session/agent IDs.
+        request: Build chat request with content and optional agent ID.
         db: Database session.
 
     Returns:
-        Build response with session ID, response text, reason, and updated agent.
-
-    Raises:
-        HTTPException: If building fails.
+        StreamingResponse with SSE events.
     """
-    logger.info(f"Received build chat request. Session: {request.session_id}")
+    logger.info(f"Received build chat stream request. Agent ID: {request.agent_id}")
 
-    try:
-        session_id, result = BuildService.build_agent(
-            db=db,
-            content=request.content,
-            session_id=request.session_id,
-            agent_id=request.agent_id,
-        )
+    async def event_generator():
+        try:
+            # Load existing agent if agent_id provided
+            agent_detail = None
+            if request.agent_id:
+                from app.crud.agent import agent as agent_crud
+                from app.crud.connection import connection as connection_crud
+                from app.crud.scene import scene as scene_crud
+                from app.crud.subscene import subscene as subscene_crud
+                from app.schemas.schemas import (
+                    ConnectionResponse,
+                    SceneGraphResponse,
+                    SubsceneWithConnectionsResponse,
+                )
 
-        return {
-            "session_id": session_id,
-            "response": result.response,
-            "reason": result.reason,
-            "updated_agent": result.agent_dict,
-        }
+                # Convert agent_id from string to int
+                agent_id_int = int(request.agent_id)
+                agent = agent_crud.get(agent_id_int, db)
 
-    except BuildServiceError as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
-    except Exception as e:
-        logger.error(f"Build failed: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Build failed: {e!s}") from e
+                if not agent:
+                    error_event = StreamEvent(
+                        type=StreamEventType.ERROR,
+                        error=f"Agent with ID {request.agent_id} not found",
+                        create_time=datetime.now(timezone.utc).isoformat(),
+                    )
+                    yield f"data: {error_event.json()}\n\n"
+                    return
+
+                # Build agent detail with scenes
+                scenes = scene_crud.get_by_agent_id(agent_id_int, db)
+
+                scenes_graph_responses = []
+                for scene in scenes:
+                    if not scene.id:
+                        continue
+
+                    # Get all subscenes for this scene
+                    subscenes = subscene_crud.get_by_scene_id(scene.id, db)
+
+                    # Build subscenes with connections
+                    subscenes_with_connections = []
+                    for subscene in subscenes:
+                        # Get all connections where this subscene is the source
+                        connections = connection_crud.get_by_from_subscene(
+                            subscene.name, db
+                        )
+
+                        # Build subscene with connections response
+                        subscenes_with_connections.append(
+                            SubsceneWithConnectionsResponse(
+                                id=subscene.id,
+                                name=subscene.name,
+                                type=subscene.type,
+                                state=subscene.state,
+                                description=subscene.description,
+                                mandatory=subscene.mandatory,
+                                objective=subscene.objective,
+                                scene_id=subscene.scene_id,
+                                connections=[
+                                    ConnectionResponse.from_orm(conn)
+                                    for conn in connections
+                                ],
+                                created_at=subscene.created_at,
+                                updated_at=subscene.updated_at,
+                            )
+                        )
+
+                    scenes_graph_responses.append(
+                        SceneGraphResponse(
+                            id=scene.id,
+                            name=scene.name,
+                            description=scene.description,
+                            state="inactive",  # Default state
+                            agent_id=scene.agent_id or agent_id_int,
+                            subscenes=subscenes_with_connections,
+                            created_at=scene.created_at,
+                            updated_at=scene.updated_at,
+                        )
+                    )
+
+                from app.schemas.schemas import AgentDetailResponse
+
+                if not agent.id:
+                    error_event = StreamEvent(
+                        type=StreamEventType.ERROR,
+                        error=f"Agent {request.agent_id} has no ID",
+                        create_time=datetime.now(timezone.utc).isoformat(),
+                    )
+                    yield f"data: {error_event.json()}\n\n"
+                    return
+
+                agent_detail = AgentDetailResponse(
+                    id=agent.id,
+                    name=agent.name,
+                    description=agent.description,
+                    model_name=agent.model_name,
+                    is_active=agent.is_active,
+                    created_at=agent.created_at,
+                    updated_at=agent.updated_at,
+                    scenes=scenes_graph_responses,
+                )
+
+            # Stream build responses
+            for event in BuildService.stream_build_chat(
+                agent_detail=agent_detail,
+                message=request.content,
+                model_name=agent_detail.model_name if agent_detail else None,
+            ):
+                yield f"data: {event.json()}\n\n"
+
+        except Exception as e:
+            logger.error(f"Error in build chat stream: {e}")
+            logger.error(traceback.format_exc())
+            error_event = StreamEvent(
+                type=StreamEventType.ERROR,
+                error=str(e),
+                create_time=datetime.now(timezone.utc).isoformat(),
+            )
+            yield f"data: {error_event.json()}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

@@ -38,6 +38,24 @@ function BuildChatInterface({ agentId }: BuildChatInterfaceProps) {
   }, [buildChatHistory]);
 
   /**
+   * Auto-expand thinking section for latest assistant message during streaming.
+   */
+  useEffect(() => {
+    if (isChatting && buildChatHistory.length > 0) {
+      const lastMessageIndex = buildChatHistory.length - 1;
+      const lastMessage = buildChatHistory[lastMessageIndex];
+
+      // Auto-expand thinking section for the last assistant message during streaming
+      if (lastMessage?.role === 'assistant' && lastMessage.thinking && !expandedThinking[lastMessageIndex]) {
+        setExpandedThinking(prev => ({
+          ...prev,
+          [lastMessageIndex]: true
+        }));
+      }
+    }
+  }, [buildChatHistory, isChatting, expandedThinking]);
+
+  /**
    * Handle form submission to send message.
    * Validates input and prevents duplicate submissions.
    *
@@ -99,13 +117,13 @@ function BuildChatInterface({ agentId }: BuildChatInterfaceProps) {
               <div className="text-[10px] mb-1 opacity-70 font-mono">
                 {formatTimestamp(message.created_at)}
               </div>
-              {message.role === 'assistant' && message.agent_snapshot && (
+              {message.role === 'assistant' && message.thinking && (
                 <div
                   className="cursor-pointer mb-2"
                   onClick={() => toggleThinking(index)}
                 >
                   <div className="text-xs text-primary mb-1 italic opacity-90 border-l-2 border-primary pl-2 flex items-center justify-between">
-                    <span className="font-medium">Proposed Changes:</span>
+                    <span className="font-medium">Thinking:</span>
                     <svg
                       className={`w-3 h-3 transition-transform duration-200 ${expandedThinking[index] ? 'rotate-90' : ''}`}
                       fill="none"
@@ -118,29 +136,25 @@ function BuildChatInterface({ agentId }: BuildChatInterfaceProps) {
                   <div
                     className={`overflow-hidden transition-all duration-300 ease-in-out ${expandedThinking[index] ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'}`}
                   >
-                    <div className="text-xs text-primary mb-1 italic opacity-90 border-l-2 border-primary pl-2">
-                      Graph structure updated based on your request
+                    <div className="max-h-64 overflow-y-auto text-xs text-primary mb-1 italic opacity-90 border-l-2 border-primary pl-2 pr-1">
+                      {message.thinking}
                     </div>
                   </div>
                 </div>
               )}
-              <div className="text-sm leading-relaxed">{message.content}</div>
+              <div className="text-sm leading-relaxed">
+                {message.content || (isChatting && index === buildChatHistory.length - 1 && !message.thinking ? (
+                  <div className="flex items-center space-x-1.5">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
+                  </div>
+                ) : '')}
+              </div>
             </div>
           </div>
         ))
       )}
-        {isChatting && (
-          <div className="flex justify-start animate-fade-in">
-            <div className="bg-muted border border-border px-3 py-2 rounded-xl shadow-sm rounded-bl-none">
-              <div className="font-semibold text-xs mb-1 opacity-90 tracking-wide uppercase">Build Assistant</div>
-              <div className="flex items-center space-x-1.5">
-                <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-                <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.15s' }}></div>
-                <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.3s' }}></div>
-              </div>
-            </div>
-          </div>
-        )}
         <div ref={messagesEndRef} />
       </div>
 
