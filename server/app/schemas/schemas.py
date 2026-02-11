@@ -161,6 +161,7 @@ class SceneGraphResponse(BaseModel):
 
 class AgentDetailResponse(AgentResponse):
     """Agent response with full details including scenes and their graphs."""
+
     scenes: list[SceneGraphResponse] = []
 
 
@@ -177,24 +178,37 @@ class ChatHistoryCreate(BaseModel):
 
 class PreviewChatRequest(BaseModel):
     """Schema for preview chat request."""
+
     message: str = Field(..., description="User message")
-    agent_detail: AgentDetailResponse = Field(..., description="Full agent detail definition")
-    current_scene_name: str | None = Field(None, description="Name of the currently active scene")
-    current_subscene_name: str | None = Field(None, description="Name of the currently active subscene")
+    agent_detail: AgentDetailResponse = Field(
+        ..., description="Full agent detail definition"
+    )
+    current_scene_name: str | None = Field(
+        None, description="Name of the currently active scene"
+    )
+    current_subscene_name: str | None = Field(
+        None, description="Name of the currently active subscene"
+    )
 
 
 class PreviewChatResponse(BaseModel):
     """Schema for preview chat response."""
+
     response: str
     reason: str | None
-    graph: list[SceneGraphResponse] | None = Field(None, description="Updated scene graph")
+    graph: list[SceneGraphResponse] | None = Field(
+        None, description="Updated scene graph"
+    )
     current_scene_name: str | None = Field(None, description="Updated active scene")
-    current_subscene_name: str | None = Field(None, description="Updated active subscene")
+    current_subscene_name: str | None = Field(
+        None, description="Updated active subscene"
+    )
     create_time: str
 
 
 class StreamEventType(str, Enum):
     """Enum for SSE stream event types."""
+
     REASONING = "reasoning"
     REASON = "reason"
     RESPONSE = "response"
@@ -205,13 +219,23 @@ class StreamEventType(str, Enum):
 
 class StreamEvent(BaseModel):
     """Schema for SSE stream event data."""
-    type: StreamEventType = Field(..., description="Event type: 'reasoning', 'reason', 'response', 'updated_scenes', 'match_connection', 'error'")
-    delta: str | None = Field(default=None, description="Incremental content update")
-    updated_scenes: list[SceneGraphResponse] | None = Field(default=None, description="Updated scene graph")
-    matched_connection: ConnectionResponse | None = Field(default=None, description="Matched connection details")
-    error: str | None = Field(default=None, description="Error message")
-    create_time: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat(), description="Creation timestamp")
 
+    type: StreamEventType = Field(
+        ...,
+        description="Event type: 'reasoning', 'reason', 'response', 'updated_scenes', 'match_connection', 'error'",
+    )
+    delta: str | None = Field(default=None, description="Incremental content update")
+    updated_scenes: list[SceneGraphResponse] | None = Field(
+        default=None, description="Updated scene graph"
+    )
+    matched_connection: ConnectionResponse | None = Field(
+        default=None, description="Matched connection details"
+    )
+    error: str | None = Field(default=None, description="Error message")
+    create_time: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        description="Creation timestamp",
+    )
 
 
 class ChatHistoryResponse(BaseModel):

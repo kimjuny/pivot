@@ -35,7 +35,9 @@ router = APIRouter()
 
 
 @router.get("/agents", response_model=list[AgentResponse])
-async def get_agents(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+async def get_agents(
+    skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
+) -> list[dict[str, Any]]:
     """Get all agents with pagination.
 
     Args:
@@ -62,7 +64,9 @@ async def get_agents(skip: int = 0, limit: int = 100, db: Session = Depends(get_
 
 
 @router.post("/agents", response_model=AgentResponse, status_code=201)
-async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def create_agent(
+    agent_data: AgentCreate, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     """Create a new agent.
 
     Args:
@@ -79,7 +83,7 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)) -
     if agent_data.model_name and agent_data.model_name not in get_all_names():
         raise HTTPException(
             status_code=400,
-            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}"
+            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}",
         )
 
     existing_agent = agent_crud.get_by_name(agent_data.name, db)
@@ -107,7 +111,9 @@ async def create_agent(agent_data: AgentCreate, db: Session = Depends(get_db)) -
 
 
 @router.put("/agents/{agent_id}", response_model=AgentResponse)
-async def update_agent(agent_id: int, agent_data: AgentUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def update_agent(
+    agent_id: int, agent_data: AgentUpdate, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     """Update an existing agent.
 
     Args:
@@ -129,7 +135,7 @@ async def update_agent(agent_id: int, agent_data: AgentUpdate, db: Session = Dep
     if agent_data.model_name and agent_data.model_name not in get_all_names():
         raise HTTPException(
             status_code=400,
-            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}"
+            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}",
         )
 
     # Check if name change conflicts with existing agent
@@ -186,21 +192,21 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, A
 
     # Get all scenes for this agent
     scenes = scene_crud.get_by_agent_id(agent_id, db)
-    
+
     scenes_graph_responses = []
     for scene in scenes:
         if not scene.id:
             continue
-            
+
         # Get all subscenes for this scene
         subscenes = subscene_crud.get_by_scene_id(scene.id, db)
-        
+
         # Build subscenes with connections
         subscenes_with_connections = []
         for subscene in subscenes:
             # Get all connections where this subscene is the source
             connections = connection_crud.get_by_from_subscene(subscene.name, db)
-            
+
             # Build subscene with connections response
             subscenes_with_connections.append(
                 SubsceneWithConnectionsResponse(
@@ -212,12 +218,14 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, A
                     mandatory=subscene.mandatory,
                     objective=subscene.objective,
                     scene_id=subscene.scene_id,
-                    connections=[ConnectionResponse.from_orm(conn) for conn in connections],
+                    connections=[
+                        ConnectionResponse.from_orm(conn) for conn in connections
+                    ],
                     created_at=subscene.created_at,
                     updated_at=subscene.updated_at,
                 )
             )
-            
+
         scenes_graph_responses.append(
             SceneGraphResponse(
                 id=scene.id,
@@ -269,7 +277,7 @@ async def update_agent_scenes(
     input_scenes_names = {s.name for s in input_scenes_data}
 
     # Process inputs
-    
+
     # 1. Update or Create
     for scene_data in input_scenes_data:
         existing_scene = current_scenes_map.get(scene_data.name)
@@ -277,7 +285,10 @@ async def update_agent_scenes(
 
         if existing_scene:
             # Update description if changed
-            if existing_scene.id and existing_scene.description != scene_data.description:
+            if (
+                existing_scene.id
+                and existing_scene.description != scene_data.description
+            ):
                 scene_crud.update(
                     existing_scene.id, db, description=scene_data.description
                 )
@@ -302,21 +313,23 @@ async def update_agent_scenes(
         # Handle Graph Update if provided and target_scene is valid
         if target_scene and target_scene.id and scene_data.graph is not None:
             scene_id = target_scene.id
-            
+
             # Delete all existing connections for this scene
             existing_subscenes = subscene_crud.get_by_scene_id(scene_id, db)
             for subscene in existing_subscenes:
                 if subscene.id:
-                    connections = connection_crud.get_by_from_subscene(subscene.name, db)
+                    connections = connection_crud.get_by_from_subscene(
+                        subscene.name, db
+                    )
                     for conn in connections:
                         if conn.id:
                             connection_crud.delete(conn.id, db)
-            
+
             # Delete all existing subscenes
             for subscene in existing_subscenes:
                 if subscene.id:
                     subscene_crud.delete(subscene.id, db)
-            
+
             # Create new subscenes
             for subscene_item in scene_data.graph:
                 subscene_crud.create(
@@ -397,7 +410,9 @@ async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
 
         # 1. Delete Connections
         # We need to find connections by scene_id.
-        connections = db.exec(select(Connection).where(Connection.scene_id == scene.id)).all()
+        connections = db.exec(
+            select(Connection).where(Connection.scene_id == scene.id)
+        ).all()
         for conn in connections:
             db.delete(conn)
 
@@ -410,7 +425,9 @@ async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
         db.delete(scene)
 
     # 4. Delete Chat History
-    chat_histories = db.exec(select(ChatHistory).where(ChatHistory.agent_id == agent_id)).all()
+    chat_histories = db.exec(
+        select(ChatHistory).where(ChatHistory.agent_id == agent_id)
+    ).all()
     for history in chat_histories:
         db.delete(history)
 

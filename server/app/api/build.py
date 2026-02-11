@@ -22,9 +22,7 @@ router = APIRouter()
 
 
 @router.post("/build/chat/stream")
-async def build_chat_stream(
-    request: BuildChatRequest, db: Session = Depends(get_db)
-):
+async def build_chat_stream(request: BuildChatRequest, db: Session = Depends(get_db)):
     """Streaming endpoint for building/modifying agents.
 
     Returns a Server-Sent Events (SSE) stream with events:

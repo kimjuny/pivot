@@ -155,9 +155,7 @@ class BuildService:
                 json_match = re.search(
                     r"```json\s*\n(.*?)\n```", full_content, re.DOTALL
                 )
-                json_str = (
-                    json_match.group(1) if json_match else full_content.strip()
-                )
+                json_str = json_match.group(1) if json_match else full_content.strip()
 
                 result = json.loads(json_str)
 

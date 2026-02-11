@@ -27,6 +27,7 @@ class SubsceneType(Enum):
     NORMAL = "normal"
     END = "end"
 
+
 class Agent(SQLModel, table=True):
     """Agent model representing an AI agent configuration.
 
@@ -118,7 +119,9 @@ class Scene(SQLModel, table=True):
         return {
             "name": self.name,
             "identification_condition": self.identification_condition,
-            "state": (self._state if hasattr(self, "_state") else SceneState.INACTIVE).value,
+            "state": (
+                self._state if hasattr(self, "_state") else SceneState.INACTIVE
+            ).value,
             "subscenes": [ss.to_dict() for ss in self.subscenes],
         }
 
@@ -136,7 +139,9 @@ class Scene(SQLModel, table=True):
             name=data.get("name", ""),
             description=data.get("identification_condition", ""),
         )
-        object.__setattr__(scene, "_state", SceneState(data.get("state", "inactive").lower()))
+        object.__setattr__(
+            scene, "_state", SceneState(data.get("state", "inactive").lower())
+        )
 
         # Create subscenes from dict data
         if data.get("subscenes"):
@@ -231,7 +236,10 @@ class Subscene(SQLModel, table=True):
             "mandatory": self.mandatory,
             "objective": self.objective or "",
             "state": self.state,
-            "connections": [conn.to_dict() for conn in (self._connections if hasattr(self, "_connections") else [])],
+            "connections": [
+                conn.to_dict()
+                for conn in (self._connections if hasattr(self, "_connections") else [])
+            ],
         }
 
     @classmethod
@@ -317,6 +325,7 @@ class Connection(SQLModel, table=True):
             to_subscene=data.get("to_subscene", ""),
             condition=data.get("condition"),
         )
+
 
 class ChatHistory(SQLModel, table=True):
     """Chat history for user-agent conversations.

@@ -11,15 +11,17 @@ class InputMessage:
     Contains context information including history, scene graph, and current state.
     """
 
-    def __init__(self, 
-                 user_message: str,
-                 history: list[dict[str, str]],
-                 scenes: list[Scene],
-                 current_scene: Scene | None = None,
-                 current_subscene: Subscene | None = None):
+    def __init__(
+        self,
+        user_message: str,
+        history: list[dict[str, str]],
+        scenes: list[Scene],
+        current_scene: Scene | None = None,
+        current_subscene: Subscene | None = None,
+    ):
         """
         Initialize an InputMessage.
-        
+
         Args:
             user_message (str): The current user message
             history (List[Dict[str, str]]): Conversation history
@@ -32,10 +34,10 @@ class InputMessage:
         self.scenes = scenes
         self.current_scene = current_scene
         self.current_subscene = current_subscene
-        
+
         # Build the messages list immediately upon initialization
         self.messages: list[dict[str, str]] = self._build_messages()
-        
+
     def _build_system_message(self) -> dict[str, str]:
         """
         Construct the system message containing instructions, rules, and state.
@@ -43,7 +45,7 @@ class InputMessage:
         return get_chat_prompt(
             scenes=self.scenes,
             current_scene=self.current_scene,
-            current_subscene=self.current_subscene
+            current_subscene=self.current_subscene,
         )
 
     def _build_messages(self) -> list[dict[str, str]]:
@@ -51,26 +53,23 @@ class InputMessage:
         Build the full list of messages including system, history, and user message.
         """
         messages = []
-        
+
         # 1. System Message (Instructions, Rules, State)
         messages.append(self._build_system_message())
-        
+
         # 2. History Messages (User, Assistant, Tool)
         if self.history:
             messages.extend(self.history)
-            
+
         # 3. Current User Message
-        messages.append({
-            "role": "user",
-            "content": self.user_message
-        })
-        
+        messages.append({"role": "user", "content": self.user_message})
+
         return messages
 
     def get_messages(self) -> list[dict[str, str]]:
         """
         Get the structured messages list for the LLM.
-        
+
         Returns:
             list[dict[str, str]]: The list of messages.
         """

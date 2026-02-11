@@ -25,6 +25,7 @@ from app.db.session import init_db  # noqa: E402
 from app.llm.doubao_llm import DoubaoLLM  # noqa: E402
 from app.llm.glm_llm import GlmLLM  # noqa: E402
 from app.llm_globals import register_llm  # noqa: E402
+from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.utils.logging_config import get_logger  # noqa: E402
 
 # Configure logging before importing other modules
@@ -72,10 +73,10 @@ async def startup_event():
     logger.info("Initializing database...")
     init_db()
     logger.info("Database initialized successfully")
-    
+
     # Initialize LLMs
     settings = get_settings()
-    
+
     if settings.LLM_DOUBAO:
         logger.info("Initializing Doubao LLM...")
         try:
@@ -96,14 +97,25 @@ async def startup_event():
             api_key = settings.GLM_API_KEY or os.getenv("GLM_API_KEY")
             if api_key:
                 glm = GlmLLM(api_key=api_key, model="glm-4.7")
-                register_llm("glm-4", glm) # alias
-                register_llm("glm", glm) # alias
+                register_llm("glm-4", glm)  # alias
+                register_llm("glm", glm)  # alias
                 logger.info("GLM LLM initialized.")
             else:
                 logger.warning("GLM_API_KEY not found.")
         except Exception as e:
             logger.error(f"Failed to initialize GLM LLM: {e}")
-            
+
+    # Initialize tool system
+    logger.info("Initializing tool system...")
+    try:
+        tool_manager = get_tool_manager()
+        builtin_tools_dir = Path(__file__).parent / "orchestration" / "tool" / "builtin"
+        tool_manager.refresh(builtin_tools_dir)
+        tool_count = len(tool_manager.list_tools())
+        logger.info(f"Tool system initialized with {tool_count} built-in tools")
+    except Exception as e:
+        logger.error(f"Failed to initialize tool system: {e}")
+
     logger.info("Application startup complete")
 
 

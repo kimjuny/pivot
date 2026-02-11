@@ -128,7 +128,9 @@ class SceneCRUD(CRUDBase[Scene]):
         Returns:
             A list of Scene instances belonging to the agent.
         """
-        statement = select(Scene).where(Scene.agent_id == agent_id).offset(skip).limit(limit)
+        statement = (
+            select(Scene).where(Scene.agent_id == agent_id).offset(skip).limit(limit)
+        )
         return session.exec(statement).all()
 
     def get_by_name(self, name: str, session: Session) -> Scene | None:

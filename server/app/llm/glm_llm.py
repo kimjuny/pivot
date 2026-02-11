@@ -21,7 +21,10 @@ class GlmLLM(AbstractLLM):
     MAX_RETRIES = 3  # Maximum number of retry attempts
 
     def __init__(
-        self, model: str | None = None, api_key: str | None = None, timeout: int | None = None
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout: int | None = None,
     ):
         """
         Initialize the GlmLLM with the given model and API key.
@@ -71,7 +74,9 @@ class GlmLLM(AbstractLLM):
         try:
             # Call OpenAI-compatible API
             completion = self.client.chat.completions.create(
-                model=self.model, messages=messages, **kwargs  # type: ignore[arg-type]
+                model=self.model,
+                messages=messages,
+                **kwargs,  # type: ignore[arg-type]
             )
 
             # Convert to our structured response format
@@ -80,7 +85,9 @@ class GlmLLM(AbstractLLM):
         except Exception as e:
             raise RuntimeError(f"API request failed: {e!s}") from e
 
-    def chat_stream(self, messages: list[dict[str, str]], **kwargs: Any) -> Iterator[Response]:
+    def chat_stream(
+        self, messages: list[dict[str, str]], **kwargs: Any
+    ) -> Iterator[Response]:
         """
         Process a conversation with the GLM LLM in streaming mode.
 
@@ -101,7 +108,10 @@ class GlmLLM(AbstractLLM):
         try:
             # Call OpenAI-compatible API with streaming
             stream = self.client.chat.completions.create(
-                model=self.model, messages=messages, stream=True, **kwargs  # type: ignore[arg-type]
+                model=self.model,
+                messages=messages,
+                stream=True,
+                **kwargs,  # type: ignore[arg-type]
             )
 
             # Process the stream

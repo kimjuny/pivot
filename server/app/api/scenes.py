@@ -59,7 +59,9 @@ async def get_scenes(
 
 
 @router.post("/scenes", response_model=SceneResponse, status_code=201)
-async def create_scene(scene_data: SceneCreate, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def create_scene(
+    scene_data: SceneCreate, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     """Create a new scene.
 
     Args:
@@ -206,7 +208,9 @@ async def create_connection(
 
 
 @router.get("/scenes/{scene_id}/graph", response_model=SceneGraphResponse)
-async def get_scene_graph(scene_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def get_scene_graph(
+    scene_id: int, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     """Get the complete scene graph with all subscenes and their connections.
 
     Args:

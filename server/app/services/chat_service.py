@@ -156,9 +156,7 @@ class ChatService:
                                     break
 
                     conn_id = (
-                        input_conn.id
-                        if input_conn
-                        else f"new-{uuid.uuid4().hex[:8]}"
+                        input_conn.id if input_conn else f"new-{uuid.uuid4().hex[:8]}"
                     )
                     conn_created_at = (
                         input_conn.created_at if input_conn else current_time
