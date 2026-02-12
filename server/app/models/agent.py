@@ -37,6 +37,7 @@ class Agent(SQLModel, table=True):
         description: Optional description of the agent's purpose.
         model_name: Name of the LLM model to use.
         is_active: Whether the agent is currently active.
+        max_iteration: Maximum number of iterations for ReAct recursion.
         created_at: UTC timestamp when the agent was created.
         updated_at: UTC timestamp when the agent was last updated.
         scenes: List of scenes associated with this agent.
@@ -47,6 +48,7 @@ class Agent(SQLModel, table=True):
     description: str | None = Field(default=None)
     model_name: str | None = Field(default=None)
     is_active: bool = Field(default=True)
+    max_iteration: int = Field(default=30, description="Maximum iterations for ReAct recursion")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     scenes: list["Scene"] = Relationship(back_populates="agent")

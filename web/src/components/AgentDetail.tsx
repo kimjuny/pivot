@@ -21,6 +21,7 @@ import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import DraggableDialog from './DraggableDialog';
 import BuildChatInterface from './BuildChatInterface';
 import PreviewChatInterface from './PreviewChatInterface';
+import ReactChatInterface from './ReactChatInterface';
 import EditPanel from './EditPanel';
 import SceneModal from './SceneModal';
 import SubsceneModal from './SubsceneModal';
@@ -84,6 +85,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isBuildChatOpen, setIsBuildChatOpen] = useState<boolean>(false);
+  const [isReactChatOpen, setIsReactChatOpen] = useState<boolean>(false);
   const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   // Removed: previewModeSceneGraphData - now using previewAgent from store
@@ -709,6 +711,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         onCreateScene={handleCreateSceneModalOpen}
         onDeleteScene={handleDeleteScene}
         onOpenBuildChat={() => setIsBuildChatOpen(true)}
+        onOpenReactChat={() => setIsReactChatOpen(true)}
         onAgentUpdate={onAgentUpdate}
       />
 
@@ -809,6 +812,15 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         title="Build Assistant"
       >
         <BuildChatInterface agentId={agentId} />
+      </DraggableDialog>
+
+      {/* ReAct Chat Draggable Dialog */}
+      <DraggableDialog
+        open={isReactChatOpen}
+        onOpenChange={setIsReactChatOpen}
+        title="ReAct Agent Chat"
+      >
+        <ReactChatInterface agentId={agentId} />
       </DraggableDialog>
 
       {/* Scene Modal */}

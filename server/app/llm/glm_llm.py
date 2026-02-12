@@ -75,7 +75,7 @@ class GlmLLM(AbstractLLM):
             # Call OpenAI-compatible API
             completion = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]
                 **kwargs,  # type: ignore[arg-type]
             )
 
@@ -109,7 +109,7 @@ class GlmLLM(AbstractLLM):
             # Call OpenAI-compatible API with streaming
             stream = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]
                 stream=True,
                 **kwargs,  # type: ignore[arg-type]
             )

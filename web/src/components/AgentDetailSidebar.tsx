@@ -8,6 +8,7 @@ import {
     Sparkles,
     Plus,
     X,
+    MessageSquare,
 } from 'lucide-react';
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -48,6 +49,7 @@ interface AgentDetailSidebarProps {
     onCreateScene: () => void;
     onDeleteScene: (scene: Scene) => void;
     onOpenBuildChat: () => void;
+    onOpenReactChat: () => void;
     onAgentUpdate?: (agent: Agent) => void;
 }
 
@@ -64,6 +66,7 @@ function AgentDetailSidebar({
     onCreateScene,
     onDeleteScene,
     onOpenBuildChat,
+    onOpenReactChat,
     onAgentUpdate,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
@@ -137,6 +140,23 @@ function AgentDetailSidebar({
                                         </span>
                                     )}
                                 </div>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onOpenReactChat();
+                                            }}
+                                            className="p-1.5 hover:bg-sidebar-accent rounded transition-colors"
+                                            aria-label="Open Chat"
+                                        >
+                                            <MessageSquare className="size-4" />
+                                        </button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="right">
+                                        <p>Chat with Agent</p>
+                                    </TooltipContent>
+                                </Tooltip>
                             </SidebarMenuButton>
                         </SidebarMenuItem>
                     </SidebarMenu>

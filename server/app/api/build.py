@@ -138,6 +138,7 @@ async def build_chat_stream(request: BuildChatRequest, db: Session = Depends(get
                     description=agent.description,
                     model_name=agent.model_name,
                     is_active=agent.is_active,
+                    max_iteration=agent.max_iteration,
                     created_at=agent.created_at,
                     updated_at=agent.updated_at,
                     scenes=scenes_graph_responses,

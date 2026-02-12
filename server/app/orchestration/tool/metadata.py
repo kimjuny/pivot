@@ -15,15 +15,13 @@ class ToolMetadata:
     Attributes:
         name: The unique identifier for the tool.
         description: A brief description of what the tool does.
-        input_schema: Description of the expected input format/parameters.
-        output_schema: Description of the output format/return value.
+        parameters: JSON Schema describing the expected parameters (OpenAI format).
         func: The actual callable function.
     """
 
     name: str
     description: str
-    input_schema: str
-    output_schema: str
+    parameters: dict[str, Any]
     func: Callable[..., Any]
 
     def to_text(self) -> str:
@@ -33,12 +31,13 @@ class ToolMetadata:
         Returns:
             A formatted string describing the tool's interface and purpose.
         """
+        import json
+
         return f"""Tool: {self.name}
 Description: {self.description}
-Input: {self.input_schema}
-Output: {self.output_schema}"""
+Parameters: {json.dumps(self.parameters, ensure_ascii=False)}"""
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert tool metadata to a dictionary (excluding the function reference).
 
@@ -48,6 +47,22 @@ Output: {self.output_schema}"""
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": self.input_schema,
-            "output_schema": self.output_schema,
+            "parameters": self.parameters,
+        }
+
+    def to_openai_format(self) -> dict[str, Any]:
+        """
+        Convert tool metadata to OpenAI function calling format.
+
+        Returns:
+            Dictionary in OpenAI tools format with type and function fields.
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+                "strict": True,  # Enable structured outputs
+            },
         }

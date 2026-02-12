@@ -110,6 +110,15 @@ class ToolManager:
         tool_descriptions = [metadata.to_text() for metadata in self._registry.values()]
         return "\n\n".join(tool_descriptions)
 
+    def to_openai_tools(self) -> list[dict[str, Any]]:
+        """
+        Generate OpenAI function calling format tool list.
+
+        Returns:
+            List of tool definitions in OpenAI tools format.
+        """
+        return [tool.to_openai_format() for tool in self._registry.values()]
+
     def refresh(self, tools_dir: Path) -> None:
         """
         Refresh the tool registry by scanning a directory for tool modules.

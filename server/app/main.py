@@ -19,6 +19,7 @@ from app.api.agents import router as agents_router  # noqa: E402
 from app.api.build import router as build_router  # noqa: E402
 from app.api.chat import router as chat_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
+from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import init_db  # noqa: E402
@@ -60,6 +61,7 @@ app.include_router(scenes_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(build_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
+app.include_router(react_router, prefix="/api")
 
 
 # Startup event to initialize database

@@ -33,9 +33,11 @@ class UsageInfo:
 class ChatMessage:
     """A single message in a chat."""
 
-    role: str  # "system", "user", "assistant", etc.
-    content: str  # The message content
+    role: str  # "system", "user", "assistant", "tool", etc.
+    content: str | None = None  # The message content (optional for tool_calls)
     reasoning_content: str | None = None  # The reasoning content for CoT models
+    tool_calls: list[dict[str, Any]] | None = None  # Tool calls from assistant
+    tool_call_id: str | None = None  # Tool call ID for tool role messages
 
 
 @dataclass
@@ -230,8 +232,35 @@ class AbstractLLM(ABC):
                 role = getattr(raw_message, "role", "assistant")
                 content = getattr(raw_message, "content", "") or ""
                 reasoning_content = getattr(raw_message, "reasoning_content", None)
+
+                # Extract tool_calls if present
+                tool_calls = None
+                raw_tool_calls = getattr(raw_message, "tool_calls", None)
+                if raw_tool_calls:
+                    tool_calls = []
+                    for tc in raw_tool_calls:
+                        tool_call_dict = {
+                            "id": getattr(tc, "id", ""),
+                            "type": getattr(tc, "type", "function"),
+                        }
+                        # Extract function info
+                        func = getattr(tc, "function", None)
+                        if func:
+                            tool_call_dict["function"] = {
+                                "name": getattr(func, "name", ""),
+                                "arguments": getattr(func, "arguments", ""),
+                            }
+                        tool_calls.append(tool_call_dict)
+
+                # Extract tool_call_id for tool role messages
+                tool_call_id = getattr(raw_message, "tool_call_id", None)
+
                 message = ChatMessage(
-                    role=role, content=content, reasoning_content=reasoning_content
+                    role=role,
+                    content=content,
+                    reasoning_content=reasoning_content,
+                    tool_calls=tool_calls,
+                    tool_call_id=tool_call_id,
                 )
             else:
                 # Fallback for empty delta

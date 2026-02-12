@@ -15,8 +15,8 @@ class DoubaoLLM(AbstractLLM):
     Uses OpenAI-compatible API via the OpenAI library.
     """
 
-    DEFAULT_MODEL = "doubao-seed-1-6-250615"
-    # DEFAULT_MODEL = "doubao-seed-1-8-251228"
+    # DEFAULT_MODEL = "doubao-seed-1-6-250615"
+    DEFAULT_MODEL = "doubao-seed-1-8-251228"
     API_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
     DEFAULT_TIMEOUT = 60  # Request timeout in seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts
@@ -76,7 +76,7 @@ class DoubaoLLM(AbstractLLM):
             # Call OpenAI-compatible API
             completion = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]
                 **kwargs,  # type: ignore[arg-type]
             )
 
@@ -110,7 +110,7 @@ class DoubaoLLM(AbstractLLM):
             # Call OpenAI-compatible API with streaming
             stream = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=messages,  # type: ignore[arg-type]
                 stream=True,
                 **kwargs,  # type: ignore[arg-type]
             )

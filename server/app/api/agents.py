@@ -56,6 +56,7 @@ async def get_agents(
             "description": agent.description,
             "model_name": agent.model_name,
             "is_active": agent.is_active,
+            "max_iteration": agent.max_iteration,
             "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
             "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
         }
@@ -98,6 +99,7 @@ async def create_agent(
         description=agent_data.description,
         model_name=agent_data.model_name,
         is_active=agent_data.is_active,
+        max_iteration=agent_data.max_iteration,
     )
     return {
         "id": agent.id,
@@ -105,6 +107,7 @@ async def create_agent(
         "description": agent.description,
         "model_name": agent.model_name,
         "is_active": agent.is_active,
+        "max_iteration": agent.max_iteration,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
@@ -156,6 +159,8 @@ async def update_agent(
         update_data["model_name"] = agent_data.model_name
     if agent_data.is_active is not None:
         update_data["is_active"] = agent_data.is_active
+    if agent_data.max_iteration is not None:
+        update_data["max_iteration"] = agent_data.max_iteration
 
     updated_agent = agent_crud.update(agent_id, db, **update_data)
     if not updated_agent:
@@ -167,6 +172,7 @@ async def update_agent(
         "description": updated_agent.description,
         "model_name": updated_agent.model_name,
         "is_active": updated_agent.is_active,
+        "max_iteration": updated_agent.max_iteration,
         "created_at": updated_agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": updated_agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
@@ -245,6 +251,7 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, A
         "description": agent.description,
         "model_name": agent.model_name,
         "is_active": agent.is_active,
+        "max_iteration": agent.max_iteration,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
         "scenes": scenes_graph_responses,

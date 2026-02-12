@@ -8,8 +8,14 @@ from app.orchestration.tool import tool
 @tool(
     name="uppercase",
     description="Convert text to uppercase",
-    input_schema="{'text': string}",
-    output_schema="string",
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The text to convert to uppercase"},
+        },
+        "required": ["text"],
+        "additionalProperties": False,
+    },
 )
 def uppercase(text: str) -> str:
     """
@@ -27,8 +33,14 @@ def uppercase(text: str) -> str:
 @tool(
     name="lowercase",
     description="Convert text to lowercase",
-    input_schema="{'text': string}",
-    output_schema="string",
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The text to convert to lowercase"},
+        },
+        "required": ["text"],
+        "additionalProperties": False,
+    },
 )
 def lowercase(text: str) -> str:
     """
@@ -46,8 +58,14 @@ def lowercase(text: str) -> str:
 @tool(
     name="word_count",
     description="Count the number of words in a text",
-    input_schema="{'text': string}",
-    output_schema="number",
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The text to count words in"},
+        },
+        "required": ["text"],
+        "additionalProperties": False,
+    },
 )
 def word_count(text: str) -> int:
     """

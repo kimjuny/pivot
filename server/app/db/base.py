@@ -1,3 +1,12 @@
 from app.models.agent import Agent, Connection, Scene, Subscene
+from app.models.react import ReactPlanStep, ReactRecursion, ReactTask
 
-__all__ = ["Agent", "Connection", "Scene", "Subscene"]
+__all__ = [
+    "Agent",
+    "Connection",
+    "ReactPlanStep",
+    "ReactRecursion",
+    "ReactTask",
+    "Scene",
+    "Subscene",
+]

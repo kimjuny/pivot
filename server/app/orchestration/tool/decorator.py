@@ -21,8 +21,7 @@ from .metadata import ToolMetadata  # noqa: E402
 def tool(
     name: str,
     description: str,
-    input_schema: str,
-    output_schema: str,
+    parameters: dict[str, Any],
 ) -> Callable[[Callable[..., Any]], ToolFunction]:
     """
     Decorator to register a function as a tool with metadata.
@@ -33,8 +32,7 @@ def tool(
     Args:
         name: Unique identifier for the tool.
         description: Brief description of the tool's purpose.
-        input_schema: Description of expected input parameters.
-        output_schema: Description of the return value.
+        parameters: JSON Schema describing expected parameters in OpenAI format.
 
     Returns:
         Decorated function with attached metadata.
@@ -43,10 +41,17 @@ def tool(
         @tool(
             name="calculate_sum",
             description="Calculates the sum of two numbers",
-            input_schema="{'a': int, 'b': int}",
-            output_schema="int"
+            parameters={
+                "type": "object",
+                "properties": {
+                    "a": {"type": "number", "description": "First number"},
+                    "b": {"type": "number", "description": "Second number"}
+                },
+                "required": ["a", "b"],
+                "additionalProperties": False
+            }
         )
-        def calculate_sum(a: int, b: int) -> int:
+        def calculate_sum(a: float, b: float) -> float:
             return a + b
     """
 
@@ -55,8 +60,7 @@ def tool(
         metadata = ToolMetadata(
             name=name,
             description=description,
-            input_schema=input_schema,
-            output_schema=output_schema,
+            parameters=parameters,
             func=func,
         )
         # Use object.__setattr__ to bypass type checking for dynamic attribute
