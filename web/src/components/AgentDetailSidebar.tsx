@@ -327,9 +327,8 @@ function AgentDetailSidebar({
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
                                                                 size="sm"
-                                                                className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                                className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent pl-7"
                                                             >
-                                                                <Wrench className="size-3.5" />
                                                                 <span className="truncate">{tool.name}</span>
                                                             </SidebarMenuButton>
                                                         </TooltipTrigger>

@@ -11,7 +11,10 @@ from app.orchestration.tool import tool
     parameters={
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "The text to convert to uppercase"},
+            "text": {
+                "type": "string",
+                "description": "The text to convert to uppercase",
+            },
         },
         "required": ["text"],
         "additionalProperties": False,
@@ -36,7 +39,10 @@ def uppercase(text: str) -> str:
     parameters={
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "The text to convert to lowercase"},
+            "text": {
+                "type": "string",
+                "description": "The text to convert to lowercase",
+            },
         },
         "required": ["text"],
         "additionalProperties": False,

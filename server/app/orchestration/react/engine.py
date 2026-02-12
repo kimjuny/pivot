@@ -49,6 +49,87 @@ class ReactEngine:
         self.db = db
         self.cancelled = False  # Flag to signal cancellation
 
+    def _fix_json_escaping(self, content: str) -> str:
+        """
+        Fix JSON by properly escaping control characters within string values.
+
+        ROOT CAUSE: LLM returns JSON with unescaped control characters (newlines, tabs)
+        in string values, which violates JSON specification.
+
+        Strategy: Only escape control characters, don't try to fix embedded quotes.
+        Embedded quotes should be avoided through prompt engineering.
+
+        Args:
+            content: Raw JSON string from LLM (may have unescaped control characters)
+
+        Returns:
+            Fixed JSON string with escaped control characters
+        """
+        # Replace Chinese quotes with regular single quotes (prevents JSON structure issues)
+        content = content.replace(""", "'").replace(""", "'")
+        content = content.replace("'", "'").replace("'", "'")
+
+        # Escape control characters within JSON strings
+        result = []
+        in_string = False
+        escape_next = False
+
+        for char in content:
+            # Skip next char if current char was escape
+            if escape_next:
+                result.append(char)
+                escape_next = False
+                continue
+
+            # Track escape sequences
+            if char == "\\":
+                result.append(char)
+                if in_string:
+                    escape_next = True
+                continue
+
+            # Track string boundaries
+            if char == '"':
+                in_string = not in_string
+                result.append(char)
+                continue
+
+            # Escape control characters only when inside strings
+            if in_string:
+                if char == "\n":
+                    result.append("\\n")
+                elif char == "\r":
+                    result.append("\\r")
+                elif char == "\t":
+                    result.append("\\t")
+                elif ord(char) < 32:  # Other control characters
+                    result.append(f"\\u{ord(char):04x}")
+                else:
+                    result.append(char)
+            else:
+                result.append(char)
+
+        fixed = "".join(result)
+
+        # Balance braces/brackets if structure is incomplete
+        open_braces = fixed.count("{")
+        close_braces = fixed.count("}")
+        open_brackets = fixed.count("[")
+        close_brackets = fixed.count("]")
+
+        if open_braces > close_braces or open_brackets > close_brackets:
+            missing_braces = open_braces - close_braces
+            missing_brackets = open_brackets - close_brackets
+            logger.warning(
+                f"Auto-completing JSON: +{missing_brackets}], +{missing_braces}}}"
+            )
+            if missing_brackets > 0:
+                fixed += "]" * missing_brackets
+            if missing_braces > 0:
+                fixed += "}" * missing_braces
+
+        return fixed
+
     async def execute_recursion(
         self, task: ReactTask, context: ReactContext, messages: list[dict[str, Any]]
     ) -> tuple[ReactRecursion, dict[str, Any]]:
@@ -81,8 +162,8 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build system prompt with current context and available tools
-        system_prompt = build_system_prompt(context, self.tool_manager)
+        # Build system prompt with current context
+        system_prompt = build_system_prompt(context)
 
         # Update messages for this recursion
         # messages[0] = user message (fixed)
@@ -92,215 +173,252 @@ class ReactEngine:
         else:
             messages[1] = {"role": "system", "content": system_prompt}
 
-        # Call LLM without tools parameter
-        # We rely on the prompt to guide LLM to return JSON format with tool_calls
-        # This ensures LLM always returns observe, thought, abstract, and action in JSON
+        # Prepare tools in standard OpenAI format
+        tools = self.tool_manager.to_openai_tools() if self.tool_manager else None
+
+        # Call LLM with standard tools parameter
+        # Despite providing tools, we instruct LLM via prompt to return our custom JSON format
+        # This ensures LLM returns observe, thought, abstract, and action in our structured format
         try:
-            response = self.llm.chat(messages=messages, tools=None)  # type: ignore[arg-type]
+            response = self.llm.chat(messages=messages, tools=tools)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
-            # Log raw LLM response immediately after receiving it (before any processing)
-            logger.info("=" * 80)
-            logger.info(f"[ReAct Recursion {trace_id}] >>> LLM RAW RESPONSE START >>>")
-            logger.info(f"Raw Input: {json.dumps(messages, ensure_ascii=False, indent=2)}")
-            logger.info(f"Message Content Type: {type(message.content)}")
-            logger.info(f"Message Content:\n{message.content}")
-            logger.info(f"Message Tool Calls: {message.tool_calls}")
-            logger.info(f"[ReAct Recursion {trace_id}] <<< LLM RAW RESPONSE END <<<")
-            logger.info("=" * 80)
-
-            # LLM should always return JSON format (since tools=None)
-            # Parse JSON response from LLM
-            if message.tool_calls:
-                # This should not happen - log warning and treat as error
+            # Parse JSON from content to get observe, thought, abstract, action_type
+            content = message.content or "{}"
+            
+            # ROOT CAUSE FIX: Properly escape special characters within JSON string values
+            # LLM often returns JSON with unescaped control characters
+            content = self._fix_json_escaping(content)
+            
+            react_output: dict[str, Any] | None = None
+            
+            try:
+                react_output = json.loads(content)
+            except json.JSONDecodeError as e:
+                # Log the error and attempt fallback extraction
                 logger.warning(
-                    "LLM returned native tool_calls despite tools=None. "
-                    "Treating as invalid response."
+                    f"JSON parse failed after escaping: {e.msg} at position {e.pos}"
                 )
+
+                # Try to extract JSON from markdown code block
+                if "```json" in content:
+                    json_start = content.find("```json") + 7
+                    json_end = content.find("```", json_start)
+                    if json_end > json_start:
+                        json_content = content[json_start:json_end].strip()
+                        json_content = self._fix_json_escaping(json_content)
+                        try:
+                            react_output = json.loads(json_content)
+                            logger.info("Extracted JSON from markdown block")
+                        except json.JSONDecodeError:
+                            pass
+
+                # If still failed, try to extract JSON by finding braces
+                if react_output is None:
+                    first_brace = content.find("{")
+                    last_brace = content.rfind("}")
+
+                    if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+                        json_content = content[first_brace : last_brace + 1]
+                        try:
+                            react_output = json.loads(json_content)
+                            logger.info(
+                                f"Extracted JSON from position {first_brace} to {last_brace}"
+                            )
+                        except json.JSONDecodeError:
+                            pass
+
+                # If all attempts failed, raise error from the original exception
+                if react_output is None:
+                    raise ValueError(
+                        f"Failed to parse LLM response: {content[:500]}..."
+                    ) from e
+
+            # Type guard: at this point react_output must be a dict
+            if react_output is None:
+                raise ValueError("Internal error: react_output is None after parsing")
+
+            observe = react_output.get("observe", "")
+            thought = react_output.get("thought", "")
+            abstract = react_output.get("abstract", "")
+            short_term_memory_append = react_output.get(
+                "short_term_memory_append", ""
+            )
+            action = react_output.get("action", {}).get("result", {})
+            action_type = action.get("action_type", "")
+            action_output = action.get("output", {})
+
+            # Skip empty/invalid responses
+            if not action_type:
+                # Mark recursion as error
                 recursion.status = "error"
-                recursion.error_log = (
-                    "LLM returned native tool_calls instead of JSON format"
-                )
+                recursion.error_log = "LLM returned empty action_type"
                 recursion.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
 
                 return recursion, {
                     "trace_id": trace_id,
                     "action_type": "ERROR",
-                    "error": "Invalid response format from LLM",
+                    "error": "Empty action_type from LLM",
                 }
 
-            else:
-                # Parse JSON response from LLM
-                content = message.content or "{}"
-                react_output = None
-                
-                try:
-                    react_output = json.loads(content)
-                except json.JSONDecodeError:
-                    # Try to extract JSON from markdown code block
-                    if react_output is None and "```json" in content:
-                        json_start = content.find("```json") + 7
-                        json_end = content.find("```", json_start)
-                        json_content = content[json_start:json_end].strip()
-                        try:
-                            react_output = json.loads(json_content)
-                        except json.JSONDecodeError:
-                            logger.debug("Failed to parse JSON from markdown block")
-                    
-                    # If still failed, try to extract JSON from content
-                    # LLM might add text before/after JSON
-                    if react_output is None:
-                        # Find first { and last }
-                        first_brace = content.find("{")
-                        last_brace = content.rfind("}")
-                        
-                        if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
-                            json_content = content[first_brace:last_brace + 1]
-                            try:
-                                react_output = json.loads(json_content)
-                                logger.info(
-                                    f"Successfully extracted JSON from position {first_brace} to {last_brace}"
-                                )
-                            except json.JSONDecodeError:
-                                logger.debug("Failed to parse extracted JSON content")
-                
-                # If all attempts failed, raise error
-                if react_output is None:
-                    raise ValueError(
-                        f"Failed to parse LLM response: {content}"
-                    )
+            # Handle CALL_TOOL with native function calling
+            tool_results = []
+            reconstructed_tool_calls = []
 
-                observe = react_output.get("observe", "")
-                thought = react_output.get("thought", "")
-                abstract = react_output.get("abstract", "")
-                action = react_output.get("action", {}).get("result", {})
-                action_type = action.get("action_type", "")
-                action_output = action.get("output", {})
-                
-                # Skip empty/invalid responses
-                if not action_type:
-
-                    # Mark recursion as error
+            if action_type == "CALL_TOOL":
+                # Validate that tool_calls exist when action_type is CALL_TOOL
+                if not message.tool_calls:
                     recursion.status = "error"
-                    recursion.error_log = "LLM returned empty action_type"
+                    recursion.error_log = (
+                        "action_type is CALL_TOOL but no tool_calls provided"
+                    )
+                    recursion.observe = observe
+                    recursion.thought = thought
+                    recursion.abstract = abstract
+                    recursion.action_type = action_type
                     recursion.updated_at = datetime.now(timezone.utc)
                     self.db.commit()
-                    
+
                     return recursion, {
                         "trace_id": trace_id,
                         "action_type": "ERROR",
-                        "error": "Empty action_type from LLM",
+                        "error": "CALL_TOOL requires tool_calls",
                     }
-
-                # Handle CALL_TOOL in JSON format
-                tool_results = []
-                reconstructed_tool_calls = []
                 
-                if action_type == "CALL_TOOL":
-                    tool_calls_data = action_output.get("tool_calls", [])
+                # Process native tool_calls
+                # Read from native tool_calls (standard OpenAI/GLM format)
+                for tool_call in message.tool_calls:
+                    # tool_call is a dict with structure: {id, type, function: {name, arguments}}
+                    tool_call_id = tool_call.get("id", "")
+                    func_info = tool_call.get("function", {})
+                    func_name = func_info.get("name", "")
+                    func_args_str = func_info.get("arguments", "{}")
                     
-                    for tool_call_data in tool_calls_data:
-                        func_name = ""
+                    # Parse arguments (usually a JSON string)
+                    try:
+                        func_args = json.loads(func_args_str)
+                    except json.JSONDecodeError:
                         func_args = {}
-                        tool_call_id = f"json-call-{uuid.uuid4()}"
-                        
-                        try:
-                            func_name = tool_call_data.get("function", {}).get("name", "")
-                            func_args = tool_call_data.get("function", {}).get("arguments", {})
-                            
-                            # Execute tool
-                            result = self.tool_manager.execute(func_name, **func_args)
-                            
-                            tool_results.append({
+                        logger.warning(
+                            f"Failed to parse tool arguments: {func_args_str}"
+                        )
+
+                    try:
+                        # Execute tool
+                        result = self.tool_manager.execute(func_name, **func_args)
+
+                        tool_results.append(
+                            {
                                 "tool_call_id": tool_call_id,
                                 "name": func_name,
                                 "arguments": func_args,
                                 "result": result,
                                 "success": True,
-                            })
-                            
-                            # Build tool_call for assistant message
-                            reconstructed_tool_calls.append({
+                            }
+                        )
+
+                        # Keep tool_call for reconstructed format
+                        reconstructed_tool_calls.append(
+                            {
                                 "id": tool_call_id,
                                 "type": "function",
                                 "function": {
                                     "name": func_name,
                                     "arguments": json.dumps(func_args),
-                                }
-                            })
-                            
-                        except Exception as e:
-                            logger.error(f"Tool {func_name} execution failed: {e}")
+                                },
+                            }
+                        )
+
+                    except Exception as e:
+                        logger.error(f"Tool {func_name} execution failed: {e}")
+                        # Provide helpful error message with available tools
+                        if "not found in registry" in str(e):
+                            available_tools = [
+                                t.get("function", {}).get("name", "")
+                                for t in self.tool_manager.to_openai_tools()
+                            ]
+                            error_msg = (
+                                f"Tool '{func_name}' not found. "
+                                f"Available tools: {', '.join(available_tools)}"
+                            )
+                        else:
                             error_msg = f"Tool execution failed: {e!s}"
-                            tool_results.append({
+                        tool_results.append(
+                            {
                                 "tool_call_id": tool_call_id,
                                 "name": func_name,
                                 "arguments": func_args,
                                 "error": error_msg,
                                 "success": False,
-                            })
+                            }
+                        )
 
-                # Save recursion
-                recursion.observe = observe
-                recursion.thought = thought
-                recursion.abstract = abstract
-                recursion.action_type = action_type
-                recursion.action_output = json.dumps(action_output, ensure_ascii=False)
-                
-                # Save tool_call_results if any
-                if tool_results:
-                    tool_results_json = json.dumps(tool_results, ensure_ascii=False)
-                    recursion.tool_call_results = tool_results_json
-                
-                recursion.status = "done"
-                recursion.updated_at = datetime.now(timezone.utc)
+            # Save recursion
+            recursion.observe = observe
+            recursion.thought = thought
+            recursion.abstract = abstract
+            recursion.action_type = action_type
+            recursion.action_output = json.dumps(action_output, ensure_ascii=False)
+
+            # Save short_term_memory if any
+            if short_term_memory_append:
+                recursion.short_term_memory = short_term_memory_append
+
+            # Save tool_call_results if any
+            if tool_results:
+                tool_results_json = json.dumps(tool_results, ensure_ascii=False)
+                recursion.tool_call_results = tool_results_json
+
+            recursion.status = "done"
+            recursion.updated_at = datetime.now(timezone.utc)
+            self.db.commit()
+
+            # Handle RE_PLAN
+            if action_type == "RE_PLAN":
+                plan_data = action_output.get("plan", [])
+                # Delete old plan steps
+                from sqlmodel import delete
+
+                delete_stmt = delete(ReactPlanStep).where(
+                    ReactPlanStep.task_id == task.task_id
+                )
+                self.db.exec(delete_stmt)  # type: ignore[arg-type]
+
+                # Create new plan steps
+                for step_data in plan_data:
+                    step = ReactPlanStep(
+                        task_id=task.task_id,
+                        react_task_id=task.id or 0,
+                        step_id=step_data.get("step_id", ""),
+                        description=step_data.get("description", ""),
+                        status=step_data.get("status", "pending"),
+                    )
+                    self.db.add(step)
                 self.db.commit()
 
-                # Handle RE_PLAN
-                if action_type == "RE_PLAN":
-                    plan_data = action_output.get("plan", [])
-                    # Delete old plan steps
-                    from sqlmodel import delete
+            # Do NOT add assistant messages to avoid confusing LLM
+            # The state machine injection in next recursion's system prompt
+            # will include tool_call_results in last_recursion
+            # This is sufficient for LLM to understand what happened
+            if action_type == "ANSWER":
+                # For ANSWER, don't add to messages as the task is complete
+                pass
+            # For all other action types (CALL_TOOL, RE_PLAN, etc.),
+            # we rely on the state machine context to convey the results
+            # No need to append to messages
 
-                    delete_stmt = delete(ReactPlanStep).where(
-                        ReactPlanStep.task_id == task.task_id
-                    )
-                    self.db.exec(delete_stmt)  # type: ignore[arg-type]
-
-                    # Create new plan steps
-                    for step_data in plan_data:
-                        step = ReactPlanStep(
-                            task_id=task.task_id,
-                            react_task_id=task.id or 0,
-                            step_id=step_data.get("step_id", ""),
-                            description=step_data.get("description", ""),
-                            status=step_data.get("status", "pending"),
-                        )
-                        self.db.add(step)
-                    self.db.commit()
-
-                # Do NOT add assistant messages to avoid confusing LLM
-                # The state machine injection in next recursion's system prompt
-                # will include tool_call_results in last_recursion
-                # This is sufficient for LLM to understand what happened
-                if action_type == "ANSWER":
-                    # For ANSWER, don't add to messages as the task is complete
-                    pass
-                # For all other action types (CALL_TOOL, RE_PLAN, etc.),
-                # we rely on the state machine context to convey the results
-                # No need to append to messages
-
-                return recursion, {
-                    "trace_id": trace_id,
-                    "action_type": action_type,
-                    "observe": observe,
-                    "thought": thought,
-                    "abstract": abstract,
-                    "output": action_output,
-                    "tool_results": tool_results,  # Add tool_results for streaming
-                }
+            return recursion, {
+                "trace_id": trace_id,
+                "action_type": action_type,
+                "observe": observe,
+                "thought": thought,
+                "abstract": abstract,
+                "output": action_output,
+                "tool_calls": reconstructed_tool_calls,  # Native tool_calls
+                "tool_results": tool_results,  # Tool execution results
+            }
 
         except Exception as e:
             # Handle errors
@@ -315,9 +433,7 @@ class ReactEngine:
                 "error": str(e),
             }
 
-    async def run_task(
-        self, task: ReactTask
-    ) -> AsyncIterator[dict[str, Any]]:
+    async def run_task(self, task: ReactTask) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
 
@@ -409,26 +525,10 @@ class ReactEngine:
 
                 # Yield recursion events
                 if action_type == "CALL_TOOL":
-                    # Get tool_calls from event_data (could be from native tool_calls or parsed JSON)
+                    # Get tool_calls and results from event_data (from native function calling)
                     tool_calls_data = event_data.get("tool_calls", [])
                     tool_results_data = event_data.get("tool_results", [])
-                    
-                    # If tool_calls is empty but we have tool_results, reconstruct tool_calls
-                    # This happens when LLM returns JSON format instead of native tool_calls
-                    if not tool_calls_data and tool_results_data:
-                        # Reconstruct tool_calls from results
-                        tool_calls_data = [
-                            {
-                                "id": result.get("tool_call_id", ""),
-                                "type": "function",
-                                "function": {
-                                    "name": result.get("name", ""),
-                                    "arguments": json.dumps(result.get("arguments", {})),
-                                }
-                            }
-                            for result in tool_results_data
-                        ]
-                    
+
                     yield {
                         "type": "tool_call",
                         "task_id": task.task_id,
@@ -449,6 +549,19 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "data": plan_output,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                elif action_type == "REFLECT":
+                    # REFLECT action: organizing thoughts without changing structure
+                    # Just emit the reflect event and continue to next iteration
+                    reflect_output = event_data.get("output")
+                    yield {
+                        "type": "reflect",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "data": reflect_output,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 

@@ -98,6 +98,16 @@ class ReactContext:
             "memory": {"short_term": [], "long_term_refs": []},
         }
 
+        # Build short_term memory from recursions
+        for rec in recursions:
+            if rec.short_term_memory:
+                context_dict["memory"]["short_term"].append(
+                    {
+                        "trace_id": rec.trace_id,
+                        "memory": rec.short_term_memory,
+                    }
+                )
+
         # Add plan steps to context
         for step in plan_steps:
             plan_step = {

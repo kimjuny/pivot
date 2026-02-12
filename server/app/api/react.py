@@ -42,6 +42,7 @@ async def react_chat_stream(
     - tool_call: Tool execution
     - tool_result: Tool execution result
     - plan_update: Plan update from RE_PLAN action
+    - reflect: Reflection summary from REFLECT action
     - answer: Final answer from ANSWER action
     - error: Error occurred
     - task_complete: Task completed successfully
@@ -145,7 +146,9 @@ async def react_chat_stream(
                     delta=event_data.get("delta"),
                     data=event_data.get("data"),
                     timestamp=datetime.fromisoformat(
-                        event_data.get("timestamp", datetime.now(timezone.utc).isoformat())
+                        event_data.get(
+                            "timestamp", datetime.now(timezone.utc).isoformat()
+                        )
                     ),
                 )
 

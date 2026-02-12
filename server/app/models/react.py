@@ -71,9 +71,10 @@ class ReactRecursion(SQLModel, table=True):
         iteration_index: Index of this recursion in the task (0-based).
         observe: LLM's observation of current state.
         thought: LLM's reasoning/analysis.
-        action_type: Type of action (CALL_TOOL, RE_PLAN, ANSWER).
+        action_type: Type of action (CALL_TOOL, RE_PLAN, ANSWER, REFLECT).
         action_output: JSON string of action output.
         tool_call_results: JSON string of tool execution results.
+        short_term_memory: Short-term memory appended in this recursion.
         status: Current status (running, done, error).
         error_log: Error message if any.
         created_at: UTC timestamp when recursion was created.
@@ -94,7 +95,7 @@ class ReactRecursion(SQLModel, table=True):
     )
     action_type: str | None = Field(
         default=None,
-        description="Action type: CALL_TOOL, RE_PLAN, ANSWER",
+        description="Action type: CALL_TOOL, RE_PLAN, ANSWER, REFLECT",
     )
     action_output: str | None = Field(
         default=None,
@@ -103,6 +104,10 @@ class ReactRecursion(SQLModel, table=True):
     tool_call_results: str | None = Field(
         default=None,
         description="JSON string of tool results",
+    )
+    short_term_memory: str | None = Field(
+        default=None,
+        description="Short-term memory appended in this recursion",
     )
     status: str = Field(default="running", description="Status: running, done, error")
     error_log: str | None = Field(default=None, description="Error message")

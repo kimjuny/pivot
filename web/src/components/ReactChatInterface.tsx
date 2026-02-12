@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, FormEvent } from 'react';
-import { Send, Loader2, CheckCircle2, XCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
+import { Send, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 
 /**
@@ -21,6 +21,7 @@ type ReactStreamEventType =
   | 'action'
   | 'tool_call'
   | 'plan_update'
+  | 'reflect'
   | 'answer'
   | 'task_complete'
   | 'error';
@@ -370,11 +371,139 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   };
 
   /**
+   * Format answer content with basic markdown support.
+   * Handles: ### headings, **bold**, line breaks, and paragraphs.
+   */
+  const formatAnswerContent = (content: string) => {
+    if (!content) return null;
+
+    // Split by double newlines to get paragraphs
+    const paragraphs = content.split(/\n\n+/);
+
+    return paragraphs.map((para, pIdx) => {
+      // Check if paragraph starts with ###
+      const headingMatch = para.match(/^###\s+(.+?)$/m);
+      if (headingMatch) {
+        const headingText = headingMatch[1];
+        const remainingText = para.substring(headingMatch[0].length).trim();
+
+        return (
+          <div key={pIdx} className="mb-3">
+            <h3 className="text-base font-bold text-foreground mb-2">{headingText}</h3>
+            {remainingText && (
+              <div className="text-sm text-foreground leading-relaxed">
+                {formatInlineMarkdown(remainingText)}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // Regular paragraph
+      return (
+        <p key={pIdx} className="text-sm text-foreground leading-relaxed mb-2">
+          {formatInlineMarkdown(para)}
+        </p>
+      );
+    });
+  };
+
+  /**
+   * Format inline markdown (bold, line breaks).
+   */
+  const formatInlineMarkdown = (text: string) => {
+    const parts: (string | JSX.Element)[] = [];
+    let lastIndex = 0;
+
+    // Match **bold** patterns
+    const boldPattern = /\*\*(.+?)\*\*/g;
+    let match;
+
+    while ((match = boldPattern.exec(text)) !== null) {
+      // Add text before match
+      if (match.index > lastIndex) {
+        const beforeText = text.substring(lastIndex, match.index);
+        parts.push(...formatLineBreaks(beforeText, parts.length));
+      }
+
+      // Add bold text
+      parts.push(
+        <strong key={`bold-${match.index}`} className="font-semibold">
+          {match[1]}
+        </strong>
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(...formatLineBreaks(text.substring(lastIndex), parts.length));
+    }
+
+    return parts;
+  };
+
+  /**
+   * Convert line breaks to <br /> tags.
+   */
+  const formatLineBreaks = (text: string, startKey: number) => {
+    const lines = text.split('\n');
+    const result: (string | JSX.Element)[] = [];
+
+    lines.forEach((line, idx) => {
+      if (idx > 0) {
+        result.push(<br key={`br-${startKey}-${idx}`} />);
+      }
+      if (line) {
+        result.push(line);
+      }
+    });
+
+    return result;
+  };
+
+  /**
+   * Check if recursion has any failed tool calls.
+   */
+  const hasFailedTools = (recursion: RecursionRecord): boolean => {
+    const toolCallEvents = recursion.events.filter((e) => e.type === 'tool_call');
+    
+    for (const event of toolCallEvents) {
+      const toolData = event.data as {
+        tool_results?: Array<{ success: boolean }>;
+      } | undefined;
+      
+      if (toolData?.tool_results?.some((result) => !result.success)) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  /**
+   * Get effective recursion status considering tool execution results.
+   */
+  const getRecursionStatus = (recursion: RecursionRecord): 'running' | 'completed' | 'warning' | 'error' => {
+    if (recursion.status === 'running') return 'running';
+    if (recursion.status === 'error') return 'error';
+    
+    // If status is 'completed', check if there are failed tools
+    if (hasFailedTools(recursion)) {
+      return 'warning';
+    }
+    
+    return 'completed';
+  };
+
+  /**
    * Render a recursion record.
    */
   const renderRecursion = (messageId: string, recursion: RecursionRecord) => {
     const key = `${messageId}-${recursion.iteration}`;
     const isExpanded = expandedRecursions[key];
+    const effectiveStatus = getRecursionStatus(recursion);
 
     const toolCallEvents = recursion.events.filter((e) => e.type === 'tool_call');
 
@@ -386,13 +515,16 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/30 transition-colors"
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
-            {recursion.status === 'running' && (
+            {effectiveStatus === 'running' && (
               <Loader2 className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" />
             )}
-            {recursion.status === 'completed' && (
+            {effectiveStatus === 'completed' && (
               <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />
             )}
-            {recursion.status === 'error' && <XCircle className="w-3.5 h-3.5 text-danger flex-shrink-0" />}
+            {effectiveStatus === 'warning' && (
+              <AlertCircle className="w-3.5 h-3.5 text-warning flex-shrink-0" />
+            )}
+            {effectiveStatus === 'error' && <XCircle className="w-3.5 h-3.5 text-danger flex-shrink-0" />}
             <span 
               className="text-xs font-semibold text-foreground truncate"
               title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
@@ -551,6 +683,22 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 );
               }
 
+              if (event.type === 'reflect') {
+                const reflectData = event.data as { summary?: string } | undefined;
+                
+                return (
+                  <div key={idx} className="bg-background/50 border border-border rounded p-2">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <Brain className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="text-xs font-semibold text-foreground">REFLECT</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground pl-5 leading-relaxed">
+                      {reflectData?.summary || 'Reflecting on current state...'}
+                    </div>
+                  </div>
+                );
+              }
+
               if (event.type === 'error') {
                 const errorData = event.data as { error?: string } | undefined;
                 return (
@@ -623,12 +771,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   {/* Final Answer */}
                   {message.content && (
                     <div className="bg-background border border-border rounded-lg px-3 py-2.5">
-                      <div className="flex items-center gap-1.5 mb-1.5">
+                      <div className="flex items-center gap-1.5 mb-2">
                         <MessageSquare className="w-3.5 h-3.5 text-success" />
                         <span className="text-xs font-semibold text-foreground">FINAL ANSWER</span>
                       </div>
-                      <div className="text-sm text-foreground leading-relaxed pl-5">
-                        {message.content}
+                      <div className="pl-5">
+                        {formatAnswerContent(message.content)}
                       </div>
                     </div>
                   )}

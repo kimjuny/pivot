@@ -26,6 +26,7 @@ class ReactStreamEventType(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     PLAN_UPDATE = "plan_update"
+    REFLECT = "reflect"
     ANSWER = "answer"
     ERROR = "error"
     TASK_COMPLETE = "task_complete"
@@ -75,6 +76,7 @@ class ReactRecursionResponse(BaseModel):
     action_type: str | None
     action_output: str | None
     tool_call_results: str | None
+    short_term_memory: str | None
     status: str
     error_log: str | None
     created_at: datetime

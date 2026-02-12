@@ -9,7 +9,9 @@ class AgentCreate(BaseModel):
     description: str | None = Field(None, description="Agent description")
     model_name: str | None = Field(None, description="Model name")
     is_active: bool = Field(default=True, description="Whether agent is active")
-    max_iteration: int = Field(default=30, description="Maximum iterations for ReAct recursion")
+    max_iteration: int = Field(
+        default=30, description="Maximum iterations for ReAct recursion"
+    )
 
 
 class AgentUpdate(BaseModel):
