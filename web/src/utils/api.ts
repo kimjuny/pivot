@@ -518,3 +518,28 @@ export const getModels = async (): Promise<string[]> => {
   const response = await apiRequest('/models') as { models: string[]; count: number };
   return response.models;
 };
+
+/**
+ * Tool metadata interface.
+ */
+export interface Tool {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description: string;
+  /** Tool parameters schema */
+  parameters: {
+    type: string;
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+/**
+ * Get all registered tools.
+ * 
+ * @returns Promise resolving to list of tool metadata
+ */
+export const getTools = async (): Promise<Tool[]> => {
+  return apiRequest('/tools') as Promise<Tool[]>;
+};

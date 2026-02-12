@@ -83,10 +83,6 @@ class ReactEngine:
 
         # Build system prompt with current context
         system_prompt = build_system_prompt(context)
-        
-        # DEBUG: Check if tool_call_results are in the context
-        if context.last_recursion and "tool_call_results" in context.last_recursion:
-            logger.info(f"[DEBUG engine.py] System prompt includes tool_call_results: {context.last_recursion['tool_call_results'][:200] if isinstance(context.last_recursion['tool_call_results'], str) else context.last_recursion['tool_call_results']}...")
 
         # Update messages for this recursion
         # messages[0] = user message (fixed)
@@ -99,29 +95,13 @@ class ReactEngine:
         # Call LLM with tools
         tools = self.tool_manager.to_openai_tools()
 
-        # DEBUG: Log messages being sent to LLM
-        logger.info(f"[DEBUG engine.py] Calling LLM with {len(messages)} messages, {len(tools)} tools")
-        for idx, msg in enumerate(messages):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            content_preview = str(content)[:100] if content else "None"
-            has_tool_calls = "tool_calls" in msg
-            has_tool_call_id = "tool_call_id" in msg
-            logger.info(f"[DEBUG engine.py] Message[{idx}]: role={role}, has_tool_calls={has_tool_calls}, has_tool_call_id={has_tool_call_id}, content={content_preview}...")
-
         try:
             response = self.llm.chat(messages=messages, tools=tools)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
-            logger.info("[DEBUG engine.py] LLM response received")
-            logger.info(f"[DEBUG engine.py] message.tool_calls = {message.tool_calls}")
-            logger.info(f"[DEBUG engine.py] message.content = {message.content[:200] if message.content else 'None'}...")
-            logger.info(f"[DEBUG engine.py] finish_reason = {choice.finish_reason}")
-
             # Check if LLM returned tool calls
             if message.tool_calls:
-                logger.info(f"[DEBUG engine.py] Entering CALL_TOOL branch with {len(message.tool_calls)} tool calls")
                 # Handle CALL_TOOL action
                 observe = "观察到需要使用工具来完成任务。"
                 thought = "决定调用工具获取必要的信息或执行操作。"
@@ -158,14 +138,8 @@ class ReactEngine:
                         # Execute tool
                         result = self.tool_manager.execute(func_name, **func_args)
 
-                        # Log result for debugging
-                        logger.info(
-                            f"Tool {func_name} executed successfully, result type: {type(result)}"
-                        )
+                        # Convert very large numbers to strings to avoid JSON serialization issues
                         if isinstance(result, int | float) and abs(result) > 1e15:
-                            logger.warning(
-                                f"Very large number result: {result}, converting to string"
-                            )
                             result = str(result)
 
                         tool_results.append({
@@ -205,12 +179,6 @@ class ReactEngine:
                             "content": error_msg,
                         })
 
-                # Log tool execution for debugging
-                logger.info(
-                    f"Tool execution completed: {len(tool_results)} results, "
-                    f"tool_calls: {len(message.tool_calls) if message.tool_calls else 0}"
-                )
-
                 # Save recursion
                 recursion.observe = observe
                 recursion.thought = thought
@@ -223,16 +191,10 @@ class ReactEngine:
                 tool_results_json = json.dumps(tool_results, ensure_ascii=False)
                 recursion.tool_call_results = tool_results_json
                 
-                logger.info(f"[DEBUG engine.py] Saving tool_call_results: {tool_results_json}")
-                logger.info(f"[DEBUG engine.py] recursion.tool_call_results = {recursion.tool_call_results}")
-                
                 recursion.status = "done"
                 recursion.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
                 self.db.refresh(recursion)
-                
-                logger.info(f"[DEBUG engine.py] After commit, recursion.tool_call_results = {recursion.tool_call_results}")
-                logger.info(f"[DEBUG engine.py] recursion.id = {recursion.id}, trace_id = {recursion.trace_id}")
 
                 return recursion, {
                     "trace_id": trace_id,
@@ -242,10 +204,8 @@ class ReactEngine:
                 }
 
             else:
-                logger.info("[DEBUG engine.py] Entering JSON parsing branch (no tool_calls)")
                 # Parse JSON response from LLM
                 content = message.content or "{}"
-                logger.info(f"[DEBUG engine.py] Parsing content: {content[:200]}...")
                 try:
                     react_output = json.loads(content)
                 except json.JSONDecodeError as e:
@@ -265,12 +225,10 @@ class ReactEngine:
                 action = react_output.get("action", {}).get("result", {})
                 action_type = action.get("action_type", "")
                 action_output = action.get("output", {})
-
-                logger.info(f"[DEBUG engine.py] Parsed action_type: {action_type}")
                 
                 # Skip empty/invalid responses
                 if not action_type:
-                    logger.warning("[DEBUG engine.py] Empty action_type, skipping this recursion")
+                    logger.warning("Empty action_type from LLM, marking as error")
                     # Mark recursion as error
                     recursion.status = "error"
                     recursion.error_log = "LLM returned empty action_type"
@@ -288,9 +246,7 @@ class ReactEngine:
                 reconstructed_tool_calls = []
                 
                 if action_type == "CALL_TOOL":
-                    logger.info("[DEBUG engine.py] Handling CALL_TOOL in JSON branch")
                     tool_calls_data = action_output.get("tool_calls", [])
-                    logger.info(f"[DEBUG engine.py] Found {len(tool_calls_data)} tool calls in output")
                     
                     for tool_call_data in tool_calls_data:
                         func_name = ""
@@ -301,12 +257,8 @@ class ReactEngine:
                             func_name = tool_call_data.get("function", {}).get("name", "")
                             func_args = tool_call_data.get("function", {}).get("arguments", {})
                             
-                            logger.info(f"[DEBUG engine.py] Executing tool: {func_name} with args: {func_args}")
-                            
                             # Execute tool
                             result = self.tool_manager.execute(func_name, **func_args)
-                            
-                            logger.info(f"[DEBUG engine.py] Tool {func_name} result: {result}")
                             
                             tool_results.append({
                                 "tool_call_id": tool_call_id,
@@ -327,7 +279,7 @@ class ReactEngine:
                             })
                             
                         except Exception as e:
-                            logger.error(f"[DEBUG engine.py] Tool execution failed: {e}")
+                            logger.error(f"Tool {func_name} execution failed: {e}")
                             error_msg = f"Tool execution failed: {e!s}"
                             tool_results.append({
                                 "tool_call_id": tool_call_id,
@@ -347,14 +299,10 @@ class ReactEngine:
                 if tool_results:
                     tool_results_json = json.dumps(tool_results, ensure_ascii=False)
                     recursion.tool_call_results = tool_results_json
-                    logger.info(f"[DEBUG engine.py] Saving tool_call_results in JSON branch: {tool_results_json}")
                 
                 recursion.status = "done"
                 recursion.updated_at = datetime.now(timezone.utc)
-                
-                logger.info(f"[DEBUG engine.py] About to commit recursion with action_type={action_type}, tool_call_results={recursion.tool_call_results}")
                 self.db.commit()
-                logger.info("[DEBUG engine.py] Committed recursion")
 
                 # Handle RE_PLAN
                 if action_type == "RE_PLAN":
@@ -382,7 +330,6 @@ class ReactEngine:
                 # Add messages in correct OpenAI format
                 if action_type == "CALL_TOOL" and reconstructed_tool_calls:
                     # Step 1: Add assistant message with tool_calls
-                    logger.info(f"[DEBUG engine.py] Adding assistant message with {len(reconstructed_tool_calls)} tool_calls")
                     messages.append({
                         "role": "assistant",
                         "content": None,
@@ -390,7 +337,6 @@ class ReactEngine:
                     })
                     
                     # Step 2: Add tool result messages
-                    logger.info(f"[DEBUG engine.py] Adding {len(tool_results)} tool result messages")
                     for result in tool_results:
                         if result["success"]:
                             content = str(result.get("result"))
@@ -405,13 +351,11 @@ class ReactEngine:
                 elif action_type == "RE_PLAN":
                     # For RE_PLAN, add a summary message instead of full JSON
                     plan_summary = f"已制定计划, 包含{len(action_output.get('plan', []))}个步骤。"
-                    logger.info(f"[DEBUG engine.py] Adding assistant message for RE_PLAN: {plan_summary}")
                     messages.append({"role": "assistant", "content": plan_summary})
                 elif action_type == "ANSWER":
                     # For ANSWER, don't add to messages as the task is complete
-                    logger.info("[DEBUG engine.py] ANSWER action, not adding to messages")
+                    pass
                 else:
-                    logger.info(f"[DEBUG engine.py] Adding assistant message without tool_calls (action_type={action_type})")
                     messages.append({"role": "assistant", "content": content})
 
                 return recursion, {
@@ -472,14 +416,6 @@ class ReactEngine:
                     break
                 # Load current context
                 context = ReactContext.from_task(task, self.db)
-
-                # DEBUG: Check context state at each iteration
-                logger.info(f"[DEBUG] Starting iteration {task.iteration}")
-                if task.iteration > 0 and context.last_recursion:
-                    logger.info(f"[DEBUG] Last action_type: {context.last_recursion.get('action', {}).get('result', {}).get('action_type')}")
-                    logger.info(f"[DEBUG] Has tool_call_results: {'tool_call_results' in context.last_recursion}")
-                    if 'tool_call_results' in context.last_recursion:
-                        logger.info(f"[DEBUG] tool_call_results: {context.last_recursion['tool_call_results']}")
 
                 # Yield recursion start event
                 yield {
@@ -562,7 +498,6 @@ class ReactEngine:
 
                 elif action_type == "RE_PLAN":
                     plan_output = event_data.get("output")
-                    logger.info(f"[DEBUG engine.py] Yielding plan_update with data: {plan_output}")
                     yield {
                         "type": "plan_update",
                         "task_id": task.task_id,

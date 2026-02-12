@@ -21,6 +21,7 @@ from app.api.chat import router as chat_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
+from app.api.tools import router as tools_router  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import init_db  # noqa: E402
 from app.llm.doubao_llm import DoubaoLLM  # noqa: E402
@@ -62,6 +63,7 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(build_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
+app.include_router(tools_router, prefix="/api")
 
 
 # Startup event to initialize database

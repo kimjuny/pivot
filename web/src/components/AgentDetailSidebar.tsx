@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Bot,
     ChevronDown,
@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/tooltip';
 import AgentModal, { AgentFormData } from './AgentModal';
 import type { Agent, Scene } from '../types';
-import { updateAgent } from '../utils/api';
+import { updateAgent, getTools, type Tool } from '../utils/api';
 import { toast } from 'sonner';
 
 interface AgentDetailSidebarProps {
@@ -74,6 +74,29 @@ function AgentDetailSidebar({
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isMCPOpen, setIsMCPOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [tools, setTools] = useState<Tool[]>([]);
+    const [toolsLoading, setToolsLoading] = useState(false);
+
+    /**
+     * Fetch tools list on component mount.
+     */
+    useEffect(() => {
+        const fetchTools = async () => {
+            setToolsLoading(true);
+            try {
+                const toolsList = await getTools();
+                setTools(toolsList);
+            } catch (err) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                console.error('Failed to fetch tools:', error);
+                toast.error('Failed to load tools');
+            } finally {
+                setToolsLoading(false);
+            }
+        };
+
+        void fetchTools();
+    }, []);
 
     const handleEditAgent = async (data: AgentFormData) => {
         if (!agent) return;
@@ -274,17 +297,49 @@ function AgentDetailSidebar({
                                 >
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                                        Soon
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent text-sidebar-accent-foreground">
+                                        {toolsLoading ? '...' : tools.length}
                                     </span>
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
-                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    <div className="px-2 py-3 text-xs text-muted-foreground text-center">
-                                        Tools management coming soon…
-                                    </div>
+                                    {toolsLoading ? (
+                                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                                            Loading tools…
+                                        </div>
+                                    ) : tools.length === 0 ? (
+                                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                                            No tools available
+                                        </div>
+                                    ) : (
+                                        <SidebarMenu>
+                                            {tools.map((tool) => (
+                                                <SidebarMenuItem key={tool.name}>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <SidebarMenuButton
+                                                                size="sm"
+                                                                className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                            >
+                                                                <Wrench className="size-3.5" />
+                                                                <span className="truncate">{tool.name}</span>
+                                                            </SidebarMenuButton>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-xs">
+                                                            <div className="space-y-1">
+                                                                <p className="font-semibold">{tool.name}</p>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {tool.description}
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </SidebarMenuItem>
+                                            ))}
+                                        </SidebarMenu>
+                                    )}
                                 </SidebarGroupContent>
                             </CollapsibleContent>
                         </SidebarGroup>

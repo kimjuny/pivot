@@ -142,20 +142,9 @@ class ReactContext:
                 }
 
                 # Add tool_call_results if this was a CALL_TOOL action
-                import logging
-                logger = logging.getLogger(__name__)
-                
-                logger.info(f"[DEBUG context.py] Checking recursion: trace_id={latest.trace_id}, action_type={latest.action_type}")
-                logger.info(f"[DEBUG context.py] tool_call_results value: {latest.tool_call_results!r}")
-                logger.info(f"[DEBUG context.py] tool_call_results type: {type(latest.tool_call_results)}")
-                
                 if latest.action_type == "CALL_TOOL" and latest.tool_call_results:
                     tool_results = json.loads(latest.tool_call_results)
                     last_recursion_dict["tool_call_results"] = tool_results
-                    
-                    logger.info(f"[DEBUG context.py] Added tool_call_results to last_recursion: {tool_results}")
-                else:
-                    logger.info(f"[DEBUG context.py] Not adding tool_call_results. action_type={latest.action_type}, has_results={bool(latest.tool_call_results)}")
 
                 last_recursion = last_recursion_dict
 
