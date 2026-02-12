@@ -26,6 +26,29 @@
    - 间接影响状态机
    - 实际状态修改由外部程序完成
 
+## ⚠️ 输出格式约束（必须严格遵守）
+
+**你的每一次响应都必须是纯 JSON 格式，绝对不能包含任何其他文字！**
+
+❌ 错误示例：
+```
+现在需要执行第一步...
+{"trace_id": "...", ...}
+```
+
+✅ 正确示例：
+```
+{"trace_id": "...", ...}
+```
+
+**格式规则（违反将导致系统错误）：**
+- 响应的第一个字符必须是 `{`
+- 响应的最后一个字符必须是 `}`
+- 不要在 JSON 前添加任何说明文字
+- 不要在 JSON 后添加任何注释
+- 不要使用 markdown 代码块包裹（不要用 \`\`\`json）
+- 直接输出纯 JSON 字符串
+
 ## 2. ReAct行为范式
 
 在每一轮 recursion 中，你必须：
@@ -70,10 +93,13 @@ Action决策环节你只能输出以下 action_type 之一：
 
 暂无其他 action_type 是合法的
 
-## 4. `action_type`对应返回格式（强校验）
+## 4. 你的返回格式（强制以下的纯JSON格式，不要有任何其他JSON外的前缀后缀，否则程序无法解析）
 
 ### 4.1. 统一外层结构
-**IMPORTANT:** 也就是说，你要根据情况选择本轮recursion要采取哪个action，且你最终只能以以下json格式返回一种（具体哪种要根据你想要采取的action来定）。
+**IMPORTANT:** 你要根据情况选择本轮recursion要采取哪个action，且你最终只能以以下json格式返回一种（具体哪种要根据你想要采取的action来定）。
+
+**⚠️ 再次强调：你的响应必须直接以 `{` 开头，以 `}` 结尾，中间是纯 JSON，不要有任何额外文字！**
+
 ```json
 {
   "trace_id": "本轮recursion的trace_id",
@@ -84,7 +110,8 @@ Action决策环节你只能输出以下 action_type 之一：
       "action_type": "CALL_TOOL | RE_PLAN | ANSWER",
       "output": {}
     }
-  }
+  },
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么"
 }
 ```
 
@@ -99,7 +126,7 @@ Action决策环节你只能输出以下 action_type 之一：
       {
         "function": {
           "name": "tool_name",
-          "arguments": ["arg1", "arg2", ...]
+          "arguments": {"arg1": "value1", "arg2": "value2"}
         }
       }
     ]
@@ -229,10 +256,20 @@ status 含义：
       "action_type": "CALL_TOOL | RE_PLAN | ANSWER",
       "output": {}
     }
-  }
+  },
+  "tool_call_results": [  // 仅当action_type=CALL_TOOL时存在
+    {
+      "tool_call_id": "string",
+      "name": "tool_name",
+      "result": "工具的返回结果（可能是数字、字符串、对象等）",
+      "success": true
+    }
+  ]
 }
 ```
 - 这部分其实就是把上一轮的recursion输出的返回结果快照下来呈现
+- **IMPORTANT**: 如果上一轮调用了工具（action_type=CALL_TOOL），`tool_call_results`字段会包含所有工具的执行结果
+- 你应该仔细阅读工具的返回结果，判断任务是否已经完成，如果完成了应该立即返回ANSWER
 
 ## 真实动态状态机注入
 ```json

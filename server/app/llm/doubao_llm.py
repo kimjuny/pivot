@@ -15,8 +15,8 @@ class DoubaoLLM(AbstractLLM):
     Uses OpenAI-compatible API via the OpenAI library.
     """
 
-    # DEFAULT_MODEL = "doubao-seed-1-6-250615"
-    DEFAULT_MODEL = "doubao-seed-1-8-251228"
+    DEFAULT_MODEL = "doubao-seed-1-6-250615"
+    # DEFAULT_MODEL = "doubao-seed-1-8-251228"
     API_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
     DEFAULT_TIMEOUT = 60  # Request timeout in seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts

@@ -81,8 +81,8 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build system prompt with current context
-        system_prompt = build_system_prompt(context)
+        # Build system prompt with current context and available tools
+        system_prompt = build_system_prompt(context, self.tool_manager)
 
         # Update messages for this recursion
         # messages[0] = user message (fixed)
@@ -92,143 +92,96 @@ class ReactEngine:
         else:
             messages[1] = {"role": "system", "content": system_prompt}
 
-        # Call LLM with tools
-        tools = self.tool_manager.to_openai_tools()
-
+        # Call LLM without tools parameter
+        # We rely on the prompt to guide LLM to return JSON format with tool_calls
+        # This ensures LLM always returns observe, thought, abstract, and action in JSON
         try:
-            response = self.llm.chat(messages=messages, tools=tools)  # type: ignore[arg-type]
+            response = self.llm.chat(messages=messages, tools=None)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
-            # Check if LLM returned tool calls
+            # Log raw LLM response immediately after receiving it (before any processing)
+            logger.info("=" * 80)
+            logger.info(f"[ReAct Recursion {trace_id}] >>> LLM RAW RESPONSE START >>>")
+            logger.info(f"Raw Input: {json.dumps(messages, ensure_ascii=False, indent=2)}")
+            logger.info(f"Message Content Type: {type(message.content)}")
+            logger.info(f"Message Content:\n{message.content}")
+            logger.info(f"Message Tool Calls: {message.tool_calls}")
+            logger.info(f"[ReAct Recursion {trace_id}] <<< LLM RAW RESPONSE END <<<")
+            logger.info("=" * 80)
+
+            # LLM should always return JSON format (since tools=None)
+            # Parse JSON response from LLM
             if message.tool_calls:
-                # Handle CALL_TOOL action
-                observe = "观察到需要使用工具来完成任务。"
-                thought = "决定调用工具获取必要的信息或执行操作。"
-                action_type = "CALL_TOOL"
-
-                # First, add assistant message with tool_calls to messages (OpenAI format requirement)
-                messages.append({
-                    "role": "assistant",
-                    "content": message.content or None,
-                    "tool_calls": message.tool_calls,
-                })
-
-                # Execute tool calls
-                tool_results = []
-                for tool_call in message.tool_calls:
-                    try:
-                        func_name = tool_call["function"]["name"]
-                        func_args_str = tool_call["function"]["arguments"]
-                        tool_call_id = tool_call["id"]
-                    except KeyError as e:
-                        error_msg = f"Invalid tool_call structure: missing {e!s}"
-                        tool_results.append({
-                            "tool_call_id": tool_call.get("id", "unknown"),
-                            "name": "unknown",
-                            "error": error_msg,
-                            "success": False,
-                        })
-                        continue
-
-                    try:
-                        # Parse arguments
-                        func_args = json.loads(func_args_str)
-
-                        # Execute tool
-                        result = self.tool_manager.execute(func_name, **func_args)
-
-                        # Convert very large numbers to strings to avoid JSON serialization issues
-                        if isinstance(result, int | float) and abs(result) > 1e15:
-                            result = str(result)
-
-                        tool_results.append({
-                            "tool_call_id": tool_call_id,
-                            "name": func_name,
-                            "arguments": func_args,
-                            "result": result,
-                            "success": True,
-                        })
-
-                        # Add tool result to messages
-                        # For very large numbers, ensure they're strings for JSON serialization
-                        result_for_message = result
-                        if isinstance(result, int) and abs(result) > 1e15:
-                            result_for_message = str(result)
-
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": str(result_for_message),
-                        })
-
-                    except Exception as e:
-                        error_msg = f"Tool execution failed: {e!s}"
-                        tool_results.append({
-                            "tool_call_id": tool_call_id,
-                            "name": func_name,
-                            "arguments": func_args_str,
-                            "error": error_msg,
-                            "success": False,
-                        })
-
-                        # Add error to messages
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": error_msg,
-                        })
-
-                # Save recursion
-                recursion.observe = observe
-                recursion.thought = thought
-                recursion.action_type = action_type
-                recursion.action_output = json.dumps(
-                    {"tool_calls": message.tool_calls}, ensure_ascii=False
+                # This should not happen - log warning and treat as error
+                logger.warning(
+                    "LLM returned native tool_calls despite tools=None. "
+                    "Treating as invalid response."
                 )
-                
-                # Convert tool_results to JSON string
-                tool_results_json = json.dumps(tool_results, ensure_ascii=False)
-                recursion.tool_call_results = tool_results_json
-                
-                recursion.status = "done"
+                recursion.status = "error"
+                recursion.error_log = (
+                    "LLM returned native tool_calls instead of JSON format"
+                )
                 recursion.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
-                self.db.refresh(recursion)
 
                 return recursion, {
                     "trace_id": trace_id,
-                    "action_type": action_type,
-                    "tool_calls": message.tool_calls,
-                    "tool_results": tool_results,
+                    "action_type": "ERROR",
+                    "error": "Invalid response format from LLM",
                 }
 
             else:
                 # Parse JSON response from LLM
                 content = message.content or "{}"
+                react_output = None
+                
                 try:
                     react_output = json.loads(content)
-                except json.JSONDecodeError as e:
+                except json.JSONDecodeError:
                     # Try to extract JSON from markdown code block
-                    if "```json" in content:
+                    if react_output is None and "```json" in content:
                         json_start = content.find("```json") + 7
                         json_end = content.find("```", json_start)
-                        content = content[json_start:json_end].strip()
-                        react_output = json.loads(content)
-                    else:
-                        raise ValueError(
-                            f"Failed to parse LLM response: {content}"
-                        ) from e
+                        json_content = content[json_start:json_end].strip()
+                        try:
+                            react_output = json.loads(json_content)
+                        except json.JSONDecodeError:
+                            logger.debug("Failed to parse JSON from markdown block")
+                    
+                    # If still failed, try to extract JSON from content
+                    # LLM might add text before/after JSON
+                    if react_output is None:
+                        # Find first { and last }
+                        first_brace = content.find("{")
+                        last_brace = content.rfind("}")
+                        
+                        if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+                            json_content = content[first_brace:last_brace + 1]
+                            try:
+                                react_output = json.loads(json_content)
+                                logger.info(
+                                    f"Successfully extracted JSON from position {first_brace} to {last_brace}"
+                                )
+                            except json.JSONDecodeError:
+                                logger.debug("Failed to parse extracted JSON content")
+                
+                # If all attempts failed, raise error
+                if react_output is None:
+                    raise ValueError(
+                        f"Failed to parse LLM response: {content}"
+                    )
 
                 observe = react_output.get("observe", "")
                 thought = react_output.get("thought", "")
+                abstract = react_output.get("abstract", "")
                 action = react_output.get("action", {}).get("result", {})
                 action_type = action.get("action_type", "")
                 action_output = action.get("output", {})
                 
                 # Skip empty/invalid responses
                 if not action_type:
-                    logger.warning("Empty action_type from LLM, marking as error")
+
                     # Mark recursion as error
                     recursion.status = "error"
                     recursion.error_log = "LLM returned empty action_type"
@@ -292,6 +245,7 @@ class ReactEngine:
                 # Save recursion
                 recursion.observe = observe
                 recursion.thought = thought
+                recursion.abstract = abstract
                 recursion.action_type = action_type
                 recursion.action_output = json.dumps(action_output, ensure_ascii=False)
                 
@@ -327,42 +281,23 @@ class ReactEngine:
                         self.db.add(step)
                     self.db.commit()
 
-                # Add messages in correct OpenAI format
-                if action_type == "CALL_TOOL" and reconstructed_tool_calls:
-                    # Step 1: Add assistant message with tool_calls
-                    messages.append({
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": reconstructed_tool_calls,
-                    })
-                    
-                    # Step 2: Add tool result messages
-                    for result in tool_results:
-                        if result["success"]:
-                            content = str(result.get("result"))
-                        else:
-                            content = result.get("error", "Unknown error")
-                        
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": result["tool_call_id"],
-                            "content": content,
-                        })
-                elif action_type == "RE_PLAN":
-                    # For RE_PLAN, add a summary message instead of full JSON
-                    plan_summary = f"已制定计划, 包含{len(action_output.get('plan', []))}个步骤。"
-                    messages.append({"role": "assistant", "content": plan_summary})
-                elif action_type == "ANSWER":
+                # Do NOT add assistant messages to avoid confusing LLM
+                # The state machine injection in next recursion's system prompt
+                # will include tool_call_results in last_recursion
+                # This is sufficient for LLM to understand what happened
+                if action_type == "ANSWER":
                     # For ANSWER, don't add to messages as the task is complete
                     pass
-                else:
-                    messages.append({"role": "assistant", "content": content})
+                # For all other action types (CALL_TOOL, RE_PLAN, etc.),
+                # we rely on the state machine context to convey the results
+                # No need to append to messages
 
                 return recursion, {
                     "trace_id": trace_id,
                     "action_type": action_type,
                     "observe": observe,
                     "thought": thought,
+                    "abstract": abstract,
                     "output": action_output,
                     "tool_results": tool_results,  # Add tool_results for streaming
                 }
@@ -448,6 +383,16 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "delta": recursion.thought,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                if recursion.abstract:
+                    yield {
+                        "type": "abstract",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "delta": recursion.abstract,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 

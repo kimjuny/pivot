@@ -17,6 +17,7 @@ type ReactStreamEventType =
   | 'recursion_start'
   | 'observe'
   | 'thought'
+  | 'abstract'
   | 'action'
   | 'tool_call'
   | 'plan_update'
@@ -45,6 +46,7 @@ interface RecursionRecord {
   trace_id: string | null;
   observe?: string;
   thought?: string;
+  abstract?: string;
   action?: string;
   events: ReactStreamEvent[];
   status: 'running' | 'completed' | 'error';
@@ -238,6 +240,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 currentRecursion.observe = event.delta ?? '';
               } else if (event.type === 'thought') {
                 currentRecursion.thought = event.delta ?? '';
+              } else if (event.type === 'abstract') {
+                currentRecursion.abstract = event.delta ?? '';
               } else if (event.type === 'action') {
                 currentRecursion.action = event.delta ?? '';
               } else if (event.type === 'tool_call') {
@@ -381,19 +385,22 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           onClick={() => toggleRecursion(messageId, recursion.iteration)}
           className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/30 transition-colors"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             {recursion.status === 'running' && (
-              <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" />
             )}
             {recursion.status === 'completed' && (
-              <CheckCircle2 className="w-3.5 h-3.5 text-success" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />
             )}
-            {recursion.status === 'error' && <XCircle className="w-3.5 h-3.5 text-danger" />}
-            <span className="text-xs font-semibold text-foreground">
-              Iteration {recursion.iteration + 1}
+            {recursion.status === 'error' && <XCircle className="w-3.5 h-3.5 text-danger flex-shrink-0" />}
+            <span 
+              className="text-xs font-semibold text-foreground truncate"
+              title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+            >
+              {recursion.abstract || `Iteration ${recursion.iteration + 1}`}
             </span>
             {toolCallEvents.length > 0 && (
-              <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary flex-shrink-0">
                 {toolCallEvents.length} tool{toolCallEvents.length > 1 ? 's' : ''}
               </span>
             )}

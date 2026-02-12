@@ -37,6 +37,7 @@ async def react_chat_stream(
     - recursion_start: New recursion cycle started
     - observe: LLM observation
     - thought: LLM reasoning
+    - abstract: Brief summary of the recursion cycle
     - action: Action decision
     - tool_call: Tool execution
     - tool_result: Tool execution result

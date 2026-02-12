@@ -88,6 +88,10 @@ class ReactRecursion(SQLModel, table=True):
     iteration_index: int = Field(description="Recursion index in task")
     observe: str | None = Field(default=None, description="LLM observation")
     thought: str | None = Field(default=None, description="LLM reasoning")
+    abstract: str | None = Field(
+        default=None,
+        description="Brief summary of this recursion cycle",
+    )
     action_type: str | None = Field(
         default=None,
         description="Action type: CALL_TOOL, RE_PLAN, ANSWER",

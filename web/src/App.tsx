@@ -65,7 +65,7 @@ function App() {
       setIsInitializing(false);
       isLoadingAgentDetailsRef.current = false;
     }
-  }, [agentId, setAgent, setScenes, setSelectedScene, setIsInitializing, setError]);
+  }, [agentId]);
 
   /**
    * Load agent details when agentId changes.

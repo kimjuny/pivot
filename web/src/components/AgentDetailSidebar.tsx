@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     Bot,
     ChevronDown,
@@ -76,12 +76,18 @@ function AgentDetailSidebar({
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [tools, setTools] = useState<Tool[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
+    const hasFetchedToolsRef = useRef(false);
 
     /**
      * Fetch tools list on component mount.
+     * Uses useRef to prevent duplicate fetches in React Strict Mode.
      */
     useEffect(() => {
+        // Prevent duplicate fetches
+        if (hasFetchedToolsRef.current) return;
+
         const fetchTools = async () => {
+            hasFetchedToolsRef.current = true;
             setToolsLoading(true);
             try {
                 const toolsList = await getTools();
