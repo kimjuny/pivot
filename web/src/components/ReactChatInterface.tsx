@@ -513,20 +513,31 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               }
 
               if (event.type === 'plan_update') {
-                const planData = event.data as { plan?: Array<{ step: string; status: string }> } | undefined;
+                const planData = event.data as { 
+                  plan?: Array<{ 
+                    step_id: string; 
+                    description: string; 
+                    status: string 
+                  }> 
+                } | undefined;
+                
                 return (
                   <div key={idx} className="bg-background/50 border border-border rounded p-2">
                     <div className="flex items-center gap-1.5 mb-2">
                       <Brain className="w-3.5 h-3.5 text-purple-500" />
                       <span className="text-xs font-semibold text-foreground">PLAN UPDATE</span>
                     </div>
-                    {planData?.plan && (
+                    {planData?.plan && planData.plan.length > 0 ? (
                       <div className="space-y-1 pl-5">
                         {planData.plan.map((step, sidx) => (
                           <div key={sidx} className="text-xs text-muted-foreground">
-                            {sidx + 1}. {step.step}
+                            {sidx + 1}. {step.description}
                           </div>
                         ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground/50 pl-5 italic">
+                        No plan data available
                       </div>
                     )}
                   </div>

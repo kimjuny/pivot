@@ -402,6 +402,14 @@ class ReactEngine:
                             "tool_call_id": result["tool_call_id"],
                             "content": content,
                         })
+                elif action_type == "RE_PLAN":
+                    # For RE_PLAN, add a summary message instead of full JSON
+                    plan_summary = f"已制定计划, 包含{len(action_output.get('plan', []))}个步骤。"
+                    logger.info(f"[DEBUG engine.py] Adding assistant message for RE_PLAN: {plan_summary}")
+                    messages.append({"role": "assistant", "content": plan_summary})
+                elif action_type == "ANSWER":
+                    # For ANSWER, don't add to messages as the task is complete
+                    logger.info("[DEBUG engine.py] ANSWER action, not adding to messages")
                 else:
                     logger.info(f"[DEBUG engine.py] Adding assistant message without tool_calls (action_type={action_type})")
                     messages.append({"role": "assistant", "content": content})
@@ -553,12 +561,14 @@ class ReactEngine:
                     }
 
                 elif action_type == "RE_PLAN":
+                    plan_output = event_data.get("output")
+                    logger.info(f"[DEBUG engine.py] Yielding plan_update with data: {plan_output}")
                     yield {
                         "type": "plan_update",
                         "task_id": task.task_id,
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
-                        "data": event_data.get("output"),
+                        "data": plan_output,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
