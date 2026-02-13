@@ -359,3 +359,37 @@
   outline: 2px solid rgb(24, 91, 233);
   outline-offset: 2px;
 }
+
+/* Status icon transition animation */
+@keyframes statusIconEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) rotate(-90deg);
+  }
+  50% {
+    transform: scale(1.1) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+@keyframes statusIconExit {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.5) rotate(90deg);
+  }
+}
+
+.status-icon-enter {
+  animation: statusIconEnter 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.status-icon-exit {
+  animation: statusIconExit 0.6s ease-out;
+}

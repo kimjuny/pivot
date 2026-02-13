@@ -17,6 +17,23 @@ export default defineConfig({
         target: 'http://localhost:8003',
         changeOrigin: true,
         secure: false,
+        // Special configuration for SSE (Server-Sent Events)
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            // Preserve streaming for SSE endpoints
+            if (req.url?.includes('/stream')) {
+              proxyReq.setHeader('Connection', 'keep-alive');
+              proxyReq.setHeader('Cache-Control', 'no-cache');
+            }
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            // Disable buffering for SSE responses
+            if (req.url?.includes('/stream')) {
+              proxyRes.headers['cache-control'] = 'no-cache';
+              proxyRes.headers['connection'] = 'keep-alive';
+            }
+          });
+        },
       }
     }
   },

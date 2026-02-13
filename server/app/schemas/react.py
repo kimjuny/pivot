@@ -7,6 +7,16 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class TokenUsage(BaseModel):
+    """Token usage information for LLM calls."""
+
+    prompt_tokens: int = Field(..., description="Number of tokens in the prompt")
+    completion_tokens: int = Field(
+        ..., description="Number of tokens in the completion"
+    )
+    total_tokens: int = Field(..., description="Total tokens used")
+
+
 class ReactChatRequest(BaseModel):
     """Request schema for ReAct chat stream endpoint."""
 
@@ -42,6 +52,18 @@ class ReactStreamEvent(BaseModel):
     delta: str | None = Field(None, description="Incremental text content")
     data: dict[str, Any] | None = Field(None, description="Additional event data")
     timestamp: datetime = Field(..., description="Event timestamp")
+    created_at: str | None = Field(
+        None, description="Recursion creation timestamp (ISO format)"
+    )
+    updated_at: str | None = Field(
+        None, description="Recursion update timestamp (ISO format)"
+    )
+    tokens: TokenUsage | None = Field(
+        None, description="Token usage for this recursion"
+    )
+    total_tokens: TokenUsage | None = Field(
+        None, description="Total token usage for the task"
+    )
 
 
 class ReactTaskResponse(BaseModel):

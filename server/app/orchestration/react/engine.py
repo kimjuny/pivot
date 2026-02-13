@@ -312,7 +312,7 @@ class ReactEngine:
             short_term_memory_append = react_output.get(
                 "short_term_memory_append", ""
             )
-            action = react_output.get("action", {}).get("result", {})
+            action = react_output.get("action", {})
             action_type = action.get("action_type", "")
             action_output = action.get("output", {})
 
@@ -439,6 +439,17 @@ class ReactEngine:
                 tool_results_json = json.dumps(tool_results, ensure_ascii=False)
                 recursion.tool_call_results = tool_results_json
 
+            # Save token usage from LLM response
+            if response.usage:
+                recursion.prompt_tokens = response.usage.prompt_tokens
+                recursion.completion_tokens = response.usage.completion_tokens
+                recursion.total_tokens = response.usage.total_tokens
+                
+                # Update task-level token accumulation
+                task.total_prompt_tokens += response.usage.prompt_tokens
+                task.total_completion_tokens += response.usage.completion_tokens
+                task.total_tokens += response.usage.total_tokens
+
             recursion.status = "done"
             recursion.updated_at = datetime.now(timezone.utc)
             self.db.commit()
@@ -477,7 +488,8 @@ class ReactEngine:
             # we rely on the state machine context to convey the results
             # No need to append to messages
 
-            return recursion, {
+            # Prepare event data
+            event_data = {
                 "trace_id": trace_id,
                 "action_type": action_type,
                 "observe": observe,
@@ -487,6 +499,16 @@ class ReactEngine:
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
             }
+            
+            # Add token usage if available
+            if response.usage:
+                event_data["tokens"] = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                }
+            
+            return recursion, event_data
 
         except Exception as e:
             # Handle errors with detailed logging
@@ -558,7 +580,7 @@ class ReactEngine:
                     task, context, messages
                 )
 
-                # Yield Observe, Thought, Action events
+                # Yield Observe, Thought, Action events with token info
                 if recursion.observe:
                     yield {
                         "type": "observe",
@@ -567,6 +589,9 @@ class ReactEngine:
                         "iteration": task.iteration,
                         "delta": recursion.observe,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "created_at": recursion.created_at.isoformat(),
+                        "updated_at": recursion.updated_at.isoformat(),
+                        "tokens": event_data.get("tokens"),
                     }
 
                 if recursion.thought:
@@ -577,6 +602,9 @@ class ReactEngine:
                         "iteration": task.iteration,
                         "delta": recursion.thought,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "created_at": recursion.created_at.isoformat(),
+                        "updated_at": recursion.updated_at.isoformat(),
+                        "tokens": event_data.get("tokens"),
                     }
 
                 if recursion.abstract:
@@ -587,9 +615,12 @@ class ReactEngine:
                         "iteration": task.iteration,
                         "delta": recursion.abstract,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "created_at": recursion.created_at.isoformat(),
+                        "updated_at": recursion.updated_at.isoformat(),
+                        "tokens": event_data.get("tokens"),
                     }
 
-                # Yield action event with type
+                # Yield action event with type and token info
                 action_type = event_data.get("action_type", "")
                 yield {
                     "type": "action",
@@ -598,6 +629,9 @@ class ReactEngine:
                     "iteration": task.iteration,
                     "delta": action_type,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "created_at": recursion.created_at.isoformat(),
+                    "updated_at": recursion.updated_at.isoformat(),
+                    "tokens": event_data.get("tokens"),
                 }
 
                 # Yield recursion events
@@ -662,6 +696,11 @@ class ReactEngine:
                         "task_id": task.task_id,
                         "iteration": task.iteration,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "total_tokens": {
+                            "prompt_tokens": task.total_prompt_tokens,
+                            "completion_tokens": task.total_completion_tokens,
+                            "total_tokens": task.total_tokens,
+                        },
                     }
                     break
 

@@ -44,6 +44,15 @@ class ReactTask(SQLModel, table=True):
     )
     iteration: int = Field(default=0, description="Current iteration count")
     max_iteration: int = Field(default=30, description="Maximum iterations")
+    total_prompt_tokens: int = Field(
+        default=0, description="Total prompt tokens consumed by this task"
+    )
+    total_completion_tokens: int = Field(
+        default=0, description="Total completion tokens consumed by this task"
+    )
+    total_tokens: int = Field(
+        default=0, description="Total tokens consumed by this task"
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -111,6 +120,15 @@ class ReactRecursion(SQLModel, table=True):
     )
     status: str = Field(default="running", description="Status: running, done, error")
     error_log: str | None = Field(default=None, description="Error message")
+    prompt_tokens: int = Field(
+        default=0, description="Prompt tokens consumed in this recursion"
+    )
+    completion_tokens: int = Field(
+        default=0, description="Completion tokens consumed in this recursion"
+    )
+    total_tokens: int = Field(
+        default=0, description="Total tokens consumed in this recursion"
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

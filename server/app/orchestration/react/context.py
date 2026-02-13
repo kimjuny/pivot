@@ -140,14 +140,12 @@ class ReactContext:
                     "observe": latest.observe or "",
                     "thought": latest.thought or "",
                     "action": {
-                        "result": {
-                            "action_type": latest.action_type or "",
-                            "output": (
-                                json.loads(latest.action_output)
-                                if latest.action_output
-                                else {}
-                            ),
-                        }
+                        "action_type": latest.action_type or "",
+                        "output": (
+                            json.loads(latest.action_output)
+                            if latest.action_output
+                            else {}
+                        ),
                     },
                 }
 

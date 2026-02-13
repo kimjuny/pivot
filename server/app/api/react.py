@@ -150,6 +150,10 @@ async def react_chat_stream(
                             "timestamp", datetime.now(timezone.utc).isoformat()
                         )
                     ),
+                    created_at=event_data.get("created_at"),
+                    updated_at=event_data.get("updated_at"),
+                    tokens=event_data.get("tokens"),
+                    total_tokens=event_data.get("total_tokens"),
                 )
 
                 try:

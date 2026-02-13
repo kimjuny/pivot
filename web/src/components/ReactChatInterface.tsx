@@ -27,6 +27,15 @@ type ReactStreamEventType =
   | 'error';
 
 /**
+ * Token usage information.
+ */
+interface TokenUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+/**
  * Stream event from ReAct backend.
  */
 interface ReactStreamEvent {
@@ -37,6 +46,10 @@ interface ReactStreamEvent {
   delta?: string | null;
   data?: unknown;
   timestamp: string;
+  created_at?: string;
+  updated_at?: string;
+  tokens?: TokenUsage;
+  total_tokens?: TokenUsage;
 }
 
 /**
@@ -53,6 +66,7 @@ interface RecursionRecord {
   status: 'running' | 'completed' | 'error';
   startTime: string;
   endTime?: string;
+  tokens?: TokenUsage;
 }
 
 /**
@@ -66,6 +80,7 @@ interface ChatMessage {
   task_id?: string;
   recursions?: RecursionRecord[];
   status?: 'running' | 'completed' | 'error';
+  totalTokens?: TokenUsage;
 }
 
 /**
@@ -150,7 +165,13 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     abortControllerRef.current = new AbortController();
 
     try {
-      const response = await fetch('/api/react/chat/stream', {
+      // Use direct backend URL to bypass Vite proxy for SSE streaming
+      // This prevents potential data loss in proxy layer
+      const apiUrl = import.meta.env.DEV 
+        ? 'http://localhost:8003/api/react/chat/stream'
+        : '/api/react/chat/stream';
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -239,12 +260,27 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
               if (event.type === 'observe') {
                 currentRecursion.observe = event.delta ?? '';
+                if (event.tokens) {
+                  currentRecursion.tokens = event.tokens;
+                }
               } else if (event.type === 'thought') {
                 currentRecursion.thought = event.delta ?? '';
+                if (event.tokens) {
+                  currentRecursion.tokens = event.tokens;
+                }
               } else if (event.type === 'abstract') {
                 currentRecursion.abstract = event.delta ?? '';
+                if (event.tokens) {
+                  currentRecursion.tokens = event.tokens;
+                }
               } else if (event.type === 'action') {
                 currentRecursion.action = event.delta ?? '';
+                if (event.tokens) {
+                  currentRecursion.tokens = event.tokens;
+                }
+                // Mark recursion as completed after action event
+                currentRecursion.status = 'completed';
+                currentRecursion.endTime = event.timestamp;
               } else if (event.type === 'tool_call') {
                 // Tool call event is already in events array, no special handling needed
                 // No special handling needed - data is rendered in renderRecursion
@@ -286,6 +322,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                         status: 'completed',
                         recursions: updatedRecursions,
                         timestamp: event.timestamp,  // Update to task completion time
+                        totalTokens: event.total_tokens,  // Save total token usage
                       };
                     }
                     return msg;
@@ -293,14 +330,16 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 );
               }
 
-              // Update recursion events
+              // Update recursion events - preserve all currentRecursion data
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
                     ? {
                         ...msg,
                         recursions: msg.recursions?.map((r) =>
-                          r.iteration === currentRecursion!.iteration ? currentRecursion! : r
+                          r.iteration === currentRecursion!.iteration 
+                            ? { ...currentRecursion! }  // Create new object to ensure React detects change
+                            : r
                         ),
                       }
                     : msg
@@ -513,6 +552,23 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   };
 
   /**
+   * Calculate duration in seconds between two ISO timestamps.
+   */
+  const calculateDuration = (startTime: string, endTime?: string): number => {
+    if (!endTime) return 0;
+    const start = new Date(startTime).getTime();
+    const end = new Date(endTime).getTime();
+    return Math.round((end - start) / 1000 * 10) / 10; // Round to 1 decimal place
+  };
+
+  /**
+   * Format token count with thousands separator.
+   */
+  const formatTokenCount = (count: number): string => {
+    return count.toLocaleString();
+  };
+
+  /**
    * Check if recursion has any failed tool calls.
    */
   const hasFailedTools = (recursion: RecursionRecord): boolean => {
@@ -565,15 +621,29 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {effectiveStatus === 'running' && (
-              <Loader2 className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" />
+              <Loader2 
+                key={`${key}-running`}
+                className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" 
+              />
             )}
             {effectiveStatus === 'completed' && (
-              <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />
+              <CheckCircle2 
+                key={`${key}-completed`}
+                className="w-3.5 h-3.5 text-success flex-shrink-0 status-icon-enter" 
+              />
             )}
             {effectiveStatus === 'warning' && (
-              <AlertCircle className="w-3.5 h-3.5 text-warning flex-shrink-0" />
+              <AlertCircle 
+                key={`${key}-warning`}
+                className="w-3.5 h-3.5 text-warning flex-shrink-0 status-icon-enter" 
+              />
             )}
-            {effectiveStatus === 'error' && <XCircle className="w-3.5 h-3.5 text-danger flex-shrink-0" />}
+            {effectiveStatus === 'error' && (
+              <XCircle 
+                key={`${key}-error`}
+                className="w-3.5 h-3.5 text-danger flex-shrink-0 status-icon-enter" 
+              />
+            )}
             {effectiveStatus === 'running' ? (
               <span 
                 className="text-xs font-semibold truncate animate-thinking-wave"
@@ -601,9 +671,18 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               </span>
             )}
           </div>
-          <span className="text-xs text-muted-foreground">
-            {formatTimestamp(recursion.startTime)}
-          </span>
+          <div className="flex items-center gap-2.5 flex-shrink-0">
+            {recursion.endTime && (
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {calculateDuration(recursion.startTime, recursion.endTime)}s
+              </span>
+            )}
+            {recursion.tokens && (
+              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                {formatTokenCount(recursion.tokens.total_tokens)} tokens
+              </span>
+            )}
+          </div>
         </button>
 
         {isExpanded && (
@@ -857,6 +936,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       <>
                         <CheckCircle2 className="w-3.5 h-3.5 text-success" />
                         <span className="text-xs text-muted-foreground">Completed</span>
+                        {message.totalTokens && (
+                          <span className="text-xs text-muted-foreground ml-2">
+                            • Total: {formatTokenCount(message.totalTokens.total_tokens)} tokens
+                          </span>
+                        )}
                       </>
                     )}
                     {message.status === 'error' && (
