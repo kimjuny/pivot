@@ -136,11 +136,20 @@ Action决策环节你只能输出以下 action_type 之一：
 ### 4.2. action_type = CALL_TOOL
 **当 action_type 为 CALL_TOOL 时，你需要同时返回两部分**：
 
-1. **content 中的 JSON**（只展示result内部）：
+1. **content 中的 JSON**：
 ```json
 {
-  "action_type": "CALL_TOOL",
-  "output": {}
+  "trace_id": "本轮recursion的trace_id",
+  "observe": "你对当前状态机和输入的客观观察",
+  "thought": "你的分析与决策理由",
+  "action": {
+    "result": {
+      "action_type": "CALL_TOOL",
+      "output": {}
+    }
+  },
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
+  "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
 ```
 
@@ -152,28 +161,38 @@ Action决策环节你只能输出以下 action_type 之一：
 - 工具调用信息通过原生 function calling 传递
 - 你不需要关心工具是否成功，success / error 会在下一轮 recursion 作为输入注入
 
-### 4.3. action_type = RE_PLAN（只展示result内部）
+### 4.3. action_type = RE_PLAN
 - plan 是先验指导，不是强约束
 - 后续 recursion 允许偏离或再次 re_plan
 ```json
 {
-  "action_type": "RE_PLAN",
-  "output": {
-    "plan": [
-      {
-        "step_id": "1",
-        "description": "...",
-        "status": "pending"
-      },
-      {
-        "step_id": "2",
-        "description": "...",
-        "status": "pending"
+  "trace_id": "本轮recursion的trace_id",
+  "observe": "你对当前状态机和输入的客观观察",
+  "thought": "你的分析与决策理由",
+  "action": {
+    "result": {
+      "action_type": "RE_PLAN",
+      "output": {
+        "plan": [
+          {
+            "step_id": "1",
+            "description": "...",
+            "status": "pending"
+          },
+          {
+            "step_id": "2",
+            "description": "...",
+            "status": "pending"
+          }
+        ],
+        "notes": "（可选）关键假设 / 风险 / 约束"
       }
-    ],
-    "notes": "（可选）关键假设 / 风险 / 约束"
-  }
+    }
+  },
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
+  "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
+
 ```
 
 ### 4.4. action_type = REFLECT（只展示result内部）
@@ -181,25 +200,44 @@ Action决策环节你只能输出以下 action_type 之一：
 > 以推进任务认知层面的完成度，而不改变执行结构
 ```json
 {
-  "action_type": "REFLECT",
-  "output": {
-    "summary": "在这一轮深思过程你得到的总结"
-  }
+  "trace_id": "本轮recursion的trace_id",
+  "observe": "你对当前状态机和输入的客观观察",
+  "thought": "你的分析与决策理由",
+  "action": {
+    "result": {
+      "action_type": "REFLECT",
+      "output": {
+        "summary": "在这一轮深思过程你得到的总结"
+      }
+    }
+  },
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
+  "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
 ```
 
 ### 4.5. action_type = ANSWER（只展示result内部）
 ```json
 {
-  "action_type": "ANSWER",
-  "output": {
-    "answer": "最终结论"
-  }
+  "trace_id": "本轮recursion的trace_id",
+  "observe": "你对当前状态机和输入的客观观察",
+  "thought": "你的分析与决策理由",
+  "action": {
+    "result": {
+      "action_type": "ANSWER",
+      "output": {
+        "answer": "最终输出给用户的结论"
+      }
+    }
+  },
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
+  "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
 ```
 
 **answer格式建议（提升可读性）**：
-- 使用 `###` 作为标题分隔不同部分（如：### 分析结果、### 建议方案）
+- 使用 `###` 作为主标题分隔不同部分（如：### 分析结果、### 建议方案）
+- 使用 `####` 作为子标题（如：#### 1. 场景示例、#### 2. 使用方法）
 - 使用 `**文字**` 标记重点内容
 - 使用 `\n` 表示换行（系统会自动转义）
 - 使用双换行（`\n\n`）分隔不同段落

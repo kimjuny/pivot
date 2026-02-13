@@ -372,23 +372,72 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
   /**
    * Format answer content with basic markdown support.
-   * Handles: ### headings, **bold**, line breaks, and paragraphs.
+   * Handles: ### and #### headings, **bold**, line breaks, and paragraphs.
    */
   const formatAnswerContent = (content: string) => {
     if (!content) return null;
 
-    // Split by double newlines to get paragraphs
-    const paragraphs = content.split(/\n\n+/);
+    // First, normalize paragraph breaks
+    // Split content into blocks by analyzing heading patterns
+    const lines = content.split('\n');
+    const blocks: string[] = [];
+    let currentBlock: string[] = [];
 
-    return paragraphs.map((para, pIdx) => {
-      // Check if paragraph starts with ###
-      const headingMatch = para.match(/^###\s+(.+?)$/m);
-      if (headingMatch) {
-        const headingText = headingMatch[1];
-        const remainingText = para.substring(headingMatch[0].length).trim();
+    for (const line of lines) {
+      // Check if line is a heading
+      if (line.match(/^#{3,4}\s+/)) {
+        // Save current block if it has content
+        if (currentBlock.length > 0) {
+          blocks.push(currentBlock.join('\n'));
+          currentBlock = [];
+        }
+        // Start new block with heading
+        currentBlock.push(line);
+      } else if (line.trim() === '' && currentBlock.length > 0) {
+        // Empty line - might be paragraph break
+        currentBlock.push(line);
+      } else {
+        // Regular content line
+        currentBlock.push(line);
+      }
+    }
+
+    // Add final block
+    if (currentBlock.length > 0) {
+      blocks.push(currentBlock.join('\n'));
+    }
+
+    // Render blocks
+    return blocks.map((block, bIdx) => {
+      const trimmedBlock = block.trim();
+      if (!trimmedBlock) return null;
+
+      // Check for headings (must use #### before ### to avoid false matches)
+      const h4Match = trimmedBlock.match(/^####\s+(.+?)(\n|$)/);
+      const h3Match = trimmedBlock.match(/^###\s+(.+?)(\n|$)/);
+      
+      if (h4Match) {
+        const headingText = h4Match[1];
+        const remainingText = trimmedBlock.substring(h4Match[0].length).trim();
 
         return (
-          <div key={pIdx} className="mb-3">
+          <div key={bIdx} className="mb-2.5">
+            <h4 className="text-sm font-semibold text-foreground mb-1.5">{headingText}</h4>
+            {remainingText && (
+              <div className="text-sm text-foreground leading-relaxed">
+                {formatInlineMarkdown(remainingText)}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      if (h3Match) {
+        const headingText = h3Match[1];
+        const remainingText = trimmedBlock.substring(h3Match[0].length).trim();
+
+        return (
+          <div key={bIdx} className="mb-3">
             <h3 className="text-base font-bold text-foreground mb-2">{headingText}</h3>
             {remainingText && (
               <div className="text-sm text-foreground leading-relaxed">
@@ -401,11 +450,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
       // Regular paragraph
       return (
-        <p key={pIdx} className="text-sm text-foreground leading-relaxed mb-2">
-          {formatInlineMarkdown(para)}
+        <p key={bIdx} className="text-sm text-foreground leading-relaxed mb-2">
+          {formatInlineMarkdown(trimmedBlock)}
         </p>
       );
-    });
+    }).filter(Boolean);
   };
 
   /**

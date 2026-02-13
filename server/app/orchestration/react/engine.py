@@ -6,6 +6,7 @@ handling recursion cycles, tool calling, and state management.
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -48,6 +49,96 @@ class ReactEngine:
         self.tool_manager = tool_manager
         self.db = db
         self.cancelled = False  # Flag to signal cancellation
+
+    def _safe_load_json(self, json_str: str) -> dict[str, Any]:
+        """
+        Safely parse JSON string with automatic fixing of common format issues.
+
+        This method handles various JSON formatting issues from LLM responses:
+        - Extra whitespace and invisible characters at start/end
+        - Multiple JSON objects (takes only the first complete one)
+        - Unescaped control characters (newlines, tabs) in string values
+        - Chinese quotes
+        - Missing closing braces/brackets
+
+        Args:
+            json_str: Potentially malformed JSON string from LLM
+
+        Returns:
+            Parsed dictionary
+
+        Raises:
+            ValueError: If JSON cannot be parsed even after all fix attempts
+        """
+        original_str = json_str
+        
+        # Step 1: Clean leading/trailing whitespace and invisible characters
+        # \s matches all whitespace, \u200b etc. match zero-width spaces
+        json_str = re.sub(
+            r"^\s+|\s+$|[\u200b\u200c\u200d\u2060\uFEFF]", "", json_str
+        )
+
+        # Step 2: Extract first complete JSON object (handles "extra data" issue)
+        # Match outermost { ... } structure only
+        # Use non-greedy matching and track brace depth to find complete object
+        first_brace = json_str.find("{")
+        if first_brace == -1:
+            raise ValueError("No JSON object found in response")
+
+        # Find matching closing brace by tracking depth
+        brace_depth = 0
+        in_string = False
+        escape_next = False
+        last_brace = -1
+
+        for i in range(first_brace, len(json_str)):
+            char = json_str[i]
+
+            if escape_next:
+                escape_next = False
+                continue
+
+            if char == "\\" and in_string:
+                escape_next = True
+                continue
+
+            if char == '"':
+                in_string = not in_string
+                continue
+
+            if not in_string:
+                if char == "{":
+                    brace_depth += 1
+                elif char == "}":
+                    brace_depth -= 1
+                    if brace_depth == 0:
+                        last_brace = i
+                        break
+
+        if last_brace == -1:
+            # No matching closing brace found, will auto-complete later
+            json_str = json_str[first_brace:]
+        else:
+            # Extract only the first complete JSON object
+            json_str = json_str[first_brace : last_brace + 1]
+
+        # Step 3: Fix escaping issues
+        json_str = self._fix_json_escaping(json_str)
+
+        # Step 4: Parse
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"JSON parse failed after all fixes\n"
+                f"Original error: {e.msg} at position {e.pos}\n"
+                f"Original string (first 300): {original_str[:300]}\n"
+                f"Fixed string (first 300): {json_str[:300]}\n"
+                f"Error context: ...{json_str[max(0, e.pos-50):e.pos+50]}..."
+            )
+            raise ValueError(
+                f"Failed to parse JSON: {e.msg} at position {e.pos}"
+            ) from e
 
     def _fix_json_escaping(self, content: str) -> str:
         """
@@ -186,58 +277,34 @@ class ReactEngine:
 
             # Parse JSON from content to get observe, thought, abstract, action_type
             content = message.content or "{}"
+            logger.info(f"LLM response: {content}")
             
-            # ROOT CAUSE FIX: Properly escape special characters within JSON string values
-            # LLM often returns JSON with unescaped control characters
-            content = self._fix_json_escaping(content)
-            
-            react_output: dict[str, Any] | None = None
-            
+            # Use safe JSON parser to handle all common LLM formatting issues
             try:
-                react_output = json.loads(content)
-            except json.JSONDecodeError as e:
-                # Log the error and attempt fallback extraction
-                logger.warning(
-                    f"JSON parse failed after escaping: {e.msg} at position {e.pos}"
+                react_output = self._safe_load_json(content)
+                logger.debug(
+                    f"Successfully parsed JSON (trace_id={trace_id})"
                 )
+            except ValueError as e:
+                # All parsing attempts failed, log and return error
+                logger.error(
+                    f"Failed to parse LLM response\n"
+                    f"Trace ID: {trace_id}\n"
+                    f"Task ID: {task.task_id}\n"
+                    f"Iteration: {task.iteration}\n"
+                    f"Error: {e}"
+                )
+                
+                recursion.status = "error"
+                recursion.error_log = str(e)
+                recursion.updated_at = datetime.now(timezone.utc)
+                self.db.commit()
 
-                # Try to extract JSON from markdown code block
-                if "```json" in content:
-                    json_start = content.find("```json") + 7
-                    json_end = content.find("```", json_start)
-                    if json_end > json_start:
-                        json_content = content[json_start:json_end].strip()
-                        json_content = self._fix_json_escaping(json_content)
-                        try:
-                            react_output = json.loads(json_content)
-                            logger.info("Extracted JSON from markdown block")
-                        except json.JSONDecodeError:
-                            pass
-
-                # If still failed, try to extract JSON by finding braces
-                if react_output is None:
-                    first_brace = content.find("{")
-                    last_brace = content.rfind("}")
-
-                    if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
-                        json_content = content[first_brace : last_brace + 1]
-                        try:
-                            react_output = json.loads(json_content)
-                            logger.info(
-                                f"Extracted JSON from position {first_brace} to {last_brace}"
-                            )
-                        except json.JSONDecodeError:
-                            pass
-
-                # If all attempts failed, raise error from the original exception
-                if react_output is None:
-                    raise ValueError(
-                        f"Failed to parse LLM response: {content[:500]}..."
-                    ) from e
-
-            # Type guard: at this point react_output must be a dict
-            if react_output is None:
-                raise ValueError("Internal error: react_output is None after parsing")
+                return recursion, {
+                    "trace_id": trace_id,
+                    "action_type": "ERROR",
+                    "error": str(e),
+                }
 
             observe = react_output.get("observe", "")
             thought = react_output.get("thought", "")
@@ -268,6 +335,7 @@ class ReactEngine:
             reconstructed_tool_calls = []
 
             if action_type == "CALL_TOOL":
+                logger.info(f"LLM tool_calls: {json.dumps(message.tool_calls, ensure_ascii=False, indent = 2)}")
                 # Validate that tool_calls exist when action_type is CALL_TOOL
                 if not message.tool_calls:
                     recursion.status = "error"
@@ -421,16 +489,25 @@ class ReactEngine:
             }
 
         except Exception as e:
-            # Handle errors
+            # Handle errors with detailed logging
+            error_msg = str(e)
+            logger.error(
+                f"Recursion execution failed for trace_id={trace_id}\n"
+                f"Error type: {type(e).__name__}\n"
+                f"Error message: {error_msg}\n"
+                f"Task ID: {task.task_id}\n"
+                f"Iteration: {task.iteration}"
+            )
+            
             recursion.status = "error"
-            recursion.error_log = str(e)
+            recursion.error_log = error_msg
             recursion.updated_at = datetime.now(timezone.utc)
             self.db.commit()
 
             return recursion, {
                 "trace_id": trace_id,
                 "action_type": "ERROR",
-                "error": str(e),
+                "error": error_msg,
             }
 
     async def run_task(self, task: ReactTask) -> AsyncIterator[dict[str, Any]]:
