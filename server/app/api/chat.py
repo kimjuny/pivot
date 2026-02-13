@@ -8,14 +8,16 @@ import logging
 import traceback
 from datetime import datetime, timezone
 
+from app.api.dependencies import get_db
 from app.schemas.schemas import (
     PreviewChatRequest,
     StreamEvent,
     StreamEventType,
 )
 from app.services.chat_service import ChatService
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from sqlmodel import Session
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -24,7 +26,9 @@ router = APIRouter()
 
 
 @router.post("/preview/chat/stream")
-async def preview_chat_stream(request: PreviewChatRequest):
+async def preview_chat_stream(
+    request: PreviewChatRequest, db: Session = Depends(get_db)
+):
     """Streaming stateless chat for preview mode using provided agent definition.
 
     Returns a Server-Sent Events (SSE) stream with events aligned with AgentResponseChunk:
@@ -41,6 +45,7 @@ async def preview_chat_stream(request: PreviewChatRequest):
             for event in ChatService.stream_preview_chat(
                 agent_detail=request.agent_detail,
                 message=request.message,
+                db=db,
                 current_scene_name=request.current_scene_name,
                 current_subscene_name=request.current_subscene_name,
             ):

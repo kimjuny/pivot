@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class AgentCreate(BaseModel):
     name: str = Field(..., description="Agent name")
     description: str | None = Field(None, description="Agent description")
-    model_name: str | None = Field(None, description="Model name")
+    llm_id: int = Field(..., description="LLM configuration ID")
     is_active: bool = Field(default=True, description="Whether agent is active")
     max_iteration: int = Field(
         default=30, description="Maximum iterations for ReAct recursion"
@@ -17,7 +17,7 @@ class AgentCreate(BaseModel):
 class AgentUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
-    model_name: str | None = None
+    llm_id: int | None = None
     is_active: bool | None = None
     max_iteration: int | None = None
 
@@ -26,6 +26,7 @@ class AgentResponse(BaseModel):
     id: int
     name: str
     description: str | None
+    llm_id: int | None
     model_name: str | None
     is_active: bool
     max_iteration: int
@@ -319,3 +320,72 @@ class AgentSceneListUpdate(BaseModel):
     scenes: list[SceneWithGraphUpdate] = Field(
         ..., description="List of scenes to update"
     )
+
+
+class LLMCreate(BaseModel):
+    """Schema for creating a new LLM."""
+
+    name: str = Field(..., description="Unique logical name for the LLM")
+    endpoint: str = Field(..., description="HTTP API Base URL")
+    model: str = Field(..., description="Model identifier for API")
+    api_key: str = Field(..., description="Authentication credential")
+    protocol: str = Field(
+        default="openai_chat_v1",
+        description="Protocol specification (e.g., 'openai_chat_v1')",
+    )
+    chat: bool = Field(
+        default=True, description="Supports multi-turn conversation with message roles"
+    )
+    system_role: bool = Field(
+        default=True, description="Distinguishes system role with higher priority"
+    )
+    tool_calling: str = Field(
+        default="native",
+        description="Tool calling support: 'native', 'prompt', or 'none'",
+    )
+    json_schema: str = Field(
+        default="strong",
+        description="JSON output reliability: 'strong', 'weak', or 'none'",
+    )
+    streaming: bool = Field(default=True, description="Supports streaming responses")
+    max_context: int = Field(
+        default=128000, description="Maximum context token limit"
+    )
+
+
+class LLMUpdate(BaseModel):
+    """Schema for updating an existing LLM."""
+
+    name: str | None = None
+    endpoint: str | None = None
+    model: str | None = None
+    api_key: str | None = None
+    protocol: str | None = None
+    chat: bool | None = None
+    system_role: bool | None = None
+    tool_calling: str | None = None
+    json_schema: str | None = None
+    streaming: bool | None = None
+    max_context: int | None = None
+
+
+class LLMResponse(BaseModel):
+    """Schema for LLM response."""
+
+    id: int
+    name: str
+    endpoint: str
+    model: str
+    api_key: str
+    protocol: str
+    chat: bool
+    system_role: bool
+    tool_calling: str
+    json_schema: str
+    streaming: bool
+    max_context: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True

@@ -35,7 +35,8 @@ class Agent(SQLModel, table=True):
         id: Primary key of the agent.
         name: Unique name of the agent.
         description: Optional description of the agent's purpose.
-        model_name: Name of the LLM model to use.
+        llm_id: Foreign key to the LLM configuration to use.
+        model_name: Deprecated. Name of the LLM model to use (kept for migration).
         is_active: Whether the agent is currently active.
         max_iteration: Maximum number of iterations for ReAct recursion.
         created_at: UTC timestamp when the agent was created.
@@ -46,7 +47,10 @@ class Agent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str | None = Field(default=None)
-    model_name: str | None = Field(default=None)
+    llm_id: int | None = Field(default=None, foreign_key="llm.id", index=True)
+    model_name: str | None = Field(
+        default=None, description="Deprecated: Use llm_id instead"
+    )
     is_active: bool = Field(default=True)
     max_iteration: int = Field(
         default=30, description="Maximum iterations for ReAct recursion"

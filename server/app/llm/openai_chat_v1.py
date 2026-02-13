@@ -1,76 +1,87 @@
+"""OpenAI Chat Completions API v1 protocol implementation.
+
+This is a generic implementation that works with any OpenAI-compatible API,
+including OpenAI, Azure OpenAI, and other providers that follow the same protocol.
+"""
+
 from collections.abc import Iterator
 from typing import Any
 
 from openai import OpenAI
 
-from .abstract_llm import (
-    AbstractLLM,
-    Response,
-)
+from .abstract_llm import AbstractLLM, Response
 
 
-class GlmLLM(AbstractLLM):
+class OpenAIChatV1(AbstractLLM):
+    """Generic implementation for OpenAI Chat Completions API v1 protocol.
+
+    This implementation works with any provider that follows the OpenAI Chat
+    Completions API specification, including:
+    - OpenAI (GPT-3.5, GPT-4, etc.)
+    - Azure OpenAI
+    - GLM (ZhipuAI)
+    - DeepSeek
+    - Any other OpenAI-compatible endpoints
+
+    The endpoint, model, and API key are provided dynamically rather than
+    hardcoded, allowing this single implementation to work with any provider.
     """
-    Implementation of AbstractLLM for GLM (ZhipuAI) model.
-    Uses OpenAI-compatible API via the OpenAI library.
-    """
 
-    DEFAULT_MODEL = "glm-4.7"
-    API_BASE_URL = "https://open.bigmodel.cn/api/coding/paas/v4"
     DEFAULT_TIMEOUT = 60  # Request timeout in seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts
 
     def __init__(
         self,
-        model: str | None = None,
-        api_key: str | None = None,
+        endpoint: str,
+        model: str,
+        api_key: str,
         timeout: int | None = None,
     ):
-        """
-        Initialize the GlmLLM with the given model and API key.
+        """Initialize the OpenAI Chat v1 LLM implementation.
 
         Args:
-            model: The model identifier to use. Defaults to glm-4.7
-            api_key: API key for authentication. Must be provided as parameter.
+            endpoint: The base URL for the API (e.g., "https://api.openai.com/v1")
+            model: The model identifier to use (e.g., "gpt-4", "glm-4")
+            api_key: API key for authentication
             timeout: Request timeout in seconds. Defaults to 60 seconds.
 
         Raises:
-            ValueError: If API key is not provided
+            ValueError: If any required parameter is missing
         """
-        self.model = model or self.DEFAULT_MODEL
+        if not endpoint:
+            raise ValueError("Endpoint is required")
+        if not model:
+            raise ValueError("Model is required")
+        if not api_key:
+            raise ValueError("API key is required")
 
-        if api_key is None:
-            raise ValueError("API key must be provided as a parameter")
-
+        self.endpoint = endpoint
+        self.model = model
         self.api_key = api_key
         self.timeout = timeout or self.DEFAULT_TIMEOUT
 
-        # Initialize OpenAI client with GLM's base URL
+        # Initialize OpenAI client with custom endpoint
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url=self.API_BASE_URL,
+            base_url=self.endpoint,
             timeout=self.timeout,
             max_retries=self.MAX_RETRIES,
         )
 
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
-        """
-        Process a conversation with the GLM LLM.
+        """Process a conversation with the LLM.
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
             **kwargs: Additional arguments for the chat completion
+                     (e.g., temperature, max_tokens, tools, etc.)
 
         Returns:
             Response: The structured response from the LLM
 
         Raises:
-            ValueError: If API key is not provided
             RuntimeError: If the API request fails
         """
-        if not self.api_key:
-            raise ValueError("API key is required for GLM LLM")
-
         try:
             # Call OpenAI-compatible API
             completion = self.client.chat.completions.create(
@@ -83,28 +94,26 @@ class GlmLLM(AbstractLLM):
             return self._convert_response(completion, self.model)
 
         except Exception as e:
-            raise RuntimeError(f"API request failed: {e!s}") from e
+            raise RuntimeError(
+                f"OpenAI Chat v1 API request failed for {self.endpoint}: {e!s}"
+            ) from e
 
     def chat_stream(
         self, messages: list[dict[str, str]], **kwargs: Any
     ) -> Iterator[Response]:
-        """
-        Process a conversation with the GLM LLM in streaming mode.
+        """Process a conversation with the LLM in streaming mode.
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
             **kwargs: Additional arguments for the chat completion
+                     (e.g., temperature, max_tokens, tools, etc.)
 
         Yields:
             Response: A chunk of the structured response from the LLM
 
         Raises:
-            ValueError: If API key is not provided
             RuntimeError: If the API request fails
         """
-        if not self.api_key:
-            raise ValueError("API key is required for GLM LLM")
-
         try:
             # Call OpenAI-compatible API with streaming
             stream = self.client.chat.completions.create(
@@ -118,4 +127,6 @@ class GlmLLM(AbstractLLM):
             for chunk in stream:
                 yield self._convert_response(chunk, self.model)
         except Exception as e:
-            raise RuntimeError(f"Error processing stream: {e!s}") from e
+            raise RuntimeError(
+                f"OpenAI Chat v1 streaming failed for {self.endpoint}: {e!s}"
+            ) from e

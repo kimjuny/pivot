@@ -432,7 +432,7 @@ function AgentDetailSidebar({
                         ? {
                             name: agent.name,
                             description: agent.description,
-                            model_name: agent.model_name,
+                            llm_id: agent.llm_id,
                             is_active: agent.is_active,
                         }
                         : undefined

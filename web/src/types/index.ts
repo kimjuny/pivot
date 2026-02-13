@@ -13,7 +13,9 @@ export interface Agent {
   name: string;
   /** Optional description of agent's purpose */
   description?: string;
-  /** Name of the LLM model used by this agent */
+  /** LLM configuration ID used by this agent */
+  llm_id?: number;
+  /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
   /** Whether the agent is currently active */
   is_active: boolean;
@@ -347,4 +349,38 @@ export interface StreamEvent {
   error?: string | null;
   /** UTC timestamp when the event was created */
   create_time: string;
+}
+
+/**
+ * Represents an LLM (Large Language Model) configuration.
+ */
+export interface LLM {
+  /** Unique identifier of the LLM */
+  id: number;
+  /** Unique logical name for the LLM in the platform */
+  name: string;
+  /** HTTP API Base URL for the LLM service */
+  endpoint: string;
+  /** Model identifier passed to the API */
+  model: string;
+  /** Authentication credential for the LLM */
+  api_key: string;
+  /** Protocol specification (e.g., 'openai_chat_v1', 'anthropic_messages_v1') */
+  protocol: string;
+  /** Whether the model supports multi-turn conversation with message roles */
+  chat: boolean;
+  /** Whether the model truly distinguishes system role with higher priority */
+  system_role: boolean;
+  /** Tool calling support level ('native', 'prompt', 'none') */
+  tool_calling: string;
+  /** JSON output reliability ('strong', 'weak', 'none') */
+  json_schema: string;
+  /** Whether the model supports streaming responses */
+  streaming: boolean;
+  /** Maximum context token limit */
+  max_context: number;
+  /** UTC timestamp when LLM was created */
+  created_at: string;
+  /** UTC timestamp when LLM was last updated */
+  updated_at: string;
 }

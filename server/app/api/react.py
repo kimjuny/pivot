@@ -9,7 +9,8 @@ import uuid
 from datetime import datetime, timezone
 
 from app.api.dependencies import get_db
-from app.llm_globals import get_llm
+from app.crud.llm import llm as llm_crud
+from app.llm.llm_factory import create_llm_from_config
 from app.models.agent import Agent
 from app.models.react import ReactTask
 from app.orchestration.react import ReactEngine
@@ -75,9 +76,22 @@ async def react_chat_stream(
                 yield f"data: {error_event.json()}\n\n"
                 return
 
-            # Get LLM for this agent
-            llm = get_llm(agent.model_name or "")
-            if not llm:
+            # Get LLM configuration for this agent
+            if not agent.llm_id:
+                error_event = ReactStreamEvent(
+                    type=ReactStreamEventType.ERROR,
+                    task_id="",
+                    trace_id=None,
+                    iteration=0,
+                    delta=None,
+                    data={"error": f"Agent {agent.name} has no LLM configured"},
+                    timestamp=datetime.now(timezone.utc),
+                )
+                yield f"data: {error_event.json()}\n\n"
+                return
+
+            llm_config = llm_crud.get(agent.llm_id, db)
+            if not llm_config:
                 error_event = ReactStreamEvent(
                     type=ReactStreamEventType.ERROR,
                     task_id="",
@@ -85,8 +99,24 @@ async def react_chat_stream(
                     iteration=0,
                     delta=None,
                     data={
-                        "error": f"LLM model '{agent.model_name}' not found or not registered"
+                        "error": f"LLM configuration with ID {agent.llm_id} not found"
                     },
+                    timestamp=datetime.now(timezone.utc),
+                )
+                yield f"data: {error_event.json()}\n\n"
+                return
+
+            # Create LLM instance from configuration
+            try:
+                llm = create_llm_from_config(llm_config)
+            except (ValueError, NotImplementedError) as e:
+                error_event = ReactStreamEvent(
+                    type=ReactStreamEventType.ERROR,
+                    task_id="",
+                    trace_id=None,
+                    iteration=0,
+                    delta=None,
+                    data={"error": f"Failed to create LLM instance: {e!s}"},
                     timestamp=datetime.now(timezone.utc),
                 )
                 yield f"data: {error_event.json()}\n\n"

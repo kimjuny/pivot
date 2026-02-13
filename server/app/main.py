@@ -18,15 +18,13 @@ sys.path.append(str(Path(server_dir).parent))
 from app.api.agents import router as agents_router  # noqa: E402
 from app.api.build import router as build_router  # noqa: E402
 from app.api.chat import router as chat_router  # noqa: E402
+from app.api.llms import router as llms_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import init_db  # noqa: E402
-from app.llm.doubao_llm import DoubaoLLM  # noqa: E402
-from app.llm.glm_llm import GlmLLM  # noqa: E402
-from app.llm_globals import register_llm  # noqa: E402
 from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.utils.logging_config import get_logger  # noqa: E402
 
@@ -61,6 +59,7 @@ app.include_router(agents_router, prefix="/api")
 app.include_router(scenes_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(build_router, prefix="/api")
+app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
@@ -77,37 +76,6 @@ async def startup_event():
     logger.info("Initializing database...")
     init_db()
     logger.info("Database initialized successfully")
-
-    # Initialize LLMs
-    settings = get_settings()
-
-    if settings.LLM_DOUBAO:
-        logger.info("Initializing Doubao LLM...")
-        try:
-            # Use setting or fallback to env var (BaseSettings handles env var, but for explicit safety/flexibility)
-            api_key = settings.DOUBAO_SEED_API_KEY or os.getenv("DOUBAO_SEED_API_KEY")
-            if api_key:
-                doubao = DoubaoLLM(api_key=api_key)
-                register_llm("doubao", doubao)
-                logger.info("Doubao LLM initialized.")
-            else:
-                logger.warning("DOUBAO_SEED_API_KEY not found.")
-        except Exception as e:
-            logger.error(f"Failed to initialize Doubao LLM: {e}")
-
-    if settings.LLM_GLM:
-        logger.info("Initializing GLM LLM...")
-        try:
-            api_key = settings.GLM_API_KEY or os.getenv("GLM_API_KEY")
-            if api_key:
-                glm = GlmLLM(api_key=api_key, model="glm-4.7")
-                register_llm("glm-4", glm)  # alias
-                register_llm("glm", glm)  # alias
-                logger.info("GLM LLM initialized.")
-            else:
-                logger.warning("GLM_API_KEY not found.")
-        except Exception as e:
-            logger.error(f"Failed to initialize GLM LLM: {e}")
 
     # Initialize tool system
     logger.info("Initializing tool system...")

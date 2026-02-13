@@ -191,11 +191,10 @@ function Navigation() {
           <Button
             variant="ghost"
             size="sm"
-            disabled
-            className="opacity-50"
-            aria-label="Knowledge (coming soon)"
+            onClick={() => navigate('/llms')}
+            aria-label="LLMs"
           >
-            Knowledge
+            LLMs
           </Button>
         </div>
 

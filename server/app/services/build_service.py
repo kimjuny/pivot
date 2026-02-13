@@ -10,9 +10,11 @@ import logging
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
-from app.llm_globals import get_default_llm, get_llm
+from app.crud.llm import llm as llm_crud
+from app.llm.llm_factory import create_llm_from_config
 from app.orchestration.base.system_prompt import get_build_prompt
 from app.schemas.schemas import AgentDetailResponse, StreamEvent, StreamEventType
+from sqlmodel import Session
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,8 @@ class BuildService:
     def stream_build_chat(
         agent_detail: AgentDetailResponse | None,
         message: str,
-        model_name: str | None = None,
+        llm_id: int | None,
+        db: Session,
     ) -> Iterator[StreamEvent]:
         """Stream build chat responses for modifying agent configuration.
 
@@ -47,7 +50,8 @@ class BuildService:
         Args:
             agent_detail: Optional existing agent definition to modify.
             message: User's build request (e.g., "Add a sleep scene with 3 steps").
-            model_name: Optional model name to use.
+            llm_id: Optional LLM ID to use.
+            db: Database session for loading LLM configuration.
 
         Yields:
             StreamEvent objects for SSE streaming:
@@ -57,13 +61,30 @@ class BuildService:
             - UPDATED_SCENES: Complete updated agent JSON in delta field
             - ERROR: Error messages
         """
-        # Get LLM model
-        llm_model = get_llm(model_name) if model_name else get_default_llm()
-
-        if not llm_model:
+        # Get LLM configuration and create instance
+        if not llm_id:
             yield StreamEvent(
                 type=StreamEventType.ERROR,
-                error="API Key not configured.",
+                error="LLM ID is required for build chat",
+                create_time=datetime.now(timezone.utc).isoformat(),
+            )
+            return
+
+        llm_config = llm_crud.get(llm_id, db)
+        if not llm_config:
+            yield StreamEvent(
+                type=StreamEventType.ERROR,
+                error=f"LLM with ID {llm_id} not found",
+                create_time=datetime.now(timezone.utc).isoformat(),
+            )
+            return
+
+        try:
+            llm_model = create_llm_from_config(llm_config)
+        except (ValueError, NotImplementedError) as e:
+            yield StreamEvent(
+                type=StreamEventType.ERROR,
+                error=f"Failed to create LLM instance: {e!s}",
                 create_time=datetime.now(timezone.utc).isoformat(),
             )
             return

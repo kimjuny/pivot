@@ -125,15 +125,29 @@ function AgentList() {
   const handleModalSave = async (agentData: {
     name: string;
     description?: string;
-    model_name?: string;
+    llm_id: number | undefined;
     is_active?: boolean;
   }) => {
     if (modalMode === 'create') {
-      const newAgent = await createAgent(agentData);
+      if (!agentData.llm_id) {
+        toast.error('LLM selection is required');
+        return;
+      }
+      const newAgent = await createAgent({
+        name: agentData.name,
+        description: agentData.description,
+        llm_id: agentData.llm_id,
+        is_active: agentData.is_active
+      });
       toast.success('Agent created successfully');
       navigate(`/agent/${newAgent.id}`);
     } else if (modalMode === 'edit' && editingAgent) {
-      await updateAgent(editingAgent.id, agentData);
+      await updateAgent(editingAgent.id, {
+        name: agentData.name,
+        description: agentData.description,
+        llm_id: agentData.llm_id,
+        is_active: agentData.is_active
+      });
       toast.success('Agent updated successfully');
       await loadAgents();
     }
@@ -312,7 +326,7 @@ function AgentList() {
         initialData={editingAgent ? {
           name: editingAgent.name,
           description: editingAgent.description,
-          model_name: editingAgent.model_name,
+          llm_id: editingAgent.llm_id,
           is_active: editingAgent.is_active
         } : undefined}
       />

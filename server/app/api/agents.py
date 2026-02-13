@@ -10,9 +10,9 @@ from typing import Any
 from app.api.dependencies import get_db
 from app.crud.agent import agent as agent_crud
 from app.crud.connection import connection as connection_crud
+from app.crud.llm import llm as llm_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
-from app.llm_globals import get_all_names
 from app.models.agent import ChatHistory, Connection
 from app.schemas.schemas import (
     AgentCreate,
@@ -49,19 +49,27 @@ async def get_agents(
         A list of agents.
     """
     agents = agent_crud.get_all(db, skip=skip, limit=limit)
-    return [
-        {
+    result = []
+    for agent in agents:
+        # Get LLM name for display
+        model_display = agent.model_name or "N/A"
+        if agent.llm_id:
+            llm = llm_crud.get(agent.llm_id, db)
+            if llm:
+                model_display = f"{llm.name} ({llm.model})"
+        
+        result.append({
             "id": agent.id,
             "name": agent.name,
             "description": agent.description,
-            "model_name": agent.model_name,
+            "llm_id": agent.llm_id,
+            "model_name": model_display,
             "is_active": agent.is_active,
             "max_iteration": agent.max_iteration,
             "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
             "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
-        }
-        for agent in agents
-    ]
+        })
+    return result
 
 
 @router.post("/agents", response_model=AgentResponse, status_code=201)
@@ -71,20 +79,21 @@ async def create_agent(
     """Create a new agent.
 
     Args:
-        agent_data: Agent creation data containing name, description, and model_name.
+        agent_data: Agent creation data containing name, description, and llm_id.
         db: Database session.
 
     Returns:
         The created agent with ID populated.
 
     Raises:
-        HTTPException: If an agent with the same name already exists (400) or if the model_name is not valid (400).
+        HTTPException: If an agent with the same name already exists (400) or if the LLM does not exist (400).
     """
-    # Validate model_name if provided
-    if agent_data.model_name and agent_data.model_name not in get_all_names():
+    # Validate LLM exists
+    llm = llm_crud.get(agent_data.llm_id, db)
+    if not llm:
         raise HTTPException(
             status_code=400,
-            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}",
+            detail=f"LLM with ID {agent_data.llm_id} does not exist",
         )
 
     existing_agent = agent_crud.get_by_name(agent_data.name, db)
@@ -97,15 +106,24 @@ async def create_agent(
         db,
         name=agent_data.name,
         description=agent_data.description,
-        model_name=agent_data.model_name,
+        llm_id=agent_data.llm_id,
         is_active=agent_data.is_active,
         max_iteration=agent_data.max_iteration,
     )
+    
+    # Get LLM name for display
+    model_display = agent.model_name or "N/A"
+    if agent.llm_id:
+        llm = llm_crud.get(agent.llm_id, db)
+        if llm:
+            model_display = f"{llm.name} ({llm.model})"
+    
     return {
         "id": agent.id,
         "name": agent.name,
         "description": agent.description,
-        "model_name": agent.model_name,
+        "llm_id": agent.llm_id,
+        "model_name": model_display,
         "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
@@ -134,12 +152,14 @@ async def update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    # Validate model_name if provided
-    if agent_data.model_name and agent_data.model_name not in get_all_names():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model '{agent_data.model_name}' is not registered. Available models: {', '.join(get_all_names())}",
-        )
+    # Validate LLM exists if provided
+    if agent_data.llm_id is not None:
+        llm = llm_crud.get(agent_data.llm_id, db)
+        if not llm:
+            raise HTTPException(
+                status_code=400,
+                detail=f"LLM with ID {agent_data.llm_id} does not exist",
+            )
 
     # Check if name change conflicts with existing agent
     if agent_data.name and agent_data.name != agent.name:
@@ -155,8 +175,8 @@ async def update_agent(
         update_data["name"] = agent_data.name
     if agent_data.description is not None:
         update_data["description"] = agent_data.description
-    if agent_data.model_name is not None:
-        update_data["model_name"] = agent_data.model_name
+    if agent_data.llm_id is not None:
+        update_data["llm_id"] = agent_data.llm_id
     if agent_data.is_active is not None:
         update_data["is_active"] = agent_data.is_active
     if agent_data.max_iteration is not None:
@@ -166,11 +186,19 @@ async def update_agent(
     if not updated_agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # Get LLM name for display
+    model_display = updated_agent.model_name or "N/A"
+    if updated_agent.llm_id:
+        llm = llm_crud.get(updated_agent.llm_id, db)
+        if llm:
+            model_display = f"{llm.name} ({llm.model})"
+
     return {
         "id": updated_agent.id,
         "name": updated_agent.name,
         "description": updated_agent.description,
-        "model_name": updated_agent.model_name,
+        "llm_id": updated_agent.llm_id,
+        "model_name": model_display,
         "is_active": updated_agent.is_active,
         "max_iteration": updated_agent.max_iteration,
         "created_at": updated_agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
@@ -195,6 +223,13 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, A
     agent = agent_crud.get(agent_id, db)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Get LLM name for display
+    model_display = agent.model_name or "N/A"
+    if agent.llm_id:
+        llm = llm_crud.get(agent.llm_id, db)
+        if llm:
+            model_display = f"{llm.name} ({llm.model})"
 
     # Get all scenes for this agent
     scenes = scene_crud.get_by_agent_id(agent_id, db)
@@ -249,7 +284,8 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, A
         "id": agent.id,
         "name": agent.name,
         "description": agent.description,
-        "model_name": agent.model_name,
+        "llm_id": agent.llm_id,
+        "model_name": model_display,
         "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),

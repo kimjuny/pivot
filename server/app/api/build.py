@@ -136,6 +136,7 @@ async def build_chat_stream(request: BuildChatRequest, db: Session = Depends(get
                     id=agent.id,
                     name=agent.name,
                     description=agent.description,
+                    llm_id=agent.llm_id,
                     model_name=agent.model_name,
                     is_active=agent.is_active,
                     max_iteration=agent.max_iteration,
@@ -144,11 +145,26 @@ async def build_chat_stream(request: BuildChatRequest, db: Session = Depends(get
                     scenes=scenes_graph_responses,
                 )
 
+            # Determine which LLM to use
+            llm_id = (
+                agent_detail.llm_id if agent_detail else request.llm_id
+            )
+
+            if not llm_id:
+                error_event = StreamEvent(
+                    type=StreamEventType.ERROR,
+                    error="LLM ID is required. Please specify llm_id or provide an agent with configured LLM.",
+                    create_time=datetime.now(timezone.utc).isoformat(),
+                )
+                yield f"data: {error_event.json()}\n\n"
+                return
+
             # Stream build responses
             for event in BuildService.stream_build_chat(
                 agent_detail=agent_detail,
                 message=request.content,
-                model_name=agent_detail.model_name if agent_detail else None,
+                llm_id=llm_id,
+                db=db,
             ):
                 yield f"data: {event.json()}\n\n"
 

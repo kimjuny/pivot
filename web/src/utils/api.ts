@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM } from '../types';
 
 /**
  * API base URL from environment configuration.
@@ -75,7 +75,7 @@ export const getAgents = async (): Promise<Agent[]> => {
 export const createAgent = async (agentData: {
   name: string;
   description?: string;
-  model_name?: string;
+  llm_id: number;
   is_active?: boolean;
 }): Promise<Agent> => {
   return apiRequest('/agents', {
@@ -499,7 +499,7 @@ export const updateAgent = async (
   agentData: {
     name?: string;
     description?: string;
-    model_name?: string;
+    llm_id?: number;
     is_active?: boolean;
   }
 ): Promise<Agent> => {
@@ -542,4 +542,89 @@ export interface Tool {
  */
 export const getTools = async (): Promise<Tool[]> => {
   return apiRequest('/tools') as Promise<Tool[]>;
+};
+
+/**
+ * Fetch all LLMs from server.
+ * 
+ * @returns Promise resolving to array of LLM objects
+ */
+export const getLLMs = async (): Promise<LLM[]> => {
+  return apiRequest('/llms') as Promise<LLM[]>;
+};
+
+/**
+ * Create a new LLM.
+ * 
+ * @param llmData - LLM creation data
+ * @returns Promise resolving to created LLM object
+ */
+export const createLLM = async (llmData: {
+  name: string;
+  endpoint: string;
+  model: string;
+  api_key: string;
+  protocol?: string;
+  chat?: boolean;
+  system_role?: boolean;
+  tool_calling?: string;
+  json_schema?: string;
+  streaming?: boolean;
+  max_context?: number;
+}): Promise<LLM> => {
+  return apiRequest('/llms', {
+    method: 'POST',
+    body: JSON.stringify(llmData),
+  }) as Promise<LLM>;
+};
+
+/**
+ * Fetch a specific LLM by ID.
+ * 
+ * @param llmId - Unique identifier of the LLM
+ * @returns Promise resolving to LLM object
+ */
+export const getLLMById = async (llmId: number): Promise<LLM> => {
+  return apiRequest(`/llms/${llmId}`) as Promise<LLM>;
+};
+
+/**
+ * Update an LLM.
+ * 
+ * @param llmId - Unique identifier of LLM
+ * @param llmData - LLM update data
+ * @returns Promise resolving to updated LLM object
+ */
+export const updateLLM = async (
+  llmId: number,
+  llmData: {
+    name?: string;
+    endpoint?: string;
+    model?: string;
+    api_key?: string;
+    protocol?: string;
+    chat?: boolean;
+    system_role?: boolean;
+    tool_calling?: string;
+    json_schema?: string;
+    streaming?: boolean;
+    max_context?: number;
+  }
+): Promise<LLM> => {
+  return apiRequest(`/llms/${llmId}`, {
+    method: 'PUT',
+    body: JSON.stringify(llmData),
+  }) as Promise<LLM>;
+};
+
+/**
+ * Delete an LLM by ID.
+ * 
+ * @param llmId - Unique identifier of LLM to delete
+ * @returns Promise resolving when LLM is deleted
+ */
+export const deleteLLM = async (llmId: number): Promise<void> => {
+  await apiRequest(`/llms/${llmId}`, {
+    method: 'DELETE',
+  });
 };

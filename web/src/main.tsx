@@ -2,6 +2,8 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import App from './App'
+import LLMList from './components/LLMList'
+import Navigation from './components/Navigation'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './index.css'
@@ -13,6 +15,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/agent/:agentId" element={<App />} />
+          <Route path="/llms" element={
+            <div className="min-h-screen bg-background text-foreground">
+              <Navigation />
+              <LLMList />
+            </div>
+          } />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>
