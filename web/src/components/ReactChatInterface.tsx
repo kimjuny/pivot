@@ -574,12 +574,27 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               <AlertCircle className="w-3.5 h-3.5 text-warning flex-shrink-0" />
             )}
             {effectiveStatus === 'error' && <XCircle className="w-3.5 h-3.5 text-danger flex-shrink-0" />}
-            <span 
-              className="text-xs font-semibold text-foreground truncate"
-              title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
-            >
-              {recursion.abstract || `Iteration ${recursion.iteration + 1}`}
-            </span>
+            {effectiveStatus === 'running' ? (
+              <span 
+                className="text-xs font-semibold truncate animate-thinking-wave"
+                style={{
+                  background: 'linear-gradient(90deg, #9ca3af 0%, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%, #9ca3af 100%)',
+                  backgroundSize: '400% 100%',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                }}
+              >
+                Thinking...
+              </span>
+            ) : (
+              <span 
+                className="text-xs font-semibold text-foreground truncate"
+                title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+              >
+                {recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+              </span>
+            )}
             {toolCallEvents.length > 0 && (
               <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary flex-shrink-0">
                 {toolCallEvents.length} tool{toolCallEvents.length > 1 ? 's' : ''}

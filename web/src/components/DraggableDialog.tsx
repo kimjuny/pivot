@@ -197,12 +197,13 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children }: 
                     </div>
                 </div>
 
-                {/* Content Area - Hidden when minimized */}
-                {!isMinimized && (
-                    <div className="flex-1 overflow-hidden">
-                        {children}
-                    </div>
-                )}
+                {/* Content Area - Hidden with CSS when minimized to preserve state */}
+                <div 
+                    className="flex-1 overflow-hidden"
+                    style={{ display: isMinimized ? 'none' : 'block' }}
+                >
+                    {children}
+                </div>
             </div>
         </div>
     );
