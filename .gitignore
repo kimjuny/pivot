@@ -70,3 +70,15 @@ web/build/
 *.tmp
 *.temp
 .cache/
+
+# DB Files
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-trace
+*.sqlite-trace-journal
+*.sqlite-trace-wal
+*.sqlite-trace-shm
