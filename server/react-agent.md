@@ -3,6 +3,10 @@
 
 ## ReAct机制状态机
 ```mermaid
+---
+config:
+  theme: dark
+---
 stateDiagram-v2
 %% Recursive Agent ReAct Diagram
 %% 递归智能体ReAct状态机
@@ -100,6 +104,14 @@ state RECURSION {
         ...其他断点信息(如果有)
       }
     end note
+1
+    ACTION_TYPE --> REFLECT(LLM): if action_type = REFLECT
+    note left of REFLECT(LLM)
+      duty: 思考、归纳、整理，推进推理，不推进执行结构
+      output: {
+        "summary": "在这一轮深思过程你得到的总结"
+      }
+    end note
 
     ACTION_TYPE --> ANSWER(LLM): if action_type == ANSWER
     note left of ANSWER(LLM)
@@ -111,6 +123,7 @@ state RECURSION {
 
     CALL_TOOL --> [*]
     RE_PLAN(LLM) --> [*]
+    REFLECT(LLM) --> [*]
     ANSWER(LLM) --> [*]
   }
 }

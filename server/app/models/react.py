@@ -168,3 +168,41 @@ class ReactPlanStep(SQLModel, table=True):
 
     # Relationships
     task: Optional["ReactTask"] = Relationship(back_populates="plan_steps")
+
+
+class ReactRecursionState(SQLModel, table=True):
+    """Recursion state model for persisting complete state machine snapshots.
+
+    Each record stores the complete current_state (as JSON string) for one recursion cycle,
+    enabling state recovery, debugging, and historical analysis.
+
+    Attributes:
+        id: Primary key of the state record.
+        trace_id: UUID of the recursion this state belongs to (foreign key).
+        task_id: UUID of the parent task (for easier querying).
+        iteration_index: Index of this recursion in the task (denormalized for querying).
+        current_state: Complete JSON string of the state machine at this recursion.
+                      Structure follows the schema in context_template.md:
+                      {
+                          "global": {...},
+                          "current_recursion": {...},
+                          "context": {...},
+                          "last_recursion": {...}
+                      }
+        created_at: UTC timestamp when state was saved.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    trace_id: str = Field(
+        index=True,
+        unique=True,
+        description="Recursion UUID (one-to-one with ReactRecursion)",
+    )
+    task_id: str = Field(index=True, description="Task UUID (denormalized)")
+    iteration_index: int = Field(
+        description="Recursion index in task (denormalized for querying)"
+    )
+    current_state: str = Field(
+        description="Complete JSON snapshot of state machine at this recursion"
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

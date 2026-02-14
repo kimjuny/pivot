@@ -16,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/ui/badge';
 
 /**
  * Agent list component.
@@ -308,9 +309,9 @@ function AgentList() {
 
                 {/* Bottom row: Model tag - always at bottom */}
                 <div className="flex items-center gap-2 mt-2">
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
                     {agent.model_name || 'N/A'}
-                  </span>
+                  </Badge>
                 </div>
               </Card>
             ))}

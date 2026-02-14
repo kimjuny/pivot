@@ -170,7 +170,7 @@ Action决策环节你只能输出以下 action_type 之一：
 
 ```
 
-### 4.4. action_type = REFLECT（只展示result内部）
+### 4.4. action_type = REFLECT
 
 > REFLECT = 对当前已知信息进行整理、归纳、分类、抽象
 > 以推进任务认知层面的完成度，而不改变执行结构
@@ -191,7 +191,29 @@ Action决策环节你只能输出以下 action_type 之一：
 }
 ```
 
-### 4.5. action_type = ANSWER（只展示result内部）
+### 4.5. action_type = CLARIFY
+
+> 当你实在没有足够信息继续这次作答时，可以选择向用户提澄清性问题获取更多信息，以便成功完成本次任务或作答。
+> 你可以给用户一个选择题这样用户回答更高效，也可以给用户一个开放题。
+
+```json
+{
+  "trace_id": "本轮recursion的trace_id",
+  "observe": "你对当前状态机和输入的客观观察",
+  "thought": "你的分析与决策理由",
+  "action": {
+    "action_type": "CLARIFY",
+    "output": {
+      "question": "你想对用户提的问题",
+      "reply": "用户对你的回复" // 注意这一段是用户回复后系统会插入给你的，你不需要在这一轮中生成
+    }
+  },
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
+  "short_term_memory_append": "（可选）本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
+}
+```
+
+### 4.6. action_type = ANSWER
 
 ```json
 {
@@ -230,7 +252,7 @@ Action决策环节你只能输出以下 action_type 之一：
   "global": {},
   "current_recursion": {},
   "context": {},
-  "last_recursion": {}
+  "recursions": []
 }
 ```
 
@@ -241,7 +263,7 @@ Action决策环节你只能输出以下 action_type 之一：
   "task_id": "string (uuid)",
   "iteration": 0,
   "max_iteration": 10,
-  "status": "pending | running | completed | failed",
+  "status": "pending | running | completed | failed | waiting_input",
   "created_at": "ISO8601",
   "updated_at": "ISO8601"
 }
@@ -305,15 +327,15 @@ plan.step 是 strategy / policy
 - done：目标已达成
 - error：多次失败或被判定不可行
 
-### 5.5. last_recursion
+### 5.5. recursions
 
 ```json
-{
+[{
   "trace_id": "上一轮recursion的trace_id",
   "observe": "你对当前状态机和输入的客观观察",
   "thought": "你的分析与决策理由",
   "action": {
-    "action_type": "CALL_TOOL | RE_PLAN | REFLECT | ANSWER",
+    "action_type": "CALL_TOOL | RE_PLAN | REFLECT | ANSWER | CLARIFY",
     "output": {}
   },
   "tool_call_results": [  // 仅当action_type=CALL_TOOL时存在
@@ -324,7 +346,7 @@ plan.step 是 strategy / policy
       "success": true
     }
   ]
-}
+}]
 ```
 
 - 这部分其实就是把上一轮的recursion输出的返回结果快照下来呈现
@@ -335,7 +357,7 @@ plan.step 是 strategy / policy
 
 以下是你可以调用的工具（仅当 action_type = CALL_TOOL 时使用）：
 
-```
+```json
 {{tools_description}}
 ```
 

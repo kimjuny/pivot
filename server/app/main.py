@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 import traceback
 from pathlib import Path
@@ -23,7 +22,6 @@ from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
-from app.config import get_settings  # noqa: E402
 from app.db.session import init_db  # noqa: E402
 from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.utils.logging_config import get_logger  # noqa: E402

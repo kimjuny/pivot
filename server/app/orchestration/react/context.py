@@ -23,13 +23,13 @@ class ReactContext:
         global_state: Global task information (task_id, iteration, status, etc.)
         current_recursion: Current recursion state (trace_id, status, etc.)
         context: Task context including objective, constraints, plan, and memory
-        last_recursion: Previous recursion's output (observe, thought, action)
+        recursions: History of previous recursions
     """
 
     global_state: dict[str, Any]
     current_recursion: dict[str, Any]
     context: dict[str, Any]
-    last_recursion: dict[str, Any] | None = None
+    recursions: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -42,7 +42,7 @@ class ReactContext:
             "global": self.global_state,
             "current_recursion": self.current_recursion,
             "context": self.context,
-            "last_recursion": self.last_recursion,
+            "recursions": self.recursions,
         }
 
     @classmethod
@@ -130,37 +130,50 @@ class ReactContext:
 
             context_dict["plan"].append(plan_step)
 
-        # Build last recursion from most recent completed recursion
-        last_recursion = None
-        if recursions:
-            latest = recursions[-1]
-            if latest.status in ["done", "error"]:
-                last_recursion_dict: dict[str, Any] = {
-                    "trace_id": latest.trace_id,
-                    "observe": latest.observe or "",
-                    "thought": latest.thought or "",
+        # Build recursion history
+        recursions_list: list[dict[str, Any]] = []
+        for rec in recursions:
+            if rec.status in ["done", "error"] or (
+                rec.status == "running" and rec.action_type == "CLARIFY"
+            ):
+                # Note: CLARIFY might be in 'running' or specialized status if we paused
+                # But typically we mark it as 'done' before pausing?
+                # The user said task status becomes waiting_input. Recursion status matches logic in engine.py.
+                # Let's assume completed recursions are what we want.
+                
+                # Careful with JSON decoding errors if data is corrupted
+                try:
+                    action_output = (
+                        json.loads(rec.action_output) if rec.action_output else {}
+                    )
+                except json.JSONDecodeError:
+                    action_output = {}
+
+                rec_dict = {
+                    "trace_id": rec.trace_id,
+                    "observe": rec.observe or "",
+                    "thought": rec.thought or "",
                     "action": {
-                        "action_type": latest.action_type or "",
-                        "output": (
-                            json.loads(latest.action_output)
-                            if latest.action_output
-                            else {}
-                        ),
+                        "action_type": rec.action_type or "",
+                        "output": action_output,
                     },
                 }
 
                 # Add tool_call_results if this was a CALL_TOOL action
-                if latest.action_type == "CALL_TOOL" and latest.tool_call_results:
-                    tool_results = json.loads(latest.tool_call_results)
-                    last_recursion_dict["tool_call_results"] = tool_results
-
-                last_recursion = last_recursion_dict
+                if rec.action_type == "CALL_TOOL" and rec.tool_call_results:
+                    try:
+                        tool_results = json.loads(rec.tool_call_results)
+                        rec_dict["tool_call_results"] = tool_results
+                    except json.JSONDecodeError:
+                        pass
+                
+                recursions_list.append(rec_dict)
 
         return cls(
             global_state=global_state,
             current_recursion=current_recursion,
             context=context_dict,
-            last_recursion=last_recursion,
+            recursions=recursions_list,
         )
 
     def update_for_new_recursion(self, trace_id: str) -> None:

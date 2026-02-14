@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, FormEvent } from 'react';
 import { Send, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 /**
  * Props for ReactChatInterface component.
@@ -23,6 +24,7 @@ type ReactStreamEventType =
   | 'plan_update'
   | 'reflect'
   | 'answer'
+  | 'clarify'
   | 'task_complete'
   | 'error';
 
@@ -79,8 +81,69 @@ interface ChatMessage {
   timestamp: string;
   task_id?: string;
   recursions?: RecursionRecord[];
-  status?: 'running' | 'completed' | 'error';
+  status?: 'running' | 'completed' | 'error' | 'waiting_input';
   totalTokens?: TokenUsage;
+}
+
+/**
+ * Component to fetch and display recursion state in a tooltip.
+ */
+function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration: number }) {
+  const [state, setState] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Function to fetch state
+  const fetchState = async () => {
+    if (state) return;
+    setLoading(true);
+    try {
+      const apiUrl = import.meta.env.DEV
+        ? `http://localhost:8003/api/react/tasks/${taskId}/states/${iteration}`
+        : `/api/react/tasks/${taskId}/states/${iteration}`;
+
+      const response = await fetch(apiUrl);
+      if (!response.ok) throw new Error('Failed to fetch state');
+
+      const data = await response.json();
+      // current_state is a JSON string in the response
+      const parsedState = JSON.parse(data.current_state);
+      setState(JSON.stringify(parsedState, null, 2));
+    } catch (err) {
+      setError('Failed to load state');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip onOpenChange={(open) => {
+        if (open) fetchState();
+      }}>
+        <TooltipTrigger asChild>
+          <button className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-full hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring" title="View state">
+            <AlertCircle className="w-3.5 h-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-[500px] max-h-[400px] overflow-auto p-4 font-mono text-xs z-50 shadow-lg border border-border">
+          {loading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Loading state...
+            </div>
+          ) : error ? (
+            <span className="text-destructive">{error}</span>
+          ) : (
+            <pre className="whitespace-pre-wrap break-all">
+              {state}
+            </pre>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 /**
@@ -93,6 +156,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRecursions, setExpandedRecursions] = useState<Record<string, boolean>>({});
+  const [replyTaskId, setReplyTaskId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -135,6 +199,13 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
    * Send message to ReAct agent.
    */
   const sendMessage = async () => {
+    // If replying, use the replyTaskId. Otherwise undefined.
+    const currentReplyTaskId = replyTaskId;
+
+    // Reset reply state if we are sending
+    if (currentReplyTaskId) {
+      setReplyTaskId(null);
+    }
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -167,10 +238,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     try {
       // Use direct backend URL to bypass Vite proxy for SSE streaming
       // This prevents potential data loss in proxy layer
-      const apiUrl = import.meta.env.DEV 
+      const apiUrl = import.meta.env.DEV
         ? 'http://localhost:8003/api/react/chat/stream'
         : '/api/react/chat/stream';
-      
+
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -180,6 +251,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           agent_id: agentId,
           message: userMessage.content,
           user: 'web-user',
+          task_id: currentReplyTaskId,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -247,10 +319,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 prev.map((msg) =>
                   msg.id === assistantMessageId
                     ? {
-                        ...msg,
-                        task_id: currentTaskId ?? undefined,
-                        recursions: [...(msg.recursions || []), currentRecursion!],
-                      }
+                      ...msg,
+                      task_id: currentTaskId ?? undefined,
+                      recursions: [...(msg.recursions || []), currentRecursion!],
+                    }
                     : msg
                 )
               );
@@ -288,21 +360,41 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 currentRecursion.status = 'error';
                 currentRecursion.endTime = event.timestamp;
               } else if (event.type === 'answer') {
-                // Extract answer content
+                // ... (answer logic)
                 const answerData = event.data as { answer?: string } | undefined;
                 if (answerData?.answer) {
                   setMessages((prev) =>
                     prev.map((msg) =>
                       msg.id === assistantMessageId
                         ? {
-                            ...msg,
-                            content: answerData.answer ?? '',
-                          }
+                          ...msg,
+                          content: answerData.answer ?? '',
+                        }
                         : msg
                     )
                   );
                 }
-                // Mark current recursion as completed
+                if (currentRecursion) {
+                  currentRecursion.status = 'completed';
+                  currentRecursion.endTime = event.timestamp;
+                }
+              } else if (event.type === 'clarify') {
+                // For CLARIFY, we set content similar to ANSWER so it shows in the main box
+                // But we prefix or handle it such that UI knows it's a question
+                const clarifyData = event.data as { question?: string } | undefined;
+                if (clarifyData?.question) {
+                  setMessages((prev) =>
+                    prev.map((msg) =>
+                      msg.id === assistantMessageId
+                        ? {
+                          ...msg,
+                          content: clarifyData.question ?? '',
+                          status: 'waiting_input' as const, // Custom status usage
+                        }
+                        : msg
+                    )
+                  );
+                }
                 if (currentRecursion) {
                   currentRecursion.status = 'completed';
                   currentRecursion.endTime = event.timestamp;
@@ -335,13 +427,13 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 prev.map((msg) =>
                   msg.id === assistantMessageId
                     ? {
-                        ...msg,
-                        recursions: msg.recursions?.map((r) =>
-                          r.iteration === currentRecursion!.iteration 
-                            ? { ...currentRecursion! }  // Create new object to ensure React detects change
-                            : r
-                        ),
-                      }
+                      ...msg,
+                      recursions: msg.recursions?.map((r) =>
+                        r.iteration === currentRecursion!.iteration
+                          ? { ...currentRecursion! }  // Create new object to ensure React detects change
+                          : r
+                      ),
+                    }
                     : msg
                 )
               );
@@ -385,11 +477,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           prev.map((msg) =>
             msg.id === assistantMessageId
               ? {
-                  ...msg,
-                  status: 'error',
-                  content: `Error: ${error.message}`,
-                  timestamp: errorTime,  // Update to error time
-                }
+                ...msg,
+                status: 'error',
+                content: `Error: ${error.message}`,
+                timestamp: errorTime,  // Update to error time
+              }
               : msg
           )
         );
@@ -454,7 +546,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       // Check for headings (must use #### before ### to avoid false matches)
       const h4Match = trimmedBlock.match(/^####\s+(.+?)(\n|$)/);
       const h3Match = trimmedBlock.match(/^###\s+(.+?)(\n|$)/);
-      
+
       if (h4Match) {
         const headingText = h4Match[1];
         const remainingText = trimmedBlock.substring(h4Match[0].length).trim();
@@ -573,17 +665,17 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
    */
   const hasFailedTools = (recursion: RecursionRecord): boolean => {
     const toolCallEvents = recursion.events.filter((e) => e.type === 'tool_call');
-    
+
     for (const event of toolCallEvents) {
       const toolData = event.data as {
         tool_results?: Array<{ success: boolean }>;
       } | undefined;
-      
+
       if (toolData?.tool_results?.some((result) => !result.success)) {
         return true;
       }
     }
-    
+
     return false;
   };
 
@@ -593,19 +685,19 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const getRecursionStatus = (recursion: RecursionRecord): 'running' | 'completed' | 'warning' | 'error' => {
     if (recursion.status === 'running') return 'running';
     if (recursion.status === 'error') return 'error';
-    
+
     // If status is 'completed', check if there are failed tools
     if (hasFailedTools(recursion)) {
       return 'warning';
     }
-    
+
     return 'completed';
   };
 
   /**
    * Render a recursion record.
    */
-  const renderRecursion = (messageId: string, recursion: RecursionRecord) => {
+  const renderRecursion = (messageId: string, recursion: RecursionRecord, taskId?: string) => {
     const key = `${messageId}-${recursion.iteration}`;
     const isExpanded = expandedRecursions[key];
     const effectiveStatus = getRecursionStatus(recursion);
@@ -621,31 +713,31 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {effectiveStatus === 'running' && (
-              <Loader2 
+              <Loader2
                 key={`${key}-running`}
-                className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" 
+                className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0"
               />
             )}
             {effectiveStatus === 'completed' && (
-              <CheckCircle2 
+              <CheckCircle2
                 key={`${key}-completed`}
-                className="w-3.5 h-3.5 text-success flex-shrink-0 status-icon-enter" 
+                className="w-3.5 h-3.5 text-success flex-shrink-0 status-icon-enter"
               />
             )}
             {effectiveStatus === 'warning' && (
-              <AlertCircle 
+              <AlertCircle
                 key={`${key}-warning`}
-                className="w-3.5 h-3.5 text-warning flex-shrink-0 status-icon-enter" 
+                className="w-3.5 h-3.5 text-warning flex-shrink-0 status-icon-enter"
               />
             )}
             {effectiveStatus === 'error' && (
-              <XCircle 
+              <XCircle
                 key={`${key}-error`}
-                className="w-3.5 h-3.5 text-danger flex-shrink-0 status-icon-enter" 
+                className="w-3.5 h-3.5 text-danger flex-shrink-0 status-icon-enter"
               />
             )}
             {effectiveStatus === 'running' ? (
-              <span 
+              <span
                 className="text-xs font-semibold truncate animate-thinking-wave"
                 style={{
                   background: 'linear-gradient(90deg, #9ca3af 0%, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%, #9ca3af 100%)',
@@ -658,7 +750,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 Thinking...
               </span>
             ) : (
-              <span 
+              <span
                 className="text-xs font-semibold text-foreground truncate"
                 title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
               >
@@ -718,11 +810,16 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             {/* Action */}
             {recursion.action && (
               <div className="bg-background/50 rounded border border-border p-2">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <div className="w-3.5 h-3.5 flex items-center justify-center">
-                    <div className="w-1 h-4 bg-green-500 rounded-full" />
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-3.5 h-3.5 flex items-center justify-center">
+                      <div className="w-1 h-4 bg-green-500 rounded-full" />
+                    </div>
+                    <span className="text-xs font-semibold text-foreground">ACTION</span>
                   </div>
-                  <span className="text-xs font-semibold text-foreground">ACTION</span>
+                  {taskId && (
+                    <RecursionStateViewer taskId={taskId} iteration={recursion.iteration} />
+                  )}
                 </div>
                 <p className="text-xs font-mono text-primary pl-5">
                   {recursion.action}
@@ -734,7 +831,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             {recursion.events.map((event, idx) => {
               if (event.type === 'tool_call') {
                 const toolData = event.data as {
-                  tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+                  tool_calls?: Array<{ id: string; name: string; arguments: Record<string, unknown> | string }>;
                   tool_results?: Array<{ tool_call_id: string; name: string; result?: unknown; error?: string; success: boolean }>;
                 } | undefined;
 
@@ -749,11 +846,13 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       {toolData?.tool_calls?.map((call, cidx) => (
                         <div key={`call-${cidx}`} className="space-y-1">
                           <div className="text-xs font-semibold text-foreground">
-                            📥 Call: {call.function.name}
+                            📥 Call: {call.name}
                           </div>
                           <div className="text-xs p-2 bg-muted/30 rounded font-mono text-muted-foreground border border-border/50">
                             <div className="text-[10px] text-muted-foreground/70 mb-1">Arguments:</div>
-                            {call.function.arguments}
+                            {typeof call.arguments === 'string'
+                              ? call.arguments
+                              : JSON.stringify(call.arguments, null, 2)}
                           </div>
                         </div>
                       ))}
@@ -795,14 +894,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               }
 
               if (event.type === 'plan_update') {
-                const planData = event.data as { 
-                  plan?: Array<{ 
-                    step_id: string; 
-                    description: string; 
-                    status: string 
-                  }> 
+                const planData = event.data as {
+                  plan?: Array<{
+                    step_id: string;
+                    description: string;
+                    status: string
+                  }>
                 } | undefined;
-                
+
                 return (
                   <div key={idx} className="bg-background/50 border border-border rounded p-2">
                     <div className="flex items-center gap-1.5 mb-2">
@@ -828,7 +927,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
               if (event.type === 'reflect') {
                 const reflectData = event.data as { summary?: string } | undefined;
-                
+
                 return (
                   <div key={idx} className="bg-background/50 border border-border rounded p-2">
                     <div className="flex items-center gap-1.5 mb-2">
@@ -881,8 +980,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               <p className="text-sm opacity-70">
                 Ask questions or give tasks. I'll show you my reasoning process.
               </p>
-            </div>
-          </div>
+            </div >
+          </div >
         ) : (
           messages.map((message) => (
             <div key={message.id} className="space-y-2">
@@ -906,17 +1005,44 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   {message.recursions && message.recursions.length > 0 && (
                     <div className="space-y-2">
                       {message.recursions.map((recursion) =>
-                        renderRecursion(message.id, recursion)
+                        renderRecursion(message.id, recursion, message.task_id)
                       )}
                     </div>
                   )}
 
-                  {/* Final Answer */}
+                  {/* Final Answer / Question */}
                   {message.content && (
-                    <div className="bg-background border border-border rounded-lg px-3 py-2.5">
-                      <div className="flex items-center gap-1.5 mb-2">
-                        <MessageSquare className="w-3.5 h-3.5 text-success" />
-                        <span className="text-xs font-semibold text-foreground">FINAL ANSWER</span>
+                    <div className={`border rounded-lg px-3 py-2.5 ${message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY')
+                      ? 'bg-blue-50/50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' // Question style
+                      : 'bg-background border-border' // Answer style
+                      }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          {message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY') ? (
+                            <>
+                              <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
+                              <span className="text-xs font-semibold text-foreground">QUESTION</span>
+                            </>
+                          ) : (
+                            <>
+                              <MessageSquare className="w-3.5 h-3.5 text-success" />
+                              <span className="text-xs font-semibold text-foreground">FINAL ANSWER</span>
+                            </>
+                          )}
+                        </div>
+                        {/* Reply Button for Question */}
+                        {(message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY')) && message.task_id && (
+                          <button
+                            onClick={() => setReplyTaskId(message.task_id || null)}
+                            disabled={isStreaming || (replyTaskId === message.task_id)}
+                            className={`text-xs px-2 py-1 rounded transition-colors ${replyTaskId === message.task_id
+                              ? 'bg-blue-100 text-blue-700 font-medium'
+                              : 'bg-muted hover:bg-muted/80'
+                              }`}
+                          >
+                            {replyTaskId === message.task_id ? 'Replying...' : 'Recall & Reply'}
+                          </button>
+                        )}
                       </div>
                       <div className="pl-5">
                         {formatAnswerContent(message.content)}
@@ -957,19 +1083,36 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               )}
             </div>
           ))
-        )}
+        )
+        }
         <div ref={messagesEndRef} />
-      </div>
+      </div >
 
       {/* Error Banner */}
-      {error && (
-        <div className="px-4 py-2 bg-danger/10 border-t border-danger text-danger text-sm">
-          {error}
-        </div>
-      )}
+      {
+        error && (
+          <div className="px-4 py-2 bg-danger/10 border-t border-danger text-danger text-sm">
+            {error}
+          </div>
+        )
+      }
 
       {/* Input Area */}
       <div className="border-t border-border p-4 bg-background">
+        {replyTaskId && (
+          <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 px-3 py-2 rounded-t-lg border-b border-blue-100 dark:border-blue-800 mb-2 text-xs">
+            <span className="text-blue-700 dark:text-blue-300 font-medium flex items-center gap-2">
+              <MessageSquare className="w-3 h-3" />
+              Replying to clarification question...
+            </span>
+            <button
+              onClick={() => setReplyTaskId(null)}
+              className="text-muted-foreground hover:text-foreground p-1"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input
             type="text"
@@ -999,7 +1142,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           )}
         </form>
       </div>
-    </div>
+    </div >
   );
 }
 

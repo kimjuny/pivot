@@ -13,7 +13,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.llm.abstract_llm import AbstractLLM
-from app.models.react import ReactPlanStep, ReactRecursion, ReactTask
+from app.models.react import (
+    ReactPlanStep,
+    ReactRecursion,
+    ReactRecursionState,
+    ReactTask,
+)
 from app.orchestration.tool.manager import ToolManager
 from sqlmodel import Session
 
@@ -401,9 +406,10 @@ class ReactEngine:
                         # Provide helpful error message with available tools
                         if "not found in registry" in str(e):
                             available_tools = self.tool_manager.list_tools()
+                            tool_names = [tool.name for tool in available_tools]
                             error_msg = (
                                 f"Tool '{func_name}' not found. "
-                                f"Available tools: {', '.join(available_tools)}"
+                                f"Available tools: {', '.join(tool_names)}"
                             )
                         else:
                             error_msg = f"Tool execution failed: {e!s}"
@@ -448,6 +454,35 @@ class ReactEngine:
             recursion.updated_at = datetime.now(timezone.utc)
             self.db.commit()
 
+            # Save current_state snapshot for this recursion
+            # This enables state recovery, debugging, and historical analysis
+            
+            # Append current recursion to context.recursions for valid snapshot
+            current_rec_dict = {
+                "trace_id": trace_id,
+                "observe": observe,
+                "thought": thought,
+                "action": {
+                    "action_type": action_type,
+                    "output": action_output,
+                },
+            }
+            if tool_results:
+                 current_rec_dict["tool_call_results"] = tool_results
+            
+            context.recursions.append(current_rec_dict)
+
+            current_state_json = json.dumps(context.to_dict(), ensure_ascii=False)
+            recursion_state = ReactRecursionState(
+                trace_id=trace_id,
+                task_id=task.task_id,
+                iteration_index=task.iteration,
+                current_state=current_state_json,
+                created_at=datetime.now(timezone.utc),
+            )
+            self.db.add(recursion_state)
+            self.db.commit()
+
             # Handle RE_PLAN
             if action_type == "RE_PLAN":
                 plan_data = action_output.get("plan", [])
@@ -477,7 +512,16 @@ class ReactEngine:
             # This is sufficient for LLM to understand what happened
             if action_type == "ANSWER":
                 # For ANSWER, don't add to messages as the task is complete
+                # Task status will be updated to 'completed' in run_task
                 pass
+            
+            if action_type == "CLARIFY":
+                # For CLARIFY, we update task status to 'waiting_input'
+                # The run_task loop will handle the break
+                task.status = "waiting_input"
+                task.updated_at = datetime.now(timezone.utc)
+                self.db.commit()
+            
             # For all other action types (CALL_TOOL, RE_PLAN, etc.),
             # we rely on the state machine context to convey the results
             # No need to append to messages
@@ -671,6 +715,26 @@ class ReactEngine:
                         "data": reflect_output,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+
+
+
+                elif action_type == "CLARIFY":
+                    yield {
+                        "type": "clarify",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "data": event_data.get("output"),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    
+                    # Increment iteration before breaking so next run starts at next iteration
+                    task.iteration += 1
+                    task.updated_at = datetime.now(timezone.utc)
+                    self.db.commit()
+
+                    # Break loop as task is waiting for input
+                    break
 
                 elif action_type == "ANSWER":
                     yield {

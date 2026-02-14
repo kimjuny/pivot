@@ -23,6 +23,9 @@ class ReactChatRequest(BaseModel):
     agent_id: int = Field(..., description="Agent ID to use for the task")
     message: str = Field(..., description="User message/task description")
     user: str = Field(default="default_user", description="Username")
+    task_id: str | None = Field(
+        default=None, description="Task ID for resuming a conversation"
+    )
 
 
 class ReactStreamEventType(str, Enum):
@@ -38,6 +41,7 @@ class ReactStreamEventType(str, Enum):
     PLAN_UPDATE = "plan_update"
     REFLECT = "reflect"
     ANSWER = "answer"
+    CLARIFY = "clarify"
     ERROR = "error"
     TASK_COMPLETE = "task_complete"
 
@@ -47,22 +51,22 @@ class ReactStreamEvent(BaseModel):
 
     type: ReactStreamEventType = Field(..., description="Event type")
     task_id: str = Field(..., description="Task UUID")
-    trace_id: str | None = Field(None, description="Current recursion trace ID")
+    trace_id: str | None = Field(default=None, description="Current recursion trace ID")
     iteration: int = Field(..., description="Current iteration index")
-    delta: str | None = Field(None, description="Incremental text content")
-    data: dict[str, Any] | None = Field(None, description="Additional event data")
+    delta: str | None = Field(default=None, description="Incremental text content")
+    data: dict[str, Any] | None = Field(default=None, description="Additional event data")
     timestamp: datetime = Field(..., description="Event timestamp")
     created_at: str | None = Field(
-        None, description="Recursion creation timestamp (ISO format)"
+        default=None, description="Recursion creation timestamp (ISO format)"
     )
     updated_at: str | None = Field(
-        None, description="Recursion update timestamp (ISO format)"
+        default=None, description="Recursion update timestamp (ISO format)"
     )
     tokens: TokenUsage | None = Field(
-        None, description="Token usage for this recursion"
+        default=None, description="Token usage for this recursion"
     )
     total_tokens: TokenUsage | None = Field(
-        None, description="Total token usage for the task"
+        default=None, description="Total token usage for the task"
     )
 
 

@@ -12,13 +12,14 @@ from app.api.dependencies import get_db
 from app.crud.llm import llm as llm_crud
 from app.llm.llm_factory import create_llm_from_config
 from app.models.agent import Agent
-from app.models.react import ReactTask
+from app.models.react import ReactRecursion, ReactTask
 from app.orchestration.react import ReactEngine
 from app.orchestration.tool import get_tool_manager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from sqlmodel import Session
+from sqlmodel import Session, select
+import json
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -122,23 +123,71 @@ async def react_chat_stream(
                 yield f"data: {error_event.json()}\n\n"
                 return
 
-            # Create ReactTask
-            task_id = str(uuid.uuid4())
-            task = ReactTask(
-                task_id=task_id,
-                agent_id=agent.id or 0,
-                user=request.user,
-                user_message=request.message,
-                objective=request.message,  # Use message as objective
-                status="pending",
-                iteration=0,
-                max_iteration=agent.max_iteration,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            )
-            db.add(task)
-            db.commit()
-            db.refresh(task)
+            # Check if this is a resume request for an existing task
+            if request.task_id:
+                stmt = select(ReactTask).where(ReactTask.task_id == request.task_id)
+                existing_task = db.exec(stmt).first()
+
+                if existing_task:
+                    # If task is waiting for input, this is a reply to CLARIFY
+                    if existing_task.status == "waiting_input":
+                        # Find the last recursion (which should be CLARIFY)
+                        rec_stmt = (
+                            select(ReactRecursion)
+                            .where(ReactRecursion.task_id == existing_task.task_id)
+                            .order_by(ReactRecursion.iteration_index.desc())
+                        )
+                        last_rec = db.exec(rec_stmt).first()
+
+                        if last_rec and last_rec.action_type == "CLARIFY":
+                            # Update action_output with user's reply
+                            try:
+                                output = json.loads(last_rec.action_output or "{}")
+                            except json.JSONDecodeError:
+                                output = {}
+                            
+                            output["reply"] = request.message
+                            last_rec.action_output = json.dumps(output, ensure_ascii=False)
+                            last_rec.updated_at = datetime.now(timezone.utc)
+                            db.add(last_rec)
+                            
+                            # Resume task
+                            task = existing_task
+                            # Status will be updated to 'running' in engine.run_task
+                            logger.info(f"Resuming task {task.task_id} with CLARIFY reply")
+                        else:
+                            # Fallback if state is inconsistent
+                            logger.warning(f"Task {existing_task.task_id} is waiting_input but last recursion is not CLARIFY")
+                            task = existing_task
+                    else:
+                        # Task exists but not waiting for input? Maybe reviving?
+                        # For now, assume we just attach to it
+                        task = existing_task
+                else:
+                    # Requests task_id but not found, create new
+                    pass
+
+            if not task:
+                # Create ReactTask
+                task_id = str(uuid.uuid4())
+                task = ReactTask(
+                    task_id=task_id,
+                    agent_id=agent.id or 0,
+                    user=request.user,
+                    user_message=request.message,
+                    objective=request.message,  # Use message as objective
+                    status="pending",
+                    iteration=0,
+                    max_iteration=agent.max_iteration,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                db.add(task)
+                db.commit()
+                db.refresh(task)
+            
+            # Ensure task_id is set
+            task_id = task.task_id
 
             # Initialize ReAct engine
             tool_manager = get_tool_manager()
@@ -280,3 +329,66 @@ async def get_task_recursions(task_id: str, db: Session = Depends(get_db)):
     recursions = db.exec(stmt).all()
 
     return list(recursions)
+
+
+@router.get("/react/tasks/{task_id}/states")
+async def get_task_states(task_id: str, db: Session = Depends(get_db)):
+    """
+    Get all recursion states for a task.
+
+    This endpoint returns the complete state machine snapshots for each recursion,
+    enabling state recovery, debugging, and historical analysis.
+
+    Args:
+        task_id: Task UUID
+        db: Database session dependency
+
+    Returns:
+        List of recursion states with complete state snapshots
+    """
+    from app.models.react import ReactRecursionState
+    from sqlmodel import select
+
+    stmt = (
+        select(ReactRecursionState)
+        .where(ReactRecursionState.task_id == task_id)
+        .order_by(ReactRecursionState.iteration_index)
+    )
+    states = db.exec(stmt).all()
+
+    return list(states)
+
+
+@router.get("/react/tasks/{task_id}/states/{iteration_index}")
+async def get_task_state_at_iteration(
+    task_id: str, iteration_index: int, db: Session = Depends(get_db)
+):
+    """
+    Get recursion state at a specific iteration.
+
+    This endpoint returns the complete state machine snapshot for a specific
+    recursion iteration, useful for debugging or state recovery.
+
+    Args:
+        task_id: Task UUID
+        iteration_index: Iteration index (0-based)
+        db: Database session dependency
+
+    Returns:
+        Recursion state at the specified iteration
+    """
+    from app.models.react import ReactRecursionState
+    from sqlmodel import select
+
+    stmt = (
+        select(ReactRecursionState)
+        .where(ReactRecursionState.task_id == task_id)
+        .where(ReactRecursionState.iteration_index == iteration_index)
+    )
+    state = db.exec(stmt).first()
+
+    if not state:
+        return {"error": "State not found"}, 404
+
+    return state
+

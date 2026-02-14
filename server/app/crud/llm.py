@@ -1,3 +1,5 @@
+from typing import Any
+
 from app.models.llm import LLM
 from sqlmodel import Session, select
 
@@ -57,7 +59,7 @@ class LLMCRUD:
         statement = select(LLM).where(LLM.name == name)
         return session.exec(statement).first()
 
-    def create(self, session: Session, **kwargs) -> LLM:
+    def create(self, session: Session, **kwargs: Any) -> LLM:
         """Create a new LLM record in the database.
 
         Args:
@@ -73,7 +75,7 @@ class LLMCRUD:
         session.refresh(db_obj)
         return db_obj
 
-    def update(self, id: int, session: Session, **kwargs) -> LLM | None:
+    def update(self, id: int, session: Session, **kwargs: Any) -> LLM | None:
         """Update an existing LLM by its primary key.
 
         Args:

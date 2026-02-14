@@ -2,7 +2,6 @@ import { useState, useEffect, MouseEvent } from 'react';
 import { Plus, Server, MoreHorizontal, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { getLLMs, deleteLLM, updateLLM, createLLM } from '../utils/api';
-import { formatTimestamp } from '../utils/timestamp';
 import type { LLM } from '../types';
 import LLMModal from './LLMModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -15,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Badge } from '@/components/ui/badge';
 
 /**
  * LLM list component.
@@ -150,15 +150,6 @@ function LLMList() {
     llm.endpoint.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  /**
-   * Mask API key for display.
-   * Shows only first 8 characters followed by asterisks.
-   */
-  const maskApiKey = (apiKey: string): string => {
-    if (apiKey.length <= 8) return '********';
-    return `${apiKey.substring(0, 8)}...`;
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
@@ -229,102 +220,84 @@ function LLMList() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {filteredLLMs.map((llm) => (
               <Card
                 key={llm.id}
-                className="transition-all duration-200 hover:bg-accent/50 motion-reduce:transition-none relative group p-4 flex flex-col"
+                className="transition-all duration-200 hover:bg-accent/50 motion-reduce:transition-none relative group p-3 flex flex-col min-h-[130px]"
                 role="article"
                 aria-label={`LLM ${llm.name}`}
               >
-                {/* Header: Icon + Name + Menu */}
-                <div className="flex items-start gap-3 mb-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <Server className="w-5 h-5 text-primary" aria-hidden="true" />
+                {/* Top row: Icon + Name + Menu */}
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-md bg-primary/20 flex items-center justify-center flex-shrink-0">
+                    <Server className="w-4 h-4 text-primary" aria-hidden="true" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-base truncate">{llm.name}</h3>
-                        <p className="text-xs text-muted-foreground truncate">{llm.model}</p>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                            aria-label="LLM options"
-                          >
-                            <MoreHorizontal className="w-4 h-4" aria-hidden="true" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                          <DropdownMenuItem onClick={(e) => handleEditLLM(llm, e as unknown as MouseEvent)}>
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => handleDeleteLLM(llm, e as unknown as MouseEvent)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-sm truncate">{llm.name}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {llm.model}
+                    </div>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="LLM options"
+                      >
+                        <MoreHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenuItem onClick={(e) => handleEditLLM(llm, e as unknown as MouseEvent)}>
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => handleDeleteLLM(llm, e as unknown as MouseEvent)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                {/* Details - with flex-1 to push tags to bottom */}
+                <div className="flex-1 mt-2">
+                  <div className="space-y-1 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Protocol:</span>
+                      <span className="text-[10px]">{llm.protocol}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Context:</span>
+                      <span className="text-[10px] tabular-nums">{llm.max_context.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Details */}
-                <div className="space-y-2 text-xs flex-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Endpoint:</span>
-                    <span className="font-mono text-[10px] truncate max-w-[60%]" title={llm.endpoint}>
-                      {llm.endpoint}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">API Key:</span>
-                    <span className="font-mono text-[10px]">{maskApiKey(llm.api_key)}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Protocol:</span>
-                    <span className="text-[10px]">{llm.protocol}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground">Max Context:</span>
-                    <span className="text-[10px]">{llm.max_context.toLocaleString()} tokens</span>
-                  </div>
-                </div>
-
-                {/* Capabilities */}
-                <div className="flex flex-wrap gap-1 mt-3">
-                  {llm.chat && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
-                      Chat
-                    </span>
-                  )}
+                {/* Bottom row: Capabilities - always at bottom */}
+                <div className="flex flex-wrap gap-1 mt-2">
                   {llm.streaming && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
-                      Streaming
-                    </span>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
+                      Stream
+                    </Badge>
                   )}
                   {llm.tool_calling === 'native' && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
                       Tools
-                    </span>
+                    </Badge>
                   )}
                   {llm.json_schema === 'strong' && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
                       JSON
-                    </span>
+                    </Badge>
                   )}
-                </div>
-
-                {/* Footer: Timestamp */}
-                <div className="text-[10px] text-muted-foreground mt-3 pt-3 border-t border-border">
-                  Updated: {formatTimestamp(llm.updated_at)}
                 </div>
               </Card>
             ))}
