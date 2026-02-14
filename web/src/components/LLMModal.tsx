@@ -57,7 +57,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     endpoint: '',
     model: '',
     api_key: '',
-    protocol: 'openai_chat_v1',
+    protocol: 'openai_compatible',
     chat: true,
     system_role: true,
     tool_calling: 'native',
@@ -77,7 +77,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           endpoint: initialData.endpoint || '',
           model: initialData.model || '',
           api_key: initialData.api_key || '',
-          protocol: initialData.protocol || 'openai_chat_v1',
+          protocol: initialData.protocol || 'openai_compatible',
           chat: initialData.chat !== undefined ? initialData.chat : true,
           system_role: initialData.system_role !== undefined ? initialData.system_role : true,
           tool_calling: initialData.tool_calling || 'native',
@@ -91,7 +91,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           endpoint: '',
           model: '',
           api_key: '',
-          protocol: 'openai_chat_v1',
+          protocol: 'openai_compatible',
           chat: true,
           system_role: true,
           tool_calling: 'native',
@@ -276,10 +276,8 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="openai_chat_v1">OpenAI Chat v1</SelectItem>
-                  <SelectItem value="openai_responses_v1">OpenAI Responses v1</SelectItem>
-                  <SelectItem value="anthropic_messages_v1">Anthropic Messages v1</SelectItem>
-                  <SelectItem value="custom_completion_v1">Custom Completion v1</SelectItem>
+                  <SelectItem value="openai_compatible">OpenAI Compatible</SelectItem>
+                  <SelectItem value="anthropic_compatible">Anthropic Compatible</SelectItem>
                 </SelectContent>
               </Select>
             </div>

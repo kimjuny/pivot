@@ -1,4 +1,4 @@
-"""OpenAI Chat Completions API v1 protocol implementation.
+"""OpenAI-compatible LLM implementation.
 
 This is a generic implementation that works with any OpenAI-compatible API,
 including OpenAI, Azure OpenAI, and other providers that follow the same protocol.
@@ -12,8 +12,8 @@ from openai import OpenAI
 from .abstract_llm import AbstractLLM, Response
 
 
-class OpenAIChatV1(AbstractLLM):
-    """Generic implementation for OpenAI Chat Completions API v1 protocol.
+class OpenAILLM(AbstractLLM):
+    """Generic implementation for OpenAI-compatible APIs.
 
     This implementation works with any provider that follows the OpenAI Chat
     Completions API specification, including:
@@ -37,7 +37,7 @@ class OpenAIChatV1(AbstractLLM):
         api_key: str,
         timeout: int | None = None,
     ):
-        """Initialize the OpenAI Chat v1 LLM implementation.
+        """Initialize the OpenAI-compatible LLM implementation.
 
         Args:
             endpoint: The base URL for the API (e.g., "https://api.openai.com/v1")
@@ -95,7 +95,7 @@ class OpenAIChatV1(AbstractLLM):
 
         except Exception as e:
             raise RuntimeError(
-                f"OpenAI Chat v1 API request failed for {self.endpoint}: {e!s}"
+                f"OpenAI-compatible API request failed for {self.endpoint}: {e!s}"
             ) from e
 
     def chat_stream(
@@ -128,5 +128,5 @@ class OpenAIChatV1(AbstractLLM):
                 yield self._convert_response(chunk, self.model)
         except Exception as e:
             raise RuntimeError(
-                f"OpenAI Chat v1 streaming failed for {self.endpoint}: {e!s}"
+                f"OpenAI-compatible streaming failed for {self.endpoint}: {e!s}"
             ) from e

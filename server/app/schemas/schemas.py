@@ -330,8 +330,8 @@ class LLMCreate(BaseModel):
     model: str = Field(..., description="Model identifier for API")
     api_key: str = Field(..., description="Authentication credential")
     protocol: str = Field(
-        default="openai_chat_v1",
-        description="Protocol specification (e.g., 'openai_chat_v1')",
+        default="openai_compatible",
+        description="Protocol specification ('openai_compatible' or 'anthropic_compatible')",
     )
     chat: bool = Field(
         default=True, description="Supports multi-turn conversation with message roles"

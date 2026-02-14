@@ -256,13 +256,11 @@ class ReactEngine:
         # Build system prompt with current context
         system_prompt = build_system_prompt(context)
 
-        # Update messages for this recursion
-        # messages[0] = user message (fixed)
-        # messages[1] = system prompt (updated each recursion)
-        if len(messages) < 2:
-            messages.append({"role": "system", "content": system_prompt})
-        else:
-            messages[1] = {"role": "system", "content": system_prompt}
+        # Update system message at index 0 (MUST be first for most LLMs)
+        # messages[0] = system prompt (updated each recursion)
+        # messages[1] = user message (fixed)
+        # messages[2+] = conversation history (assistant responses, tool results, etc.)
+        messages[0] = {"role": "system", "content": system_prompt}
 
         # Prepare tools in standard OpenAI format
         tools = self.tool_manager.to_openai_tools() if self.tool_manager else None
@@ -545,8 +543,10 @@ class ReactEngine:
         Raises:
             asyncio.CancelledError: If the task is cancelled by client disconnect
         """
-        # Initialize messages
+        # Initialize messages with system placeholder first (will be filled in first recursion)
+        # System message MUST be at index 0 for most LLMs
         messages: list[dict[str, Any]] = [
+            {"role": "system", "content": ""},  # Placeholder, updated each recursion
             {"role": "user", "content": task.user_message}
         ]
 
