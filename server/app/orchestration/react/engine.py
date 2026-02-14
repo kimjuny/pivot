@@ -253,8 +253,8 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build system prompt with current context
-        system_prompt = build_system_prompt(context)
+        # Build system prompt with current context and available tools
+        system_prompt = build_system_prompt(context, self.tool_manager)
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)
@@ -262,14 +262,10 @@ class ReactEngine:
         # messages[2+] = conversation history (assistant responses, tool results, etc.)
         messages[0] = {"role": "system", "content": system_prompt}
 
-        # Prepare tools in standard OpenAI format
-        tools = self.tool_manager.to_openai_tools() if self.tool_manager else None
-
-        # Call LLM with standard tools parameter
-        # Despite providing tools, we instruct LLM via prompt to return our custom JSON format
-        # This ensures LLM returns observe, thought, abstract, and action in our structured format
+        # Call LLM WITHOUT tools parameter (using prompt-based approach)
+        # Tools are described in the system prompt, and LLM returns tool calls in action.output
         try:
-            response = self.llm.chat(messages=messages, tools=tools)  # type: ignore[arg-type]
+            response = self.llm.chat(messages=messages)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
@@ -333,12 +329,17 @@ class ReactEngine:
             reconstructed_tool_calls = []
 
             if action_type == "CALL_TOOL":
-                logger.info(f"LLM tool_calls: {json.dumps(message.tool_calls, ensure_ascii=False, indent = 2)}")
+                # Extract tool_calls from action.output (prompt-based approach)
+                tool_calls_from_output = action_output.get("tool_calls", [])
+                logger.info(
+                    f"Tool calls from action.output: {json.dumps(tool_calls_from_output, ensure_ascii=False, indent=2)}"
+                )
+
                 # Validate that tool_calls exist when action_type is CALL_TOOL
-                if not message.tool_calls:
+                if not tool_calls_from_output:
                     recursion.status = "error"
                     recursion.error_log = (
-                        "action_type is CALL_TOOL but no tool_calls provided"
+                        "action_type is CALL_TOOL but no tool_calls in action.output"
                     )
                     recursion.observe = observe
                     recursion.thought = thought
@@ -350,26 +351,27 @@ class ReactEngine:
                     return recursion, {
                         "trace_id": trace_id,
                         "action_type": "ERROR",
-                        "error": "CALL_TOOL requires tool_calls",
+                        "error": "CALL_TOOL requires tool_calls in action.output",
                     }
-                
-                # Process native tool_calls
-                # Read from native tool_calls (standard OpenAI/GLM format)
-                for tool_call in message.tool_calls:
-                    # tool_call is a dict with structure: {id, type, function: {name, arguments}}
+
+                # Process tool_calls from action.output
+                for tool_call in tool_calls_from_output:
+                    # tool_call format from LLM: {id, name, arguments}
+                    # arguments is already a dict, not a JSON string
                     tool_call_id = tool_call.get("id", "")
-                    func_info = tool_call.get("function", {})
-                    func_name = func_info.get("name", "")
-                    func_args_str = func_info.get("arguments", "{}")
-                    
-                    # Parse arguments (usually a JSON string)
-                    try:
-                        func_args = json.loads(func_args_str)
-                    except json.JSONDecodeError:
-                        func_args = {}
-                        logger.warning(
-                            f"Failed to parse tool arguments: {func_args_str}"
-                        )
+                    func_name = tool_call.get("name", "")
+                    func_args = tool_call.get("arguments", {})
+
+                    # Validate arguments is dict
+                    if not isinstance(func_args, dict):
+                        # Try to parse if it's a string
+                        try:
+                            func_args = json.loads(func_args)
+                        except (json.JSONDecodeError, TypeError):
+                            func_args = {}
+                            logger.warning(
+                                f"Failed to parse tool arguments: {func_args}"
+                            )
 
                     try:
                         # Execute tool
@@ -385,15 +387,12 @@ class ReactEngine:
                             }
                         )
 
-                        # Keep tool_call for reconstructed format
+                        # Keep tool_call in reconstructed format for event data
                         reconstructed_tool_calls.append(
                             {
                                 "id": tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": func_name,
-                                    "arguments": json.dumps(func_args),
-                                },
+                                "name": func_name,
+                                "arguments": func_args,
                             }
                         )
 
@@ -401,10 +400,7 @@ class ReactEngine:
                         logger.error(f"Tool {func_name} execution failed: {e}")
                         # Provide helpful error message with available tools
                         if "not found in registry" in str(e):
-                            available_tools = [
-                                t.get("function", {}).get("name", "")
-                                for t in self.tool_manager.to_openai_tools()
-                            ]
+                            available_tools = self.tool_manager.list_tools()
                             error_msg = (
                                 f"Tool '{func_name}' not found. "
                                 f"Available tools: {', '.join(available_tools)}"

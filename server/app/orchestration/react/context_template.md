@@ -58,13 +58,9 @@ Action决策环节你只能输出以下 action_type 之一：
 
 1. CALL_TOOL
    - 当任务需要外部能力（搜索 / 计算 / 读取...）
-   - **使用原生 function calling**：直接调用系统通过 `tools` 参数提供的工具
-   - 你的响应应该包含：
-     - content 中的 JSON：包含 observe, thought, abstract, action_type（值为 "CALL_TOOL"）
-     - tool_calls：使用标准的 function calling 格式调用工具
-     - **重要约束**：即CALL_TOOL时需要同时返回message.content和tool_calls
-   - 只能使用 `tools` 参数中提供的工具
-   - 本轮 recursion 结束，等待下一轮注入执行结果
+   - 在 `action.output` 中返回要调用的工具信息
+   - 只能使用下方 "可用工具列表" 中提供的工具
+   - 本轮 recursion 结束，系统自动执行工具，下一轮注入执行结果
 
 2. RE_PLAN
    - 当：
@@ -106,9 +102,7 @@ Action决策环节你只能输出以下 action_type 之一：
 
 ### 4.2. action_type = CALL_TOOL
 
-**当 action_type 为 CALL_TOOL 时，你需要同时返回两部分**：
-
-1. **content 中的 JSON**：
+**当 action_type 为 CALL_TOOL 时，output 格式**：
 
 ```json
 {
@@ -117,20 +111,29 @@ Action决策环节你只能输出以下 action_type 之一：
   "thought": "你的分析与决策理由",
   "action": {
     "action_type": "CALL_TOOL",
-    "output": {}
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call_xxx",
+          "name": "tool_name",
+          "arguments": {
+            "arg1": "value1",
+            "arg2": "value2"
+          }
+        }
+      ]
+    }
   },
   "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
   "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
 ```
 
-2. **使用原生 function calling**（在 tool_calls 中）：
-   直接使用标准的 function calling 格式调用工具，系统会自动从 `message.tool_calls` 中读取
-
 **注意**：
 
-- `output` 字段留空即可，不需要手动构造 tool_calls
-- 工具调用信息通过原生 function calling 传递
+- `tool_calls` 是一个数组，可以一次调用多个工具
+- 每个工具调用需要包含 `id`（自己生成，如 "call_1"）、`name`（工具名称）、`arguments`（参数对象）
+- `arguments` 是对象格式，不是 JSON 字符串
 - 你不需要关心工具是否成功，success / error 会在下一轮 recursion 作为输入注入
 
 ### 4.3. action_type = RE_PLAN
@@ -328,7 +331,20 @@ plan.step 是 strategy / policy
 - **IMPORTANT**: 如果上一轮调用了工具（action_type=CALL_TOOL），`tool_call_results`字段会包含所有工具的执行结果
 - 你应该仔细阅读工具的返回结果，判断任务是否已经完成，如果完成了应该立即返回ANSWER
 
-## 6. 真实动态状态机注入
+## 6. 可用工具列表
+
+以下是你可以调用的工具（仅当 action_type = CALL_TOOL 时使用）：
+
+```
+{{tools_description}}
+```
+
+**重要**：
+- 只能调用上述列表中的工具
+- 工具名称、参数名称、参数类型必须严格匹配
+- 在 `action.output.tool_calls` 中返回要调用的工具信息
+
+## 7. 真实动态状态机注入
 
 ```json
 {{current_state}}
