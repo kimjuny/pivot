@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, FormEvent } from 'react';
 import { Send, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ButtonGroup } from '@/components/ui/button-group';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 /**
  * Props for ReactChatInterface component.
@@ -1103,33 +1106,37 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             </button>
           </div>
         )}
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            placeholder={replyTaskId ? "Reply to question..." : "Type your message..."}
-            disabled={isStreaming}
-            className="flex-1 px-3 py-2 text-sm bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-          />
-          {isStreaming ? (
-            <button
-              type="button"
-              onClick={handleStop}
-              className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors flex items-center gap-2"
-              title="Stop execution"
-            >
-              <Square className="w-4 h-4" fill="currentColor" />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!inputMessage.trim()}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          )}
+        <form onSubmit={handleSubmit}>
+          <ButtonGroup className="w-full">
+            <Input
+              type="text"
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              placeholder={replyTaskId ? "Reply to question..." : "Type your message..."}
+              disabled={isStreaming}
+              className="flex-1"
+            />
+            {isStreaming ? (
+              <Button
+                type="button"
+                onClick={handleStop}
+                variant="outline"
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90 border-destructive"
+                title="Stop execution"
+              >
+                <Square className="w-4 h-4" fill="currentColor" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                disabled={!inputMessage.trim()}
+                variant="outline"
+                title="Send message"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            )}
+          </ButtonGroup>
         </form>
       </div>
     </div >

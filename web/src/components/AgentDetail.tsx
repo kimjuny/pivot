@@ -17,7 +17,7 @@ import '@xyflow/react/dist/style.css';
 import { usePreviewChatStore } from '../store/previewChatStore';
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useBuildChatStore } from '../store/buildChatStore';
-import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import DraggableDialog from './DraggableDialog';
 import BuildChatInterface from './BuildChatInterface';
 import PreviewChatInterface from './PreviewChatInterface';
@@ -723,8 +723,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
               }`}
           >
+            {/* Sidebar Trigger Button - Floating */}
+            <div className="absolute top-3 left-3 z-10">
+              <SidebarTrigger />
+            </div>
+
             {mode === 'preview' && (
-              <div className="absolute top-3 left-3 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
+              <div className="absolute top-3 left-14 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
                 <div className="relative">
                   <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
                   <div className="w-2 h-2 bg-danger rounded-full relative" />
