@@ -380,7 +380,6 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 }
               } else if (event.type === 'clarify') {
                 // For CLARIFY, we set content similar to ANSWER so it shows in the main box
-                // But we prefix or handle it such that UI knows it's a question
                 const clarifyData = event.data as { question?: string } | undefined;
                 if (clarifyData?.question) {
                   setMessages((prev) =>
@@ -389,7 +388,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                         ? {
                           ...msg,
                           content: clarifyData.question ?? '',
-                          status: 'waiting_input' as const, // Custom status usage
+                          status: 'waiting_input' as const,
                         }
                         : msg
                     )
@@ -1012,15 +1011,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
                   {/* Final Answer / Question */}
                   {message.content && (
-                    <div className={`border rounded-lg px-3 py-2.5 ${message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY')
-                      ? 'bg-blue-50/50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' // Question style
-                      : 'bg-background border-border' // Answer style
-                      }`}>
+                    <div className="bg-background/50 border border-border rounded p-2">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-1.5">
                           {message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY') ? (
                             <>
-                              <MessageSquare className="w-3.5 h-3.5 text-blue-500" />
+                              <MessageSquare className="w-3.5 h-3.5 text-info" />
                               <span className="text-xs font-semibold text-foreground">QUESTION</span>
                             </>
                           ) : (
@@ -1030,21 +1026,17 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                             </>
                           )}
                         </div>
-                        {/* Reply Button for Question */}
+                        {/* REPLY button for QUESTION */}
                         {(message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY')) && message.task_id && (
                           <button
                             onClick={() => setReplyTaskId(message.task_id || null)}
-                            disabled={isStreaming || (replyTaskId === message.task_id)}
-                            className={`text-xs px-2 py-1 rounded transition-colors ${replyTaskId === message.task_id
-                              ? 'bg-blue-100 text-blue-700 font-medium'
-                              : 'bg-muted hover:bg-muted/80'
-                              }`}
+                            className="text-xs text-muted-foreground hover:text-info transition-colors"
                           >
-                            {replyTaskId === message.task_id ? 'Replying...' : 'Recall & Reply'}
+                            REPLY
                           </button>
                         )}
                       </div>
-                      <div className="pl-5">
+                      <div className="text-sm text-foreground pl-5 leading-relaxed">
                         {formatAnswerContent(message.content)}
                       </div>
                     </div>
@@ -1100,14 +1092,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       {/* Input Area */}
       <div className="border-t border-border p-4 bg-background">
         {replyTaskId && (
-          <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 px-3 py-2 rounded-t-lg border-b border-blue-100 dark:border-blue-800 mb-2 text-xs">
-            <span className="text-blue-700 dark:text-blue-300 font-medium flex items-center gap-2">
-              <MessageSquare className="w-3 h-3" />
-              Replying to clarification question...
-            </span>
+          <div className="flex items-center justify-between text-xs mb-2 px-2 py-1.5 rounded bg-muted/30 border border-border/50">
+            <span className="text-foreground/70">↳ Replying to question</span>
             <button
               onClick={() => setReplyTaskId(null)}
-              className="text-muted-foreground hover:text-foreground p-1"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="Cancel reply"
             >
               <XCircle className="w-3.5 h-3.5" />
             </button>
@@ -1118,7 +1108,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
-            placeholder="Type your message…"
+            placeholder={replyTaskId ? "Reply to question..." : "Type your message..."}
             disabled={isStreaming}
             className="flex-1 px-3 py-2 text-sm bg-background border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
           />
