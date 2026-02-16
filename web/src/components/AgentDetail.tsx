@@ -14,7 +14,7 @@ import {
   ReactFlowInstance
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { X } from 'lucide-react';
+import { X, Layers, Wrench, Zap } from 'lucide-react';
 import { usePreviewChatStore } from '../store/previewChatStore';
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useBuildChatStore } from '../store/buildChatStore';
@@ -127,6 +127,16 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       setCurrentSceneId(selectedScene.id);
     }
   }, [selectedScene, setCurrentSceneId]);
+
+  // Sync activeTabId with currentSceneId when a scene tab is activated
+  useEffect(() => {
+    if (activeTabId) {
+      const activeTab = tabs.find(tab => tab.id === activeTabId);
+      if (activeTab && activeTab.type === 'scene' && activeTab.resourceId !== currentSceneId) {
+        setCurrentSceneId(activeTab.resourceId as number);
+      }
+    }
+  }, [activeTabId, tabs, currentSceneId, setCurrentSceneId]);
 
   // Monitor theme changes
   useEffect(() => {
@@ -732,26 +742,34 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               {/* Tabs List */}
               <div className="border-b border-border px-2">
                 <TabsList className="h-auto bg-transparent p-0 gap-0.5">
-                  {tabs.map((tab) => (
-                    <div key={tab.id} className="relative group">
-                      <TabsTrigger
-                        value={tab.id}
-                        className="relative rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background data-[state=inactive]:bg-transparent px-3 py-1.5 text-xs font-medium transition-all hover:bg-background/50"
-                      >
-                        <span className="mr-5">{tab.name}</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            closeTab(tab.id);
-                          }}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                          aria-label={`Close ${tab.name} tab`}
+                  {tabs.map((tab) => {
+                    // Get icon based on tab type (matching sidebar icons)
+                    const TabIcon = tab.type === 'scene' ? Layers
+                      : tab.type === 'function' ? Wrench
+                      : Zap;
+
+                    return (
+                      <div key={tab.id} className="relative group">
+                        <TabsTrigger
+                          value={tab.id}
+                          className="relative rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background data-[state=inactive]:bg-transparent px-2.5 py-1.5 pr-7 text-xs font-medium transition-all hover:bg-background/50"
                         >
-                          <X className="size-3" />
-                        </button>
-                      </TabsTrigger>
-                    </div>
-                  ))}
+                          <TabIcon className="size-3 mr-1.5 shrink-0" />
+                          <span>{tab.name}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              closeTab(tab.id);
+                            }}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                            aria-label={`Close ${tab.name} tab`}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </TabsTrigger>
+                      </div>
+                    );
+                  })}
                 </TabsList>
               </div>
 

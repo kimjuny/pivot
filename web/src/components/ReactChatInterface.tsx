@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, FormEvent } from 'react';
 import { Send, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
+import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
@@ -239,17 +240,30 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     abortControllerRef.current = new AbortController();
 
     try {
+      // Check token validity before making request
+      if (!isTokenValid()) {
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+        throw new Error('Token expired or invalid. Please log in again.');
+      }
+
       // Use direct backend URL to bypass Vite proxy for SSE streaming
       // This prevents potential data loss in proxy layer
       const apiUrl = import.meta.env.DEV
         ? 'http://localhost:8003/api/react/chat/stream'
         : '/api/react/chat/stream';
 
+      const token = getAuthToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           agent_id: agentId,
           message: userMessage.content,
@@ -258,6 +272,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         }),
         signal: abortControllerRef.current.signal,
       });
+
+      // Handle 401 Unauthorized
+      if (response.status === 401) {
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+        throw new Error('Authentication expired. Please log in again.');
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
