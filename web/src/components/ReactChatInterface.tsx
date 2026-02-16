@@ -1,11 +1,16 @@
-import { useState, useRef, useEffect, FormEvent } from 'react';
-import { Send, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
+import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from 'react';
+import { ArrowUp, Plus, Paperclip, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { ButtonGroup } from '@/components/ui/button-group';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 /**
  * Props for ReactChatInterface component.
@@ -109,9 +114,9 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
       const response = await fetch(apiUrl);
       if (!response.ok) throw new Error('Failed to fetch state');
 
-      const data = await response.json();
+      const data = await response.json() as { current_state: string };
       // current_state is a JSON string in the response
-      const parsedState = JSON.parse(data.current_state);
+      const parsedState = JSON.parse(data.current_state) as unknown;
       setState(JSON.stringify(parsedState, null, 2));
     } catch (err) {
       setError('Failed to load state');
@@ -124,7 +129,7 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
   return (
     <TooltipProvider delayDuration={300}>
       <Tooltip onOpenChange={(open) => {
-        if (open) fetchState();
+        if (open) void fetchState();
       }}>
         <TooltipTrigger asChild>
           <button className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-full hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring" title="View state">
@@ -177,6 +182,18 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  /**
+   * Handle form submission to send message.
+   */
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (inputMessage.trim() && !isStreaming) {
+        void sendMessage();
+      }
+    }
+  };
 
   /**
    * Handle form submission to send message.
@@ -1126,37 +1143,59 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             </button>
           </div>
         )}
-        <form onSubmit={handleSubmit}>
-          <ButtonGroup className="w-full">
-            <Input
-              type="text"
-              value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
-              placeholder={replyTaskId ? "Reply to question..." : "Type your message..."}
-              disabled={isStreaming}
-              className="flex-1"
-            />
-            {isStreaming ? (
-              <Button
-                type="button"
-                onClick={handleStop}
-                variant="outline"
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90 border-destructive"
-                title="Stop execution"
-              >
-                <Square className="w-4 h-4" fill="currentColor" />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                disabled={!inputMessage.trim()}
-                variant="outline"
-                title="Send message"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            )}
-          </ButtonGroup>
+        <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-lg border bg-background focus-within:border-ring focus-within:ring-0 transition-colors">
+          <Textarea
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
+            className="min-h-[60px] w-full resize-none border-0 p-3 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
+            disabled={isStreaming}
+          />
+          <div className="flex items-center p-3 pt-0 justify-between">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
+                  <Plus className="h-4 w-4" />
+                  <span className="sr-only">Attach</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem>
+                  <Paperclip className="mr-2 h-4 w-4" />
+                  <span>Add images & files</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem>
+                  <Brain className="mr-2 h-4 w-4" />
+                  <span>Thinking</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <div className="flex items-center gap-2">
+              {isStreaming ? (
+                <Button
+                  type="button"
+                  onClick={handleStop}
+                  size="icon"
+                  className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
+                  title="Stop execution"
+                >
+                  <Square className="h-4 w-4" fill="currentColor" />
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={!inputMessage.trim()}
+                  size="icon"
+                  className="h-8 w-8 rounded-full"
+                  title="Send message"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                  <span className="sr-only">Send</span>
+                </Button>
+              )}
+            </div>
+          </div>
         </form>
       </div>
     </div >

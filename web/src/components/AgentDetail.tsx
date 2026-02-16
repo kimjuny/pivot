@@ -746,7 +746,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                     // Get icon based on tab type (matching sidebar icons)
                     const TabIcon = tab.type === 'scene' ? Layers
                       : tab.type === 'function' ? Wrench
-                      : Zap;
+                        : Zap;
 
                     return (
                       <div key={tab.id} className="relative group">
