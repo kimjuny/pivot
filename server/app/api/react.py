@@ -1,6 +1,7 @@
 """API endpoints for ReAct agent chat stream.
 
 This module provides streaming chat endpoints for the ReAct agent system.
+All endpoints require authentication.
 """
 
 import json
@@ -9,11 +10,13 @@ import traceback
 import uuid
 from datetime import datetime, timezone
 
+from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.crud.llm import llm as llm_crud
 from app.llm.llm_factory import create_llm_from_config
 from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask
+from app.models.user import User
 from app.orchestration.react import ReactEngine
 from app.orchestration.tool import get_tool_manager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
@@ -29,7 +32,10 @@ router = APIRouter()
 
 @router.post("/react/chat/stream")
 async def react_chat_stream(
-    request: ReactChatRequest, raw_request: Request, db: Session = Depends(get_db)
+    request: ReactChatRequest,
+    raw_request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     ReAct streaming chat endpoint.
@@ -289,7 +295,11 @@ async def react_chat_stream(
 
 
 @router.get("/react/tasks/{task_id}")
-async def get_react_task(task_id: str, db: Session = Depends(get_db)):
+async def get_react_task(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Get ReAct task information by task_id.
 
@@ -313,7 +323,11 @@ async def get_react_task(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/react/tasks/{task_id}/recursions")
-async def get_task_recursions(task_id: str, db: Session = Depends(get_db)):
+async def get_task_recursions(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Get all recursions for a task.
 
@@ -338,7 +352,11 @@ async def get_task_recursions(task_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/react/tasks/{task_id}/states")
-async def get_task_states(task_id: str, db: Session = Depends(get_db)):
+async def get_task_states(
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Get all recursion states for a task.
 
@@ -367,7 +385,10 @@ async def get_task_states(task_id: str, db: Session = Depends(get_db)):
 
 @router.get("/react/tasks/{task_id}/states/{iteration_index}")
 async def get_task_state_at_iteration(
-    task_id: str, iteration_index: int, db: Session = Depends(get_db)
+    task_id: str,
+    iteration_index: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Get recursion state at a specific iteration.

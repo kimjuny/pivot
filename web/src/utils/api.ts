@@ -1,5 +1,5 @@
 import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM } from '../types';
-import { getAuthToken } from '../contexts/AuthContext';
+import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 
 /**
  * API base URL from environment configuration.
@@ -19,16 +19,28 @@ interface RequestOptions {
   body?: string;
   /** Whether to skip adding auth header (for login endpoint) */
   skipAuth?: boolean;
+  /** Whether to skip token validation check */
+  skipTokenCheck?: boolean;
+}
+
+/** Error class for authentication-related errors */
+export class AuthError extends Error {
+  constructor(message: string = 'Authentication required') {
+    super(message);
+    this.name = 'AuthError';
+  }
 }
 
 /**
  * Make an API request to backend server.
  * Handles common request/response logic including error handling.
  * Automatically includes auth token if available.
+ * Validates token before making requests (unless skipTokenCheck is true).
  *
  * @param endpoint - API endpoint path (e.g., '/agents')
  * @param options - Request configuration options
  * @returns Promise resolving to response data
+ * @throws AuthError if token is invalid or request returns 401
  * @throws Error if request fails or returns non-OK status
  */
 const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promise<unknown> => {
@@ -41,6 +53,13 @@ const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promi
 
   // Add auth header if token exists and not explicitly skipped
   if (!options.skipAuth) {
+    // Check token validity before making request
+    if (!options.skipTokenCheck && !isTokenValid()) {
+      // Dispatch auth expired event
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+      throw new AuthError('Token expired or invalid. Please log in again.');
+    }
+
     const token = getAuthToken();
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -54,6 +73,13 @@ const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promi
 
   try {
     const response = await fetch(url, config);
+
+    // Handle 401 Unauthorized - token expired or invalid
+    if (response.status === 401) {
+      // Dispatch auth expired event
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+      throw new AuthError('Authentication expired. Please log in again.');
+    }
 
     if (!response.ok) {
       const errorData = await response.json() as { detail?: string };
@@ -373,7 +399,7 @@ export const chatWithBuildAgent = async (request: BuildChatRequest): Promise<Bui
 
 /**
  * Send a message to Preview Agent (stateless) with streaming response.
- * 
+ *
  * @param request - Preview chat request containing message, agent definition, and state
  * @param onEvent - Callback for handling stream events
  * @returns Promise resolving when stream completes
@@ -382,15 +408,34 @@ export const previewChatStream = async (
   request: PreviewChatRequest,
   onEvent: (event: StreamEvent) => void
 ): Promise<void> => {
+  // Check token validity before making request
+  if (!isTokenValid()) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Token expired or invalid. Please log in again.');
+  }
+
+  const token = getAuthToken();
   const url = `${API_BASE_URL}/preview/chat/stream`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(request),
   });
+
+  // Handle 401 Unauthorized
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
 
   if (!response.ok) {
     const errorData = await response.json() as { detail?: string };
@@ -432,7 +477,7 @@ export const previewChatStream = async (
 
 /**
  * Send a message to Build Agent (streaming) for agent editing assistance.
- * 
+ *
  * @param request - Build chat request containing message and optional agent ID
  * @param onEvent - Callback for handling stream events
  * @returns Promise resolving when stream completes
@@ -441,15 +486,34 @@ export const buildChatStream = async (
   request: BuildChatRequest,
   onEvent: (event: StreamEvent) => void
 ): Promise<void> => {
+  // Check token validity before making request
+  if (!isTokenValid()) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Token expired or invalid. Please log in again.');
+  }
+
+  const token = getAuthToken();
   const url = `${API_BASE_URL}/build/chat/stream`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(request),
   });
+
+  // Handle 401 Unauthorized
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
 
   if (!response.ok) {
     const errorData = await response.json() as { detail?: string };

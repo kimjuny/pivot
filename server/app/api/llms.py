@@ -1,14 +1,17 @@
 """API endpoints for LLM management.
 
 This module provides CRUD operations for LLMs (Large Language Models).
+All endpoints require authentication.
 """
 
 import logging
 from datetime import timezone
 from typing import Any
 
+from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.crud.llm import llm as llm_crud
+from app.models.user import User
 from app.schemas.schemas import LLMCreate, LLMResponse, LLMUpdate
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
@@ -21,7 +24,10 @@ router = APIRouter()
 
 @router.get("/llms", response_model=list[LLMResponse])
 async def get_llms(
-    skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Get all LLMs with pagination.
 
@@ -57,7 +63,9 @@ async def get_llms(
 
 @router.post("/llms", response_model=LLMResponse, status_code=201)
 async def create_llm(
-    llm_data: LLMCreate, db: Session = Depends(get_db)
+    llm_data: LLMCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a new LLM.
 
@@ -108,7 +116,11 @@ async def create_llm(
 
 
 @router.get("/llms/{llm_id}", response_model=LLMResponse)
-async def get_llm(llm_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def get_llm(
+    llm_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
     """Get a single LLM by ID.
 
     Args:
@@ -145,7 +157,10 @@ async def get_llm(llm_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 @router.put("/llms/{llm_id}", response_model=LLMResponse)
 async def update_llm(
-    llm_id: int, llm_data: LLMUpdate, db: Session = Depends(get_db)
+    llm_id: int,
+    llm_data: LLMUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update an existing LLM.
 
@@ -220,7 +235,11 @@ async def update_llm(
 
 
 @router.delete("/llms/{llm_id}", status_code=204)
-async def delete_llm(llm_id: int, db: Session = Depends(get_db)):
+async def delete_llm(
+    llm_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete an LLM.
 
     Args:

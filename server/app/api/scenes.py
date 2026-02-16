@@ -1,16 +1,19 @@
 """API endpoints for scene management.
 
 This module provides CRUD operations for scenes.
+All endpoints require authentication.
 """
 
 import logging
 from datetime import timezone
 from typing import Any
 
+from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.crud.connection import connection as connection_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
+from app.models.user import User
 from app.schemas.schemas import (
     ConnectionCreate,
     ConnectionResponse,
@@ -35,10 +38,11 @@ router = APIRouter()
 
 @router.get("/scenes", response_model=list[SceneResponse])
 async def get_scenes(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     skip: int = 0,
     limit: int = 100,
     agent_id: int | None = None,
-    db: Session = Depends(get_db),
 ):
     """Get all scenes with pagination.
 
@@ -60,7 +64,9 @@ async def get_scenes(
 
 @router.post("/scenes", response_model=SceneResponse, status_code=201)
 async def create_scene(
-    scene_data: SceneCreate, db: Session = Depends(get_db)
+    scene_data: SceneCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a new scene.
 
@@ -100,7 +106,10 @@ async def create_scene(
     "/scenes/{scene_id}/subscenes", response_model=SubsceneResponse, status_code=201
 )
 async def create_subscene(
-    scene_id: int, subscene_data: SubsceneCreate, db: Session = Depends(get_db)
+    scene_id: int,
+    subscene_data: SubsceneCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new subscene within a scene.
 
@@ -145,7 +154,10 @@ async def create_subscene(
     "/scenes/{scene_id}/connections", response_model=ConnectionResponse, status_code=201
 )
 async def create_connection(
-    scene_id: int, connection_data: ConnectionCreate, db: Session = Depends(get_db)
+    scene_id: int,
+    connection_data: ConnectionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new connection within a scene.
 
@@ -209,7 +221,9 @@ async def create_connection(
 
 @router.get("/scenes/{scene_id}/graph", response_model=SceneGraphResponse)
 async def get_scene_graph(
-    scene_id: int, db: Session = Depends(get_db)
+    scene_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get the complete scene graph with all subscenes and their connections.
 
@@ -275,6 +289,7 @@ async def update_subscene(
     subscene_name: str,
     subscene_data: SubsceneUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a subscene within a scene.
 
@@ -309,7 +324,10 @@ async def update_subscene(
 
 @router.put("/scenes/{scene_id}/connections", response_model=ConnectionResponse)
 async def update_connection(
-    scene_id: int, connection_data: ConnectionUpdate, db: Session = Depends(get_db)
+    scene_id: int,
+    connection_data: ConnectionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a connection within a scene.
 
@@ -355,7 +373,10 @@ async def update_connection(
 
 @router.put("/scenes/{scene_id}/graph", response_model=SceneGraphResponse)
 async def update_scene_graph(
-    scene_id: int, graph_data: SceneGraphUpdate, db: Session = Depends(get_db)
+    scene_id: int,
+    graph_data: SceneGraphUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Bulk update scene graph including all subscenes and their connections.
 

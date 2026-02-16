@@ -2,7 +2,7 @@ import { useState, useEffect, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, User, MoreHorizontal, Search } from 'lucide-react';
 import { toast } from 'sonner';
-import { getAgents, deleteAgent, updateAgent, createAgent } from '../utils/api';
+import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
 import AgentModal from './AgentModal';
@@ -48,6 +48,7 @@ function AgentList() {
   /**
    * Fetch agents from API and update state.
    * Handles loading and error states.
+   * AuthError is handled by ProtectedRoute which redirects to login page.
    */
   const loadAgents = async () => {
     try {
@@ -56,6 +57,10 @@ function AgentList() {
       const data = await getAgents();
       setAgents(data);
     } catch (err) {
+      // AuthError is handled by ProtectedRoute - just don't show error
+      if (err instanceof AuthError) {
+        return;
+      }
       const error = err as Error;
       setError(error.message || 'Failed to load agents');
     } finally {

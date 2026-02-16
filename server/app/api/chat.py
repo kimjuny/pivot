@@ -2,13 +2,16 @@
 
 This module provides endpoints for chatting with agents and managing
 chat history, including conversation state persistence.
+All endpoints require authentication.
 """
 
 import logging
 import traceback
 from datetime import datetime, timezone
 
+from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.models.user import User
 from app.schemas.schemas import (
     PreviewChatRequest,
     StreamEvent,
@@ -27,7 +30,9 @@ router = APIRouter()
 
 @router.post("/preview/chat/stream")
 async def preview_chat_stream(
-    request: PreviewChatRequest, db: Session = Depends(get_db)
+    request: PreviewChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Streaming stateless chat for preview mode using provided agent definition.
 

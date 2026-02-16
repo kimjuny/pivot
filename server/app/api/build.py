@@ -2,13 +2,16 @@
 
 This module provides endpoints for building and modifying agents
 using LLM-powered natural language interactions.
+All endpoints require authentication.
 """
 
 import logging
 import traceback
 from datetime import datetime, timezone
 
+from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.models.user import User
 from app.schemas.build import BuildChatRequest
 from app.schemas.schemas import StreamEvent, StreamEventType
 from app.services.build_service import BuildService
@@ -22,7 +25,11 @@ router = APIRouter()
 
 
 @router.post("/build/chat/stream")
-async def build_chat_stream(request: BuildChatRequest, db: Session = Depends(get_db)):
+async def build_chat_stream(
+    request: BuildChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Streaming endpoint for building/modifying agents.
 
     Returns a Server-Sent Events (SSE) stream with events:

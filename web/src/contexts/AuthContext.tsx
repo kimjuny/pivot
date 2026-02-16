@@ -16,12 +16,50 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   /** Logout function to clear authentication state */
   logout: () => void;
+  /** Check if current token is valid */
+  checkTokenValidity: () => boolean;
+  /** Force logout and redirect to login */
+  forceLogout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = 'pivot_auth_token';
 const USER_KEY = 'pivot_auth_user';
+
+/** Event name for auth expiry events */
+export const AUTH_EXPIRED_EVENT = 'pivot:auth-expired';
+
+/**
+ * Decode JWT token to extract payload.
+ * Returns null if token is invalid or cannot be decoded.
+ */
+const decodeToken = (token: string): { exp?: number; sub?: string } | null => {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1])) as { exp?: number; sub?: string };
+    return payload;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Check if a token is valid (not expired).
+ * Returns true if token exists and hasn't expired.
+ */
+export const isTokenValid = (): boolean => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (!token) return false;
+
+  const decoded = decodeToken(token);
+  if (!decoded || !decoded.exp) return false;
+
+  // Check with 60 second buffer
+  const now = Math.floor(Date.now() / 1000);
+  return decoded.exp > now + 60;
+};
 
 /**
  * Authentication Provider Component.
@@ -34,8 +72,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   /**
+   * Check if the current token is valid (exists and not expired).
+   */
+  const checkTokenValidity = useCallback((): boolean => {
+    return isTokenValid();
+  }, []);
+
+  /**
+   * Force logout and dispatch event for the app to handle.
+   */
+  const forceLogout = useCallback(() => {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    setUser(null);
+    // Dispatch custom event for app-wide handling
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+  }, []);
+
+  /**
    * Initialize auth state from localStorage on mount.
-   * This ensures the user stays logged in across page refreshes.
+   * Validates token and clears invalid/expired tokens.
    */
   useEffect(() => {
     const storedToken = localStorage.getItem(TOKEN_KEY);
@@ -43,8 +99,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (storedToken && storedUser) {
       try {
-        const parsedUser = JSON.parse(storedUser) as User;
-        setUser(parsedUser);
+        // Validate token before setting user
+        const decoded = decodeToken(storedToken);
+        if (decoded && decoded.exp) {
+          const now = Math.floor(Date.now() / 1000);
+          if (decoded.exp > now) {
+            const parsedUser = JSON.parse(storedUser) as User;
+            setUser(parsedUser);
+          } else {
+            // Token expired, clear storage
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem(USER_KEY);
+          }
+        } else {
+          // Invalid token, clear storage
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(USER_KEY);
+        }
       } catch {
         // Clear invalid stored data
         localStorage.removeItem(TOKEN_KEY);
@@ -91,7 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, checkTokenValidity, forceLogout }}>
       {children}
     </AuthContext.Provider>
   );

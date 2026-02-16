@@ -1,12 +1,14 @@
 """API endpoints for agent management.
 
 This module provides CRUD operations for agents.
+All endpoints require authentication.
 """
 
 import logging
 from datetime import timezone
 from typing import Any
 
+from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.crud.agent import agent as agent_crud
 from app.crud.connection import connection as connection_crud
@@ -14,6 +16,7 @@ from app.crud.llm import llm as llm_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
 from app.models.agent import ChatHistory, Connection
+from app.models.user import User
 from app.schemas.schemas import (
     AgentCreate,
     AgentDetailResponse,
@@ -36,7 +39,10 @@ router = APIRouter()
 
 @router.get("/agents", response_model=list[AgentResponse])
 async def get_agents(
-    skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Get all agents with pagination.
 
@@ -76,7 +82,9 @@ async def get_agents(
 
 @router.post("/agents", response_model=AgentResponse, status_code=201)
 async def create_agent(
-    agent_data: AgentCreate, db: Session = Depends(get_db)
+    agent_data: AgentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a new agent.
 
@@ -135,7 +143,10 @@ async def create_agent(
 
 @router.put("/agents/{agent_id}", response_model=AgentResponse)
 async def update_agent(
-    agent_id: int, agent_data: AgentUpdate, db: Session = Depends(get_db)
+    agent_id: int,
+    agent_data: AgentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update an existing agent.
 
@@ -209,7 +220,11 @@ async def update_agent(
 
 
 @router.get("/agents/{agent_id}", response_model=AgentDetailResponse)
-async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def get_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
     """Get a single agent by ID with full details (scenes and graphs).
 
     Args:
@@ -298,7 +313,10 @@ async def get_agent(agent_id: int, db: Session = Depends(get_db)) -> dict[str, A
 
 @router.put("/agents/{agent_id}/scenes", response_model=list[SceneResponse])
 async def update_agent_scenes(
-    agent_id: int, scenes_update: AgentSceneListUpdate, db: Session = Depends(get_db)
+    agent_id: int,
+    scenes_update: AgentSceneListUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Bulk update scenes for an agent.
 
@@ -424,7 +442,11 @@ async def update_agent_scenes(
 
 
 @router.delete("/agents/{agent_id}", status_code=204)
-async def delete_agent(agent_id: int, db: Session = Depends(get_db)):
+async def delete_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Delete an agent and all associated data.
 
     Recursively deletes:

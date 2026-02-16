@@ -10,7 +10,10 @@
       "Bash(poetry lock:*)",
       "Bash(sqlite3:*)",
       "Bash(poetry run python:*)",
-      "Bash(npm run type-check:*)"
+      "Bash(npm run type-check:*)",
+      "Bash(./lint.sh)",
+      "Bash(python:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

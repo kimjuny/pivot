@@ -16,18 +16,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 
-interface NavigationProps {
-  /** Callback when user clicks login button (opens login modal) */
-  onLoginClick: () => void;
-}
-
 /**
  * Navigation bar component.
  * Displays app logo, center navigation menu, and user actions with proper accessibility support.
  * When viewing an agent detail page, shows agent selector dropdown.
  * Shows user menu with logout option when authenticated.
  */
-function Navigation({ onLoginClick }: NavigationProps) {
+function Navigation() {
   const navigate = useNavigate();
   const { agentId } = useParams<{ agentId?: string }>();
   const { user, logout } = useAuth();
@@ -37,11 +32,20 @@ function Navigation({ onLoginClick }: NavigationProps) {
 
   /**
    * Handle logout click.
-   * Shows confirmation toast and logs out the user.
+   * Logs out the user and redirects to login page.
    */
   const handleLogout = () => {
     logout();
     toast.success('Signed out successfully');
+    navigate('/', { replace: true });
+  };
+
+  /**
+   * Handle sign in click.
+   * Navigates to login page.
+   */
+  const handleSignIn = () => {
+    navigate('/');
   };
 
   /**
@@ -72,7 +76,7 @@ function Navigation({ onLoginClick }: NavigationProps) {
   };
 
   const handleNavigateToAgents = () => {
-    navigate('/');
+    navigate('/agents');
   };
 
   return (
@@ -279,7 +283,7 @@ function Navigation({ onLoginClick }: NavigationProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={onLoginClick}
+              onClick={handleSignIn}
               className="flex items-center gap-1.5"
               aria-label="Sign in"
             >

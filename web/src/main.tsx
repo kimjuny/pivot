@@ -1,27 +1,76 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import App from './App'
+import LoginPage from './components/LoginPage'
+import AgentList from './components/AgentList'
+import AgentDetailPage from './components/AgentDetailPage'
 import LLMList from './components/LLMList'
 import Navigation from './components/Navigation'
-import LoginModal from './components/LoginModal'
-import { AuthProvider } from './contexts/AuthContext'
+import { AuthProvider, useAuth, isTokenValid } from './contexts/AuthContext'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './index.css'
 
 /**
- * LLM List Page wrapper with Navigation and login modal.
+ * Protected route wrapper.
+ * Redirects to login page if user is not authenticated.
+ */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+
+  // Show loading while checking auth state
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="flex flex-col items-center space-y-4">
+          <div className="spinner"></div>
+          <div className="text-lg text-muted-foreground font-medium">Loading…</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!user || !isTokenValid()) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+/**
+ * Layout wrapper with Navigation for authenticated pages.
+ */
+function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-background text-foreground">
+        <Navigation />
+        {children}
+      </div>
+    </ProtectedRoute>
+  );
+}
+
+/**
+ * Agent List Page with layout.
+ */
+function AgentListPage() {
+  return (
+    <AuthenticatedLayout>
+      <AgentList />
+    </AuthenticatedLayout>
+  );
+}
+
+/**
+ * LLM List Page with layout.
  */
 function LLMListPage() {
-  const [isLoginModalOpen, setIsLoginModalOpen] = React.useState(false);
-
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <Navigation onLoginClick={() => setIsLoginModalOpen(true)} />
+    <AuthenticatedLayout>
       <LLMList />
-      <LoginModal open={isLoginModalOpen} onOpenChange={setIsLoginModalOpen} />
-    </div>
+    </AuthenticatedLayout>
   );
 }
 
@@ -31,9 +80,15 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            <Route path="/" element={<App />} />
-            <Route path="/agent/:agentId" element={<App />} />
+            {/* Public route - Login page */}
+            <Route path="/" element={<LoginPage />} />
+
+            {/* Protected routes */}
+            <Route path="/agents" element={<AgentListPage />} />
+            <Route path="/agent/:agentId" element={<AgentDetailPage />} />
             <Route path="/llms" element={<LLMListPage />} />
+
+            {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           <Toaster />
@@ -42,4 +97,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ThemeProvider>
   </React.StrictMode>,
 )
-
