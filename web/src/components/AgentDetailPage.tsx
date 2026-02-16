@@ -5,6 +5,7 @@ import Navigation from './Navigation';
 import { getAgentById, AuthError } from '../utils/api';
 import type { Agent, Scene } from '../types';
 import { useSceneGraphStore } from '../store/sceneGraphStore';
+import { useAgentTabStore } from '../store/agentTabStore';
 import { isTokenValid } from '../contexts/AuthContext';
 
 /**
@@ -80,6 +81,30 @@ function AgentDetailPage() {
   useEffect(() => {
     void loadAgentDetails();
   }, [agentId, loadAgentDetails]);
+
+  /**
+   * Clear tab store when leaving the page or switching to a different agent.
+   * This prevents tabs from previous agent appearing when viewing a new agent.
+   */
+  useEffect(() => {
+    return () => {
+      useAgentTabStore.getState().closeAllTabs();
+    };
+  }, [agentId]);
+
+  /**
+   * Open a tab for the first scene when the page loads with scenes available.
+   * This ensures users see content immediately instead of an empty state.
+   */
+  useEffect(() => {
+    if (selectedScene && !isInitializing) {
+      useAgentTabStore.getState().openTab({
+        type: 'scene',
+        name: selectedScene.name,
+        resourceId: selectedScene.id,
+      });
+    }
+  }, [selectedScene, isInitializing]);
 
   /**
    * Refresh scenes list from server.

@@ -228,14 +228,13 @@ function Navigation() {
             asChild
           >
             <a
-              href="https://github.com"
+              href="https://github.com/kimjuny/pivot"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5"
-              aria-label="View on GitHub, 23.4K stars"
+              aria-label="View on GitHub"
             >
               <Github className="w-4 h-4" aria-hidden="true" />
-              <span>23.4K</span>
             </a>
           </Button>
 
