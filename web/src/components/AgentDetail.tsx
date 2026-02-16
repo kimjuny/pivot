@@ -14,10 +14,13 @@ import {
   ReactFlowInstance
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { X } from 'lucide-react';
 import { usePreviewChatStore } from '../store/previewChatStore';
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useBuildChatStore } from '../store/buildChatStore';
+import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import DraggableDialog from './DraggableDialog';
 import BuildChatInterface from './BuildChatInterface';
 import PreviewChatInterface from './PreviewChatInterface';
@@ -81,6 +84,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     reset
   } = useAgentWorkStore();
   const { reset: resetBuildChat } = useBuildChatStore();
+  const { tabs, activeTabId, setActiveTab, closeTab } = useAgentTabStore();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -717,69 +721,138 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
       <SidebarInset className="flex flex-col bg-background overflow-hidden">
         {/* Main Content Area */}
-        <div className="flex-1 relative overflow-hidden">
-          {/* React Flow Canvas */}
-          <div
-            className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
-              }`}
-          >
-            {/* Sidebar Trigger Button - Floating */}
-            <div className="absolute top-3 left-3 z-10">
-              <SidebarTrigger />
-            </div>
-
-            {mode === 'preview' && (
-              <div className="absolute top-3 left-14 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
-                <div className="relative">
-                  <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
-                  <div className="w-2 h-2 bg-danger rounded-full relative" />
-                </div>
-                <span className="text-xs font-medium text-foreground">Realtime Graph</span>
-              </div>
-            )}
-
-            <ControlButtons
-              mode={mode}
-              onModeChange={handleModeChange}
-            />
-
-
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onPaneClick={onPaneClick}
-              onNodeClick={(event, node) => handleElementClick(event, node)}
-              onEdgeClick={(event, edge) => handleElementClick(event, edge)}
-              onContextMenu={handleContextMenu}
-              onNodeContextMenu={handleNodeContextMenu}
-              onEdgeContextMenu={handleEdgeContextMenu}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              fitView
-              fitViewOptions={{ padding: 0.2, maxZoom: 0.9 }}
-              onInit={(instance) => {
-                reactFlowInstanceRef.current = instance;
-              }}
-            >
-              <Controls />
-              <MiniMap />
-              <Background />
-            </ReactFlow>
-
-            {selectedElement && mode === 'edit' && (
-              <EditPanel
-                key={`${selectedElement.type}-${selectedElement.id}`}
-                element={selectedElement}
-                sceneId={currentSceneId}
-                onClose={() => setSelectedElement(null)}
-                onNodeUpdate={handleNodeUpdate}
-                onEdgeUpdate={handleEdgeUpdate}
-              />
-            )}
+        <div className="flex-1 relative overflow-hidden flex flex-col">
+          {/* Sidebar Trigger Button - Floating */}
+          <div className="absolute top-3 left-3 z-10">
+            <SidebarTrigger />
           </div>
+
+          {mode === 'preview' && (
+            <div className="absolute top-3 left-14 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
+              <div className="relative">
+                <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
+                <div className="w-2 h-2 bg-danger rounded-full relative" />
+              </div>
+              <span className="text-xs font-medium text-foreground">Realtime Graph</span>
+            </div>
+          )}
+
+          <ControlButtons
+            mode={mode}
+            onModeChange={handleModeChange}
+          />
+
+          {/* Tabs System */}
+          {tabs.length > 0 ? (
+            <Tabs
+              value={activeTabId || undefined}
+              onValueChange={setActiveTab}
+              className="flex-1 flex flex-col overflow-hidden"
+            >
+              {/* Tabs List */}
+              <div className="border-b border-border bg-muted/30 px-3 pt-14">
+                <TabsList className="h-auto bg-transparent p-0 gap-1">
+                  {tabs.map((tab) => (
+                    <div key={tab.id} className="relative group">
+                      <TabsTrigger
+                        value={tab.id}
+                        className="relative rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background data-[state=inactive]:bg-transparent px-4 py-2 text-sm font-medium transition-all hover:bg-background/50"
+                      >
+                        <span className="mr-6">{tab.name}</span>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            closeTab(tab.id);
+                          }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                          aria-label={`Close ${tab.name} tab`}
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </TabsTrigger>
+                    </div>
+                  ))}
+                </TabsList>
+              </div>
+
+              {/* Tab Content Areas */}
+              {tabs.map((tab) => (
+                <TabsContent
+                  key={tab.id}
+                  value={tab.id}
+                  className="flex-1 m-0 relative overflow-hidden data-[state=inactive]:hidden"
+                >
+                  {tab.type === 'scene' ? (
+                    // Scene content with ReactFlow graph
+                    <div
+                      className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
+                        }`}
+                    >
+                      <ReactFlow
+                        nodes={nodes}
+                        edges={edges}
+                        onNodesChange={onNodesChange}
+                        onEdgesChange={onEdgesChange}
+                        onConnect={onConnect}
+                        onPaneClick={onPaneClick}
+                        onNodeClick={(event, node) => handleElementClick(event, node)}
+                        onEdgeClick={(event, edge) => handleElementClick(event, edge)}
+                        onContextMenu={handleContextMenu}
+                        onNodeContextMenu={handleNodeContextMenu}
+                        onEdgeContextMenu={handleEdgeContextMenu}
+                        nodeTypes={nodeTypes}
+                        edgeTypes={edgeTypes}
+                        fitView
+                        fitViewOptions={{ padding: 0.2, maxZoom: 0.9 }}
+                        onInit={(instance) => {
+                          reactFlowInstanceRef.current = instance;
+                        }}
+                      >
+                        <Controls />
+                        <MiniMap />
+                        <Background />
+                      </ReactFlow>
+
+                      {selectedElement && mode === 'edit' && (
+                        <EditPanel
+                          key={`${selectedElement.type}-${selectedElement.id}`}
+                          element={selectedElement}
+                          sceneId={currentSceneId}
+                          onClose={() => setSelectedElement(null)}
+                          onNodeUpdate={handleNodeUpdate}
+                          onEdgeUpdate={handleEdgeUpdate}
+                        />
+                      )}
+                    </div>
+                  ) : tab.type === 'function' ? (
+                    // Function editor placeholder
+                    <div className="flex items-center justify-center h-full text-muted-foreground">
+                      <div className="text-center space-y-2">
+                        <p className="text-lg font-medium">Function Editor</p>
+                        <p className="text-sm">Coming soon…</p>
+                      </div>
+                    </div>
+                  ) : tab.type === 'skill' ? (
+                    // Skill editor placeholder
+                    <div className="flex items-center justify-center h-full text-muted-foreground">
+                      <div className="text-center space-y-2">
+                        <p className="text-lg font-medium">Skill Editor</p>
+                        <p className="text-sm">Coming soon…</p>
+                      </div>
+                    </div>
+                  ) : null}
+                </TabsContent>
+              ))}
+            </Tabs>
+          ) : (
+            // Empty state when no tabs are open
+            <div className="flex-1 flex items-center justify-center text-muted-foreground">
+              <div className="text-center space-y-2">
+                <p className="text-lg font-medium">No Tab Open</p>
+                <p className="text-sm">Select a scene, function, or skill from the sidebar to get started</p>
+              </div>
+            </div>
+          )}
 
           {/* Preview Chat Panel */}
           {mode === 'preview' && (

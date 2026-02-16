@@ -40,6 +40,7 @@ import AgentModal, { AgentFormData } from './AgentModal';
 import type { Agent, Scene } from '../types';
 import { updateAgent, getTools, type Tool } from '../utils/api';
 import { toast } from 'sonner';
+import { useAgentTabStore } from '../store/agentTabStore';
 
 interface AgentDetailSidebarProps {
     agent: Agent | null;
@@ -77,6 +78,7 @@ function AgentDetailSidebar({
     const [tools, setTools] = useState<Tool[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const hasFetchedToolsRef = useRef(false);
+    const { openTab } = useAgentTabStore();
 
     /**
      * Fetch tools list on component mount.
@@ -140,6 +142,22 @@ function AgentDetailSidebar({
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
         }
+    };
+
+    /**
+     * Handle scene item click.
+     * Opens a new tab for the scene and maintains backward compatibility.
+     */
+    const handleSceneClick = (scene: Scene) => {
+        // Open tab for this scene
+        openTab({
+            type: 'scene',
+            name: scene.name,
+            resourceId: scene.id,
+        });
+
+        // Keep backward compatibility with existing logic
+        onSceneSelect(scene);
     };
 
     return (
@@ -224,7 +242,7 @@ function AgentDetailSidebar({
                                 >
                                     <Layers className="size-4" />
                                     <span className="flex-1 text-left">Scenes</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent text-sidebar-accent-foreground">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
                                         {scenes.length}
                                     </span>
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
@@ -237,7 +255,7 @@ function AgentDetailSidebar({
                                             <SidebarMenuItem key={scene.id} className="group/item">
                                                 <SidebarMenuButton
                                                     isActive={selectedScene?.id === scene.id}
-                                                    onClick={() => onSceneSelect(scene)}
+                                                    onClick={() => handleSceneClick(scene)}
                                                     tooltip={scene.name}
                                                     size="sm"
                                                     className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
@@ -303,7 +321,7 @@ function AgentDetailSidebar({
                                 >
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent text-sidebar-accent-foreground">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
                                         {toolsLoading ? '...' : tools.length}
                                     </span>
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
@@ -380,7 +398,7 @@ function AgentDetailSidebar({
                                 >
                                     <Zap className="size-4" />
                                     <span className="flex-1 text-left">Skills</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/50 italic">
                                         Soon
                                     </span>
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
