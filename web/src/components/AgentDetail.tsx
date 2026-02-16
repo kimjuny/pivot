@@ -730,24 +730,24 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               className="flex-1 flex flex-col overflow-hidden"
             >
               {/* Tabs List */}
-              <div className="border-b border-border bg-muted/30 px-3">
-                <TabsList className="h-auto bg-transparent p-0 gap-1">
+              <div className="border-b border-border px-2">
+                <TabsList className="h-auto bg-transparent p-0 gap-0.5">
                   {tabs.map((tab) => (
                     <div key={tab.id} className="relative group">
                       <TabsTrigger
                         value={tab.id}
-                        className="relative rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background data-[state=inactive]:bg-transparent px-4 py-2 text-sm font-medium transition-all hover:bg-background/50"
+                        className="relative rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background data-[state=inactive]:bg-transparent px-3 py-1.5 text-xs font-medium transition-all hover:bg-background/50"
                       >
-                        <span className="mr-6">{tab.name}</span>
+                        <span className="mr-5">{tab.name}</span>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             closeTab(tab.id);
                           }}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                           aria-label={`Close ${tab.name} tab`}
                         >
-                          <X className="size-3.5" />
+                          <X className="size-3" />
                         </button>
                       </TabsTrigger>
                     </div>
