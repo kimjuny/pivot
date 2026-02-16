@@ -15,6 +15,7 @@ sys.path.append(str(Path(server_dir).parent))
 # Import core modules after path is set up (noqa: E402 - must be after sys.path setup)
 # Import server modules (noqa: E402 - must be after sys.path setup)
 from app.api.agents import router as agents_router  # noqa: E402
+from app.api.auth import init_default_user, router as auth_router  # noqa: E402
 from app.api.build import router as build_router  # noqa: E402
 from app.api.chat import router as chat_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
@@ -22,7 +23,7 @@ from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
-from app.db.session import init_db  # noqa: E402
+from app.db.session import get_engine, get_session  # noqa: E402
 from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.utils.logging_config import get_logger  # noqa: E402
 
@@ -61,6 +62,7 @@ app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 
 # Startup event to initialize database
@@ -72,8 +74,19 @@ async def startup_event():
     """
     logger.info("Starting up application...")
     logger.info("Initializing database...")
-    init_db()
+    from sqlmodel import SQLModel
+
+    engine = get_engine()
+    SQLModel.metadata.create_all(engine)
     logger.info("Database initialized successfully")
+
+    # Initialize default user
+    logger.info("Initializing default user...")
+    try:
+        with next(get_session()) as session:
+            init_default_user(session)
+    except Exception as e:
+        logger.error(f"Failed to initialize default user: {e}")
 
     # Initialize tool system
     logger.info("Initializing tool system...")

@@ -30,9 +30,7 @@ class LLMCRUD:
         """
         return session.get(self.model, id)
 
-    def get_all(
-        self, session: Session, skip: int = 0, limit: int = 100
-    ) -> list[LLM]:
+    def get_all(self, session: Session, skip: int = 0, limit: int = 100) -> list[LLM]:
         """Retrieve multiple LLMs with pagination support.
 
         Args:

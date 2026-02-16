@@ -4,7 +4,7 @@ import {
     ChevronDown,
     Layers,
     Wrench,
-    Plug,
+    Zap,
     Sparkles,
     Plus,
     X,
@@ -55,7 +55,7 @@ interface AgentDetailSidebarProps {
 
 /**
  * Sidebar for agent detail page.
- * Shows agent info, scenes list, tools (not implemented), and MCP (not implemented).
+ * Shows agent info, scenes list, tools, and skills (coming soon).
  * Uses shadcn sidebar components for consistent styling.
  */
 function AgentDetailSidebar({
@@ -72,7 +72,7 @@ function AgentDetailSidebar({
     const { state, setOpen } = useSidebar();
     const [isScenesOpen, setIsScenesOpen] = useState(true);
     const [isToolsOpen, setIsToolsOpen] = useState(false);
-    const [isMCPOpen, setIsMCPOpen] = useState(false);
+    const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [tools, setTools] = useState<Tool[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
@@ -124,7 +124,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'scenes' | 'tools' | 'mcp') => {
+    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -132,13 +132,13 @@ function AgentDetailSidebar({
             setTimeout(() => {
                 setIsScenesOpen(section === 'scenes');
                 setIsToolsOpen(section === 'tools');
-                setIsMCPOpen(section === 'mcp');
+                setIsSkillsOpen(section === 'skills');
             }, 100);
         } else {
             // In expanded mode, toggle section immediately
             setIsScenesOpen(section === 'scenes');
             setIsToolsOpen(section === 'tools');
-            setIsMCPOpen(section === 'mcp');
+            setIsSkillsOpen(section === 'skills');
         }
     };
 
@@ -350,10 +350,10 @@ function AgentDetailSidebar({
                         </SidebarGroup>
                     </Collapsible>
 
-                    {/* MCP Section (Not Implemented) */}
+                    {/* Skills Section */}
                     <Collapsible
-                        open={isMCPOpen}
-                        onOpenChange={setIsMCPOpen}
+                        open={isSkillsOpen}
+                        onOpenChange={setIsSkillsOpen}
                         className="group/collapsible"
                     >
                         <SidebarGroup className="py-0">
@@ -361,13 +361,13 @@ function AgentDetailSidebar({
                             <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
                                 <SidebarMenuItem>
                                     <SidebarMenuButton
-                                        onClick={() => handleSectionClick('mcp')}
-                                        tooltip="MCP"
-                                        isActive={isMCPOpen}
+                                        onClick={() => handleSectionClick('skills')}
+                                        tooltip="Skills"
+                                        isActive={isSkillsOpen}
                                         className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
                                     >
-                                        <Plug className="size-4" />
-                                        <span>MCP</span>
+                                        <Zap className="size-4" />
+                                        <span>Skills</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -375,11 +375,11 @@ function AgentDetailSidebar({
                             {/* Full header for expanded mode */}
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
-                                    onClick={() => handleSectionClick('mcp')}
+                                    onClick={() => handleSectionClick('skills')}
                                     className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
                                 >
-                                    <Plug className="size-4" />
-                                    <span className="flex-1 text-left">MCP</span>
+                                    <Zap className="size-4" />
+                                    <span className="flex-1 text-left">Skills</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                                         Soon
                                     </span>
@@ -389,7 +389,7 @@ function AgentDetailSidebar({
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
                                 <SidebarGroupContent>
                                     <div className="px-2 py-3 text-xs text-muted-foreground text-center">
-                                        MCP integration coming soon…
+                                        Skills integration coming soon…
                                     </div>
                                 </SidebarGroupContent>
                             </CollapsibleContent>

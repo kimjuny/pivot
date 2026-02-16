@@ -1,8 +1,9 @@
-import { Github, Inbox, ChevronDown, Bot, ArrowLeft } from 'lucide-react';
+import { Github, Inbox, ChevronDown, Bot, ArrowLeft, LogOut, User } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { getAgents } from '../utils/api';
 import type { Agent } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ModeToggle } from '@/components/ui/mode-toggle';
@@ -13,18 +14,35 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
+
+interface NavigationProps {
+  /** Callback when user clicks login button (opens login modal) */
+  onLoginClick: () => void;
+}
 
 /**
  * Navigation bar component.
  * Displays app logo, center navigation menu, and user actions with proper accessibility support.
  * When viewing an agent detail page, shows agent selector dropdown.
+ * Shows user menu with logout option when authenticated.
  */
-function Navigation() {
+function Navigation({ onLoginClick }: NavigationProps) {
   const navigate = useNavigate();
   const { agentId } = useParams<{ agentId?: string }>();
+  const { user, logout } = useAuth();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isAgentsButtonHovered, setIsAgentsButtonHovered] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
+
+  /**
+   * Handle logout click.
+   * Shows confirmation toast and logs out the user.
+   */
+  const handleLogout = () => {
+    logout();
+    toast.success('Signed out successfully');
+  };
 
   /**
    * Fetch all agents for the dropdown selector.
@@ -227,16 +245,48 @@ function Navigation() {
 
           <ModeToggle />
 
-          <Button
-            variant="ghost"
-            size="icon"
-            className="rounded-full"
-            aria-label="User menu"
-          >
-            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-              <span className="text-sm font-medium">U</span>
-            </div>
-          </Button>
+          {user ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full"
+                  aria-label={`User menu: ${user.username}`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                    <span className="text-sm font-medium">
+                      {user.username.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <div className="px-2 py-1.5 text-sm font-medium">
+                  {user.username}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onLoginClick}
+              className="flex items-center gap-1.5"
+              aria-label="Sign in"
+            >
+              <User className="w-4 h-4" aria-hidden="true" />
+              <span>Sign in</span>
+            </Button>
+          )}
         </div>
       </div>
     </nav>

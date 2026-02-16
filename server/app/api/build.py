@@ -146,9 +146,7 @@ async def build_chat_stream(request: BuildChatRequest, db: Session = Depends(get
                 )
 
             # Determine which LLM to use
-            llm_id = (
-                agent_detail.llm_id if agent_detail else request.llm_id
-            )
+            llm_id = agent_detail.llm_id if agent_detail else request.llm_id
 
             if not llm_id:
                 error_event = StreamEvent(

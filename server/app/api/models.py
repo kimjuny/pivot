@@ -19,7 +19,7 @@ async def get_models(db: Session = Depends(get_db)) -> dict[str, Any]:
 
     Returns:
         A dictionary containing the list of available LLM names.
-        
+
     Note:
         This endpoint is deprecated. Use /api/llms instead for full LLM details.
     """

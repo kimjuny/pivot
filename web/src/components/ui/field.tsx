@@ -41,4 +41,27 @@ const FieldLabel = React.forwardRef<
 })
 FieldLabel.displayName = "FieldLabel"
 
-export { Field, FieldLabel }
+/**
+ * Error message component for form fields.
+ * Displays validation errors with proper styling.
+ * Should be placed immediately after the input control.
+ */
+const FieldError = React.forwardRef<
+    HTMLParagraphElement,
+    React.ComponentProps<"p">
+>(({ className, ...props }, ref) => {
+    return (
+        <p
+            ref={ref}
+            className={cn(
+                "text-[13px] text-destructive font-medium",
+                "[&_::before]:content-[attr(data-icon)] [&_::before]:mr-1.5 [&_::before]:inline-block",
+                className
+            )}
+            {...props}
+        />
+    )
+})
+FieldError.displayName = "FieldError"
+
+export { Field, FieldLabel, FieldError }

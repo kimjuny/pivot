@@ -3,6 +3,7 @@
 This module provides streaming chat endpoints for the ReAct agent system.
 """
 
+import json
 import logging
 import traceback
 import uuid
@@ -19,7 +20,6 @@ from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEve
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
-import json
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -145,19 +145,25 @@ async def react_chat_stream(
                                 output = json.loads(last_rec.action_output or "{}")
                             except json.JSONDecodeError:
                                 output = {}
-                            
+
                             output["reply"] = request.message
-                            last_rec.action_output = json.dumps(output, ensure_ascii=False)
+                            last_rec.action_output = json.dumps(
+                                output, ensure_ascii=False
+                            )
                             last_rec.updated_at = datetime.now(timezone.utc)
                             db.add(last_rec)
-                            
+
                             # Resume task
                             task = existing_task
                             # Status will be updated to 'running' in engine.run_task
-                            logger.info(f"Resuming task {task.task_id} with CLARIFY reply")
+                            logger.info(
+                                f"Resuming task {task.task_id} with CLARIFY reply"
+                            )
                         else:
                             # Fallback if state is inconsistent
-                            logger.warning(f"Task {existing_task.task_id} is waiting_input but last recursion is not CLARIFY")
+                            logger.warning(
+                                f"Task {existing_task.task_id} is waiting_input but last recursion is not CLARIFY"
+                            )
                             task = existing_task
                     else:
                         # Task exists but not waiting for input? Maybe reviving?
@@ -185,7 +191,7 @@ async def react_chat_stream(
                 db.add(task)
                 db.commit()
                 db.refresh(task)
-            
+
             # Ensure task_id is set
             task_id = task.task_id
 
@@ -391,4 +397,3 @@ async def get_task_state_at_iteration(
         return {"error": "State not found"}, 404
 
     return state
-

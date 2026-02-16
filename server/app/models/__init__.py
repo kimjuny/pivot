@@ -6,6 +6,7 @@ from app.models.react import (
     ReactRecursionState,
     ReactTask,
 )
+from app.models.user import User, UserLogin, UserResponse
 
 __all__ = [
     "LLM",
@@ -17,4 +18,7 @@ __all__ = [
     "ReactTask",
     "Scene",
     "Subscene",
+    "User",
+    "UserLogin",
+    "UserResponse",
 ]

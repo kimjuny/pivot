@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import AgentList from './components/AgentList';
 import AgentDetail from './components/AgentDetail';
 import Navigation from './components/Navigation';
+import LoginModal from './components/LoginModal';
 import { getAgentById } from './utils/api';
 import type { Agent, Scene } from './types';
 import { useSceneGraphStore } from './store/sceneGraphStore';
@@ -11,6 +12,7 @@ import { useSceneGraphStore } from './store/sceneGraphStore';
  * Main application component.
  * Manages routing between agent list and agent visualization views.
  * Handles loading agent details, scenes, and scene graph state.
+ * Manages login modal state for authentication.
  */
 function App() {
   const [isInitializing, setIsInitializing] = useState<boolean>(false);
@@ -18,6 +20,7 @@ function App() {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState<boolean>(false);
   const { agentId } = useParams<{ agentId?: string }>();
   const navigate = useNavigate();
   const isLoadingAgentDetailsRef = useRef<boolean>(false);
@@ -137,15 +140,16 @@ function App() {
   if (!agentId) {
     return (
       <div className="min-h-screen bg-background text-foreground">
-        <Navigation />
+        <Navigation onLoginClick={() => setIsLoginModalOpen(true)} />
         <AgentList />
+        <LoginModal open={isLoginModalOpen} onOpenChange={setIsLoginModalOpen} />
       </div>
     );
   }
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
-      <Navigation />
+      <Navigation onLoginClick={() => setIsLoginModalOpen(true)} />
       <div className="flex-1 min-h-0 bg-background overflow-hidden">
         <AgentDetail
           agent={agent}
@@ -158,6 +162,7 @@ function App() {
           onAgentUpdate={setAgent}
         />
       </div>
+      <LoginModal open={isLoginModalOpen} onOpenChange={setIsLoginModalOpen} />
     </div>
   );
 }

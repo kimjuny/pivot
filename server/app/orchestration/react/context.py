@@ -140,7 +140,7 @@ class ReactContext:
                 # But typically we mark it as 'done' before pausing?
                 # The user said task status becomes waiting_input. Recursion status matches logic in engine.py.
                 # Let's assume completed recursions are what we want.
-                
+
                 # Careful with JSON decoding errors if data is corrupted
                 try:
                     action_output = (
@@ -166,7 +166,7 @@ class ReactContext:
                         rec_dict["tool_call_results"] = tool_results
                     except json.JSONDecodeError:
                         pass
-                
+
                 recursions_list.append(rec_dict)
 
         return cls(

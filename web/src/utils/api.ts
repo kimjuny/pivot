@@ -1,4 +1,5 @@
 import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM } from '../types';
+import { getAuthToken } from '../contexts/AuthContext';
 
 /**
  * API base URL from environment configuration.
@@ -16,12 +17,15 @@ interface RequestOptions {
   method?: string;
   /** Request body as JSON string */
   body?: string;
+  /** Whether to skip adding auth header (for login endpoint) */
+  skipAuth?: boolean;
 }
 
 /**
  * Make an API request to backend server.
  * Handles common request/response logic including error handling.
- * 
+ * Automatically includes auth token if available.
+ *
  * @param endpoint - API endpoint path (e.g., '/agents')
  * @param options - Request configuration options
  * @returns Promise resolving to response data
@@ -30,11 +34,21 @@ interface RequestOptions {
 const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promise<unknown> => {
   const url = `${API_BASE_URL}${endpoint}`;
 
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  // Add auth header if token exists and not explicitly skipped
+  if (!options.skipAuth) {
+    const token = getAuthToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
   const config: RequestInit = {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
     ...options,
   };
 

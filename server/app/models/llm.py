@@ -47,8 +47,6 @@ class LLM(SQLModel, table=True):
         description="JSON output reliability: 'strong', 'weak', or 'none'",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
-    max_context: int = Field(
-        default=128000, description="Maximum context token limit"
-    )
+    max_context: int = Field(default=128000, description="Maximum context token limit")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

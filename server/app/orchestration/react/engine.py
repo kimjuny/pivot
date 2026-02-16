@@ -76,12 +76,10 @@ class ReactEngine:
             ValueError: If JSON cannot be parsed even after all fix attempts
         """
         original_str = json_str
-        
+
         # Step 1: Clean leading/trailing whitespace and invisible characters
         # \s matches all whitespace, \u200b etc. match zero-width spaces
-        json_str = re.sub(
-            r"^\s+|\s+$|[\u200b\u200c\u200d\u2060\uFEFF]", "", json_str
-        )
+        json_str = re.sub(r"^\s+|\s+$|[\u200b\u200c\u200d\u2060\uFEFF]", "", json_str)
 
         # Step 2: Extract first complete JSON object (handles "extra data" issue)
         # Match outermost { ... } structure only
@@ -277,13 +275,11 @@ class ReactEngine:
             # Parse JSON from content to get observe, thought, abstract, action_type
             content = message.content or "{}"
             logger.info(f"LLM response: {content}")
-            
+
             # Use safe JSON parser to handle all common LLM formatting issues
             try:
                 react_output = self._safe_load_json(content)
-                logger.debug(
-                    f"Successfully parsed JSON (trace_id={trace_id})"
-                )
+                logger.debug(f"Successfully parsed JSON (trace_id={trace_id})")
             except ValueError as e:
                 # All parsing attempts failed, log and return error
                 logger.error(
@@ -293,7 +289,7 @@ class ReactEngine:
                     f"Iteration: {task.iteration}\n"
                     f"Error: {e}"
                 )
-                
+
                 recursion.status = "error"
                 recursion.error_log = str(e)
                 recursion.updated_at = datetime.now(timezone.utc)
@@ -308,9 +304,7 @@ class ReactEngine:
             observe = react_output.get("observe", "")
             thought = react_output.get("thought", "")
             abstract = react_output.get("abstract", "")
-            short_term_memory_append = react_output.get(
-                "short_term_memory_append", ""
-            )
+            short_term_memory_append = react_output.get("short_term_memory_append", "")
             action = react_output.get("action", {})
             action_type = action.get("action_type", "")
             action_output = action.get("output", {})
@@ -444,7 +438,7 @@ class ReactEngine:
                 recursion.prompt_tokens = response.usage.prompt_tokens
                 recursion.completion_tokens = response.usage.completion_tokens
                 recursion.total_tokens = response.usage.total_tokens
-                
+
                 # Update task-level token accumulation
                 task.total_prompt_tokens += response.usage.prompt_tokens
                 task.total_completion_tokens += response.usage.completion_tokens
@@ -456,7 +450,7 @@ class ReactEngine:
 
             # Save current_state snapshot for this recursion
             # This enables state recovery, debugging, and historical analysis
-            
+
             # Append current recursion to context.recursions for valid snapshot
             current_rec_dict = {
                 "trace_id": trace_id,
@@ -468,8 +462,8 @@ class ReactEngine:
                 },
             }
             if tool_results:
-                 current_rec_dict["tool_call_results"] = tool_results
-            
+                current_rec_dict["tool_call_results"] = tool_results
+
             context.recursions.append(current_rec_dict)
 
             current_state_json = json.dumps(context.to_dict(), ensure_ascii=False)
@@ -514,14 +508,14 @@ class ReactEngine:
                 # For ANSWER, don't add to messages as the task is complete
                 # Task status will be updated to 'completed' in run_task
                 pass
-            
+
             if action_type == "CLARIFY":
                 # For CLARIFY, we update task status to 'waiting_input'
                 # The run_task loop will handle the break
                 task.status = "waiting_input"
                 task.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
-            
+
             # For all other action types (CALL_TOOL, RE_PLAN, etc.),
             # we rely on the state machine context to convey the results
             # No need to append to messages
@@ -537,7 +531,7 @@ class ReactEngine:
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
             }
-            
+
             # Add token usage if available
             if response.usage:
                 event_data["tokens"] = {
@@ -545,7 +539,7 @@ class ReactEngine:
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
                 }
-            
+
             return recursion, event_data
 
         except Exception as e:
@@ -558,7 +552,7 @@ class ReactEngine:
                 f"Task ID: {task.task_id}\n"
                 f"Iteration: {task.iteration}"
             )
-            
+
             recursion.status = "error"
             recursion.error_log = error_msg
             recursion.updated_at = datetime.now(timezone.utc)
@@ -587,7 +581,7 @@ class ReactEngine:
         # System message MUST be at index 0 for most LLMs
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": ""},  # Placeholder, updated each recursion
-            {"role": "user", "content": task.user_message}
+            {"role": "user", "content": task.user_message},
         ]
 
         # Update task status
@@ -716,8 +710,6 @@ class ReactEngine:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
-
-
                 elif action_type == "CLARIFY":
                     yield {
                         "type": "clarify",
@@ -727,7 +719,7 @@ class ReactEngine:
                         "data": event_data.get("output"),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
-                    
+
                     # Increment iteration before breaking so next run starts at next iteration
                     task.iteration += 1
                     task.updated_at = datetime.now(timezone.utc)

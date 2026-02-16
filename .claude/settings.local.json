@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)",
+      "Bash(poetry run ruff check:*)",
+      "Bash(poetry run ruff format:*)",
+      "Bash(npx eslint:*)",
+      "Bash(poetry install:*)",
+      "Bash(poetry lock:*)",
+      "Bash(sqlite3:*)",
+      "Bash(poetry run python:*)"
+    ]
+  }
+}

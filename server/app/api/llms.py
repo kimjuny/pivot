@@ -73,9 +73,7 @@ async def create_llm(
     """
     existing_llm = llm_crud.get_by_name(llm_data.name, db)
     if existing_llm:
-        raise HTTPException(
-            status_code=400, detail="LLM with this name already exists"
-        )
+        raise HTTPException(status_code=400, detail="LLM with this name already exists")
 
     llm = llm_crud.create(
         db,

@@ -57,18 +57,20 @@ async def get_agents(
             llm = llm_crud.get(agent.llm_id, db)
             if llm:
                 model_display = f"{llm.name} ({llm.model})"
-        
-        result.append({
-            "id": agent.id,
-            "name": agent.name,
-            "description": agent.description,
-            "llm_id": agent.llm_id,
-            "model_name": model_display,
-            "is_active": agent.is_active,
-            "max_iteration": agent.max_iteration,
-            "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
-            "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
-        })
+
+        result.append(
+            {
+                "id": agent.id,
+                "name": agent.name,
+                "description": agent.description,
+                "llm_id": agent.llm_id,
+                "model_name": model_display,
+                "is_active": agent.is_active,
+                "max_iteration": agent.max_iteration,
+                "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
+                "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+            }
+        )
     return result
 
 
@@ -110,14 +112,14 @@ async def create_agent(
         is_active=agent_data.is_active,
         max_iteration=agent_data.max_iteration,
     )
-    
+
     # Get LLM name for display
     model_display = agent.model_name or "N/A"
     if agent.llm_id:
         llm = llm_crud.get(agent.llm_id, db)
         if llm:
             model_display = f"{llm.name} ({llm.model})"
-    
+
     return {
         "id": agent.id,
         "name": agent.name,

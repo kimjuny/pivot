@@ -54,7 +54,9 @@ class ReactStreamEvent(BaseModel):
     trace_id: str | None = Field(default=None, description="Current recursion trace ID")
     iteration: int = Field(..., description="Current iteration index")
     delta: str | None = Field(default=None, description="Incremental text content")
-    data: dict[str, Any] | None = Field(default=None, description="Additional event data")
+    data: dict[str, Any] | None = Field(
+        default=None, description="Additional event data"
+    )
     timestamp: datetime = Field(..., description="Event timestamp")
     created_at: str | None = Field(
         default=None, description="Recursion creation timestamp (ISO format)"

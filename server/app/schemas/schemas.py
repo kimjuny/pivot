@@ -348,9 +348,7 @@ class LLMCreate(BaseModel):
         description="JSON output reliability: 'strong', 'weak', or 'none'",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
-    max_context: int = Field(
-        default=128000, description="Maximum context token limit"
-    )
+    max_context: int = Field(default=128000, description="Maximum context token limit")
 
 
 class LLMUpdate(BaseModel):
