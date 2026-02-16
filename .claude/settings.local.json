@@ -9,7 +9,8 @@
       "Bash(poetry install:*)",
       "Bash(poetry lock:*)",
       "Bash(sqlite3:*)",
-      "Bash(poetry run python:*)"
+      "Bash(poetry run python:*)",
+      "Bash(npm run type-check:*)"
     ]
   }
 }
