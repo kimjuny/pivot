@@ -84,7 +84,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     reset
   } = useAgentWorkStore();
   const { reset: resetBuildChat } = useBuildChatStore();
-  const { tabs, activeTabId, setActiveTab, closeTab } = useAgentTabStore();
+  const { tabs, activeTabId, setActiveTab, closeTab, replaceTabResource } = useAgentTabStore();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -690,6 +690,18 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       // 1. Single API Call to sync everything
       const updatedScenes = await updateAgentScenes(agentId, scenesPayload);
 
+      // Diff and update tabs for any scenes that had temporary IDs
+      if (workspaceAgent.scenes) {
+        workspaceAgent.scenes.forEach(scene => {
+          if (scene.id && scene.id < 0) {
+            const updatedScene = updatedScenes.find(s => s.name === scene.name);
+            if (updatedScene) {
+              replaceTabResource(scene.id, updatedScene.id, 'scene');
+            }
+          }
+        });
+      }
+
       // 2. Mark everything as committed (update Original to match Workspace)
       // Ideally we should update originalAgent with the response from server (updatedScenes).
       // But updateAgentScenes only returns Scene[] (with updated IDs).
@@ -740,8 +752,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               className="flex-1 flex flex-col overflow-hidden"
             >
               {/* Tabs List */}
-              <div className="border-b border-border px-2">
-                <TabsList className="h-auto bg-transparent p-0 gap-0.5">
+              <div className="bg-muted border-b border-border px-2 pt-1.5">
+                <TabsList className="h-auto bg-transparent p-0 gap-1 w-full justify-start items-end -mb-px">
                   {tabs.map((tab) => {
                     // Get icon based on tab type (matching sidebar icons)
                     const TabIcon = tab.type === 'scene' ? Layers
@@ -752,16 +764,31 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                       <div key={tab.id} className="relative group">
                         <TabsTrigger
                           value={tab.id}
-                          className="relative rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-background data-[state=inactive]:bg-transparent px-2.5 py-1.5 pr-7 text-xs font-medium transition-all hover:bg-background/50"
+                          className="
+                            relative 
+                            rounded-t-md rounded-b-none 
+                            border-t border-x border-transparent 
+                            px-3 py-2 pr-7 
+                            text-xs font-medium 
+                            text-muted-foreground
+                            transition-all 
+                            hover:text-foreground hover:bg-background/40
+                            data-[state=active]:bg-background 
+                            data-[state=active]:text-foreground 
+                            data-[state=active]:border-border 
+                            data-[state=active]:shadow-none
+                            data-[state=active]:z-10
+                            data-[state=active]:font-semibold
+                          "
                         >
-                          <TabIcon className="size-3 mr-1.5 shrink-0" />
-                          <span>{tab.name}</span>
+                          <TabIcon className="size-3.5 mr-2 shrink-0 opacity-70 group-hover:opacity-100 data-[state=active]:opacity-100" />
+                          <span className="truncate max-w-[120px]">{tab.name}</span>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               closeTab(tab.id);
                             }}
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded-sm hover:bg-muted text-muted-foreground hover:text-foreground transition-all opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                             aria-label={`Close ${tab.name} tab`}
                           >
                             <X className="size-3" />

@@ -26,6 +26,8 @@ interface AgentTabStore {
     setActiveTab: (id: string) => void;
     /** Close all tabs */
     closeAllTabs: () => void;
+    /** Replace a tab's resource ID (e.g. after a new scene is saved and gets a real ID) */
+    replaceTabResource: (oldResourceId: number | string, newResourceId: number | string, type: 'scene' | 'function' | 'skill') => void;
 }
 
 /**
@@ -87,6 +89,34 @@ export const useAgentTabStore = create<AgentTabStore>((set, get) => ({
 
     setActiveTab: (id) => {
         set({ activeTabId: id });
+    },
+
+    replaceTabResource: (oldResourceId, newResourceId, type) => {
+        const { tabs, activeTabId } = get();
+        const oldTabId = `${type}-${oldResourceId}`;
+        const newTabId = `${type}-${newResourceId}`;
+
+        // If new tab already exists (shouldn't happen usually), closes the old one
+        // But here we want to mutate the old one to the new one
+
+        const updatedTabs = tabs.map(tab => {
+            if (tab.id === oldTabId) {
+                return {
+                    ...tab,
+                    id: newTabId,
+                    resourceId: newResourceId
+                };
+            }
+            return tab;
+        });
+
+        // Update active ID if needed
+        const newActiveTabId = activeTabId === oldTabId ? newTabId : activeTabId;
+
+        set({
+            tabs: updatedTabs,
+            activeTabId: newActiveTabId
+        });
     },
 
     closeAllTabs: () => {
