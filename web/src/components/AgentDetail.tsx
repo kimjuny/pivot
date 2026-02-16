@@ -722,26 +722,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       <SidebarInset className="flex flex-col bg-background overflow-hidden">
         {/* Main Content Area */}
         <div className="flex-1 relative overflow-hidden flex flex-col">
-          {/* Sidebar Trigger Button - Floating */}
-          <div className="absolute top-3 left-3 z-10">
-            <SidebarTrigger />
-          </div>
-
-          {mode === 'preview' && (
-            <div className="absolute top-3 left-14 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
-              <div className="relative">
-                <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
-                <div className="w-2 h-2 bg-danger rounded-full relative" />
-              </div>
-              <span className="text-xs font-medium text-foreground">Realtime Graph</span>
-            </div>
-          )}
-
-          <ControlButtons
-            mode={mode}
-            onModeChange={handleModeChange}
-          />
-
           {/* Tabs System */}
           {tabs.length > 0 ? (
             <Tabs
@@ -750,7 +730,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               className="flex-1 flex flex-col overflow-hidden"
             >
               {/* Tabs List */}
-              <div className="border-b border-border bg-muted/30 px-3 pt-14">
+              <div className="border-b border-border bg-muted/30 px-3">
                 <TabsList className="h-auto bg-transparent p-0 gap-1">
                   {tabs.map((tab) => (
                     <div key={tab.id} className="relative group">
@@ -788,6 +768,27 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                       className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
                         }`}
                     >
+                      {/* Sidebar Trigger Button - Inside tab content */}
+                      <div className="absolute top-3 left-3 z-10">
+                        <SidebarTrigger />
+                      </div>
+
+                      {mode === 'preview' && (
+                        <div className="absolute top-3 left-14 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
+                          <div className="relative">
+                            <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
+                            <div className="w-2 h-2 bg-danger rounded-full relative" />
+                          </div>
+                          <span className="text-xs font-medium text-foreground">Realtime Graph</span>
+                        </div>
+                      )}
+
+                      {/* Preview Button - Inside scene graph */}
+                      <ControlButtons
+                        mode={mode}
+                        onModeChange={handleModeChange}
+                      />
+
                       <ReactFlow
                         nodes={nodes}
                         edges={edges}
@@ -826,18 +827,30 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                     </div>
                   ) : tab.type === 'function' ? (
                     // Function editor placeholder
-                    <div className="flex items-center justify-center h-full text-muted-foreground">
-                      <div className="text-center space-y-2">
-                        <p className="text-lg font-medium">Function Editor</p>
-                        <p className="text-sm">Coming soon…</p>
+                    <div className="relative h-full">
+                      {/* Sidebar Trigger Button */}
+                      <div className="absolute top-3 left-3 z-10">
+                        <SidebarTrigger />
+                      </div>
+                      <div className="flex items-center justify-center h-full text-muted-foreground">
+                        <div className="text-center space-y-2">
+                          <p className="text-lg font-medium">Function Editor</p>
+                          <p className="text-sm">Coming soon…</p>
+                        </div>
                       </div>
                     </div>
                   ) : tab.type === 'skill' ? (
                     // Skill editor placeholder
-                    <div className="flex items-center justify-center h-full text-muted-foreground">
-                      <div className="text-center space-y-2">
-                        <p className="text-lg font-medium">Skill Editor</p>
-                        <p className="text-sm">Coming soon…</p>
+                    <div className="relative h-full">
+                      {/* Sidebar Trigger Button */}
+                      <div className="absolute top-3 left-3 z-10">
+                        <SidebarTrigger />
+                      </div>
+                      <div className="flex items-center justify-center h-full text-muted-foreground">
+                        <div className="text-center space-y-2">
+                          <p className="text-lg font-medium">Skill Editor</p>
+                          <p className="text-sm">Coming soon…</p>
+                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -846,7 +859,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             </Tabs>
           ) : (
             // Empty state when no tabs are open
-            <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <div className="flex-1 relative flex items-center justify-center text-muted-foreground">
+              {/* Sidebar Trigger Button - In empty state */}
+              <div className="absolute top-3 left-3 z-10">
+                <SidebarTrigger />
+              </div>
               <div className="text-center space-y-2">
                 <p className="text-lg font-medium">No Tab Open</p>
                 <p className="text-sm">Select a scene, function, or skill from the sidebar to get started</p>

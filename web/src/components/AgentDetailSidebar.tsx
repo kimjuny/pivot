@@ -226,7 +226,7 @@ function AgentDetailSidebar({
                                         onClick={() => handleSectionClick('scenes')}
                                         tooltip="Scenes"
                                         isActive={isScenesOpen}
-                                        className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground/80 hover:bg-sidebar-accent/50 data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent/50"
                                     >
                                         <Layers className="size-4" />
                                         <span>Scenes</span>
@@ -238,7 +238,7 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('scenes')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground/80 hover:bg-sidebar-accent/50 rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent/50"
                                 >
                                     <Layers className="size-4" />
                                     <span className="flex-1 text-left">Scenes</span>
@@ -258,7 +258,7 @@ function AgentDetailSidebar({
                                                     onClick={() => handleSceneClick(scene)}
                                                     tooltip={scene.name}
                                                     size="sm"
-                                                    className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+                                                    className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent/50"
                                                 >
                                                     <span className="truncate">{scene.name}</span>
                                                 </SidebarMenuButton>
@@ -278,7 +278,7 @@ function AgentDetailSidebar({
                                         <SidebarMenuItem>
                                             <SidebarMenuButton
                                                 onClick={onCreateScene}
-                                                className="border border-dashed border-sidebar-border text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent hover:border-sidebar-primary"
+                                                className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent/50"
                                                 size="sm"
                                             >
                                                 <Plus className="size-3.5" />
@@ -305,7 +305,7 @@ function AgentDetailSidebar({
                                         onClick={() => handleSectionClick('tools')}
                                         tooltip="Tools"
                                         isActive={isToolsOpen}
-                                        className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground/80 hover:bg-sidebar-accent/50 data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent/50"
                                     >
                                         <Wrench className="size-4" />
                                         <span>Tools</span>
@@ -317,7 +317,7 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('tools')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground/80 hover:bg-sidebar-accent/50 rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent/50"
                                 >
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
@@ -330,11 +330,11 @@ function AgentDetailSidebar({
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
                                     {toolsLoading ? (
-                                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading tools…
                                         </div>
                                     ) : tools.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             No tools available
                                         </div>
                                     ) : (
@@ -345,7 +345,7 @@ function AgentDetailSidebar({
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
                                                                 size="sm"
-                                                                className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent pl-7"
+                                                                className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50 pl-7"
                                                             >
                                                                 <span className="truncate">{tool.name}</span>
                                                             </SidebarMenuButton>
@@ -382,7 +382,7 @@ function AgentDetailSidebar({
                                         onClick={() => handleSectionClick('skills')}
                                         tooltip="Skills"
                                         isActive={isSkillsOpen}
-                                        className="text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground/80 hover:bg-sidebar-accent/50 data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent/50"
                                     >
                                         <Zap className="size-4" />
                                         <span>Skills</span>
@@ -394,7 +394,7 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('skills')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground/80 hover:bg-sidebar-accent/50 rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent/50"
                                 >
                                     <Zap className="size-4" />
                                     <span className="flex-1 text-left">Skills</span>
@@ -406,7 +406,7 @@ function AgentDetailSidebar({
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
                                 <SidebarGroupContent>
-                                    <div className="px-2 py-3 text-xs text-muted-foreground text-center">
+                                    <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                         Skills integration coming soon…
                                     </div>
                                 </SidebarGroupContent>
@@ -422,7 +422,7 @@ function AgentDetailSidebar({
                                 <TooltipTrigger asChild>
                                     <SidebarMenuButton
                                         onClick={onOpenBuildChat}
-                                        className="bg-sidebar-primary/10 hover:bg-sidebar-primary/20 text-sidebar-primary"
+                                        className="bg-sidebar-primary/10 hover:bg-sidebar-primary/15 text-sidebar-primary"
                                         size="lg"
                                     >
                                         <Sparkles className="size-4" />
