@@ -111,7 +111,13 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
         ? `http://localhost:8003/api/react/tasks/${taskId}/states/${iteration}`
         : `/api/react/tasks/${taskId}/states/${iteration}`;
 
-      const response = await fetch(apiUrl);
+      const token = getAuthToken();
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(apiUrl, { headers });
       if (!response.ok) throw new Error('Failed to fetch state');
 
       const data = await response.json() as { current_state: string };
@@ -367,40 +373,55 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 )
               );
             } else if (currentRecursion && currentTaskId) {
-              // Add event to current recursion
-              currentRecursion.events.push(event);
+              // Create new events array to ensure React detects state changes
+              const updatedEvents: ReactStreamEvent[] = [...currentRecursion.events, event];
 
               if (event.type === 'observe') {
-                currentRecursion.observe = event.delta ?? '';
-                if (event.tokens) {
-                  currentRecursion.tokens = event.tokens;
-                }
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  observe: event.delta ?? '',
+                  tokens: event.tokens ?? currentRecursion.tokens,
+                };
               } else if (event.type === 'thought') {
-                currentRecursion.thought = event.delta ?? '';
-                if (event.tokens) {
-                  currentRecursion.tokens = event.tokens;
-                }
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  thought: event.delta ?? '',
+                  tokens: event.tokens ?? currentRecursion.tokens,
+                };
               } else if (event.type === 'abstract') {
-                currentRecursion.abstract = event.delta ?? '';
-                if (event.tokens) {
-                  currentRecursion.tokens = event.tokens;
-                }
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  abstract: event.delta ?? '',
+                  tokens: event.tokens ?? currentRecursion.tokens,
+                };
               } else if (event.type === 'action') {
-                currentRecursion.action = event.delta ?? '';
-                if (event.tokens) {
-                  currentRecursion.tokens = event.tokens;
-                }
                 // Mark recursion as completed after action event
-                currentRecursion.status = 'completed';
-                currentRecursion.endTime = event.timestamp;
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  action: event.delta ?? '',
+                  status: 'completed' as const,
+                  endTime: event.timestamp,
+                  tokens: event.tokens ?? currentRecursion.tokens,
+                };
               } else if (event.type === 'tool_call') {
-                // Tool call event is already in events array, no special handling needed
-                // No special handling needed - data is rendered in renderRecursion
+                // Tool call event - just add to events, no special field update needed
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                };
               } else if (event.type === 'error') {
-                currentRecursion.status = 'error';
-                currentRecursion.endTime = event.timestamp;
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  status: 'error' as const,
+                  endTime: event.timestamp,
+                };
               } else if (event.type === 'answer') {
-                // ... (answer logic)
+                // Answer event - update message content and mark recursion completed
                 const answerData = event.data as { answer?: string } | undefined;
                 if (answerData?.answer) {
                   setMessages((prev) =>
@@ -414,10 +435,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     )
                   );
                 }
-                if (currentRecursion) {
-                  currentRecursion.status = 'completed';
-                  currentRecursion.endTime = event.timestamp;
-                }
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  status: 'completed' as const,
+                  endTime: event.timestamp,
+                };
               } else if (event.type === 'clarify') {
                 // For CLARIFY, we set content similar to ANSWER so it shows in the main box
                 const clarifyData = event.data as { question?: string } | undefined;
@@ -434,11 +457,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     )
                   );
                 }
-                if (currentRecursion) {
-                  currentRecursion.status = 'completed';
-                  currentRecursion.endTime = event.timestamp;
-                }
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                  status: 'completed' as const,
+                  endTime: event.timestamp,
+                };
               } else if (event.type === 'task_complete') {
+                // Task complete - update message status and all running recursions
                 setMessages((prev) =>
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
@@ -459,23 +485,35 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     return msg;
                   })
                 );
+                // Don't update currentRecursion for task_complete - it's handled above
+                // Skip the general setMessages call below
+                currentRecursion = null;
+              } else {
+                // Handle other events (plan_update, reflect, etc.) - just add to events
+                currentRecursion = {
+                  ...currentRecursion,
+                  events: updatedEvents,
+                };
               }
 
               // Update recursion events - preserve all currentRecursion data
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMessageId
-                    ? {
-                      ...msg,
-                      recursions: msg.recursions?.map((r) =>
-                        r.iteration === currentRecursion!.iteration
-                          ? { ...currentRecursion! }  // Create new object to ensure React detects change
-                          : r
-                      ),
-                    }
-                    : msg
-                )
-              );
+              // Skip if currentRecursion was set to null (e.g., for task_complete)
+              if (currentRecursion) {
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? {
+                        ...msg,
+                        recursions: msg.recursions?.map((r) =>
+                          r.iteration === currentRecursion!.iteration
+                            ? { ...currentRecursion! }
+                            : r
+                        ),
+                      }
+                      : msg
+                  )
+                );
+              }
             }
           } catch (err) {
             console.error('Failed to parse SSE event:', err);
