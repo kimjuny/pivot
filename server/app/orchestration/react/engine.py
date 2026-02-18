@@ -6,7 +6,6 @@ handling recursion cycles, tool calling, and state management.
 
 import json
 import logging
-import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -58,172 +57,49 @@ class ReactEngine:
 
     def _safe_load_json(self, json_str: str) -> dict[str, Any]:
         """
-        Safely parse JSON string with automatic fixing of common format issues.
+        Parse JSON string from LLM response.
 
-        This method handles various JSON formatting issues from LLM responses:
-        - Extra whitespace and invisible characters at start/end
-        - Multiple JSON objects (takes only the first complete one)
-        - Unescaped control characters (newlines, tabs) in string values
-        - Chinese quotes
-        - Missing closing braces/brackets
+        The only allowed fix is stripping markdown code block markers
+        (```json ... ```) that some LLMs add despite instructions not to.
+        All other invalid JSON will raise an error for easier debugging.
 
         Args:
-            json_str: Potentially malformed JSON string from LLM
+            json_str: JSON string from LLM
 
         Returns:
             Parsed dictionary
 
         Raises:
-            ValueError: If JSON cannot be parsed even after all fix attempts
+            ValueError: If JSON cannot be parsed
         """
-        original_str = json_str
+        # Strip leading/trailing whitespace
+        json_str = json_str.strip()
 
-        # Step 1: Clean leading/trailing whitespace and invisible characters
-        # \s matches all whitespace, \u200b etc. match zero-width spaces
-        json_str = re.sub(r"^\s+|\s+$|[\u200b\u200c\u200d\u2060\uFEFF]", "", json_str)
+        # Strip markdown code block markers if present
+        # Simple approach: check start/end and strip
+        if json_str.startswith("```json"):
+            json_str = json_str[7:]  # Remove ```json
+        elif json_str.startswith("```"):
+            json_str = json_str[3:]  # Remove ```
 
-        # Step 2: Extract first complete JSON object (handles "extra data" issue)
-        # Match outermost { ... } structure only
-        # Use non-greedy matching and track brace depth to find complete object
-        first_brace = json_str.find("{")
-        if first_brace == -1:
-            raise ValueError("No JSON object found in response")
+        if json_str.endswith("```"):
+            json_str = json_str[:-3]  # Remove trailing ```
 
-        # Find matching closing brace by tracking depth
-        brace_depth = 0
-        in_string = False
-        escape_next = False
-        last_brace = -1
+        # Strip again after removing markers
+        json_str = json_str.strip()
 
-        for i in range(first_brace, len(json_str)):
-            char = json_str[i]
-
-            if escape_next:
-                escape_next = False
-                continue
-
-            if char == "\\" and in_string:
-                escape_next = True
-                continue
-
-            if char == '"':
-                in_string = not in_string
-                continue
-
-            if not in_string:
-                if char == "{":
-                    brace_depth += 1
-                elif char == "}":
-                    brace_depth -= 1
-                    if brace_depth == 0:
-                        last_brace = i
-                        break
-
-        if last_brace == -1:
-            # No matching closing brace found, will auto-complete later
-            json_str = json_str[first_brace:]
-        else:
-            # Extract only the first complete JSON object
-            json_str = json_str[first_brace : last_brace + 1]
-
-        # Step 3: Fix escaping issues
-        json_str = self._fix_json_escaping(json_str)
-
-        # Step 4: Parse
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
             logger.error(
-                f"JSON parse failed after all fixes\n"
-                f"Original error: {e.msg} at position {e.pos}\n"
-                f"Original string (first 300): {original_str[:300]}\n"
-                f"Fixed string (first 300): {json_str[:300]}\n"
+                f"JSON parse failed\n"
+                f"Error: {e.msg} at position {e.pos}\n"
+                f"Content (first 500): {json_str[:500]}\n"
                 f"Error context: ...{json_str[max(0, e.pos-50):e.pos+50]}..."
             )
             raise ValueError(
-                f"Failed to parse JSON: {e.msg} at position {e.pos}"
+                f"Failed to parse JSON {e.msg} at position {e.pos}: {json_str}"
             ) from e
-
-    def _fix_json_escaping(self, content: str) -> str:
-        """
-        Fix JSON by properly escaping control characters within string values.
-
-        ROOT CAUSE: LLM returns JSON with unescaped control characters (newlines, tabs)
-        in string values, which violates JSON specification.
-
-        Strategy: Only escape control characters, don't try to fix embedded quotes.
-        Embedded quotes should be avoided through prompt engineering.
-
-        Args:
-            content: Raw JSON string from LLM (may have unescaped control characters)
-
-        Returns:
-            Fixed JSON string with escaped control characters
-        """
-        # Replace Chinese quotes with regular single quotes (prevents JSON structure issues)
-        content = content.replace(""", "'").replace(""", "'")
-        content = content.replace("'", "'").replace("'", "'")
-
-        # Escape control characters within JSON strings
-        result = []
-        in_string = False
-        escape_next = False
-
-        for char in content:
-            # Skip next char if current char was escape
-            if escape_next:
-                result.append(char)
-                escape_next = False
-                continue
-
-            # Track escape sequences
-            if char == "\\":
-                result.append(char)
-                if in_string:
-                    escape_next = True
-                continue
-
-            # Track string boundaries
-            if char == '"':
-                in_string = not in_string
-                result.append(char)
-                continue
-
-            # Escape control characters only when inside strings
-            if in_string:
-                if char == "\n":
-                    result.append("\\n")
-                elif char == "\r":
-                    result.append("\\r")
-                elif char == "\t":
-                    result.append("\\t")
-                elif ord(char) < 32:  # Other control characters
-                    result.append(f"\\u{ord(char):04x}")
-                else:
-                    result.append(char)
-            else:
-                result.append(char)
-
-        fixed = "".join(result)
-
-        # Balance braces/brackets if structure is incomplete
-        open_braces = fixed.count("{")
-        close_braces = fixed.count("}")
-        open_brackets = fixed.count("[")
-        close_brackets = fixed.count("]")
-
-        if open_braces > close_braces or open_brackets > close_brackets:
-            missing_braces = open_braces - close_braces
-            missing_brackets = open_brackets - close_brackets
-            logger.warning(
-                f"Auto-completing JSON: +{missing_brackets}], +{missing_braces}}}"
-            )
-            if missing_brackets > 0:
-                fixed += "]" * missing_brackets
-            if missing_braces > 0:
-                fixed += "}" * missing_braces
-
-        return fixed
 
     async def execute_recursion(
         self,

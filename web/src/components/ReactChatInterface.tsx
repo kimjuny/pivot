@@ -219,23 +219,43 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               });
 
               // Convert recursions to RecursionRecord format
-              const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => ({
-                iteration: r.iteration,
-                trace_id: r.trace_id,
-                observe: r.observe || undefined,
-                thought: r.thought || undefined,
-                abstract: r.abstract || undefined,
-                action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
-                events: [],
-                status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
-                startTime: r.created_at,
-                endTime: r.updated_at,
-                tokens: {
-                  prompt_tokens: r.prompt_tokens,
-                  completion_tokens: r.completion_tokens,
-                  total_tokens: r.total_tokens,
-                },
-              }));
+              const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
+                // Parse tool_call_results to construct events for historical sessions
+                let events: ReactStreamEvent[] = [];
+                if (r.tool_call_results) {
+                  try {
+                    const toolData = JSON.parse(r.tool_call_results);
+                    events.push({
+                      type: 'tool_call',
+                      task_id: task.task_id,
+                      trace_id: r.trace_id,
+                      iteration: r.iteration,
+                      data: toolData,
+                      timestamp: r.updated_at,
+                    });
+                  } catch {
+                    // If parsing fails, skip adding the event
+                  }
+                }
+
+                return {
+                  iteration: r.iteration,
+                  trace_id: r.trace_id,
+                  observe: r.observe || undefined,
+                  thought: r.thought || undefined,
+                  abstract: r.abstract || undefined,
+                  action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
+                  events: events,
+                  status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+                  startTime: r.created_at,
+                  endTime: r.updated_at,
+                  tokens: {
+                    prompt_tokens: r.prompt_tokens,
+                    completion_tokens: r.completion_tokens,
+                    total_tokens: r.total_tokens,
+                  },
+                };
+              });
 
               // Add assistant message with recursions
               loadedMessages.push({
@@ -336,23 +356,43 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         });
 
         // Convert recursions to RecursionRecord format
-        const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => ({
-          iteration: r.iteration,
-          trace_id: r.trace_id,
-          observe: r.observe || undefined,
-          thought: r.thought || undefined,
-          abstract: r.abstract || undefined,
-          action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
-          events: [], // Events are not stored, we only have the final state
-          status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
-          startTime: r.created_at,
-          endTime: r.updated_at,
-          tokens: {
-            prompt_tokens: r.prompt_tokens,
-            completion_tokens: r.completion_tokens,
-            total_tokens: r.total_tokens,
-          },
-        }));
+        const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
+          // Parse tool_call_results to construct events for historical sessions
+          let events: ReactStreamEvent[] = [];
+          if (r.tool_call_results) {
+            try {
+              const toolData = JSON.parse(r.tool_call_results);
+              events.push({
+                type: 'tool_call',
+                task_id: task.task_id,
+                trace_id: r.trace_id,
+                iteration: r.iteration,
+                data: toolData,
+                timestamp: r.updated_at,
+              });
+            } catch {
+              // If parsing fails, skip adding the event
+            }
+          }
+
+          return {
+            iteration: r.iteration,
+            trace_id: r.trace_id,
+            observe: r.observe || undefined,
+            thought: r.thought || undefined,
+            abstract: r.abstract || undefined,
+            action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
+            events: events,
+            status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+            startTime: r.created_at,
+            endTime: r.updated_at,
+            tokens: {
+              prompt_tokens: r.prompt_tokens,
+              completion_tokens: r.completion_tokens,
+              total_tokens: r.total_tokens,
+            },
+          };
+        });
 
         // Add assistant message with recursions
         loadedMessages.push({
@@ -1045,7 +1085,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 className="w-3.5 h-3.5 text-danger flex-shrink-0 status-icon-enter"
               />
             )}
-            {effectiveStatus === 'running' ? (
+            {effectiveStatus === 'running' && !recursion.abstract ? (
               <span
                 className="text-xs font-semibold truncate animate-thinking-wave"
                 style={{
