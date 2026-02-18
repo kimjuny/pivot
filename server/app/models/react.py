@@ -16,9 +16,14 @@ class ReactTask(SQLModel, table=True):
     Each task corresponds to one user request and contains multiple recursion cycles
     until completion or max iteration is reached.
 
+    Note: session_id is a UUID string reference to Session.session_id for linking
+    tasks to sessions. There's no ORM relationship defined to avoid complex join
+    conditions. Use service layer to query session by session_id.
+
     Attributes:
         id: Primary key of the task.
         task_id: UUID string for global unique task identification.
+        session_id: UUID string linking to the parent session (optional for backward compatibility).
         agent_id: Foreign key to the agent executing this task.
         user: Username of the user who initiated the task.
         user_message: Original user input message.
@@ -34,6 +39,11 @@ class ReactTask(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     task_id: str = Field(index=True, unique=True, description="UUID for task")
+    session_id: str | None = Field(
+        default=None,
+        index=True,
+        description="UUID for session (optional)",
+    )
     agent_id: int = Field(foreign_key="agent.id", index=True)
     user: str = Field(index=True, description="Username")
     user_message: str = Field(description="Original user input")

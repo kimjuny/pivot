@@ -22,6 +22,7 @@ from app.api.llms import router as llms_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
+from app.api.session import router as session_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.db.session import get_engine, get_session  # noqa: E402
 from app.orchestration.tool import get_tool_manager  # noqa: E402
@@ -61,6 +62,7 @@ app.include_router(build_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
+app.include_router(session_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 

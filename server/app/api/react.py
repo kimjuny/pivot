@@ -184,6 +184,7 @@ async def react_chat_stream(
                 task_id = str(uuid.uuid4())
                 task = ReactTask(
                     task_id=task_id,
+                    session_id=request.session_id,
                     agent_id=agent.id or 0,
                     user=request.user,
                     user_message=request.message,

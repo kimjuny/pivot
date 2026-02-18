@@ -6,6 +6,7 @@ at server startup and provides utilities to inject context state.
 
 import json
 from pathlib import Path
+from typing import Any
 
 from app.orchestration.tool.manager import ToolManager
 
@@ -23,20 +24,24 @@ except FileNotFoundError as e:
 
 
 def build_system_prompt(
-    context: ReactContext, tool_manager: ToolManager | None = None
+    context: ReactContext,
+    tool_manager: ToolManager | None = None,
+    session_memory: dict[str, Any] | None = None,
 ) -> str:
     """
-    Build system prompt with injected context state and available tools.
+    Build system prompt with injected context state, available tools, and session memory.
 
     The template is loaded from context_template.md at server startup,
-    and this function injects the current state machine snapshot and tool descriptions.
+    and this function injects the current state machine snapshot, tool descriptions,
+    and session memory.
 
     Args:
         context: ReactContext containing current state machine state
         tool_manager: Optional tool manager to get available tools description
+        session_memory: Optional session memory dictionary for context injection
 
     Returns:
-        Complete system prompt with context and tools injected
+        Complete system prompt with context, tools, and session memory injected
     """
     # Inject state
     state_json = json.dumps(context.to_dict(), ensure_ascii=False, indent=2)
@@ -48,5 +53,14 @@ def build_system_prompt(
         tools_description = tool_manager.to_text_catalog()
 
     prompt = prompt.replace("{{tools_description}}", tools_description)
+
+    # Inject session memory
+    if session_memory:
+        session_memory_json = json.dumps(session_memory, ensure_ascii=False, indent=2)
+    else:
+        # Empty session memory for new sessions
+        session_memory_json = json.dumps({}, ensure_ascii=False, indent=2)
+
+    prompt = prompt.replace("{{session_memory}}", session_memory_json)
 
     return prompt

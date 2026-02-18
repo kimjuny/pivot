@@ -20,6 +20,7 @@ from app.models.react import (
     ReactTask,
 )
 from app.orchestration.tool.manager import ToolManager
+from app.services.session_memory_service import SessionMemoryService
 from sqlmodel import Session
 
 from .context import ReactContext
@@ -225,7 +226,11 @@ class ReactEngine:
         return fixed
 
     async def execute_recursion(
-        self, task: ReactTask, context: ReactContext, messages: list[dict[str, Any]]
+        self,
+        task: ReactTask,
+        context: ReactContext,
+        messages: list[dict[str, Any]],
+        session_memory: dict[str, Any] | None = None,
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """
         Execute a single recursion cycle.
@@ -256,8 +261,8 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build system prompt with current context and available tools
-        system_prompt = build_system_prompt(context, self.tool_manager)
+        # Build system prompt with current context, available tools, and session memory
+        system_prompt = build_system_prompt(context, self.tool_manager, session_memory)
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)
@@ -308,6 +313,12 @@ class ReactEngine:
             action = react_output.get("action", {})
             action_type = action.get("action_type", "")
             action_output = action.get("output", {})
+
+            # Extract session memory related fields (only used when action_type == ANSWER)
+            session_memory_delta = react_output.get("session_memory_delta", {})
+            session_subject = react_output.get("session_subject", {})
+            session_object = react_output.get("session_object", {})
+            task_summary = react_output.get("task_summary", {})
 
             # Skip empty/invalid responses
             if not action_type:
@@ -530,6 +541,11 @@ class ReactEngine:
                 "output": action_output,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
+                # Session memory related fields (for ANSWER action)
+                "session_memory_delta": session_memory_delta,
+                "session_subject": session_subject,
+                "session_object": session_object,
+                "task_summary": task_summary,
             }
 
             # Add token usage if available
@@ -584,6 +600,18 @@ class ReactEngine:
             {"role": "user", "content": task.user_message},
         ]
 
+        # Load session memory if session_id is provided
+        session_memory_dict: dict[str, Any] | None = None
+        if task.session_id:
+            session_service = SessionMemoryService(self.db)
+            session_memory_dict = session_service.get_full_session_memory_dict(
+                task.session_id
+            )
+            # Update chat history with user input
+            session_service.update_chat_history(
+                task.session_id, "user", task.user_message
+            )
+
         # Update task status
         task.status = "running"
         task.updated_at = datetime.now(timezone.utc)
@@ -611,7 +639,7 @@ class ReactEngine:
 
                 # Execute recursion
                 recursion, event_data = await self.execute_recursion(
-                    task, context, messages
+                    task, context, messages, session_memory_dict
                 )
 
                 # Yield Observe, Thought, Action events with token info
@@ -737,6 +765,43 @@ class ReactEngine:
                         "data": event_data.get("output"),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+
+                    # Process session memory updates if session_id is provided
+                    if task.session_id:
+                        session_service = SessionMemoryService(self.db)
+
+                        # Apply memory delta (add, update, delete operations)
+                        session_memory_delta = event_data.get("session_memory_delta", {})
+                        if session_memory_delta:
+                            session_service.apply_memory_delta(
+                                task.session_id, session_memory_delta
+                            )
+
+                        # Update session subject if provided
+                        session_subject = event_data.get("session_subject", {})
+                        if session_subject:
+                            session_service.update_subject(task.session_id, session_subject)
+
+                        # Update session object if provided
+                        session_object = event_data.get("session_object", {})
+                        if session_object:
+                            session_service.update_object(task.session_id, session_object)
+
+                        # Get answer content for conversation record
+                        answer_output = event_data.get("output", {})
+                        agent_answer = answer_output.get("answer", "")
+
+                        # Add conversation record with task summary
+                        task_summary = event_data.get("task_summary", {})
+                        session_service.add_conversation(
+                            task.session_id, task, agent_answer, task_summary
+                        )
+
+                        # Update chat history with agent answer
+                        if agent_answer:
+                            session_service.update_chat_history(
+                                task.session_id, "assistant", agent_answer
+                            )
 
                     # Task complete
                     task.status = "completed"

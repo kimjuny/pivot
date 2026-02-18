@@ -2,6 +2,11 @@ import { useState, useRef, useEffect, ReactNode } from 'react';
 import { X, Minus, Maximize2 } from 'lucide-react';
 
 /**
+ * Dialog size preset.
+ */
+type DialogSize = 'default' | 'large';
+
+/**
  * Props for DraggableDialog component.
  */
 interface DraggableDialogProps {
@@ -15,6 +20,8 @@ interface DraggableDialogProps {
     headerAction?: ReactNode;
     /** Dialog content to render inside the draggable container */
     children: ReactNode;
+    /** Size preset: 'default' (480x600) or 'large' (75% of screen) */
+    size?: DialogSize;
 }
 
 /**
@@ -28,22 +35,43 @@ interface DraggableDialogProps {
  * - Theme-aware styling
  * - High-performance dragging using transform
  */
-function DraggableDialog({ open, onOpenChange, title, headerAction, children }: DraggableDialogProps) {
+function DraggableDialog({ open, onOpenChange, title, headerAction, children, size = 'default' }: DraggableDialogProps) {
     const [isMinimized, setIsMinimized] = useState(false);
     const dialogRef = useRef<HTMLDivElement>(null);
     const isDraggingRef = useRef(false);
     const dragStartRef = useRef({ x: 0, y: 0, elemX: 0, elemY: 0 });
     const currentPosRef = useRef({ x: 0, y: 0 });
 
-    // Initialize position to center-ish on first render
+    // Calculate dimensions based on size
+    const getDimensions = () => {
+        if (size === 'large') {
+            return {
+                width: window.innerWidth * 0.75,
+                height: window.innerHeight * 0.75,
+                minWidth: 600,
+                minHeight: 400
+            };
+        }
+        return {
+            width: 480,
+            height: Math.min(window.innerHeight * 0.8, 600),
+            minWidth: 480,
+            minHeight: 300
+        };
+    };
+
+    const dimensions = getDimensions();
+
+    // Initialize position to center on first render
     useEffect(() => {
         if (open && dialogRef.current) {
-            const initialX = window.innerWidth / 2 - 240; // 480px / 2
-            const initialY = 80;
+            const dims = getDimensions();
+            const initialX = (window.innerWidth - dims.width) / 2;
+            const initialY = (window.innerHeight - dims.height) / 2;
             currentPosRef.current = { x: initialX, y: initialY };
             dialogRef.current.style.transform = `translate(${initialX}px, ${initialY}px)`;
         }
-    }, [open]);
+    }, [open, size]);
 
     /**
      * Start dragging when mouse down on header.
@@ -86,9 +114,10 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children }: 
             const newX = dragStartRef.current.elemX + deltaX;
             const newY = dragStartRef.current.elemY + deltaY;
 
-            // Simple boundary check
-            const dialogWidth = 480;
-            const dialogHeight = isMinimized ? 40 : Math.min(window.innerHeight * 0.8, 600);
+            // Get current dimensions
+            const dims = getDimensions();
+            const dialogWidth = dims.width;
+            const dialogHeight = isMinimized ? 40 : dims.height;
 
             const boundedX = Math.max(0, Math.min(newX, window.innerWidth - dialogWidth));
             const boundedY = Math.max(0, Math.min(newY, window.innerHeight - dialogHeight));
@@ -117,7 +146,7 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children }: 
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isMinimized]);
+    }, [isMinimized, size]);
 
     /**
      * Toggle between minimized and expanded states.
@@ -137,14 +166,15 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children }: 
 
     if (!open) return null;
 
+    const dims = getDimensions();
+
     return (
         <div
             ref={dialogRef}
             className="fixed z-50 left-0 top-0"
             style={{
-                width: '480px',
-                height: isMinimized ? '40px' : '80vh',
-                maxHeight: isMinimized ? '40px' : '600px',
+                width: `${dims.width}px`,
+                height: isMinimized ? '40px' : `${dims.height}px`,
                 willChange: 'transform'
             }}
         >

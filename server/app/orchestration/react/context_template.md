@@ -225,6 +225,49 @@ Action决策环节你只能输出以下 action_type 之一：
       "answer": "最终输出给用户的结论"
     }
   },
+  "session_memory_delta": { // 此区域为session_memory的‘增’、‘删’、‘改’操作区，仅当action_type = ANSWER时这段session_memory_delta才可注入。
+    "add": [{
+      "type": "preference | constraint | background | capability_assumption | decision",
+      "content": "...",
+      "confidence": 0.8,
+
+      // type = decision 专属字段
+      "source": "user | joint | agent",
+      "decision": "...",
+      "rationale": "...",
+      "reversible": true
+    }],
+    "update": [{
+      "id": 3, // 与add完全一致，但是基于id = x进行内容修改
+      "type": "preference | constraint | background | capability_assumption | decision",
+      "content": "...",
+      "confidence": 0.8,
+
+      // type = decision 专属字段
+      "source": "user | joint | agent",
+      "decision": "...",
+      "rationale": "...",
+      "reversible": true
+    }],
+    "delete": [{
+      "id": 4 // 仅输入id即可删除
+    }]
+  },
+  "session_subject": { // 在action_type = ANSWER环节，可以修改session的subject信息，应当逐渐往confidence更高的方向进行修改
+    "content": "对于这段对话的主题 / 话题是什么?",
+    "source": "user | agent",
+    "confidence": 0.8
+  },
+  "session_object": { // 在action_type = ANSWER环节，可以修改session的object信息，应当逐渐往confidence更高的方向进行修改
+    "content": "对于这段对话用户的目的究竟是什么?",
+    "source": "user | agent",
+    "confidence": 0.7
+  },
+  "task_summary": { // 在action_type = ANSWER环节，可以对本次递归的task进行收尾性总结
+    "content": "简要描述下你在整个多轮recursion完成的整个task过程中，你都有哪些发现、思考，最终怎样解决的问题，给用户呈现的最终回答都包含什么关键信息。这里不需要太冗长，而是在简洁凝练的前提下对后续的持续对话产生关键信息的参考作用。",
+    "key_findings": ["...", "..."],
+    "final_decisions": ["...", "..."]
+  }
   "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
   "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
@@ -352,7 +395,19 @@ plan.step 是 strategy / policy
 - **IMPORTANT**: 如果上一轮调用了工具（action_type=CALL_TOOL），`tool_call_results`字段会包含所有工具的执行结果
 - 你应该仔细阅读工具的返回结果，判断任务是否已经完成，如果完成了应该立即返回ANSWER
 
-## 6. 可用工具列表
+## 6. 真实动态状态机注入
+
+参考5.x中对状态机的schema描述，以下是该系统当前真实的递归状态机。
+```json
+{{current_state}}
+```
+
+你必须：
+- 完整阅读它，以上才是真实的状态机
+- 基于它进行 Observe / Thought / Action
+- 不得假设任何“未出现的信息”
+
+## 7. 可用工具列表
 
 以下是你可以调用的工具（仅当 action_type = CALL_TOOL 时使用）：
 
@@ -365,14 +420,85 @@ plan.step 是 strategy / policy
 - 工具名称、参数名称、参数类型必须严格匹配
 - 在 `action.output.tool_calls` 中返回要调用的工具信息
 
-## 7. 真实动态状态机注入
+## 8. Session-Memory
 
+### 8.1. Session-Memory机制
+- 该系统包含short-term memory、session-memory。
+- short-term memory只存在于单轮对话（recursive动态状态机context）中。
+- session-memory则单独维护在一个持久化的存储系统中，它挂载在session_id中，在同一session中的多轮对话共享这段记忆。
+- 你可以对session-memory做‘增、删、改’，且action_type = ANSWER是你的唯一的commit point，你要把对session-memory的修改以schema的格式做修改。
+
+### 8.2. Session-Memory Schema | 语义、说明
 ```json
-{{current_state}}
+{
+    "session_id": "session_id",
+    "subject": {
+        "content": "对于这段对话的主题 / 话题是什么?",
+        "source": "user | agent",
+        "confidence": 0.8
+    },
+    "object": {
+        "content": "对于这段对话用户的目的究竟是什么?",
+        "source": "user | agent",
+        "confidence": 0.7
+    },
+    "status": "active | waiting_input | closed",
+    "artifacts_metadata": {
+        "workspace_root": "/dev",
+        "sandbox_id": "podman-session-xxx"
+    },
+    "conversations": [
+        {
+            "task_index": 1,
+            "task_id": "每一轮对话都是一个task_id(uuid)",
+            "user_input": "用户在这一轮对话的输入信息",
+            "angent_answer": "Agent在这一轮的最终answer",
+            "status": "running | done | error",
+            "error": "（选填）错误原因",
+            "summary": {
+                "content": "简要描述下你在整个多轮recursion完成的整个task过程中，你都有哪些发现、思考，最终怎样解决的问题，给用户呈现的最终回答都包含什么关键信息。这里不需要太冗长，而是在简洁凝练的前提下对后续的持续对话产生关键信息的参考作用。",
+                "key_findings": ["...", "..."],
+                "final_decisions": ["...", "..."]
+            }
+        }
+    ],
+    "session_memory": [
+        {
+            "type": "preference",       // 写入时机：1. 用户明确说，2. 多次行为一致
+            "content": "用户在表达方式 / 输出形式 / 风格上的偏好，如用户偏好工程化、系统级、结构化的回答",
+            "confidence": 0.8
+        },
+        {
+            "type": "constraint",        // 写入时机：1. 用户明确声明，2. 任务依赖环境
+            "content": "对任务执行形成硬限制，如方案必须基于 Python + FastAPI + React",
+            "confidence": 0.8
+        },
+        {
+            "type": "background",        // 写入时机：1. 用户声明，2. 多轮对话中逐渐显现
+            "content": "关于用户 / 项目的长期背景信息，我们默认应该知道的事实，如用户正在构建一个 Agent Runtime 系统",
+            "confidence": 0.7
+        },
+        {
+            "type": "capability_assumption",        // 写入时机：1. 用户展现出能力
+            "content": "关于用户能做什么 / 系统能做什么的假设，这类假设可有效减少CLARIFY次数，例如用户具备 Python / 后端工程能力",
+            "confidence": 0.8
+        },
+        {
+            "type": "decision",          // 写入时机：共同决策、Agent默认决策、或用户的提出
+            "source": "user | joint | agent",
+            "decision": "例如采用 Agent Runtime 视角来讨论问题",
+            "rationale": "例如用户多次讨论状态机与调度机制",
+            "confidence": 0.85,
+            "reversible": true    // 是否可re-clarify
+        }
+    ],
+    "created_at": "",
+    "updated_at": ""
+}
 ```
 
-你必须：
+### 8.3. 当前真实Session-Memory
 
-- 完整阅读它，以上才是真实的状态机
-- 基于它进行 Observe / Thought / Action
-- 不得假设任何“未出现的信息”
+```json
+{{session_memory}}
+```

@@ -959,6 +959,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         open={isReactChatOpen}
         onOpenChange={setIsReactChatOpen}
         title="ReAct Agent Chat"
+        size="large"
       >
         <ReactChatInterface agentId={agentId} />
       </DraggableDialog>

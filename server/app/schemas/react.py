@@ -26,6 +26,9 @@ class ReactChatRequest(BaseModel):
     task_id: str | None = Field(
         default=None, description="Task ID for resuming a conversation"
     )
+    session_id: str | None = Field(
+        default=None, description="Session ID for session memory persistence"
+    )
 
 
 class ReactStreamEventType(str, Enum):

@@ -697,7 +697,7 @@ export const updateLLM = async (
 
 /**
  * Delete an LLM by ID.
- * 
+ *
  * @param llmId - Unique identifier of LLM to delete
  * @returns Promise resolving when LLM is deleted
  */
@@ -705,4 +705,184 @@ export const deleteLLM = async (llmId: number): Promise<void> => {
   await apiRequest(`/llms/${llmId}`, {
     method: 'DELETE',
   });
+};
+
+// ============================================
+// Session API Functions
+// ============================================
+
+/**
+ * Session list item from API.
+ */
+export interface SessionListItem {
+  session_id: string;
+  agent_id: number;
+  status: string;
+  subject: string | null;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+/**
+ * Session list response from API.
+ */
+export interface SessionListResponse {
+  sessions: SessionListItem[];
+  total: number;
+}
+
+/**
+ * Session response from API.
+ */
+export interface SessionResponse {
+  id: number;
+  session_id: string;
+  agent_id: number;
+  user: string;
+  status: string;
+  subject: {
+    content: string;
+    source: string;
+    confidence: number;
+  } | null;
+  object: {
+    content: string;
+    source: string;
+    confidence: number;
+  } | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Create a new conversation session.
+ *
+ * @param agentId - Agent ID for the session
+ * @returns Promise resolving to created session
+ */
+export const createSession = async (agentId: number): Promise<SessionResponse> => {
+  return apiRequest('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ agent_id: agentId }),
+  }) as Promise<SessionResponse>;
+};
+
+/**
+ * List sessions for the current user.
+ *
+ * @param agentId - Optional agent ID filter
+ * @param limit - Maximum number of sessions to return
+ * @returns Promise resolving to list of sessions
+ */
+export const listSessions = async (
+  agentId?: number,
+  limit: number = 50
+): Promise<SessionListResponse> => {
+  let endpoint = `/sessions?limit=${limit}`;
+  if (agentId !== undefined) {
+    endpoint += `&agent_id=${agentId}`;
+  }
+  return apiRequest(endpoint) as Promise<SessionListResponse>;
+};
+
+/**
+ * Get a session by ID.
+ *
+ * @param sessionId - Session UUID
+ * @returns Promise resolving to session details
+ */
+export const getSession = async (sessionId: string): Promise<SessionResponse> => {
+  return apiRequest(`/sessions/${sessionId}`) as Promise<SessionResponse>;
+};
+
+/**
+ * Chat history message from session API.
+ */
+export interface SessionChatHistoryMessage {
+  type: string;
+  content: string;
+  timestamp: string;
+}
+
+/**
+ * Chat history response from session API.
+ */
+export interface SessionChatHistoryResponse {
+  version: number;
+  messages: SessionChatHistoryMessage[];
+}
+
+/**
+ * Delete a session.
+ *
+ * @param sessionId - Session UUID
+ * @returns Promise resolving when session is deleted
+ */
+export const deleteSession = async (sessionId: string): Promise<void> => {
+  await apiRequest(`/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+};
+
+/**
+ * Get chat history for a session.
+ *
+ * @param sessionId - Session UUID
+ * @returns Promise resolving to chat history
+ */
+export const getSessionHistory = async (sessionId: string): Promise<SessionChatHistoryResponse> => {
+  return apiRequest(`/sessions/${sessionId}/history`) as Promise<SessionChatHistoryResponse>;
+};
+
+/**
+ * Recursion detail from full session history API.
+ */
+export interface RecursionDetail {
+  iteration: number;
+  trace_id: string;
+  observe: string | null;
+  thought: string | null;
+  abstract: string | null;
+  action_type: string | null;
+  action_output: string | null;
+  tool_call_results: string | null;
+  status: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Task message from full session history API.
+ */
+export interface TaskMessage {
+  task_id: string;
+  user_message: string;
+  agent_answer: string | null;
+  status: string;
+  total_tokens: number;
+  recursions: RecursionDetail[];
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Full session history response from API.
+ */
+export interface FullSessionHistoryResponse {
+  session_id: string;
+  tasks: TaskMessage[];
+}
+
+/**
+ * Get full session history with recursion details.
+ *
+ * @param sessionId - Session UUID
+ * @returns Promise resolving to full session history with tasks and recursions
+ */
+export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
+  return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
 };

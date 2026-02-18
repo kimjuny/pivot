@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from 'react';
-import { ArrowUp, Plus, Paperclip, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square } from 'lucide-react';
+import { ArrowUp, Plus, Paperclip, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { createSession, listSessions, deleteSession, getFullSessionHistory, SessionListItem, TaskMessage, RecursionDetail } from '../utils/api';
 
 /**
  * Props for ReactChatInterface component.
@@ -175,6 +176,235 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // Session state
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
+  const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+
+  /**
+   * Initialize sessions on mount.
+   * Loads existing sessions and creates a new one only if none exist.
+   * This prevents duplicate session creation.
+   */
+  useEffect(() => {
+    const initSessions = async () => {
+      if (isInitialized || isLoadingSession) return;
+
+      setIsLoadingSession(true);
+      try {
+        // First, load existing sessions
+        const response = await listSessions(agentId);
+        setSessions(response.sessions);
+
+        // If there are existing sessions, select the most recent one and load its history
+        // Otherwise, create a new session
+        if (response.sessions.length > 0) {
+          const firstSessionId = response.sessions[0].session_id;
+          setCurrentSessionId(firstSessionId);
+
+          // Load history for the first session
+          try {
+            const history = await getFullSessionHistory(firstSessionId);
+            const loadedMessages: ChatMessage[] = [];
+
+            for (const task of history.tasks) {
+              // Add user message
+              loadedMessages.push({
+                id: `user-${task.task_id}`,
+                role: 'user',
+                content: task.user_message,
+                timestamp: task.created_at,
+              });
+
+              // Convert recursions to RecursionRecord format
+              const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => ({
+                iteration: r.iteration,
+                trace_id: r.trace_id,
+                observe: r.observe || undefined,
+                thought: r.thought || undefined,
+                abstract: r.abstract || undefined,
+                action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
+                events: [],
+                status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+                startTime: r.created_at,
+                endTime: r.updated_at,
+                tokens: {
+                  prompt_tokens: r.prompt_tokens,
+                  completion_tokens: r.completion_tokens,
+                  total_tokens: r.total_tokens,
+                },
+              }));
+
+              // Add assistant message with recursions
+              loadedMessages.push({
+                id: `assistant-${task.task_id}`,
+                role: 'assistant',
+                content: task.agent_answer || '',
+                timestamp: task.updated_at,
+                task_id: task.task_id,
+                recursions: recursions,
+                status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
+                totalTokens: {
+                  prompt_tokens: 0,
+                  completion_tokens: 0,
+                  total_tokens: task.total_tokens,
+                },
+              });
+            }
+
+            setMessages(loadedMessages);
+          } catch (historyErr) {
+            console.error('Failed to load initial session history:', historyErr);
+          }
+        } else {
+          // Only create a new session if no sessions exist
+          const session = await createSession(agentId);
+          setCurrentSessionId(session.session_id);
+          setSessions([{
+            session_id: session.session_id,
+            agent_id: session.agent_id,
+            status: session.status,
+            subject: session.subject?.content || null,
+            created_at: session.created_at,
+            updated_at: session.updated_at,
+            message_count: 0,
+          }]);
+        }
+
+        setIsInitialized(true);
+      } catch (err) {
+        console.error('Failed to initialize sessions:', err);
+        setError('Failed to initialize session');
+      } finally {
+        setIsLoadingSession(false);
+      }
+    };
+    void initSessions();
+  }, [agentId, isInitialized, isLoadingSession]);
+
+  /**
+   * Create a new session and switch to it.
+   */
+  const handleNewSession = async () => {
+    setIsLoadingSession(true);
+    try {
+      const session = await createSession(agentId);
+      setCurrentSessionId(session.session_id);
+      setMessages([]); // Clear messages for new session
+      setSessions((prev) => [{
+        session_id: session.session_id,
+        agent_id: session.agent_id,
+        status: session.status,
+        subject: session.subject?.content || null,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        message_count: 0,
+      }, ...prev]);
+    } catch (err) {
+      console.error('Failed to create new session:', err);
+      setError('Failed to create new session');
+    } finally {
+      setIsLoadingSession(false);
+    }
+  };
+
+  /**
+   * Switch to an existing session and load its history.
+   */
+  const handleSelectSession = async (sessionId: string) => {
+    if (sessionId === currentSessionId || isLoadingSession) return;
+
+    setCurrentSessionId(sessionId);
+    setIsLoadingSession(true);
+
+    try {
+      // Load full session history with recursion details
+      const history = await getFullSessionHistory(sessionId);
+
+      // Convert tasks to ChatMessage format with recursion details
+      const loadedMessages: ChatMessage[] = [];
+
+      for (const task of history.tasks) {
+        // Add user message
+        loadedMessages.push({
+          id: `user-${task.task_id}`,
+          role: 'user',
+          content: task.user_message,
+          timestamp: task.created_at,
+        });
+
+        // Convert recursions to RecursionRecord format
+        const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => ({
+          iteration: r.iteration,
+          trace_id: r.trace_id,
+          observe: r.observe || undefined,
+          thought: r.thought || undefined,
+          abstract: r.abstract || undefined,
+          action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
+          events: [], // Events are not stored, we only have the final state
+          status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+          startTime: r.created_at,
+          endTime: r.updated_at,
+          tokens: {
+            prompt_tokens: r.prompt_tokens,
+            completion_tokens: r.completion_tokens,
+            total_tokens: r.total_tokens,
+          },
+        }));
+
+        // Add assistant message with recursions
+        loadedMessages.push({
+          id: `assistant-${task.task_id}`,
+          role: 'assistant',
+          content: task.agent_answer || '',
+          timestamp: task.updated_at,
+          task_id: task.task_id,
+          recursions: recursions,
+          status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
+          totalTokens: {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: task.total_tokens,
+          },
+        });
+      }
+
+      setMessages(loadedMessages);
+    } catch (err) {
+      console.error('Failed to load session history:', err);
+      setMessages([]); // Clear messages on error
+    } finally {
+      setIsLoadingSession(false);
+    }
+  };
+
+  /**
+   * Delete a session.
+   */
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await deleteSession(sessionId);
+      setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
+      if (sessionId === currentSessionId) {
+        // Switch to another session or clear if no sessions left
+        const remainingSessions = sessions.filter((s) => s.session_id !== sessionId);
+        if (remainingSessions.length > 0) {
+          void handleSelectSession(remainingSessions[0].session_id);
+        } else {
+          // Create a new session if all are deleted
+          setCurrentSessionId(null);
+          setMessages([]);
+          setIsInitialized(false); // Allow re-initialization to create new session
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+      setError('Failed to delete session');
+    }
+  };
+
   /**
    * Scroll chat view to bottom.
    */
@@ -292,6 +522,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           message: userMessage.content,
           user: 'web-user',
           task_id: currentReplyTaskId,
+          session_id: currentSessionId,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -374,48 +605,49 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               );
             } else if (currentRecursion && currentTaskId) {
               // Create new events array to ensure React detects state changes
-              const updatedEvents: ReactStreamEvent[] = [...currentRecursion.events, event];
+              const existingRecursion = currentRecursion as RecursionRecord;
+              const updatedEvents: ReactStreamEvent[] = [...existingRecursion.events, event];
 
               if (event.type === 'observe') {
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   observe: event.delta ?? '',
-                  tokens: event.tokens ?? currentRecursion.tokens,
+                  tokens: event.tokens ?? existingRecursion.tokens,
                 };
               } else if (event.type === 'thought') {
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   thought: event.delta ?? '',
-                  tokens: event.tokens ?? currentRecursion.tokens,
+                  tokens: event.tokens ?? existingRecursion.tokens,
                 };
               } else if (event.type === 'abstract') {
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   abstract: event.delta ?? '',
-                  tokens: event.tokens ?? currentRecursion.tokens,
+                  tokens: event.tokens ?? existingRecursion.tokens,
                 };
               } else if (event.type === 'action') {
                 // Mark recursion as completed after action event
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   action: event.delta ?? '',
                   status: 'completed' as const,
                   endTime: event.timestamp,
-                  tokens: event.tokens ?? currentRecursion.tokens,
+                  tokens: event.tokens ?? existingRecursion.tokens,
                 };
               } else if (event.type === 'tool_call') {
                 // Tool call event - just add to events, no special field update needed
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                 };
               } else if (event.type === 'error') {
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   status: 'error' as const,
                   endTime: event.timestamp,
@@ -436,7 +668,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   );
                 }
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   status: 'completed' as const,
                   endTime: event.timestamp,
@@ -458,7 +690,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   );
                 }
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                   status: 'completed' as const,
                   endTime: event.timestamp,
@@ -491,7 +723,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               } else {
                 // Handle other events (plan_update, reflect, etc.) - just add to events
                 currentRecursion = {
-                  ...currentRecursion,
+                  ...existingRecursion,
                   events: updatedEvents,
                 };
               }
@@ -1042,9 +1274,123 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-background text-foreground overflow-hidden">
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+    <div className="flex h-full bg-background text-foreground overflow-hidden">
+      {/* Sidebar - Session List */}
+      <div
+        className={`flex-shrink-0 border-r border-border flex flex-col bg-muted/30 transition-all duration-300 ease-in-out ${
+          isSidebarCollapsed ? 'w-12' : 'w-64'
+        }`}
+      >
+        {/* Sidebar Header */}
+        <div className={`p-3 border-b border-border flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
+          {!isSidebarCollapsed && (
+            <Button
+              onClick={handleNewSession}
+              variant="outline"
+              className="flex-1 justify-start gap-2"
+              disabled={isLoadingSession || isStreaming}
+            >
+              <PlusCircle className="w-4 h-4" />
+              New Session
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={`h-8 w-8 ${isSidebarCollapsed ? '' : 'ml-2'}`}
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isSidebarCollapsed ? (
+              <PanelLeft className="w-4 h-4" />
+            ) : (
+              <PanelLeftClose className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
+
+        {/* Session List */}
+        {!isSidebarCollapsed && (
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-2 space-y-1">
+              {sessions.length === 0 ? (
+                <div className="text-center text-muted-foreground text-sm py-4">
+                  {isLoadingSession ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Creating session...</span>
+                    </div>
+                  ) : (
+                    <span>No sessions yet</span>
+                  )}
+                </div>
+              ) : (
+                sessions.map((session) => (
+                  <div
+                    key={session.session_id}
+                    onClick={() => void handleSelectSession(session.session_id)}
+                    className={`w-full text-left p-2 rounded-lg transition-colors group cursor-pointer ${
+                      session.session_id === currentSessionId
+                        ? 'bg-primary/10 border border-primary/30'
+                        : 'hover:bg-muted border border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <MessageCircle className="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
+                          <span className="text-sm font-medium truncate">
+                            {session.subject || 'New conversation'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1 pl-5">
+                          {formatTimestamp(session.updated_at)}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5 pl-5">
+                          {session.message_count} messages
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 flex items-center justify-center rounded hover:bg-accent"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDeleteSession(session.session_id);
+                        }}
+                        title="Delete session"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Collapsed state - show icon buttons */}
+        {isSidebarCollapsed && (
+          <div className="flex-1 flex flex-col items-center py-2 space-y-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleNewSession}
+              disabled={isLoadingSession || isStreaming}
+              title="New Session"
+            >
+              <PlusCircle className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Main Chat Area - single scrollable container for both messages and input */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
+          {/* Centered content container */}
+          <div className="max-w-3xl mx-auto p-4 pb-4">
         {messages.length === 0 ? (
           <div className="text-center text-muted-foreground mt-12 animate-fade-in">
             <div className="mb-4">
@@ -1061,10 +1407,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           </div >
         ) : (
           messages.map((message) => (
-            <div key={message.id} className="space-y-2">
+            <div key={message.id} className="space-y-2 mb-6 last:mb-0">
               {message.role === 'user' ? (
                 <div className="flex justify-end">
-                  <div className="max-w-[85%] lg:max-w-[75%] px-3 py-2 rounded-xl shadow-sm bg-primary text-primary-foreground rounded-br-none">
+                  <div className="max-w-[85%] px-4 py-2.5 rounded-2xl shadow-sm bg-primary text-primary-foreground rounded-br-none">
                     <div className="font-semibold text-xs mb-1 opacity-90 tracking-wide uppercase">
                       YOU
                     </div>
@@ -1089,7 +1435,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
                   {/* Final Answer / Question */}
                   {message.content && (
-                    <div className="bg-background/50 border border-border rounded p-2">
+                    <div className="bg-background/50 border border-border rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-1.5">
                           {message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY') ? (
@@ -1156,85 +1502,85 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         )
         }
         <div ref={messagesEndRef} />
-      </div >
 
-      {/* Error Banner */}
-      {
-        error && (
-          <div className="px-4 py-2 bg-danger/10 border-t border-danger text-danger text-sm">
-            {error}
-          </div>
-        )
-      }
+          {/* Input Area - sticky at bottom with negative margins to extend to container edges */}
+          <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pb-4 pt-6 mt-4 bg-gradient-to-t from-background via-background to-transparent">
+            {/* Error Banner */}
+            {error && (
+              <div className="px-4 py-2 mb-2 bg-danger/10 border border-danger/30 rounded-lg text-danger text-sm">
+                {error}
+              </div>
+            )}
 
-      {/* Input Area */}
-      <div className="border-t border-border p-4 bg-background">
-        {replyTaskId && (
-          <div className="flex items-center justify-between text-xs mb-2 px-2 py-1.5 rounded bg-muted/30 border border-border/50">
-            <span className="text-foreground/70">↳ Replying to question</span>
-            <button
-              onClick={() => setReplyTaskId(null)}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              title="Cancel reply"
-            >
-              <XCircle className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-lg border bg-background focus-within:border-ring focus-within:ring-0 transition-colors">
-          <Textarea
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
-            className="min-h-[60px] w-full resize-none border-0 p-3 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
-            disabled={isStreaming}
-          />
-          <div className="flex items-center p-3 pt-0 justify-between">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
-                  <Plus className="h-4 w-4" />
-                  <span className="sr-only">Attach</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem>
-                  <Paperclip className="mr-2 h-4 w-4" />
-                  <span>Add images & files</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <Brain className="mr-2 h-4 w-4" />
-                  <span>Thinking</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <div className="flex items-center gap-2">
-              {isStreaming ? (
-                <Button
-                  type="button"
-                  onClick={handleStop}
-                  size="icon"
-                  className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
-                  title="Stop execution"
+            {replyTaskId && (
+              <div className="flex items-center justify-between text-xs mb-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50">
+                <span className="text-foreground/70">↳ Replying to question</span>
+                <button
+                  onClick={() => setReplyTaskId(null)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="Cancel reply"
                 >
-                  <Square className="h-4 w-4" fill="currentColor" />
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  disabled={!inputMessage.trim()}
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  title="Send message"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                  <span className="sr-only">Send</span>
-                </Button>
-              )}
-            </div>
+                  <XCircle className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
+              <Textarea
+                value={inputMessage}
+                onChange={(e) => setInputMessage(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
+                className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
+                disabled={isStreaming}
+              />
+              <div className="flex items-center px-4 pb-3 justify-between">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
+                      <Plus className="h-4 h-4" />
+                      <span className="sr-only">Attach</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem>
+                      <Paperclip className="mr-2 h-4 w-4" />
+                      <span>Add images & files</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem>
+                      <Brain className="mr-2 h-4 w-4" />
+                      <span>Thinking</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <div className="flex items-center gap-2">
+                  {isStreaming ? (
+                    <Button
+                      type="button"
+                      onClick={handleStop}
+                      size="icon"
+                      className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
+                      title="Stop execution"
+                    >
+                      <Square className="h-4 w-4" fill="currentColor" />
+                    </Button>
+                  ) : (
+                    <Button
+                      type="submit"
+                      disabled={!inputMessage.trim()}
+                      size="icon"
+                      className="h-8 w-8 rounded-full"
+                      title="Send message"
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                      <span className="sr-only">Send</span>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </form>
           </div>
-        </form>
+          </div>
+        </div>
       </div>
     </div >
   );
