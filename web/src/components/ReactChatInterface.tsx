@@ -613,7 +613,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
                       const updatedRecursions = msg.recursions?.map((r) =>
-                        r.iteration === currentRecursion!.iteration ? currentRecursion! : r
+                        r && r.iteration === currentRecursion!.iteration ? currentRecursion! : r
                       );
                       return { ...msg, recursions: updatedRecursions };
                     }
@@ -742,7 +742,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     if (msg.id === assistantMessageId) {
                       // Mark all running recursions as completed
                       const updatedRecursions = msg.recursions?.map((r) =>
-                        r.status === 'running'
+                        r && r.status === 'running'
                           ? { ...r, status: 'completed' as const, endTime: event.timestamp }
                           : r
                       );
@@ -777,7 +777,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       ? {
                         ...msg,
                         recursions: msg.recursions?.map((r) =>
-                          r.iteration === currentRecursion!.iteration
+                          r && r.iteration === currentRecursion!.iteration
                             ? { ...currentRecursion! }
                             : r
                         ),
@@ -803,7 +803,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             if (msg.id === assistantMessageId) {
               // Mark the last recursion as cancelled if it exists
               const updatedRecursions = msg.recursions?.map((r, idx, arr) =>
-                idx === arr.length - 1 && r.status === 'running'
+                r && idx === arr.length - 1 && r.status === 'running'
                   ? { ...r, status: 'error' as const, endTime: cancelTime }
                   : r
               );
@@ -1467,7 +1467,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   {/* Recursions */}
                   {message.recursions && message.recursions.length > 0 && (
                     <div className="space-y-2">
-                      {message.recursions.map((recursion) =>
+                      {message.recursions.filter((r) => r !== null).map((recursion) =>
                         renderRecursion(message.id, recursion, message.task_id)
                       )}
                     </div>
@@ -1478,7 +1478,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     <div className="bg-background/50 border border-border rounded-lg p-3">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-1.5">
-                          {message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY') ? (
+                          {message.status === 'waiting_input' || (message.recursions?.length && message.recursions.filter((r) => r !== null)[message.recursions.filter((r) => r !== null).length - 1]?.action === 'CLARIFY') ? (
                             <>
                               <MessageSquare className="w-3.5 h-3.5 text-info" />
                               <span className="text-xs font-semibold text-foreground">QUESTION</span>
@@ -1491,7 +1491,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                           )}
                         </div>
                         {/* REPLY button for QUESTION */}
-                        {(message.status === 'waiting_input' || (message.recursions?.length && message.recursions[message.recursions.length - 1].action === 'CLARIFY')) && message.task_id && (
+                        {(message.status === 'waiting_input' || (message.recursions?.length && message.recursions.filter((r) => r !== null)[message.recursions.filter((r) => r !== null).length - 1]?.action === 'CLARIFY')) && message.task_id && (
                           <button
                             onClick={() => setReplyTaskId(message.task_id || null)}
                             className="text-xs text-muted-foreground hover:text-info transition-colors"

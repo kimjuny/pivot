@@ -13,7 +13,8 @@
       "Bash(npm run type-check:*)",
       "Bash(./lint.sh)",
       "Bash(python:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(python3:*)"
     ]
   }
 }

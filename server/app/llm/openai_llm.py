@@ -87,6 +87,7 @@ class OpenAILLM(AbstractLLM):
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,  # type: ignore[arg-type]
+                response_format={"type": "json_object"},
                 **kwargs,  # type: ignore[arg-type]
             )
 

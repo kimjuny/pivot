@@ -189,16 +189,24 @@ function AgentDetailSidebar({
                                 </div>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <button
+                                        <div
+                                            role="button"
+                                            tabIndex={0}
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onOpenReactChat();
                                             }}
-                                            className="p-1.5 hover:bg-sidebar-accent rounded transition-colors"
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    e.stopPropagation();
+                                                    onOpenReactChat();
+                                                }
+                                            }}
+                                            className="p-1.5 hover:bg-sidebar-accent rounded transition-colors cursor-pointer"
                                             aria-label="Open Chat"
                                         >
                                             <MessageSquare className="size-4" />
-                                        </button>
+                                        </div>
                                     </TooltipTrigger>
                                     <TooltipContent side="right">
                                         <p>Chat with Agent</p>

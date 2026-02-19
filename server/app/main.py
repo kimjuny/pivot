@@ -1,11 +1,13 @@
 import logging
 import sys
+import time
 import traceback
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Add server directory and parent directory to Python path BEFORE importing other modules
 server_dir = str(Path(__file__).resolve().parent.parent)
@@ -40,10 +42,36 @@ logging.getLogger("core").setLevel(logging.DEBUG)
 logging.getLogger("core.agent").setLevel(logging.DEBUG)
 logging.getLogger("core.llm").setLevel(logging.DEBUG)
 
+# Disable uvicorn's default access log (we use our own TimingMiddleware instead)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
 # Initialize logger for server
 logger = get_logger("server")
 
 app = FastAPI(title="Agent Visualization API", version="1.0.0")
+
+
+class TimingMiddleware(BaseHTTPMiddleware):
+    """Middleware to log request with processing time appended.
+
+    Replaces uvicorn's default access log with a single line that includes
+    the processing time in milliseconds at the end.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        response = await call_next(request)
+        process_time_ms = (time.time() - start_time) * 1000
+
+        # Log in uvicorn-like format with timing appended: client - "method path" status - Xms
+        client = f"{request.client.host}:{request.client.port}" if request.client else "-"
+        logger.info(
+            f'{client} - "{request.method} {request.url.path} HTTP/{request.scope.get("http_version", "1.1")}" '
+            f"{response.status_code} - {process_time_ms:.0f}ms"
+        )
+
+        return response
+
 
 # Add CORS middleware to allow frontend to communicate with backend
 app.add_middleware(
@@ -53,6 +81,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add timing middleware
+app.add_middleware(TimingMiddleware)
 
 # Include API routes
 app.include_router(agents_router, prefix="/api")

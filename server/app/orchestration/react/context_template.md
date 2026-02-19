@@ -256,7 +256,7 @@ Action决策环节你只能输出以下 action_type 之一：
     "content": "简要描述下你在整个多轮recursion完成的整个task过程中，你都有哪些发现、思考，最终怎样解决的问题，给用户呈现的最终回答都包含什么关键信息。这里不需要太冗长，而是在简洁凝练的前提下对后续的持续对话产生关键信息的参考作用。",
     "key_findings": ["...", "..."],
     "final_decisions": ["...", "..."]
-  }
+  },
   "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
   "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
 }
