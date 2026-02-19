@@ -205,16 +205,16 @@ Action决策环节你只能输出以下 action_type 之一：
 ### 4.6. action_type = ANSWER
 
 {
-  "trace_id": "本轮recursion的trace_id",
-  "observe": "你对当前状态机和输入的客观观察",
-  "thought": "你的分析与决策理由",
+  "trace_id": "本轮recursion的trace_id", //【必须返回】
+  "observe": "你对当前状态机和输入的客观观察", //【必须返回】
+  "thought": "你的分析与决策理由", //【必须返回】
   "action": {
-    "action_type": "ANSWER",
+    "action_type": "ANSWER", //【必须返回】
     "output": {
-      "answer": "最终输出给用户的结论"
+      "answer": "最终输出给用户的结论" //【必须返回】
     }
   },
-  "session_memory_delta": { // 此区域为session_memory的‘增’、‘删’、‘改’操作区，仅当action_type = ANSWER时这段session_memory_delta才可注入。
+  "session_memory_delta": { //【可选返回】此区域为session_memory的‘增’、‘删’、‘改’操作区，仅当action_type = ANSWER时这段session_memory_delta才可返回并注入。
     "add": [{
       "type": "preference | constraint | background | capability_assumption | decision",
       "content": "...",
@@ -242,23 +242,23 @@ Action决策环节你只能输出以下 action_type 之一：
       "id": 4 // 仅输入id即可删除
     }]
   },
-  "session_subject": { // 在action_type = ANSWER环节，可以修改session的subject信息，应当逐渐往confidence更高的方向进行修改
+  "session_subject": { //【可选返回】在action_type = ANSWER环节，可以修改session的subject信息，应当逐渐往confidence更高的方向进行修改
     "content": "对于这段对话的主题 / 话题是什么?",
     "source": "user | agent",
     "confidence": 0.8
   },
-  "session_object": { // 在action_type = ANSWER环节，可以修改session的object信息，应当逐渐往confidence更高的方向进行修改
+  "session_object": { //【可选返回】只在action_type = ANSWER环节，可以修改session的object信息，应当逐渐往confidence更高的方向进行修改
     "content": "对于这段对话用户的目的究竟是什么?",
     "source": "user | agent",
     "confidence": 0.7
   },
-  "task_summary": { // 在action_type = ANSWER环节，可以对本次递归的task进行收尾性总结
+  "task_summary": { //【必须返回】在action_type = ANSWER环节，可以对本次递归的task进行收尾性总结
     "content": "简要描述下你在整个多轮recursion完成的整个task过程中，你都有哪些发现、思考，最终怎样解决的问题，给用户呈现的最终回答都包含什么关键信息。这里不需要太冗长，而是在简洁凝练的前提下对后续的持续对话产生关键信息的参考作用。",
     "key_findings": ["...", "..."],
     "final_decisions": ["...", "..."]
   },
-  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么",
-  "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项"
+  "abstract": "本轮recursion的简短摘要，便于在日志中能快速掌握这一轮recursion到底做了什么", //【必须返回】
+  "short_term_memory_append": "本轮你希望增加的短期记忆，记录一些有助于你在在下一轮recursion中获取足够信息进行判断的事项" //【可选返回】
 }
 
 **answer格式建议（提升可读性）**：

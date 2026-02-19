@@ -612,9 +612,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 setMessages((prev) =>
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
-                      const updatedRecursions = msg.recursions?.map((r) =>
-                        r && r.iteration === currentRecursion!.iteration ? currentRecursion! : r
-                      );
+                      // Filter out nulls and update matching recursion
+                      const updatedRecursions = msg.recursions
+                        ?.filter((r): r is RecursionRecord => r !== null)
+                        .map((r) =>
+                          r.iteration === currentRecursion!.iteration ? currentRecursion! : r
+                        );
                       return { ...msg, recursions: updatedRecursions };
                     }
                     return msg;
@@ -638,7 +641,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     ? {
                       ...msg,
                       task_id: currentTaskId ?? undefined,
-                      recursions: [...(msg.recursions || []), currentRecursion!],
+                      // Filter out any nulls from previous state before adding new recursion
+                      recursions: [...(msg.recursions?.filter((r): r is RecursionRecord => r !== null) || []), currentRecursion!],
                     }
                     : msg
                 )
@@ -740,12 +744,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 setMessages((prev) =>
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
-                      // Mark all running recursions as completed
-                      const updatedRecursions = msg.recursions?.map((r) =>
-                        r && r.status === 'running'
-                          ? { ...r, status: 'completed' as const, endTime: event.timestamp }
-                          : r
-                      );
+                      // Filter out nulls and mark all running recursions as completed
+                      const updatedRecursions = msg.recursions
+                        ?.filter((r): r is RecursionRecord => r !== null)
+                        .map((r) =>
+                          r.status === 'running'
+                            ? { ...r, status: 'completed' as const, endTime: event.timestamp }
+                            : r
+                        );
                       return {
                         ...msg,
                         status: 'completed',
@@ -776,11 +782,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     msg.id === assistantMessageId
                       ? {
                         ...msg,
-                        recursions: msg.recursions?.map((r) =>
-                          r && r.iteration === currentRecursion!.iteration
-                            ? { ...currentRecursion! }
-                            : r
-                        ),
+                        // Filter out nulls and update matching recursion
+                        recursions: msg.recursions
+                          ?.filter((r): r is RecursionRecord => r !== null)
+                          .map((r) =>
+                            r.iteration === currentRecursion!.iteration
+                              ? { ...currentRecursion! }
+                              : r
+                          ),
                       }
                       : msg
                   )
@@ -801,9 +810,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         setMessages((prev) =>
           prev.map((msg) => {
             if (msg.id === assistantMessageId) {
-              // Mark the last recursion as cancelled if it exists
-              const updatedRecursions = msg.recursions?.map((r, idx, arr) =>
-                r && idx === arr.length - 1 && r.status === 'running'
+              // Filter out nulls first, then mark the last running recursion as cancelled
+              const filteredRecursions = msg.recursions?.filter((r): r is RecursionRecord => r !== null) || [];
+              const updatedRecursions = filteredRecursions.map((r, idx, arr) =>
+                idx === arr.length - 1 && r.status === 'running'
                   ? { ...r, status: 'error' as const, endTime: cancelTime }
                   : r
               );

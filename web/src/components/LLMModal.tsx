@@ -37,6 +37,7 @@ export interface LLMFormData {
   json_schema: string;
   streaming: boolean;
   max_context: number;
+  extra_config: string;
 }
 
 interface LLMModalProps {
@@ -64,6 +65,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     json_schema: 'strong',
     streaming: true,
     max_context: 128000,
+    extra_config: '',
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -84,6 +86,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           json_schema: initialData.json_schema || 'strong',
           streaming: initialData.streaming !== undefined ? initialData.streaming : true,
           max_context: initialData.max_context || 128000,
+          extra_config: initialData.extra_config || '',
         });
       } else {
         setFormData({
@@ -98,6 +101,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           json_schema: 'strong',
           streaming: true,
           max_context: 128000,
+          extra_config: '',
         });
       }
       setServerError(null);
@@ -436,6 +440,29 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                       disabled={isSubmitting}
                     />
                   </div>
+                </div>
+
+                {/* Extra Config */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="extra_config">Extra Config (JSON)</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p>Additional kwargs to pass to LLM API calls. Example: {"{"}"extra_body": {"{"}"reasoning_split": true{"}"}{"}"} or {"{"}"temperature": 0.7{"}"}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <textarea
+                    id="extra_config"
+                    value={formData.extra_config}
+                    onChange={(e) => setFormData({ ...formData, extra_config: e.target.value })}
+                    disabled={isSubmitting}
+                    placeholder='{"extra_body": {"reasoning_split": true}}'
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                  />
                 </div>
               </div>
             )}

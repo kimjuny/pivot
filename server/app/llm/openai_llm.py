@@ -36,6 +36,7 @@ class OpenAILLM(AbstractLLM):
         model: str,
         api_key: str,
         timeout: int | None = None,
+        extra_config: dict[str, Any] | None = None,
     ):
         """Initialize the OpenAI-compatible LLM implementation.
 
@@ -44,6 +45,8 @@ class OpenAILLM(AbstractLLM):
             model: The model identifier to use (e.g., "gpt-4", "glm-4")
             api_key: API key for authentication
             timeout: Request timeout in seconds. Defaults to 60 seconds.
+            extra_config: Additional kwargs to pass to API calls.
+                         Example: {"extra_body": {"reasoning_split": True}}
 
         Raises:
             ValueError: If any required parameter is missing
@@ -59,6 +62,7 @@ class OpenAILLM(AbstractLLM):
         self.model = model
         self.api_key = api_key
         self.timeout = timeout or self.DEFAULT_TIMEOUT
+        self.extra_config = extra_config or {}
 
         # Initialize OpenAI client with custom endpoint
         self.client = OpenAI(
@@ -83,12 +87,15 @@ class OpenAILLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
+            # Merge extra_config with kwargs (kwargs takes precedence)
+            merged_kwargs = {**self.extra_config, **kwargs}
+
             # Call OpenAI-compatible API
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,  # type: ignore[arg-type]
                 response_format={"type": "json_object"},
-                **kwargs,  # type: ignore[arg-type]
+                **merged_kwargs,  # type: ignore[arg-type]
             )
 
             # Convert to our structured response format
@@ -116,12 +123,15 @@ class OpenAILLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
+            # Merge extra_config with kwargs (kwargs takes precedence)
+            merged_kwargs = {**self.extra_config, **kwargs}
+
             # Call OpenAI-compatible API with streaming
             stream = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,  # type: ignore[arg-type]
                 stream=True,
-                **kwargs,  # type: ignore[arg-type]
+                **merged_kwargs,  # type: ignore[arg-type]
             )
 
             # Process the stream

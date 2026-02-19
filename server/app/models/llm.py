@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlmodel import Field, SQLModel
 
@@ -19,6 +20,8 @@ class LLM(SQLModel, table=True):
         json_schema: JSON output reliability ('strong', 'weak', 'none').
         streaming: Whether the model supports streaming responses.
         max_context: Maximum context token limit.
+        extra_config: Additional kwargs to pass to LLM API calls (JSON format).
+            Example: {"extra_body": {"reasoning_split": true}, "temperature": 0.7}
         created_at: UTC timestamp when the LLM was created.
         updated_at: UTC timestamp when the LLM was last updated.
     """
@@ -48,5 +51,24 @@ class LLM(SQLModel, table=True):
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     max_context: int = Field(default=128000, description="Maximum context token limit")
+    extra_config: str | None = Field(
+        default=None,
+        description="Additional kwargs for API calls (JSON format). E.g.: {'extra_body': {'reasoning_split': true}}",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def get_extra_config(self) -> dict[str, Any]:
+        """Parse and return the extra_config as a dictionary.
+
+        Returns:
+            Dictionary of extra configuration parameters, or empty dict if not set.
+        """
+        import json
+
+        if not self.extra_config:
+            return {}
+        try:
+            return json.loads(self.extra_config)
+        except json.JSONDecodeError:
+            return {}

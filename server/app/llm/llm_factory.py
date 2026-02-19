@@ -22,6 +22,7 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
         ValueError: If the protocol is not supported
     """
     protocol = llm_config.protocol.lower()
+    extra_config = llm_config.get_extra_config()
 
     if protocol == "openai_compatible":
         # OpenAI-compatible APIs (OpenAI, GLM, DeepSeek, etc.)
@@ -29,6 +30,7 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
             endpoint=llm_config.endpoint,
             model=llm_config.model,
             api_key=llm_config.api_key,
+            extra_config=extra_config,
         )
     elif protocol == "anthropic_compatible":
         # Anthropic-compatible APIs
@@ -38,6 +40,7 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
             endpoint=llm_config.endpoint,
             model=llm_config.model,
             api_key=llm_config.api_key,
+            extra_config=extra_config,
         )
     else:
         raise ValueError(

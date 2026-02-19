@@ -38,6 +38,7 @@ class AnthropicLLM(AbstractLLM):
         model: str,
         api_key: str,
         timeout: int | None = None,
+        extra_config: dict[str, Any] | None = None,
     ):
         """Initialize the Anthropic-compatible LLM implementation.
 
@@ -46,6 +47,8 @@ class AnthropicLLM(AbstractLLM):
             model: The model identifier to use (e.g., "claude-3-5-sonnet-20241022")
             api_key: API key for authentication
             timeout: Request timeout in seconds. Defaults to 60 seconds.
+            extra_config: Additional kwargs to pass to API calls.
+                         Example: {"extra_body": {"reasoning_split": True}}
 
         Raises:
             ValueError: If any required parameter is missing
@@ -61,6 +64,7 @@ class AnthropicLLM(AbstractLLM):
         self.model = model
         self.api_key = api_key
         self.timeout = timeout or self.DEFAULT_TIMEOUT
+        self.extra_config = extra_config or {}
 
         # Initialize Anthropic client
         self.client = Anthropic(
@@ -283,19 +287,22 @@ class AnthropicLLM(AbstractLLM):
             # Convert messages to Anthropic format
             system_message, formatted_messages = self._convert_messages(messages)
 
+            # Merge extra_config with kwargs (kwargs takes precedence)
+            merged_kwargs = {**self.extra_config, **kwargs}
+
             # Convert tools from OpenAI format to Anthropic format if present
-            tools = kwargs.pop("tools", None)
+            tools = merged_kwargs.pop("tools", None)
             anthropic_tools = self._convert_tools_to_anthropic(tools)
 
             # Set default max_tokens if not provided (required by Anthropic)
-            if "max_tokens" not in kwargs:
-                kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
+            if "max_tokens" not in merged_kwargs:
+                merged_kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
 
             # Build API call parameters
             api_params: dict[str, Any] = {
                 "model": self.model,
                 "messages": formatted_messages,
-                **kwargs,
+                **merged_kwargs,
             }
 
             # Add system message if present
@@ -337,19 +344,22 @@ class AnthropicLLM(AbstractLLM):
             # Convert messages to Anthropic format
             system_message, formatted_messages = self._convert_messages(messages)
 
+            # Merge extra_config with kwargs (kwargs takes precedence)
+            merged_kwargs = {**self.extra_config, **kwargs}
+
             # Convert tools from OpenAI format to Anthropic format if present
-            tools = kwargs.pop("tools", None)
+            tools = merged_kwargs.pop("tools", None)
             anthropic_tools = self._convert_tools_to_anthropic(tools)
 
             # Set default max_tokens if not provided (required by Anthropic)
-            if "max_tokens" not in kwargs:
-                kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
+            if "max_tokens" not in merged_kwargs:
+                merged_kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
 
             # Build API call parameters
             api_params: dict[str, Any] = {
                 "model": self.model,
                 "messages": formatted_messages,
-                **kwargs,
+                **merged_kwargs,
             }
 
             # Add system message if present

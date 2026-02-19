@@ -54,6 +54,7 @@ async def get_llms(
             "json_schema": llm.json_schema,
             "streaming": llm.streaming,
             "max_context": llm.max_context,
+            "extra_config": llm.extra_config,
             "created_at": llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
             "updated_at": llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
         }
@@ -96,6 +97,7 @@ async def create_llm(
         json_schema=llm_data.json_schema,
         streaming=llm_data.streaming,
         max_context=llm_data.max_context,
+        extra_config=llm_data.extra_config,
     )
     return {
         "id": llm.id,
@@ -110,6 +112,7 @@ async def create_llm(
         "json_schema": llm.json_schema,
         "streaming": llm.streaming,
         "max_context": llm.max_context,
+        "extra_config": llm.extra_config,
         "created_at": llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
@@ -150,6 +153,7 @@ async def get_llm(
         "json_schema": llm.json_schema,
         "streaming": llm.streaming,
         "max_context": llm.max_context,
+        "extra_config": llm.extra_config,
         "created_at": llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
@@ -211,6 +215,8 @@ async def update_llm(
         update_data["streaming"] = llm_data.streaming
     if llm_data.max_context is not None:
         update_data["max_context"] = llm_data.max_context
+    if llm_data.extra_config is not None:
+        update_data["extra_config"] = llm_data.extra_config
 
     updated_llm = llm_crud.update(llm_id, db, **update_data)
     if not updated_llm:
@@ -229,6 +235,7 @@ async def update_llm(
         "json_schema": updated_llm.json_schema,
         "streaming": updated_llm.streaming,
         "max_context": updated_llm.max_context,
+        "extra_config": updated_llm.extra_config,
         "created_at": updated_llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": updated_llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }

@@ -349,6 +349,10 @@ class LLMCreate(BaseModel):
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     max_context: int = Field(default=128000, description="Maximum context token limit")
+    extra_config: str | None = Field(
+        default=None,
+        description="Additional kwargs for API calls (JSON format). E.g.: {'extra_body': {'reasoning_split': true}}",
+    )
 
 
 class LLMUpdate(BaseModel):
@@ -365,6 +369,7 @@ class LLMUpdate(BaseModel):
     json_schema: str | None = None
     streaming: bool | None = None
     max_context: int | None = None
+    extra_config: str | None = None
 
 
 class LLMResponse(BaseModel):
@@ -382,6 +387,7 @@ class LLMResponse(BaseModel):
     json_schema: str
     streaming: bool
     max_context: int
+    extra_config: str | None
     created_at: datetime
     updated_at: datetime
 
