@@ -86,6 +86,7 @@ class RecursionDetail(BaseModel):
     action_output: str | None = None
     tool_call_results: str | None = None
     status: str
+    error_log: str | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0

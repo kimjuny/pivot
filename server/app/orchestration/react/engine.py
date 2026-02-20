@@ -20,7 +20,7 @@ from app.models.react import (
 )
 from app.orchestration.tool.manager import ToolManager
 from app.services.session_memory_service import SessionMemoryService
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from .context import ReactContext
 from .prompt_template import build_system_prompt
@@ -91,12 +91,6 @@ class ReactEngine:
         try:
             return json.loads(json_str)
         except json.JSONDecodeError as e:
-            logger.error(
-                f"JSON parse failed\n"
-                f"Error: {e.msg} at position {e.pos}\n"
-                f"Content (first 500): {json_str[:500]}\n"
-                f"Error context: ...{json_str[max(0, e.pos-50):e.pos+50]}..."
-            )
             raise ValueError(
                 f"Failed to parse JSON {e.msg} at position {e.pos}: {json_str}"
             ) from e
@@ -171,6 +165,21 @@ class ReactEngine:
                     f"Error: {e}"
                 )
 
+                # Save token usage even on error (tokens were still consumed)
+                tokens_data = None
+                if response.usage:
+                    recursion.prompt_tokens = response.usage.prompt_tokens
+                    recursion.completion_tokens = response.usage.completion_tokens
+                    recursion.total_tokens = response.usage.total_tokens
+                    task.total_prompt_tokens += response.usage.prompt_tokens
+                    task.total_completion_tokens += response.usage.completion_tokens
+                    task.total_tokens += response.usage.total_tokens
+                    tokens_data = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens,
+                    }
+
                 recursion.status = "error"
                 recursion.error_log = str(e)
                 recursion.updated_at = datetime.now(timezone.utc)
@@ -180,6 +189,7 @@ class ReactEngine:
                     "trace_id": trace_id,
                     "action_type": "ERROR",
                     "error": str(e),
+                    "tokens": tokens_data,
                 }
 
             observe = react_output.get("observe", "")
@@ -190,6 +200,12 @@ class ReactEngine:
             action_type = action.get("action_type", "")
             action_output = action.get("output", {})
 
+            # Extract the plan step this recursion belongs to.
+            # The LLM returns action.step_id when executing as part of a plan.
+            # We must validate its presence when a plan exists, but never abort — a
+            # missing step_id should only surface as a warning so the task can continue.
+            action_step_id: str | None = action.get("step_id") or None
+
             # Extract session memory related fields (only used when action_type == ANSWER)
             session_memory_delta = react_output.get("session_memory_delta", {})
             session_subject = react_output.get("session_subject", {})
@@ -198,6 +214,21 @@ class ReactEngine:
 
             # Skip empty/invalid responses
             if not action_type:
+                # Save token usage even on error (tokens were still consumed)
+                tokens_data = None
+                if response.usage:
+                    recursion.prompt_tokens = response.usage.prompt_tokens
+                    recursion.completion_tokens = response.usage.completion_tokens
+                    recursion.total_tokens = response.usage.total_tokens
+                    task.total_prompt_tokens += response.usage.prompt_tokens
+                    task.total_completion_tokens += response.usage.completion_tokens
+                    task.total_tokens += response.usage.total_tokens
+                    tokens_data = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens,
+                    }
+
                 # Mark recursion as error
                 recursion.status = "error"
                 recursion.error_log = "LLM returned empty action_type"
@@ -208,6 +239,7 @@ class ReactEngine:
                     "trace_id": trace_id,
                     "action_type": "ERROR",
                     "error": "Empty action_type from LLM",
+                    "tokens": tokens_data,
                 }
 
             # Handle CALL_TOOL with native function calling
@@ -223,6 +255,21 @@ class ReactEngine:
 
                 # Validate that tool_calls exist when action_type is CALL_TOOL
                 if not tool_calls_from_output:
+                    # Save token usage even on error (tokens were still consumed)
+                    tokens_data = None
+                    if response.usage:
+                        recursion.prompt_tokens = response.usage.prompt_tokens
+                        recursion.completion_tokens = response.usage.completion_tokens
+                        recursion.total_tokens = response.usage.total_tokens
+                        task.total_prompt_tokens += response.usage.prompt_tokens
+                        task.total_completion_tokens += response.usage.completion_tokens
+                        task.total_tokens += response.usage.total_tokens
+                        tokens_data = {
+                            "prompt_tokens": response.usage.prompt_tokens,
+                            "completion_tokens": response.usage.completion_tokens,
+                            "total_tokens": response.usage.total_tokens,
+                        }
+
                     recursion.status = "error"
                     recursion.error_log = (
                         "action_type is CALL_TOOL but no tool_calls in action.output"
@@ -238,6 +285,7 @@ class ReactEngine:
                         "trace_id": trace_id,
                         "action_type": "ERROR",
                         "error": "CALL_TOOL requires tool_calls in action.output",
+                        "tokens": tokens_data,
                     }
 
                 # Process tool_calls from action.output
@@ -311,6 +359,36 @@ class ReactEngine:
             recursion.action_type = action_type
             recursion.action_output = json.dumps(action_output, ensure_ascii=False)
 
+            # Resolve plan_step_id: validate presence in plan mode, then persist.
+            # Load current plan steps to determine whether a plan is active.
+            existing_plan_steps = self.db.exec(
+                select(ReactPlanStep).where(ReactPlanStep.task_id == task.task_id)
+            ).all()
+            plan_is_active = len(existing_plan_steps) > 0
+
+            if plan_is_active and not action_step_id:
+                # The LLM forgot to declare which step it's executing — log the
+                # anomaly but do NOT abort; the recursion result will simply be
+                # unassociated with any step (plan_step_id stays None).
+                logger.error(
+                    f"Action returned without step_id while a plan is active. "
+                    f"The recursion result will NOT be attributed to any plan step. "
+                    f"trace_id={trace_id}, task_id={task.task_id}, "
+                    f"action_type={action_type}, iteration={task.iteration}"
+                )
+            elif action_step_id:
+                # Validate that the declared step_id actually exists in the plan.
+                known_step_ids = {s.step_id for s in existing_plan_steps}
+                if action_step_id not in known_step_ids:
+                    logger.error(
+                        f"LLM returned unknown step_id='{action_step_id}' "
+                        f"(known: {sorted(known_step_ids)}). "
+                        f"Saving as-is for debugging; it will not match any plan step. "
+                        f"trace_id={trace_id}, task_id={task.task_id}"
+                    )
+
+            recursion.plan_step_id = action_step_id
+
             # Save short_term_memory if any
             if short_term_memory_append:
                 recursion.short_term_memory = short_term_memory_append
@@ -338,7 +416,20 @@ class ReactEngine:
             # Save current_state snapshot for this recursion
             # This enables state recovery, debugging, and historical analysis
 
-            # Append current recursion to context.recursions for valid snapshot
+            # Append current recursion to context.recursions for the state snapshot.
+            # Tool execution results are merged directly into action_output.tool_calls[n]
+            # as `result` and `success` fields (§5.5 of context_template.md), rather
+            # than stored in a separate top-level `tool_call_results` list.
+            if tool_results:
+                result_by_id = {
+                    r["tool_call_id"]: r for r in tool_results if "tool_call_id" in r
+                }
+                for tc in action_output.get("tool_calls", []):
+                    matched = result_by_id.get(tc.get("id", ""))
+                    if matched is not None:
+                        tc["result"] = matched.get("result", "")
+                        tc["success"] = matched.get("success", False)
+
             current_rec_dict = {
                 "trace_id": trace_id,
                 "observe": observe,
@@ -348,11 +439,71 @@ class ReactEngine:
                     "output": action_output,
                 },
             }
-            if tool_results:
-                current_rec_dict["tool_call_results"] = tool_results
 
-            context.recursions.append(current_rec_dict)
+            # --- 1. UPDATE IN-MEMORY STATE BEfORE SNAPSHOT ---
+            # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred 
+            # in this recursion cycle so that the state snapshot is consistent.
 
+            # Sync short-term memory to memory context if present
+            if short_term_memory_append:
+                if "short_term" not in context.context.get("memory", {}):
+                    if "memory" not in context.context:
+                        context.context["memory"] = {}
+                    context.context["memory"]["short_term"] = []
+                context.context["memory"]["short_term"].append({
+                    "trace_id": trace_id,
+                    "memory": short_term_memory_append
+                })
+
+            # Sync RE_PLAN updates to database and memory context
+            if action_type == "RE_PLAN":
+                plan_data = action_output.get("plan", [])
+                
+                # Delete old plan steps in DB
+                from sqlmodel import delete
+                delete_stmt = delete(ReactPlanStep).where(
+                    ReactPlanStep.task_id == task.task_id
+                )
+                self.db.exec(delete_stmt)  # type: ignore[arg-type]
+
+                # Create new plan steps in DB and rebuild memory representation
+                new_plan_context = []
+                for step_data in plan_data:
+                    step = ReactPlanStep(
+                        task_id=task.task_id,
+                        react_task_id=task.id or 0,
+                        step_id=step_data.get("step_id", ""),
+                        description=step_data.get("description", ""),
+                        status=step_data.get("status", "pending"),
+                    )
+                    self.db.add(step)
+                    
+                    # Update in-memory context so the snapshot captures the new plan
+                    new_plan_context.append({
+                        "step_id": step.step_id,
+                        "description": step.description,
+                        "status": step.status,
+                        "recursions": [],
+                    })
+                self.db.commit()
+                context.context["plan"] = new_plan_context
+
+            # --- 2. LINK TARGET RECURSION ---
+            # Sync the current recursion into its matching plan step for the snapshot
+            # (Matches what `context.py` from_task does on reload).
+            added_to_plan = False
+            if action_step_id:
+                for plan_step in context.context.get("plan", []):
+                    if plan_step.get("step_id") == action_step_id:
+                        plan_step["recursions"].append(current_rec_dict)
+                        added_to_plan = True
+                        break
+
+            # If it doesn't belong to a plan step, keep it in the top-level list
+            if not added_to_plan:
+                context.recursions.append(current_rec_dict)
+
+            # --- 3. GENERATE CURRENT STATE SNAPSHOT ---
             current_state_json = json.dumps(context.to_dict(), ensure_ascii=False)
             recursion_state = ReactRecursionState(
                 trace_id=trace_id,
@@ -363,29 +514,6 @@ class ReactEngine:
             )
             self.db.add(recursion_state)
             self.db.commit()
-
-            # Handle RE_PLAN
-            if action_type == "RE_PLAN":
-                plan_data = action_output.get("plan", [])
-                # Delete old plan steps
-                from sqlmodel import delete
-
-                delete_stmt = delete(ReactPlanStep).where(
-                    ReactPlanStep.task_id == task.task_id
-                )
-                self.db.exec(delete_stmt)  # type: ignore[arg-type]
-
-                # Create new plan steps
-                for step_data in plan_data:
-                    step = ReactPlanStep(
-                        task_id=task.task_id,
-                        react_task_id=task.id or 0,
-                        step_id=step_data.get("step_id", ""),
-                        description=step_data.get("description", ""),
-                        status=step_data.get("status", "pending"),
-                    )
-                    self.db.add(step)
-                self.db.commit()
 
             # Do NOT add assistant messages to avoid confusing LLM
             # The state machine injection in next recursion's system prompt
@@ -698,18 +826,27 @@ class ReactEngine:
                     break
 
                 elif action_type == "ERROR":
+                    # Log the error but don't fail the task - retry with next iteration
+                    error_msg = event_data.get("error", "Unknown error")
+                    logger.warning(
+                        f"Recursion error at iteration {task.iteration}, retrying... "
+                        f"Error: {error_msg}"
+                    )
+
                     yield {
                         "type": "error",
                         "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
-                        "data": {"error": event_data.get("error", "Unknown error")},
+                        "data": {"error": error_msg},
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
-                    task.status = "failed"
+                    # Increment iteration and continue (retry)
+                    task.iteration += 1
                     task.updated_at = datetime.now(timezone.utc)
                     self.db.commit()
-                    break
+                    continue
 
                 # Update iteration count
                 task.iteration += 1

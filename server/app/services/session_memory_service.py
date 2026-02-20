@@ -513,6 +513,7 @@ class SessionMemoryService:
                     "action_output": recursion.action_output,
                     "tool_call_results": recursion.tool_call_results,
                     "status": recursion.status,
+                    "error_log": recursion.error_log,
                     "prompt_tokens": recursion.prompt_tokens,
                     "completion_tokens": recursion.completion_tokens,
                     "total_tokens": recursion.total_tokens,

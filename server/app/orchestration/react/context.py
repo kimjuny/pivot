@@ -95,7 +95,7 @@ class ReactContext:
             "objective": task.objective,
             "constraints": [],  # Can be extended
             "plan": [],
-            "memory": {"short_term": [], "long_term_refs": []},
+            "memory": {"short_term": []},
         }
 
         # Build short_term memory from recursions
@@ -108,7 +108,7 @@ class ReactContext:
                     }
                 )
 
-        # Add plan steps to context
+        # Initialize plan steps
         for step in plan_steps:
             plan_step = {
                 "step_id": step.step_id,
@@ -116,31 +116,14 @@ class ReactContext:
                 "status": step.status,
                 "recursions": [],
             }
-
-            # Find recursions associated with this step (by matching in action_output)
-            for rec in recursions:
-                if rec.status in ["done", "error"]:
-                    recursion_entry = {
-                        "trace_id": rec.trace_id,
-                        "status": rec.status,
-                        "result": rec.action_output if rec.status == "done" else "",
-                        "error_log": rec.error_log if rec.status == "error" else None,
-                    }
-                    plan_step["recursions"].append(recursion_entry)
-
             context_dict["plan"].append(plan_step)
 
-        # Build recursion history
+        # Build recursion history and assign to either plan steps or global list
         recursions_list: list[dict[str, Any]] = []
         for rec in recursions:
             if rec.status in ["done", "error"] or (
                 rec.status == "running" and rec.action_type == "CLARIFY"
             ):
-                # Note: CLARIFY might be in 'running' or specialized status if we paused
-                # But typically we mark it as 'done' before pausing?
-                # The user said task status becomes waiting_input. Recursion status matches logic in engine.py.
-                # Let's assume completed recursions are what we want.
-
                 # Careful with JSON decoding errors if data is corrupted
                 try:
                     action_output = (
@@ -159,15 +142,40 @@ class ReactContext:
                     },
                 }
 
-                # Add tool_call_results if this was a CALL_TOOL action
+                # For CALL_TOOL recursions, merge execution results (result, success)
+                # directly into each tool_calls[n] entry.
                 if rec.action_type == "CALL_TOOL" and rec.tool_call_results:
                     try:
-                        tool_results = json.loads(rec.tool_call_results)
-                        rec_dict["tool_call_results"] = tool_results
+                        tool_results: list[dict[str, Any]] = json.loads(
+                            rec.tool_call_results
+                        )
+                        result_by_id = {
+                            r["tool_call_id"]: r
+                            for r in tool_results
+                            if "tool_call_id" in r
+                        }
+                        tool_calls = action_output.get("tool_calls", [])
+                        for tc in tool_calls:
+                            matched = result_by_id.get(tc.get("id", ""))
+                            if matched is not None:
+                                tc["result"] = matched.get("result", "")
+                                tc["success"] = matched.get("success", False)
                     except json.JSONDecodeError:
                         pass
 
-                recursions_list.append(rec_dict)
+                # Route to the matching plan step if plan_step_id is provided
+                added_to_plan = False
+                if rec.plan_step_id:
+                    for plan_step in context_dict["plan"]:
+                        if plan_step["step_id"] == rec.plan_step_id:
+                            plan_step["recursions"].append(rec_dict)
+                            added_to_plan = True
+                            break
+                
+                # If it doesn't belong to a plan step (or the step was deleted), 
+                # keep it in the top-level recursion list.
+                if not added_to_plan:
+                    recursions_list.append(rec_dict)
 
         return cls(
             global_state=global_state,

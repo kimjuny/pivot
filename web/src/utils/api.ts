@@ -848,6 +848,7 @@ export interface RecursionDetail {
   action_output: string | null;
   tool_call_results: string | null;
   status: string;
+  error_log: string | null;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;

@@ -291,6 +291,7 @@ async def get_full_session_history(
                 action_output=r["action_output"],
                 tool_call_results=r["tool_call_results"],
                 status=r["status"],
+                error_log=r["error_log"],
                 prompt_tokens=r["prompt_tokens"],
                 completion_tokens=r["completion_tokens"],
                 total_tokens=r["total_tokens"],

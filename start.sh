@@ -56,7 +56,7 @@ start_backend() {
     fi
 
     # Start backend with proper output prefix
-    poetry run python -m uvicorn app.main:app --reload --port 8003 2>&1 | sed 's/^/[BACKEND] /' &
+    poetry run python -m uvicorn app.main:app --reload --workers 3 --port 8003 2>&1 | sed 's/^/[BACKEND] /' &
     BACKEND_PID=$!
     cd ..
     echo "Backend server started with PID $BACKEND_PID"

@@ -14,7 +14,8 @@
       "Bash(./lint.sh)",
       "Bash(python:*)",
       "Bash(npx tsc:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(./server/lint.sh:*)"
     ]
   }
 }

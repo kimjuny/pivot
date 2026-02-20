@@ -128,6 +128,15 @@ class ReactRecursion(SQLModel, table=True):
         default=None,
         description="Short-term memory appended in this recursion",
     )
+    plan_step_id: str | None = Field(
+        default=None,
+        index=True,
+        description=(
+            "The plan step_id this recursion was executed under. "
+            "Set when the LLM returns action.step_id (plan mode only). "
+            "None means either no plan exists or the LLM omitted step_id."
+        ),
+    )
     status: str = Field(default="running", description="Status: running, done, error")
     error_log: str | None = Field(default=None, description="Error message")
     prompt_tokens: int = Field(

@@ -1,4 +1,3 @@
-import logging
 import sys
 import time
 import traceback
@@ -28,22 +27,10 @@ from app.api.session import router as session_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.db.session import get_engine, get_session  # noqa: E402
 from app.orchestration.tool import get_tool_manager  # noqa: E402
-from app.utils.logging_config import get_logger  # noqa: E402
+from app.utils.logging_config import get_logger, setup_logging  # noqa: E402
 
-# Configure logging before importing other modules
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
-    handlers=[logging.StreamHandler()],
-)
-
-# Set core module loggers to DEBUG level for development
-logging.getLogger("core").setLevel(logging.DEBUG)
-logging.getLogger("core.agent").setLevel(logging.DEBUG)
-logging.getLogger("core.llm").setLevel(logging.DEBUG)
-
-# Disable uvicorn's default access log (we use our own TimingMiddleware instead)
-logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+# Set up logging at startup
+setup_logging()
 
 # Initialize logger for server
 logger = get_logger("server")
@@ -105,7 +92,10 @@ async def startup_event():
 
     Initializes the database and logs startup completion.
     """
-    logger.info("Starting up application...")
+    logger.info("=" * 50)
+    logger.info("Starting Pivot Agent Framework...")
+    logger.info("=" * 50)
+
     logger.info("Initializing database...")
     from sqlmodel import SQLModel
 
@@ -132,7 +122,9 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize tool system: {e}")
 
+    logger.info("=" * 50)
     logger.info("Application startup complete")
+    logger.info("=" * 50)
 
 
 # Shutdown event
@@ -142,7 +134,9 @@ async def shutdown_event():
 
     Logs shutdown notification.
     """
+    logger.info("=" * 50)
     logger.info("Shutting down application...")
+    logger.info("=" * 50)
 
 
 # Global exception handler for better error logging

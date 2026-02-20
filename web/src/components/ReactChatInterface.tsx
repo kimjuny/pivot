@@ -76,6 +76,7 @@ interface RecursionRecord {
   action?: string;
   events: ReactStreamEvent[];
   status: 'running' | 'completed' | 'error';
+  errorLog?: string;
   startTime: string;
   endTime?: string;
   tokens?: TokenUsage;
@@ -220,17 +221,59 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
               // Convert recursions to RecursionRecord format
               const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
-                // Parse tool_call_results to construct events for historical sessions
+                // Parse events from recursion data for historical sessions
                 let events: ReactStreamEvent[] = [];
-                if (r.tool_call_results) {
-                  try {
-                    const toolData = JSON.parse(r.tool_call_results);
+
+                // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
+                if (r.action_type === 'CALL_TOOL') {
+                  let toolCalls: unknown[] = [];
+                  let toolResults: unknown[] = [];
+
+                  // Parse tool_calls from action_output
+                  if (r.action_output) {
+                    try {
+                      const actionData = JSON.parse(r.action_output);
+                      toolCalls = actionData.tool_calls || [];
+                    } catch {
+                      // If parsing fails, continue without tool_calls
+                    }
+                  }
+
+                  // Parse tool_results from tool_call_results
+                  if (r.tool_call_results) {
+                    try {
+                      toolResults = JSON.parse(r.tool_call_results);
+                    } catch {
+                      // If parsing fails, continue without tool_results
+                    }
+                  }
+
+                  // Add tool_call event if we have any data
+                  if (toolCalls.length > 0 || toolResults.length > 0) {
                     events.push({
                       type: 'tool_call',
                       task_id: task.task_id,
                       trace_id: r.trace_id,
                       iteration: r.iteration,
-                      data: toolData,
+                      data: {
+                        tool_calls: toolCalls,
+                        tool_results: toolResults,
+                      },
+                      timestamp: r.updated_at,
+                    });
+                  }
+                }
+
+                // For RE_PLAN: parse action_output for plan data
+                if (r.action_type === 'RE_PLAN' && r.action_output) {
+                  try {
+                    const planData = JSON.parse(r.action_output);
+                    events.push({
+                      type: 'plan_update',
+                      task_id: task.task_id,
+                      trace_id: r.trace_id,
+                      iteration: r.iteration,
+                      data: planData,
                       timestamp: r.updated_at,
                     });
                   } catch {
@@ -244,9 +287,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   observe: r.observe || undefined,
                   thought: r.thought || undefined,
                   abstract: r.abstract || undefined,
-                  action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
+                  // Only show action_type, not the full action_output
+                  // Tool calls are rendered separately in TOOL EXECUTION section
+                  action: r.action_type || undefined,
                   events: events,
                   status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+                  errorLog: r.error_log || undefined,
                   startTime: r.created_at,
                   endTime: r.updated_at,
                   tokens: {
@@ -357,17 +403,59 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
         // Convert recursions to RecursionRecord format
         const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
-          // Parse tool_call_results to construct events for historical sessions
+          // Parse events from recursion data for historical sessions
           let events: ReactStreamEvent[] = [];
-          if (r.tool_call_results) {
-            try {
-              const toolData = JSON.parse(r.tool_call_results);
+
+          // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
+          if (r.action_type === 'CALL_TOOL') {
+            let toolCalls: unknown[] = [];
+            let toolResults: unknown[] = [];
+
+            // Parse tool_calls from action_output
+            if (r.action_output) {
+              try {
+                const actionData = JSON.parse(r.action_output);
+                toolCalls = actionData.tool_calls || [];
+              } catch {
+                // If parsing fails, continue without tool_calls
+              }
+            }
+
+            // Parse tool_results from tool_call_results
+            if (r.tool_call_results) {
+              try {
+                toolResults = JSON.parse(r.tool_call_results);
+              } catch {
+                // If parsing fails, continue without tool_results
+              }
+            }
+
+            // Add tool_call event if we have any data
+            if (toolCalls.length > 0 || toolResults.length > 0) {
               events.push({
                 type: 'tool_call',
                 task_id: task.task_id,
                 trace_id: r.trace_id,
                 iteration: r.iteration,
-                data: toolData,
+                data: {
+                  tool_calls: toolCalls,
+                  tool_results: toolResults,
+                },
+                timestamp: r.updated_at,
+              });
+            }
+          }
+
+          // For RE_PLAN: parse action_output for plan data
+          if (r.action_type === 'RE_PLAN' && r.action_output) {
+            try {
+              const planData = JSON.parse(r.action_output);
+              events.push({
+                type: 'plan_update',
+                task_id: task.task_id,
+                trace_id: r.trace_id,
+                iteration: r.iteration,
+                data: planData,
                 timestamp: r.updated_at,
               });
             } catch {
@@ -381,9 +469,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             observe: r.observe || undefined,
             thought: r.thought || undefined,
             abstract: r.abstract || undefined,
-            action: r.action_type ? `${r.action_type}${r.action_output ? ` ${r.action_output}` : ''}` : undefined,
+            // Only show action_type, not the full action_output
+            // Tool calls are rendered separately in TOOL EXECUTION section
+            action: r.action_type || undefined,
             events: events,
             status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+            errorLog: r.error_log || undefined,
             startTime: r.created_at,
             endTime: r.updated_at,
             tokens: {
@@ -605,19 +696,25 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             const event = JSON.parse(data) as ReactStreamEvent;
 
             if (event.type === 'recursion_start') {
-              // Mark previous recursion as completed if it's still running
+              // Mark previous recursion as completed if it's still running.
+              // Capture a snapshot before setMessages — the callback is enqueued
+              // and executed later; by then currentRecursion may point elsewhere.
               if (currentRecursion && currentRecursion.status === 'running') {
-                currentRecursion.status = 'completed';
-                currentRecursion.endTime = event.timestamp;
+                const prevRecursionSnapshot: RecursionRecord = {
+                  ...currentRecursion,
+                  status: 'completed',
+                  endTime: event.timestamp,
+                };
+                // Also update the local variable so subsequent code sees the right state
+                currentRecursion = prevRecursionSnapshot;
                 setMessages((prev) =>
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
                       // Filter out nulls and update matching recursion
-                      const updatedRecursions = msg.recursions
-                        ?.filter((r): r is RecursionRecord => r !== null)
-                        .map((r) =>
-                          r.iteration === currentRecursion!.iteration ? currentRecursion! : r
-                        );
+                      const filtered = (msg.recursions || []).filter((r): r is RecursionRecord => r !== null);
+                      const updatedRecursions = filtered.map((r) =>
+                        r.iteration === prevRecursionSnapshot.iteration ? prevRecursionSnapshot : r
+                      );
                       return { ...msg, recursions: updatedRecursions };
                     }
                     return msg;
@@ -635,6 +732,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 startTime: event.timestamp,
               };
 
+              // Capture snapshot here for the same stale-closure reason
+              const newRecursionSnapshot = currentRecursion;
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
@@ -642,7 +741,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       ...msg,
                       task_id: currentTaskId ?? undefined,
                       // Filter out any nulls from previous state before adding new recursion
-                      recursions: [...(msg.recursions?.filter((r): r is RecursionRecord => r !== null) || []), currentRecursion!],
+                      recursions: [...(msg.recursions?.filter((r): r is RecursionRecord => r !== null) || []), newRecursionSnapshot],
                     }
                     : msg
                 )
@@ -695,6 +794,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   events: updatedEvents,
                   status: 'error' as const,
                   endTime: event.timestamp,
+                  // Preserve tokens if available in error event
+                  tokens: event.tokens ?? existingRecursion.tokens,
                 };
               } else if (event.type === 'answer') {
                 // Answer event - update message content and mark recursion completed
@@ -745,13 +846,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
                       // Filter out nulls and mark all running recursions as completed
-                      const updatedRecursions = msg.recursions
-                        ?.filter((r): r is RecursionRecord => r !== null)
-                        .map((r) =>
-                          r.status === 'running'
-                            ? { ...r, status: 'completed' as const, endTime: event.timestamp }
-                            : r
-                        );
+                      const filtered = (msg.recursions || []).filter((r): r is RecursionRecord => r !== null);
+                      const updatedRecursions = filtered.map((r) =>
+                        r.status === 'running'
+                          ? { ...r, status: 'completed' as const, endTime: event.timestamp }
+                          : r
+                      );
                       return {
                         ...msg,
                         status: 'completed',
@@ -774,25 +874,29 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 };
               }
 
-              // Update recursion events - preserve all currentRecursion data
-              // Skip if currentRecursion was set to null (e.g., for task_complete)
+              // Update recursion events - preserve all currentRecursion data.
+              // Skip if currentRecursion was set to null (e.g., for task_complete).
+              // IMPORTANT: Capture currentRecursion into an immutable const snapshot
+              // BEFORE calling setMessages. React state updater functions are enqueued
+              // and executed asynchronously during reconciliation. The `currentRecursion`
+              // let-variable may be mutated (or nulled) by a later SSE event before
+              // React runs this callback, causing a null-dereference crash at runtime.
               if (currentRecursion) {
+                const frozenRecursion = currentRecursion;
                 setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessageId
-                      ? {
-                        ...msg,
-                        // Filter out nulls and update matching recursion
-                        recursions: msg.recursions
-                          ?.filter((r): r is RecursionRecord => r !== null)
-                          .map((r) =>
-                            r.iteration === currentRecursion!.iteration
-                              ? { ...currentRecursion! }
-                              : r
-                          ),
-                      }
-                      : msg
-                  )
+                  prev.map((msg) => {
+                    if (msg.id === assistantMessageId) {
+                      // Filter out nulls and update matching recursion
+                      const filtered = (msg.recursions || []).filter((r): r is RecursionRecord => r !== null);
+                      const updatedRecursions = filtered.map((r) =>
+                        r.iteration === frozenRecursion.iteration
+                          ? { ...frozenRecursion }
+                          : r
+                      );
+                      return { ...msg, recursions: updatedRecursions };
+                    }
+                    return msg;
+                  })
                 );
               }
             }
@@ -1317,6 +1421,19 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
               return null;
             })}
+
+            {/* Error Log - Display if recursion has error_log */}
+            {recursion.errorLog && (
+              <div className="bg-danger/5 border border-danger/30 rounded p-2">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <XCircle className="w-3.5 h-3.5 text-danger" />
+                  <span className="text-xs font-semibold text-danger">ERROR LOG</span>
+                </div>
+                <div className="text-xs pl-5 text-danger/90 leading-relaxed">
+                  {recursion.errorLog}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1327,9 +1444,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     <div className="flex h-full bg-background text-foreground overflow-hidden">
       {/* Sidebar - Session List */}
       <div
-        className={`flex-shrink-0 border-r border-border flex flex-col bg-muted/30 transition-all duration-300 ease-in-out ${
-          isSidebarCollapsed ? 'w-12' : 'w-64'
-        }`}
+        className={`flex-shrink-0 border-r border-border flex flex-col bg-muted/30 transition-all duration-300 ease-in-out ${isSidebarCollapsed ? 'w-12' : 'w-64'
+          }`}
       >
         {/* Sidebar Header */}
         <div className={`p-3 border-b border-border flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
@@ -1379,11 +1495,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   <div
                     key={session.session_id}
                     onClick={() => void handleSelectSession(session.session_id)}
-                    className={`w-full text-left p-2 rounded-lg transition-colors group cursor-pointer ${
-                      session.session_id === currentSessionId
-                        ? 'bg-primary/10 border border-primary/30'
-                        : 'hover:bg-muted border border-transparent'
-                    }`}
+                    className={`w-full text-left p-2 rounded-lg transition-colors group cursor-pointer ${session.session_id === currentSessionId
+                      ? 'bg-primary/10 border border-primary/30'
+                      : 'hover:bg-muted border border-transparent'
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
@@ -1441,194 +1556,194 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         <div className="flex-1 overflow-y-auto">
           {/* Centered content container */}
           <div className="max-w-3xl mx-auto p-4 pb-4">
-        {messages.length === 0 ? (
-          <div className="text-center text-muted-foreground mt-12 animate-fade-in">
-            <div className="mb-4">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
-                <MessageSquare className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <p className="text-base font-medium text-foreground mb-2">
-                Chat with ReAct Agent
-              </p>
-              <p className="text-sm opacity-70">
-                Ask questions or give tasks. I'll show you my reasoning process.
-              </p>
-            </div >
-          </div >
-        ) : (
-          messages.map((message) => (
-            <div key={message.id} className="space-y-2 mb-6 last:mb-0">
-              {message.role === 'user' ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[85%] px-4 py-2.5 rounded-2xl shadow-sm bg-primary text-primary-foreground rounded-br-none">
-                    <div className="font-semibold text-xs mb-1 opacity-90 tracking-wide uppercase">
-                      YOU
-                    </div>
-                    <div className="text-[10px] mb-1 opacity-70 font-mono">
-                      {formatTimestamp(message.timestamp)}
-                    </div>
-                    <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                      {message.content}
-                    </div>
+            {messages.length === 0 ? (
+              <div className="text-center text-muted-foreground mt-12 animate-fade-in">
+                <div className="mb-4">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
+                    <MessageSquare className="w-8 h-8 text-muted-foreground" />
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {/* Recursions */}
-                  {message.recursions && message.recursions.length > 0 && (
-                    <div className="space-y-2">
-                      {message.recursions.filter((r) => r !== null).map((recursion) =>
-                        renderRecursion(message.id, recursion, message.task_id)
-                      )}
+                  <p className="text-base font-medium text-foreground mb-2">
+                    Chat with ReAct Agent
+                  </p>
+                  <p className="text-sm opacity-70">
+                    Ask questions or give tasks. I'll show you my reasoning process.
+                  </p>
+                </div >
+              </div >
+            ) : (
+              messages.map((message) => (
+                <div key={message.id} className="space-y-2 mb-6 last:mb-0">
+                  {message.role === 'user' ? (
+                    <div className="flex justify-end">
+                      <div className="max-w-[85%] px-4 py-2.5 rounded-2xl shadow-sm bg-primary text-primary-foreground rounded-br-none">
+                        <div className="font-semibold text-xs mb-1 opacity-90 tracking-wide uppercase">
+                          YOU
+                        </div>
+                        <div className="text-[10px] mb-1 opacity-70 font-mono">
+                          {formatTimestamp(message.timestamp)}
+                        </div>
+                        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                          {message.content}
+                        </div>
+                      </div>
                     </div>
-                  )}
-
-                  {/* Final Answer / Question */}
-                  {message.content && (
-                    <div className="bg-background/50 border border-border rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-1.5">
-                          {message.status === 'waiting_input' || (message.recursions?.length && message.recursions.filter((r) => r !== null)[message.recursions.filter((r) => r !== null).length - 1]?.action === 'CLARIFY') ? (
-                            <>
-                              <MessageSquare className="w-3.5 h-3.5 text-info" />
-                              <span className="text-xs font-semibold text-foreground">QUESTION</span>
-                            </>
-                          ) : (
-                            <>
-                              <MessageSquare className="w-3.5 h-3.5 text-success" />
-                              <span className="text-xs font-semibold text-foreground">FINAL ANSWER</span>
-                            </>
+                  ) : (
+                    <div className="space-y-2">
+                      {/* Recursions */}
+                      {message.recursions && message.recursions.length > 0 && (
+                        <div className="space-y-2">
+                          {message.recursions.filter((r) => r !== null).map((recursion) =>
+                            renderRecursion(message.id, recursion, message.task_id)
                           )}
                         </div>
-                        {/* REPLY button for QUESTION */}
-                        {(message.status === 'waiting_input' || (message.recursions?.length && message.recursions.filter((r) => r !== null)[message.recursions.filter((r) => r !== null).length - 1]?.action === 'CLARIFY')) && message.task_id && (
-                          <button
-                            onClick={() => setReplyTaskId(message.task_id || null)}
-                            className="text-xs text-muted-foreground hover:text-info transition-colors"
-                          >
-                            REPLY
-                          </button>
+                      )}
+
+                      {/* Final Answer / Question */}
+                      {message.content && (
+                        <div className="bg-background/50 border border-border rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-1.5">
+                              {message.status === 'waiting_input' || (message.recursions?.length && message.recursions.filter((r) => r !== null)[message.recursions.filter((r) => r !== null).length - 1]?.action === 'CLARIFY') ? (
+                                <>
+                                  <MessageSquare className="w-3.5 h-3.5 text-info" />
+                                  <span className="text-xs font-semibold text-foreground">QUESTION</span>
+                                </>
+                              ) : (
+                                <>
+                                  <MessageSquare className="w-3.5 h-3.5 text-success" />
+                                  <span className="text-xs font-semibold text-foreground">FINAL ANSWER</span>
+                                </>
+                              )}
+                            </div>
+                            {/* REPLY button for QUESTION */}
+                            {(message.status === 'waiting_input' || (message.recursions?.length && message.recursions.filter((r) => r !== null)[message.recursions.filter((r) => r !== null).length - 1]?.action === 'CLARIFY')) && message.task_id && (
+                              <button
+                                onClick={() => setReplyTaskId(message.task_id || null)}
+                                className="text-xs text-muted-foreground hover:text-info transition-colors"
+                              >
+                                REPLY
+                              </button>
+                            )}
+                          </div>
+                          <div className="text-sm text-foreground pl-5 leading-relaxed">
+                            {formatAnswerContent(message.content)}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Status */}
+                      <div className="flex items-center gap-2 px-3">
+                        {message.status === 'running' && (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                            <span className="text-xs text-muted-foreground">Processing...</span>
+                          </>
                         )}
-                      </div>
-                      <div className="text-sm text-foreground pl-5 leading-relaxed">
-                        {formatAnswerContent(message.content)}
+                        {message.status === 'completed' && (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5 text-success" />
+                            <span className="text-xs text-muted-foreground">Completed</span>
+                            {message.totalTokens && (
+                              <span className="text-xs text-muted-foreground ml-2">
+                                • Total: {formatTokenCount(message.totalTokens.total_tokens)} tokens
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {message.status === 'error' && (
+                          <>
+                            <XCircle className="w-3.5 h-3.5 text-danger" />
+                            <span className="text-xs text-danger">Error</span>
+                          </>
+                        )}
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {formatTimestamp(message.timestamp)}
+                        </span>
                       </div>
                     </div>
                   )}
+                </div>
+              ))
+            )
+            }
+            <div ref={messagesEndRef} />
 
-                  {/* Status */}
-                  <div className="flex items-center gap-2 px-3">
-                    {message.status === 'running' && (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                        <span className="text-xs text-muted-foreground">Processing...</span>
-                      </>
-                    )}
-                    {message.status === 'completed' && (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5 text-success" />
-                        <span className="text-xs text-muted-foreground">Completed</span>
-                        {message.totalTokens && (
-                          <span className="text-xs text-muted-foreground ml-2">
-                            • Total: {formatTokenCount(message.totalTokens.total_tokens)} tokens
-                          </span>
-                        )}
-                      </>
-                    )}
-                    {message.status === 'error' && (
-                      <>
-                        <XCircle className="w-3.5 h-3.5 text-danger" />
-                        <span className="text-xs text-danger">Error</span>
-                      </>
-                    )}
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {formatTimestamp(message.timestamp)}
-                    </span>
-                  </div>
+            {/* Input Area - sticky at bottom with negative margins to extend to container edges */}
+            <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pb-4 pt-6 mt-4 bg-gradient-to-t from-background via-background to-transparent">
+              {/* Error Banner */}
+              {error && (
+                <div className="px-4 py-2 mb-2 bg-danger/10 border border-danger/30 rounded-lg text-danger text-sm">
+                  {error}
                 </div>
               )}
-            </div>
-          ))
-        )
-        }
-        <div ref={messagesEndRef} />
 
-          {/* Input Area - sticky at bottom with negative margins to extend to container edges */}
-          <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pb-4 pt-6 mt-4 bg-gradient-to-t from-background via-background to-transparent">
-            {/* Error Banner */}
-            {error && (
-              <div className="px-4 py-2 mb-2 bg-danger/10 border border-danger/30 rounded-lg text-danger text-sm">
-                {error}
-              </div>
-            )}
-
-            {replyTaskId && (
-              <div className="flex items-center justify-between text-xs mb-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50">
-                <span className="text-foreground/70">↳ Replying to question</span>
-                <button
-                  onClick={() => setReplyTaskId(null)}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                  title="Cancel reply"
-                >
-                  <XCircle className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-            <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
-              <Textarea
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
-                className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
-                disabled={isStreaming}
-              />
-              <div className="flex items-center px-4 pb-3 justify-between">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
-                      <Plus className="h-4 h-4" />
-                      <span className="sr-only">Attach</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem>
-                      <Paperclip className="mr-2 h-4 w-4" />
-                      <span>Add images & files</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem>
-                      <Brain className="mr-2 h-4 w-4" />
-                      <span>Thinking</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <div className="flex items-center gap-2">
-                  {isStreaming ? (
-                    <Button
-                      type="button"
-                      onClick={handleStop}
-                      size="icon"
-                      className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
-                      title="Stop execution"
-                    >
-                      <Square className="h-4 w-4" fill="currentColor" />
-                    </Button>
-                  ) : (
-                    <Button
-                      type="submit"
-                      disabled={!inputMessage.trim()}
-                      size="icon"
-                      className="h-8 w-8 rounded-full"
-                      title="Send message"
-                    >
-                      <ArrowUp className="h-4 w-4" />
-                      <span className="sr-only">Send</span>
-                    </Button>
-                  )}
+              {replyTaskId && (
+                <div className="flex items-center justify-between text-xs mb-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50">
+                  <span className="text-foreground/70">↳ Replying to question</span>
+                  <button
+                    onClick={() => setReplyTaskId(null)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title="Cancel reply"
+                  >
+                    <XCircle className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              </div>
-            </form>
-          </div>
+              )}
+              <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
+                <Textarea
+                  value={inputMessage}
+                  onChange={(e) => setInputMessage(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
+                  className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
+                  disabled={isStreaming}
+                />
+                <div className="flex items-center px-4 pb-3 justify-between">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
+                        <Plus className="h-4 h-4" />
+                        <span className="sr-only">Attach</span>
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem>
+                        <Paperclip className="mr-2 h-4 w-4" />
+                        <span>Add images & files</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem>
+                        <Brain className="mr-2 h-4 w-4" />
+                        <span>Thinking</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <div className="flex items-center gap-2">
+                    {isStreaming ? (
+                      <Button
+                        type="button"
+                        onClick={handleStop}
+                        size="icon"
+                        className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
+                        title="Stop execution"
+                      >
+                        <Square className="h-4 w-4" fill="currentColor" />
+                      </Button>
+                    ) : (
+                      <Button
+                        type="submit"
+                        disabled={!inputMessage.trim()}
+                        size="icon"
+                        className="h-8 w-8 rounded-full"
+                        title="Send message"
+                      >
+                        <ArrowUp className="h-4 w-4" />
+                        <span className="sr-only">Send</span>
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       </div>
