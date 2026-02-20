@@ -773,39 +773,17 @@ class ReactEngine:
                     # Process session memory updates if session_id is provided
                     if task.session_id:
                         session_service = SessionMemoryService(self.db)
-
-                        # Apply memory delta (add, update, delete operations)
-                        session_memory_delta = event_data.get("session_memory_delta", {})
-                        if session_memory_delta:
-                            session_service.apply_memory_delta(
-                                task.session_id, session_memory_delta
-                            )
-
-                        # Update session subject if provided
-                        session_subject = event_data.get("session_subject", {})
-                        if session_subject:
-                            session_service.update_subject(task.session_id, session_subject)
-
-                        # Update session object if provided
-                        session_object = event_data.get("session_object", {})
-                        if session_object:
-                            session_service.update_object(task.session_id, session_object)
-
-                        # Get answer content for conversation record
                         answer_output = event_data.get("output", {})
-                        agent_answer = answer_output.get("answer", "")
-
-                        # Add conversation record with task summary
-                        task_summary = event_data.get("task_summary", {})
-                        session_service.add_conversation(
-                            task.session_id, task, agent_answer, task_summary
+                        
+                        session_service.process_answer_updates(
+                            session_id=task.session_id,
+                            task=task,
+                            session_memory_delta=event_data.get("session_memory_delta", {}),
+                            session_subject=event_data.get("session_subject", {}),
+                            session_object=event_data.get("session_object", {}),
+                            agent_answer=answer_output.get("answer", ""),
+                            task_summary=event_data.get("task_summary", {}),
                         )
-
-                        # Update chat history with agent answer
-                        if agent_answer:
-                            session_service.update_chat_history(
-                                task.session_id, "assistant", agent_answer
-                            )
 
                     # Task complete
                     task.status = "completed"

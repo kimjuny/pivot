@@ -1,4 +1,4 @@
-## Session Schema
+### Session-Memory Schema | 语义、说明
 
 ```json
 {
@@ -35,31 +35,26 @@
     ],
     "session_memory": [
         {
-            "id": 1,
             "type": "preference",       // 写入时机：1. 用户明确说，2. 多次行为一致
             "content": "用户在表达方式 / 输出形式 / 风格上的偏好，如用户偏好工程化、系统级、结构化的回答",
             "confidence": 0.8
         },
         {
-            "id": 2,
             "type": "constraint",        // 写入时机：1. 用户明确声明，2. 任务依赖环境
             "content": "对任务执行形成硬限制，如方案必须基于 Python + FastAPI + React",
             "confidence": 0.8
         },
         {
-            "id": 3,
             "type": "background",        // 写入时机：1. 用户声明，2. 多轮对话中逐渐显现
             "content": "关于用户 / 项目的长期背景信息，我们默认应该知道的事实，如用户正在构建一个 Agent Runtime 系统",
             "confidence": 0.7
         },
         {
-            "id": 4,
             "type": "capability_assumption",        // 写入时机：1. 用户展现出能力
             "content": "关于用户能做什么 / 系统能做什么的假设，这类假设可有效减少CLARIFY次数，例如用户具备 Python / 后端工程能力",
             "confidence": 0.8
         },
         {
-            "id": 5,
             "type": "decision",          // 写入时机：共同决策、Agent默认决策、或用户的提出
             "source": "user | joint | agent",
             "decision": "例如采用 Agent Runtime 视角来讨论问题",

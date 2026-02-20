@@ -214,8 +214,7 @@ Action决策环节你只能输出以下 action_type 之一：
       "type": "preference | constraint | background | capability_assumption | decision",
       "content": "...",
       "confidence": 0.8,
-
-      // type = decision 专属字段
+      // 以下字段仅当type = decision时需要返回
       "source": "user | joint | agent",
       "decision": "...",
       "rationale": "...",
@@ -256,95 +255,15 @@ Action决策环节你只能输出以下 action_type 之一：
   - 推荐：`power(base=12, exponent=5)`
   - 避免：`power(text="hello")` ← 包含双引号会导致JSON解析失败
 
-## 5. 动态状态机Schema | 语义、结构说明
-
-### 5.1. 顶层结构
-
-{
-  "global": {},
-  "current_recursion": {},
-  "context": {},
-  "recursions": []
-}
-
-### 5.2. global
-
-{
-  "task_id": "string (uuid)",
-  "iteration": 0,
-  "max_iteration": 10,
-  "status": "pending | running | completed | failed | waiting_input",
-  "created_at": "ISO8601",
-  "updated_at": "ISO8601"
-}
-
-- iteration：已执行的 recursion 次数
-- max_iteration：达到后系统将强制终止
-
-### 5.3. current_recursion
-
-{
-  "trace_id": "string (uuid)",
-  "iteration_index": 3,
-  "status": "running | done | error",
-}
-
-### 5.4. context
-
-{
-  "objective": "string",
-  "constraints": ["string", "..."],
-  "plan": [
-    {
-      "step_id": "string",
-      "description": "string",
-      "status": "pending | running | done | error",
-      "recursions": [] // 外围程序将在这里维护每一个与step相关联的recursion的完整快照
-    }
-  ],
-
-  "memory": {
-    "short_term": [{"trace_id": "uuid", "memory": "指定uuid的recursion中写入进来的短期记忆"}] // 短期记忆，当你在每一轮recursion中返回
-  }
-}
-
-**关键语义（非常重要）：**
-- plan.step 是 strategy / policy
-- 描述“应该怎么做”
-- 不是执行承诺
-  recursions 是 execution history：
-- 一个 step 可以对应多个 recursion
-- 每一次 recursion 都有独立 trace_id
-- success / failure 都会被记录
-  status 含义：
-- pending：尚未开始
-- running：正在被探索
-- done：目标已达成
-- error：多次失败或被判定不可行
-
-### 5.5. recursions
-
-[{
-  "trace_id": "上一轮recursion的trace_id",
-  "observe": "你对当前状态机和输入的客观观察",
-  "thought": "你的分析与决策理由",
-  "action": {
-    "action_type": "CALL_TOOL | RE_PLAN | REFLECT | ANSWER | CLARIFY",
-    "output": {}
-  }
-}]
-
-**IMPORTANT:**
-- 【外围程序】如果这一轮调用了工具（action_type=CALL_TOOL），那么应当在recursions[n].action.output.tool_calls[n]下增加result（str）、success（bool）两个字段，然后把计算结果注入进去。
-- 【外围程序】recursions中只存储没有plan的step认领的recursion（避免重复存储），如果一个recursion有指定属于哪个step_id，那么就应当存储到关联的step_id中而不是这里。
-
 ## 6. 真实动态状态机注入
 
-参考5.x中对状态机的schema描述，以下是该系统当前真实的递归状态机。
+以下是当前系统真实的Recursive React状态机信息，声明周期为本次task。
+
+```json
 {{current_state}}
+```
 
 你必须：
-- 完整阅读它，以上才是真实的状态机
 - 基于它进行 Observe / Thought / Action
 - 不得假设任何“未出现的信息”
 
@@ -366,74 +285,6 @@ Action决策环节你只能输出以下 action_type 之一：
 - session-memory则单独维护在一个持久化的存储系统中，它挂载在session_id中，在同一session中的多轮对话共享这段记忆。
 - 你可以对session-memory做‘增、删、改’，且action_type = ANSWER是你的唯一的commit point，你要把对session-memory的修改以schema的格式做修改。
 
-### 8.2. Session-Memory Schema | 语义、说明
-
-{
-    "session_id": "session_id",
-    "subject": {
-        "content": "对于这段对话的主题 / 话题是什么?",
-        "source": "user | agent",
-        "confidence": 0.8
-    },
-    "object": {
-        "content": "对于这段对话用户的目的究竟是什么?",
-        "source": "user | agent",
-        "confidence": 0.7
-    },
-    "status": "active | waiting_input | closed",
-    "artifacts_metadata": {
-        "workspace_root": "/dev",
-        "sandbox_id": "podman-session-xxx"
-    },
-    "conversations": [
-        {
-            "task_index": 1,
-            "task_id": "每一轮对话都是一个task_id(uuid)",
-            "user_input": "用户在这一轮对话的输入信息",
-            "angent_answer": "Agent在这一轮的最终answer",
-            "status": "running | done | error",
-            "error": "（选填）错误原因",
-            "summary": {
-                "content": "简要描述下你在整个多轮recursion完成的整个task过程中，你都有哪些发现、思考，最终怎样解决的问题，给用户呈现的最终回答都包含什么关键信息。这里不需要太冗长，而是在简洁凝练的前提下对后续的持续对话产生关键信息的参考作用。",
-                "key_findings": ["...", "..."],
-                "final_decisions": ["...", "..."]
-            }
-        }
-    ],
-    "session_memory": [
-        {
-            "type": "preference",       // 写入时机：1. 用户明确说，2. 多次行为一致
-            "content": "用户在表达方式 / 输出形式 / 风格上的偏好，如用户偏好工程化、系统级、结构化的回答",
-            "confidence": 0.8
-        },
-        {
-            "type": "constraint",        // 写入时机：1. 用户明确声明，2. 任务依赖环境
-            "content": "对任务执行形成硬限制，如方案必须基于 Python + FastAPI + React",
-            "confidence": 0.8
-        },
-        {
-            "type": "background",        // 写入时机：1. 用户声明，2. 多轮对话中逐渐显现
-            "content": "关于用户 / 项目的长期背景信息，我们默认应该知道的事实，如用户正在构建一个 Agent Runtime 系统",
-            "confidence": 0.7
-        },
-        {
-            "type": "capability_assumption",        // 写入时机：1. 用户展现出能力
-            "content": "关于用户能做什么 / 系统能做什么的假设，这类假设可有效减少CLARIFY次数，例如用户具备 Python / 后端工程能力",
-            "confidence": 0.8
-        },
-        {
-            "type": "decision",          // 写入时机：共同决策、Agent默认决策、或用户的提出
-            "source": "user | joint | agent",
-            "decision": "例如采用 Agent Runtime 视角来讨论问题",
-            "rationale": "例如用户多次讨论状态机与调度机制",
-            "confidence": 0.85,
-            "reversible": true    // 是否可re-clarify
-        }
-    ],
-    "created_at": "",
-    "updated_at": ""
-}
-
-### 8.3. 当前真实Session-Memory
+### 8.2. 当前真实Session-Memory
 
 {{session_memory}}

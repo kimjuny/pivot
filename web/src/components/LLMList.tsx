@@ -132,6 +132,7 @@ function LLMList() {
     json_schema: string;
     streaming: boolean;
     max_context: number;
+    extra_config: string;
   }) => {
     if (modalMode === 'create') {
       await createLLM(llmData);
@@ -322,6 +323,7 @@ function LLMList() {
           json_schema: editingLLM.json_schema,
           streaming: editingLLM.streaming,
           max_context: editingLLM.max_context,
+          extra_config: editingLLM.extra_config,
         } : undefined}
       />
 

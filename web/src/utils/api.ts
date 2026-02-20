@@ -649,6 +649,7 @@ export const createLLM = async (llmData: {
   json_schema?: string;
   streaming?: boolean;
   max_context?: number;
+  extra_config?: string;
 }): Promise<LLM> => {
   return apiRequest('/llms', {
     method: 'POST',
@@ -687,6 +688,7 @@ export const updateLLM = async (
     json_schema?: string;
     streaming?: boolean;
     max_context?: number;
+    extra_config?: string;
   }
 ): Promise<LLM> => {
   return apiRequest(`/llms/${llmId}`, {

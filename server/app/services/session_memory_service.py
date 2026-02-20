@@ -176,6 +176,132 @@ class SessionMemoryService:
             "updated_at": session.updated_at.isoformat(),
         }
 
+    def process_answer_updates(
+        self,
+        session_id: str,
+        task: ReactTask,
+        session_memory_delta: dict[str, Any] | None = None,
+        session_subject: dict[str, Any] | None = None,
+        session_object: dict[str, Any] | None = None,
+        agent_answer: str | None = None,
+        task_summary: dict[str, Any] | None = None,
+    ) -> bool:
+        """Process all session updates from an ANSWER action in a single transaction.
+
+        This consolidates memory delta, subject/object updates, conversation logging,
+        and chat history appending into one database operation.
+
+        Args:
+            session_id: UUID of the session.
+            task: The completed ReactTask.
+            session_memory_delta: Dictionary with add/update/delete memory operations.
+            session_subject: Optional updated subject.
+            session_object: Optional updated object.
+            agent_answer: The final agent response content.
+            task_summary: Summary dictionary of the task execution.
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        session = self.get_session(session_id)
+        memory = self.get_session_memory(session_id)
+
+        if not session or not memory:
+            logger.warning(f"Session or memory not found for session_id: {session_id}")
+            return False
+
+        now = datetime.now(timezone.utc)
+        memory_updated = False
+        session_updated = False
+
+        # 1. Process Memory Deltas
+        if session_memory_delta:
+            try:
+                memory_items = json.loads(memory.memory_items)
+            except json.JSONDecodeError:
+                memory_items = []
+
+            max_id = 0
+            for item in memory_items:
+                if "id" in item and isinstance(item["id"], int):
+                    max_id = max(max_id, item["id"])
+
+            for add_item in session_memory_delta.get("add", []):
+                max_id += 1
+                memory_items.append(self._build_memory_item(add_item, max_id))
+
+            for update_item in session_memory_delta.get("update", []):
+                item_id = update_item.get("id")
+                if item_id is not None:
+                    for i, existing in enumerate(memory_items):
+                        if existing.get("id") == item_id:
+                            memory_items[i] = self._build_memory_item(update_item, item_id)
+                            break
+
+            delete_ids = {d.get("id") for d in session_memory_delta.get("delete", []) if d.get("id")}
+            if delete_ids:
+                memory_items = [item for item in memory_items if item.get("id") not in delete_ids]
+
+            memory.memory_items = json.dumps(memory_items, ensure_ascii=False)
+            memory_updated = True
+
+        # 2. Process Conversation Record
+        try:
+            conversations = json.loads(memory.conversations)
+        except json.JSONDecodeError:
+            conversations = []
+
+        task_index = len(conversations) + 1
+        conversations.append({
+            "task_index": task_index,
+            "task_id": task.task_id,
+            "user_input": task.user_message,
+            "agent_answer": agent_answer or "",
+            "status": task.status,
+            "summary": task_summary,
+        })
+        memory.conversations = json.dumps(conversations, ensure_ascii=False)
+        memory_updated = True
+
+        if memory_updated:
+            memory.updated_at = now
+
+        # 3. Process Session Subject & Object
+        if session_subject:
+            session.subject = json.dumps(session_subject, ensure_ascii=False)
+            session_updated = True
+
+        if session_object:
+            session.object = json.dumps(session_object, ensure_ascii=False)
+            session_updated = True
+
+        # 4. Process Chat History
+        if agent_answer:
+            try:
+                history = json.loads(session.chat_history or '{"version": 1, "messages": []}')
+            except json.JSONDecodeError:
+                history = {"version": 1, "messages": []}
+
+            if "messages" not in history:
+                history["messages"] = []
+
+            history["messages"].append({
+                "type": "assistant",
+                "content": agent_answer,
+                "timestamp": now.isoformat(),
+            })
+            session.chat_history = json.dumps(history, ensure_ascii=False)
+            session_updated = True
+
+        if session_updated:
+            session.updated_at = now
+
+        # Fast single commit for everything
+        if memory_updated or session_updated:
+            self.db.commit()
+
+        return True
+
     def apply_memory_delta(
         self,
         session_id: str,

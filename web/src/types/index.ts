@@ -379,6 +379,8 @@ export interface LLM {
   streaming: boolean;
   /** Maximum context token limit */
   max_context: number;
+  /** Extra JSON configuration for LLM API calls */
+  extra_config: string;
   /** UTC timestamp when LLM was created */
   created_at: string;
   /** UTC timestamp when LLM was last updated */
