@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import path from 'path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -12,9 +13,14 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // Allow access from any host (required when running inside a container)
+    host: true,
+    watch: {
+      usePolling: true,
+    },
     proxy: {
       '/api': {
-        target: 'http://localhost:8003',
+        target: process.env.BACKEND_URL || 'http://localhost:8003',
         changeOrigin: true,
         secure: false,
         // Special configuration for SSE (Server-Sent Events)

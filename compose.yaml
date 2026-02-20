@@ -1,0 +1,65 @@
+# =============================================================================
+# Pivot — Dev Compose
+# Strategy: mount source code, pre-install deps in image, hot-reload both ends
+# Usage:    podman compose up
+# =============================================================================
+
+services:
+  # ---------- Backend (FastAPI + Uvicorn) ----------
+  backend:
+    build:
+      context: .
+      dockerfile: Containerfile.dev
+      target: backend-dev
+    container_name: pivot-backend
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./server:/app/server:z
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./poetry.lock:/app/poetry.lock:ro
+      # Persist SQLite database across rebuilds
+      - pivot-data:/app/server/data
+    environment:
+      - DATABASE_URL=sqlite:////app/server/data/pivot.db
+      - ENV=development
+      - PYTHONUNBUFFERED=1
+    # Hot-reload on code changes
+    command: >
+      poetry run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8003 --app-dir server
+
+  # ---------- Frontend (Vite dev server) ----------
+  frontend:
+    build:
+      context: .
+      dockerfile: Containerfile.dev
+      target: frontend-dev
+    container_name: pivot-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./web/src:/app/web/src:z
+      - ./web/public:/app/web/public:z
+      - ./web/index.html:/app/web/index.html:ro
+      - ./web/vite.config.ts:/app/web/vite.config.ts:ro
+      - ./web/tailwind.config.js:/app/web/tailwind.config.js:ro
+      - ./web/postcss.config.js:/app/web/postcss.config.js:ro
+      - ./web/tsconfig.json:/app/web/tsconfig.json:ro
+      - ./web/tsconfig.node.json:/app/web/tsconfig.node.json:ro
+      - ./web/eslint.config.js:/app/web/eslint.config.js:ro
+      - ./web/components.json:/app/web/components.json:ro
+    environment:
+      # BACKEND_URL is used by the Vite proxy config (server-side) to forward
+      # /api/* requests to the backend container. It is NOT a VITE_* var so it
+      # is never inlined into the browser bundle.
+      - BACKEND_URL=http://backend:8003
+      # VITE_API_BASE_URL is inlined into the React app — use a relative path
+      # so the browser sends /api/* to the same origin (Vite dev server), which
+      # then proxies to the backend container via BACKEND_URL above.
+      - VITE_API_BASE_URL=/api
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  pivot-data:

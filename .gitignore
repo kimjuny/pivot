@@ -82,3 +82,6 @@ web/build/
 *.sqlite-trace-journal
 *.sqlite-trace-wal
 *.sqlite-trace-shm
+
+# Podman / Container
+server/data/

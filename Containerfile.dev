@@ -1,0 +1,54 @@
+# =============================================================================
+# Pivot — Dev Container (multi-stage)
+# Two targets: frontend-dev and backend-dev
+# Pre-installs all dependencies so `podman compose up` is instant
+# =============================================================================
+
+# ---- Frontend dev target ----------------------------------------------------
+FROM docker.io/library/node:20-alpine AS frontend-dev
+
+WORKDIR /app/web
+
+# Install all dependencies (including devDependencies) into the image
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+
+# Copy config files needed at startup (source is bind-mounted at runtime)
+COPY web/vite.config.ts web/tsconfig.json web/tsconfig.node.json ./
+COPY web/tailwind.config.js web/postcss.config.js ./
+COPY web/eslint.config.js web/components.json ./
+COPY web/index.html ./
+COPY web/.env.development ./
+COPY web/src/ ./src/
+COPY web/public/ ./public/
+
+EXPOSE 3000
+
+
+# ---- Backend dev target -----------------------------------------------------
+FROM docker.io/library/python:3.10-slim AS backend-dev
+
+# System deps for compiled Python packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libffi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Poetry
+ENV POETRY_VIRTUALENVS_CREATE=true \
+    POETRY_VIRTUALENVS_IN_PROJECT=true \
+    POETRY_NO_INTERACTION=1
+RUN pip install --no-cache-dir poetry==1.8.5
+
+WORKDIR /app
+
+# Install Python dependencies (including dev deps for linting/type-checking)
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --no-root && rm -rf /root/.cache
+
+# Copy server code (will be overridden by bind mount in compose)
+COPY server/ ./server/
+
+# Create data directory for SQLite persistence
+RUN mkdir -p ./server/data
+
+EXPOSE 8003

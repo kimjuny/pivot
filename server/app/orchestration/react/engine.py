@@ -20,6 +20,7 @@ from app.models.react import (
 )
 from app.orchestration.tool.manager import ToolManager
 from app.services.session_memory_service import SessionMemoryService
+from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
 from .context import ReactContext
@@ -143,13 +144,13 @@ class ReactEngine:
         # Call LLM WITHOUT tools parameter (using prompt-based approach)
         # Tools are described in the system prompt, and LLM returns tool calls in action.output
         try:
-            response = self.llm.chat(messages=messages)  # type: ignore[arg-type]
+            response = await run_in_threadpool(self.llm.chat, messages=messages)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
             # Parse JSON from content to get observe, thought, abstract, action_type
             content = message.content or "{}"
-            logger.info(f"LLM response: {content}")
+            logger.info(f"LLM response: \n{content}")
 
             # Use safe JSON parser to handle all common LLM formatting issues
             try:
@@ -209,7 +210,7 @@ class ReactEngine:
             # Extract session memory related fields (only used when action_type == ANSWER)
             session_memory_delta = react_output.get("session_memory_delta", {})
             session_subject = react_output.get("session_subject", {})
-            session_object = react_output.get("session_object", {})
+            session_goal = react_output.get("session_goal", {})
             task_summary = react_output.get("task_summary", {})
 
             # Skip empty/invalid responses
@@ -308,8 +309,10 @@ class ReactEngine:
                             )
 
                     try:
-                        # Execute tool
-                        result = self.tool_manager.execute(func_name, **func_args)
+                        # Execute tool asynchronously via thread pool
+                        result = await run_in_threadpool(
+                            self.tool_manager.execute, func_name, **func_args
+                        )
 
                         tool_results.append(
                             {
@@ -416,7 +419,7 @@ class ReactEngine:
             # Save current_state snapshot for this recursion
             # This enables state recovery, debugging, and historical analysis
 
-            # Append current recursion to context.recursions for the state snapshot.
+            # Append current recursion to context.recursion_history for the state snapshot.
             # Tool execution results are merged directly into action_output.tool_calls[n]
             # as `result` and `success` fields (§5.5 of context_template.md), rather
             # than stored in a separate top-level `tool_call_results` list.
@@ -483,7 +486,7 @@ class ReactEngine:
                         "step_id": step.step_id,
                         "description": step.description,
                         "status": step.status,
-                        "recursions": [],
+                        "recursion_history": [],
                     })
                 self.db.commit()
                 context.context["plan"] = new_plan_context
@@ -495,13 +498,13 @@ class ReactEngine:
             if action_step_id:
                 for plan_step in context.context.get("plan", []):
                     if plan_step.get("step_id") == action_step_id:
-                        plan_step["recursions"].append(current_rec_dict)
+                        plan_step["recursion_history"].append(current_rec_dict)
                         added_to_plan = True
                         break
 
             # If it doesn't belong to a plan step, keep it in the top-level list
             if not added_to_plan:
-                context.recursions.append(current_rec_dict)
+                context.recursion_history.append(current_rec_dict)
 
             # --- 3. GENERATE CURRENT STATE SNAPSHOT ---
             current_state_json = json.dumps(context.to_dict(), ensure_ascii=False)
@@ -548,7 +551,7 @@ class ReactEngine:
                 # Session memory related fields (for ANSWER action)
                 "session_memory_delta": session_memory_delta,
                 "session_subject": session_subject,
-                "session_object": session_object,
+                "session_goal": session_goal,
                 "task_summary": task_summary,
             }
 
@@ -780,7 +783,7 @@ class ReactEngine:
                             task=task,
                             session_memory_delta=event_data.get("session_memory_delta", {}),
                             session_subject=event_data.get("session_subject", {}),
-                            session_object=event_data.get("session_object", {}),
+                            session_goal=event_data.get("session_goal", {}),
                             agent_answer=answer_output.get("answer", ""),
                             task_summary=event_data.get("task_summary", {}),
                         )

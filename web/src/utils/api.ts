@@ -5,7 +5,7 @@ import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/Auth
  * API base URL from environment configuration.
  * In development, uses localhost; in production, uses relative path.
  */
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8003/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8003/api';
 
 /**
  * Configuration options for API requests.

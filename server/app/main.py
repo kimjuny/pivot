@@ -84,6 +84,25 @@ app.include_router(session_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 
+# ---------- Production: serve frontend static files ----------
+# In the production fat image the built React SPA is copied to ./static/.
+# Mount it so the backend serves both the API and the UI from a single process.
+_static_dir = Path(__file__).parent.parent / "static"
+if _static_dir.is_dir() and (_static_dir / "index.html").exists():
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    # Serve assets (JS, CSS, images) before the catch-all
+    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def _spa_fallback(full_path: str):
+        """Catch-all: return index.html for client-side routing."""
+        file_path = _static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(_static_dir / "index.html"))
+
 
 # Startup event to initialize database
 @app.on_event("startup")

@@ -23,13 +23,13 @@ class ReactContext:
         global_state: Global task information (task_id, iteration, status, etc.)
         current_recursion: Current recursion state (trace_id, status, etc.)
         context: Task context including objective, constraints, plan, and memory
-        recursions: History of previous recursions
+        recursion_history: History of previous recursions
     """
 
     global_state: dict[str, Any]
     current_recursion: dict[str, Any]
     context: dict[str, Any]
-    recursions: list[dict[str, Any]]
+    recursion_history: list[dict[str, Any]]
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -42,7 +42,7 @@ class ReactContext:
             "global": self.global_state,
             "current_recursion": self.current_recursion,
             "context": self.context,
-            "recursions": self.recursions,
+            "recursion_history": self.recursion_history,
         }
 
     @classmethod
@@ -114,7 +114,7 @@ class ReactContext:
                 "step_id": step.step_id,
                 "description": step.description,
                 "status": step.status,
-                "recursions": [],
+                "recursion_history": [],
             }
             context_dict["plan"].append(plan_step)
 
@@ -168,7 +168,7 @@ class ReactContext:
                 if rec.plan_step_id:
                     for plan_step in context_dict["plan"]:
                         if plan_step["step_id"] == rec.plan_step_id:
-                            plan_step["recursions"].append(rec_dict)
+                            plan_step["recursion_history"].append(rec_dict)
                             added_to_plan = True
                             break
                 
@@ -181,7 +181,7 @@ class ReactContext:
             global_state=global_state,
             current_recursion=current_recursion,
             context=context_dict,
-            recursions=recursions_list,
+            recursion_history=recursions_list,
         )
 
     def update_for_new_recursion(self, trace_id: str) -> None:

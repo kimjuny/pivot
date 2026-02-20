@@ -182,7 +182,7 @@ class SessionMemoryService:
         task: ReactTask,
         session_memory_delta: dict[str, Any] | None = None,
         session_subject: dict[str, Any] | None = None,
-        session_object: dict[str, Any] | None = None,
+        session_goal: dict[str, Any] | None = None,
         agent_answer: str | None = None,
         task_summary: dict[str, Any] | None = None,
     ) -> bool:
@@ -196,7 +196,7 @@ class SessionMemoryService:
             task: The completed ReactTask.
             session_memory_delta: Dictionary with add/update/delete memory operations.
             session_subject: Optional updated subject.
-            session_object: Optional updated object.
+            session_goal: Optional updated goal.
             agent_answer: The final agent response content.
             task_summary: Summary dictionary of the task execution.
 
@@ -256,7 +256,7 @@ class SessionMemoryService:
             "task_index": task_index,
             "task_id": task.task_id,
             "user_input": task.user_message,
-            "agent_answer": agent_answer or "",
+            "final_answer": agent_answer or "",
             "status": task.status,
             "summary": task_summary,
         })
@@ -271,8 +271,8 @@ class SessionMemoryService:
             session.subject = json.dumps(session_subject, ensure_ascii=False)
             session_updated = True
 
-        if session_object:
-            session.object = json.dumps(session_object, ensure_ascii=False)
+        if session_goal:
+            session.object = json.dumps(session_goal, ensure_ascii=False)
             session_updated = True
 
         # 4. Process Chat History
@@ -391,6 +391,7 @@ class SessionMemoryService:
             item["source"] = data.get("source", "agent")
             item["decision"] = data.get("decision", "")
             item["rationale"] = data.get("rationale", "")
+            item["scope"] = data.get("scope", "session")
             item["reversible"] = data.get("reversible", True)
 
         return item
@@ -418,16 +419,16 @@ class SessionMemoryService:
         self.db.commit()
         return True
 
-    def update_object(
+    def update_goal(
         self,
         session_id: str,
-        object_data: dict[str, Any],
+        goal_data: dict[str, Any],
     ) -> bool:
-        """Update session object (purpose).
+        """Update session goal (purpose).
 
         Args:
             session_id: UUID of the session.
-            object_data: Dictionary with content, source, confidence.
+            goal_data: Dictionary with content, source, confidence.
 
         Returns:
             True if successful, False otherwise.
@@ -436,7 +437,7 @@ class SessionMemoryService:
         if not session:
             return False
 
-        session.object = json.dumps(object_data, ensure_ascii=False)
+        session.object = json.dumps(goal_data, ensure_ascii=False)
         session.updated_at = datetime.now(timezone.utc)
         self.db.commit()
         return True
@@ -478,7 +479,7 @@ class SessionMemoryService:
             "task_index": task_index,
             "task_id": task.task_id,
             "user_input": task.user_message,
-            "agent_answer": agent_answer or "",
+            "final_answer": agent_answer or "",
             "status": task.status,
             "summary": task_summary,
         }

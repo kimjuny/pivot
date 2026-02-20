@@ -1,0 +1,46 @@
+# Dependencies (re-installed inside container)
+**/node_modules/
+**/.venv/
+**/__pycache__/
+
+# Build artifacts
+web/dist/
+web/build/
+
+# Databases
+*.db
+*.sqlite*
+
+# Editor / IDE
+**/.vscode/
+**/.idea/
+**/.cursor/
+**/.trae/
+**/.agents/
+**/.agent/
+**/.claude/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Caches
+**/.ruff_cache/
+**/.pytest_cache/
+**/coverage/
+**/.cache/
+
+# Logs
+**/logs/
+*.log
+
+# Docs not needed in image
+*.md
+!README.md
+CLAUDE.md
+ARCHITECTURE.md
+ENV_SETUP.md

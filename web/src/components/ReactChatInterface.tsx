@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { createSession, listSessions, deleteSession, getFullSessionHistory, SessionListItem, TaskMessage, RecursionDetail } from '../utils/api';
+import { createSession, listSessions, deleteSession, getFullSessionHistory, SessionListItem, TaskMessage, RecursionDetail, API_BASE_URL } from '../utils/api';
 
 /**
  * Props for ReactChatInterface component.
@@ -109,9 +109,7 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
     if (state) return;
     setLoading(true);
     try {
-      const apiUrl = import.meta.env.DEV
-        ? `http://localhost:8003/api/react/tasks/${taskId}/states/${iteration}`
-        : `/api/react/tasks/${taskId}/states/${iteration}`;
+      const apiUrl = `${API_BASE_URL}/react/tasks/${taskId}/states/${iteration}`;
 
       const token = getAuthToken();
       const headers: Record<string, string> = {};
@@ -632,9 +630,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
       // Use direct backend URL to bypass Vite proxy for SSE streaming
       // This prevents potential data loss in proxy layer
-      const apiUrl = import.meta.env.DEV
-        ? 'http://localhost:8003/api/react/chat/stream'
-        : '/api/react/chat/stream';
+      const apiUrl = `${API_BASE_URL}/react/chat/stream`;
 
       const token = getAuthToken();
       const headers: Record<string, string> = {
