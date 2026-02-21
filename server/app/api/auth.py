@@ -5,7 +5,6 @@ This module provides endpoints for user authentication including login.
 
 import os
 from datetime import datetime, timezone
-from typing import Any
 
 import bcrypt
 from app.api.dependencies import get_db
@@ -53,7 +52,7 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def create_access_token(data: dict[str, Any]) -> str:
+def create_access_token(data: dict) -> str:
     """Create a JWT access token.
 
     Args:
@@ -62,7 +61,7 @@ def create_access_token(data: dict[str, Any]) -> str:
     Returns:
         The encoded JWT token.
     """
-    to_encode: dict[str, Any] = data.copy()
+    to_encode = data.copy()
     to_encode.update(
         {
             "exp": datetime.now(timezone.utc).timestamp()
@@ -95,16 +94,12 @@ def get_current_user(
     )
 
     try:
-        payload: dict[str, Any] = jwt.decode(
+        payload = jwt.decode(
             credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM]
         )
-        sub = payload.get("sub")
-        if not isinstance(sub, str):
+        user_id: int | None = payload.get("sub")
+        if user_id is None:
             raise credentials_exception
-        try:
-            user_id = int(sub)
-        except ValueError as err:
-            raise credentials_exception from err
     except JWTError as err:
         raise credentials_exception from err
 
@@ -135,9 +130,7 @@ def init_default_user(session: Session) -> None:
 
 
 @router.post("/auth/login", response_model=UserResponse)
-async def login(
-    login_data: UserLogin, session: Session = Depends(get_db)
-) -> UserResponse:
+async def login(login_data: UserLogin, session: Session = Depends(get_db)) -> User:
     """Authenticate a user and return an access token.
 
     Args:
@@ -158,12 +151,6 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
-        )
-
-    if user.id is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="User ID is missing",
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})

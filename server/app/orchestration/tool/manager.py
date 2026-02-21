@@ -4,17 +4,10 @@ Tool manager for discovering, registering, and managing tools.
 
 import importlib
 import inspect
-import logging
-import threading
-import time
 from pathlib import Path
 from typing import Any
 
 from .metadata import ToolMetadata
-from .podman_sidecar_executor import PodmanSidecarConfig, PodmanSidecarExecutor
-
-logger = logging.getLogger(__name__)
-_PIVOT_CONTEXT_KEY = "__pivot_context"
 
 
 class ToolManager:
@@ -31,7 +24,6 @@ class ToolManager:
     def __init__(self) -> None:
         """Initialize the ToolManager with an empty registry."""
         self._registry: dict[str, ToolMetadata] = {}
-        self._podman_sidecar_executor: PodmanSidecarExecutor | None = None
 
     def add_entry(self, metadata: ToolMetadata) -> None:
         """
@@ -85,9 +77,9 @@ class ToolManager:
         """
         return list(self._registry.values())
 
-    def execute_local(self, name: str, *args: Any, **kwargs: Any) -> Any:
+    def execute(self, name: str, *args: Any, **kwargs: Any) -> Any:
         """
-        Execute a tool in-process by name with the given arguments.
+        Execute a tool by name with the given arguments.
 
         Args:
             name: The name of the tool to execute.
@@ -104,116 +96,6 @@ class ToolManager:
         if tool_metadata is None:
             raise KeyError(f"Tool '{name}' not found in registry.")
         return tool_metadata.func(*args, **kwargs)
-
-    def execute(self, name: str, *args: Any, **kwargs: Any) -> Any:
-        """
-        Execute a tool by name with the given arguments.
-
-        Args:
-            name: The name of the tool to execute.
-            *args: Positional arguments to pass to the tool.
-            **kwargs: Keyword arguments to pass to the tool.
-
-        Returns:
-            The result of the tool execution.
-
-        Raises:
-            KeyError: If the tool is not found in the registry.
-        """
-        pivot_context = kwargs.pop(_PIVOT_CONTEXT_KEY, None)
-        if pivot_context is not None and not isinstance(pivot_context, dict):
-            pivot_context = None
-
-        tool_metadata = self.get_tool(name)
-        if tool_metadata is None:
-            raise KeyError(f"Tool '{name}' not found in registry.")
-
-        from app.config import get_settings
-
-        settings = get_settings()
-        start_ts = time.perf_counter()
-        thread_id = threading.get_ident()
-        if settings.TOOL_EXECUTION_MODE == "podman_sidecar":
-            if args:
-                raise ValueError("Sidecar tool execution only supports kwargs.")
-            logger.info(
-                "tool_execute_start mode=podman_sidecar tool=%s thread_id=%s context=%s",
-                name,
-                thread_id,
-                pivot_context,
-            )
-            try:
-                result = self._execute_via_podman_sidecar(
-                    name=name, kwargs=kwargs, pivot_context=pivot_context
-                )
-                elapsed_ms = (time.perf_counter() - start_ts) * 1000
-                logger.info(
-                    "tool_execute_end mode=podman_sidecar tool=%s thread_id=%s elapsed_ms=%.2f",
-                    name,
-                    thread_id,
-                    elapsed_ms,
-                )
-                return result
-            except Exception:
-                elapsed_ms = (time.perf_counter() - start_ts) * 1000
-                logger.exception(
-                    "tool_execute_error mode=podman_sidecar tool=%s thread_id=%s elapsed_ms=%.2f",
-                    name,
-                    thread_id,
-                    elapsed_ms,
-                )
-                raise
-
-        logger.info(
-            "tool_execute_start mode=local tool=%s thread_id=%s context=%s",
-            name,
-            thread_id,
-            pivot_context,
-        )
-        try:
-            result = tool_metadata.func(*args, **kwargs)
-            elapsed_ms = (time.perf_counter() - start_ts) * 1000
-            logger.info(
-                "tool_execute_end mode=local tool=%s thread_id=%s elapsed_ms=%.2f",
-                name,
-                thread_id,
-                elapsed_ms,
-            )
-            return result
-        except Exception:
-            elapsed_ms = (time.perf_counter() - start_ts) * 1000
-            logger.exception(
-                "tool_execute_error mode=local tool=%s thread_id=%s elapsed_ms=%.2f",
-                name,
-                thread_id,
-                elapsed_ms,
-            )
-            raise
-
-    def _execute_via_podman_sidecar(
-        self,
-        name: str,
-        kwargs: dict[str, Any],
-        pivot_context: dict[str, Any] | None,
-    ) -> Any:
-        if self._podman_sidecar_executor is None:
-            from app.config import get_settings
-
-            settings = get_settings()
-            self._podman_sidecar_executor = PodmanSidecarExecutor(
-                PodmanSidecarConfig(
-                    podman_host=settings.PODMAN_HOST,
-                    timeout_seconds=settings.TOOL_SIDECAR_TIMEOUT_SECONDS,
-                    network=settings.TOOL_SIDECAR_NETWORK,
-                    image=settings.TOOL_SIDECAR_IMAGE,
-                )
-            )
-
-        return self._podman_sidecar_executor.execute(
-            tool_name=name,
-            tool_kwargs=kwargs,
-            pivot_context=pivot_context,
-        )
 
     def to_text_catalog(self) -> str:
         """

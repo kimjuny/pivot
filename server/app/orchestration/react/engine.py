@@ -9,7 +9,6 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from time import perf_counter
 from typing import Any
 
 from app.llm.abstract_llm import AbstractLLM
@@ -311,26 +310,8 @@ class ReactEngine:
 
                     try:
                         # Execute tool asynchronously via thread pool
-                        call_started = perf_counter()
-                        pivot_context = {
-                            "trace_id": trace_id,
-                            "tool_call_id": tool_call_id,
-                            "task_id": task.task_id,
-                            "iteration": task.iteration,
-                        }
                         result = await run_in_threadpool(
-                            self.tool_manager.execute,
-                            func_name,
-                            __pivot_context=pivot_context,
-                            **func_args,
-                        )
-                        call_elapsed_ms = (perf_counter() - call_started) * 1000
-                        logger.info(
-                            "react_tool_call_done trace_id=%s tool_call_id=%s tool=%s elapsed_ms=%.2f",
-                            trace_id,
-                            tool_call_id,
-                            func_name,
-                            call_elapsed_ms,
+                            self.tool_manager.execute, func_name, **func_args
                         )
 
                         tool_results.append(
