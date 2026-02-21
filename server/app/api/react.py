@@ -22,6 +22,7 @@ from app.orchestration.tool import get_tool_manager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import desc
 from sqlmodel import Session, select
 
 # Get logger for this module
@@ -141,7 +142,7 @@ async def react_chat_stream(
                         rec_stmt = (
                             select(ReactRecursion)
                             .where(ReactRecursion.task_id == existing_task.task_id)
-                            .order_by(ReactRecursion.iteration_index.desc())
+                            .order_by(desc(ReactRecursion.iteration_index))
                         )
                         last_rec = db.exec(rec_stmt).first()
 

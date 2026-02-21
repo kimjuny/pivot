@@ -8,6 +8,7 @@ import json
 import time
 import uuid
 from collections.abc import Iterator
+from contextlib import suppress
 from typing import Any
 
 import requests
@@ -117,17 +118,14 @@ class OpenAILLM(AbstractLLM):
             finish_reason = None
             raw_fr = raw_choice.get("finish_reason", None)
             if raw_fr:
-                try:
+                with suppress(ValueError):
                     finish_reason = FinishReason(raw_fr)
-                except ValueError:
-                    # Depending on API, custom or invalid finish reasons might exist
-                    pass
 
             choice = Choice(index=i, message=message, finish_reason=finish_reason)
             choices.append(choice)
 
         usage = None
-        raw_usage = raw_dict.get("usage", None)
+        raw_usage = raw_dict.get("usage")
         if raw_usage:
             usage = UsageInfo(
                 prompt_tokens=raw_usage.get("prompt_tokens", 0),

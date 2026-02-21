@@ -20,12 +20,11 @@ def get_engine():
     if database_url.startswith("sqlite"):
         # For SQLite, ensure the parent directory exists (important in containers
         # where the named volume may be mounted but not yet initialised).
-        db_path_str = database_url.lstrip("sqlite:///").lstrip("/")
         if database_url.startswith("sqlite:////"):
             # Absolute path form sqlite:////abs/path
-            db_path = Path("/" + database_url[len("sqlite:////"):])
+            db_path = Path("/" + database_url.removeprefix("sqlite:////"))
         else:
-            db_path = Path(db_path_str)
+            db_path = Path(database_url.removeprefix("sqlite:///"))
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return create_engine(database_url, connect_args={"check_same_thread": False})
 

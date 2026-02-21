@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     DOUBAO_SEED_API_KEY: str | None = None
     GLM_API_KEY: str | None = None
 
+    # podman_sidecar | local
+    TOOL_EXECUTION_MODE: str = "podman_sidecar"
+    PODMAN_HOST: str = "unix:///run/podman/podman.sock"
+    TOOL_SIDECAR_TIMEOUT_SECONDS: int = 60
+    TOOL_SIDECAR_NETWORK: str | None = None
+    TOOL_SIDECAR_IMAGE: str | None = None
+
     class Config:  # type: ignore
         env_file = ".env"
 

@@ -14,16 +14,21 @@ services:
     container_name: pivot-backend
     ports:
       - "8003:8003"
+    security_opt:
+      - label=disable
     volumes:
       - ./server:/app/server:z
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./poetry.lock:/app/poetry.lock:ro
       # Persist SQLite database across rebuilds
       - pivot-data:/app/server/data
+      - /run/user/501/podman/podman.sock:/run/podman/podman.sock:z
     environment:
       - DATABASE_URL=sqlite:////app/server/data/pivot.db
       - ENV=development
       - PYTHONUNBUFFERED=1
+      - PODMAN_HOST=unix:///run/podman/podman.sock
+      - TOOL_EXECUTION_MODE=podman_sidecar
     # Hot-reload on code changes
     command: >
       poetry run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8003 --app-dir server

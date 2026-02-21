@@ -23,7 +23,7 @@ FROM docker.io/library/python:3.10-slim AS runtime
 
 # System deps needed by some Python packages (bcrypt, cryptography)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libffi-dev && \
+    apt-get install -y --no-install-recommends gcc libffi-dev podman && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry into a known location
