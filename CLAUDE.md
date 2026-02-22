@@ -128,11 +128,23 @@ web/
 
 ### Development Workflow
 
-**Required Before Committing**: Execute these commands in the `server` directory:
+**Required Before Committing**: Execute these commands inside the Podman container:
 
-1. `ruff check . --fix` - Resolve linting and import issues
-2. `ruff format .` - Ensure consistent code styling
-3. `pyright .` - Verify type integrity
+```bash
+# Run backend linting inside container
+podman exec pivot-backend poetry run ruff check server/ --fix
+podman exec pivot-backend poetry run ruff format server/
+podman exec pivot-backend poetry run pyright server/
+
+# Or run all checks at once
+podman exec pivot-backend sh -c "cd server && poetry run ruff check . --fix && poetry run ruff format . && poetry run pyright ."
+```
+
+**Alternative**: If you have Poetry installed locally, you can run:
+
+1. `cd server && ruff check . --fix` - Resolve linting and import issues
+2. `cd server && ruff format .` - Ensure consistent code styling
+3. `cd server && pyright .` - Verify type integrity
 
 ### Strategic Coding Requirements
 
@@ -273,13 +285,14 @@ def get_agent_status(agent_id: str, verbose: bool = False) -> dict | None:
 ### Quality Assurance Checks
 
 **Web Frontend**:
-- Run `npm run check-all` after every code modification
+- Run inside container: `podman exec pivot-frontend npm run check-all`
 - This command performs both linting and type checking (see `package.json`)
 - **Requirement**: Fix all reported issues, regardless of direct relation to current changes
 
 **Server & Core**:
-- Run `server/lint.sh` after every code modification
+- Run inside container: `podman exec pivot-backend poetry run ruff check server/ --fix && podman exec pivot-backend poetry run pyright server/`
 - **Requirement**: Fix all ruff and pyright errors, regardless of direct relation to current changes
+- **Note**: The `server/lint.sh` script is deprecated; run linting commands directly in the container
 
 ### Open Source Project Guidelines
 

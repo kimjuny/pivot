@@ -48,7 +48,4 @@ RUN poetry install --no-root && rm -rf /root/.cache
 # Copy server code (will be overridden by bind mount in compose)
 COPY server/ ./server/
 
-# Create data directory for SQLite persistence
-RUN mkdir -p ./server/data
-
 EXPOSE 8003

@@ -15,7 +15,11 @@
       "Bash(python:*)",
       "Bash(npx tsc:*)",
       "Bash(python3:*)",
-      "Bash(./server/lint.sh:*)"
+      "Bash(./server/lint.sh:*)",
+      "Bash(podman info:*)",
+      "Bash(podman images:*)",
+      "Bash(podman version:*)",
+      "Bash(podman exec:*)"
     ]
   }
 }
