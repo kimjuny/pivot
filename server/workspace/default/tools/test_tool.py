@@ -9,7 +9,7 @@ from app.orchestration.tool import tool
         "properties": {
             "input": {
                 "type": "string",
-                "description": "input anything(str)"
+                "description": "input anything anything(str)"
             }
         },
         "required": ["input"],

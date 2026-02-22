@@ -442,3 +442,25 @@ export interface ToolUpdateRequest {
   /** Updated Python source code */
   source_code?: string;
 }
+
+/**
+ * Agent tool response with enabled status.
+ */
+export interface AgentToolResponse {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description: string;
+  /** Tool type: "shared" or "private" */
+  tool_type: 'shared' | 'private';
+  /** Whether this tool is enabled for the agent */
+  is_enabled: boolean;
+}
+
+/**
+ * Agent tools update request.
+ */
+export interface AgentToolsUpdateRequest {
+  /** List of tool names to enable for the agent */
+  tool_names: string[];
+}

@@ -14,9 +14,12 @@ import importlib.util
 import inspect
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    from sqlmodel import Session
 
 from .metadata import ToolMetadata
 from .sandbox import ExecutionResult, LocalExecutor, PodmanSidecarExecutor
@@ -296,6 +299,104 @@ class ToolManager:
 
         tool_descriptions = [metadata.to_text() for metadata in self._registry.values()]
         return "\n\n".join(tool_descriptions)
+
+    def get_tools_for_agent(self, agent_id: int, db: "Session") -> list[ToolMetadata]:
+        """
+        Get tools enabled for a specific agent.
+
+        If no tools are configured for the agent, returns an empty list.
+        This enforces explicit tool assignment per agent.
+
+        Args:
+            agent_id: The ID of the agent.
+            db: Database session for querying agent tool assignments.
+
+        Returns:
+            List of ToolMetadata for tools enabled for this agent.
+        """
+        from app.models.agent_tool import AgentTool
+        from sqlmodel import select
+
+        # Get enabled tool names for this agent
+        enabled_tool_names = db.exec(
+            select(AgentTool.tool_name).where(AgentTool.agent_id == agent_id)
+        ).all()
+        enabled_set = set(enabled_tool_names)
+
+        # Return only enabled tools
+        result = []
+        for name in enabled_set:
+            if name in self._registry:
+                result.append(self._registry[name])
+
+        return result
+
+    def to_text_catalog_for_agent(self, agent_id: int, db: "Session") -> str:
+        """
+        Generate a text catalog of tools enabled for a specific agent.
+
+        Args:
+            agent_id: The ID of the agent.
+            db: Database session for querying agent tool assignments.
+
+        Returns:
+            A formatted string containing descriptions of enabled tools.
+        """
+        tools = self.get_tools_for_agent(agent_id, db)
+
+        if not tools:
+            return "No tools available for this agent."
+
+        tool_descriptions = [metadata.to_text() for metadata in tools]
+        return "\n\n".join(tool_descriptions)
+
+    def execute_for_agent(
+        self,
+        agent_id: int,
+        name: str,
+        db: "Session",
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Execute a tool by name for a specific agent.
+
+        This method checks if the tool is enabled for the agent before
+        executing it. If the tool is not enabled, raises a KeyError.
+
+        Args:
+            agent_id: The ID of the agent.
+            name: The name of the tool to execute.
+            db: Database session for querying agent tool assignments.
+            *args: Positional arguments (not used in sidecar mode).
+            **kwargs: Keyword arguments to pass to the tool.
+
+        Returns:
+            The result of the tool execution.
+
+        Raises:
+            KeyError: If the tool is not found in registry or not enabled for agent.
+            RuntimeError: If tool execution fails in sidecar mode.
+            Exception: Any exception raised by the tool in local mode.
+        """
+        from app.models.agent_tool import AgentTool
+        from sqlmodel import select
+
+        # Check if tool is enabled for this agent
+        enabled_tool_names = db.exec(
+            select(AgentTool.tool_name).where(AgentTool.agent_id == agent_id)
+        ).all()
+        enabled_set = set(enabled_tool_names)
+
+        if name not in enabled_set:
+            available = list(enabled_set) if enabled_set else ["(none configured)"]
+            raise KeyError(
+                f"Tool '{name}' is not enabled for agent {agent_id}. "
+                f"Enabled tools: {', '.join(available)}"
+            )
+
+        # Execute the tool using the standard execute method
+        return self.execute(name, *args, **kwargs)
 
     def to_openai_tools(self) -> list[dict[str, Any]]:
         """

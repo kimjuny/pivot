@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM, ToolWithOwnership, ToolSource, ToolCreateRequest, ToolUpdateRequest } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM, ToolWithOwnership, ToolSource, ToolCreateRequest, ToolUpdateRequest, AgentToolResponse, AgentToolsUpdateRequest } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 
 /**
@@ -949,4 +949,36 @@ export interface FullSessionHistoryResponse {
  */
 export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
   return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
+};
+
+// ============================================
+// Agent Tools API Functions
+// ============================================
+
+/**
+ * Get all available tools with their enabled status for an agent.
+ *
+ * @param agentId - Agent ID
+ * @returns Promise resolving to list of tools with enabled status
+ */
+export const getAgentTools = async (agentId: number): Promise<AgentToolResponse[]> => {
+  return apiRequest(`/agents/${agentId}/tools`) as Promise<AgentToolResponse[]>;
+};
+
+/**
+ * Update the list of tools enabled for an agent.
+ * Replaces the current tool assignments with the provided list.
+ *
+ * @param agentId - Agent ID
+ * @param data - Object containing list of tool names to enable
+ * @returns Promise resolving to updated list of tools with enabled status
+ */
+export const updateAgentTools = async (
+  agentId: number,
+  data: AgentToolsUpdateRequest
+): Promise<AgentToolResponse[]> => {
+  return apiRequest(`/agents/${agentId}/tools`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }) as Promise<AgentToolResponse[]>;
 };

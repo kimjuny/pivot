@@ -9,6 +9,7 @@ import {
     Plus,
     X,
     MessageSquare,
+    Settings2,
 } from 'lucide-react';
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -37,8 +38,9 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import AgentModal, { AgentFormData } from './AgentModal';
+import ToolSelectorDialog from './ToolSelectorDialog';
 import type { Agent, Scene } from '../types';
-import { updateAgent, getTools, type Tool } from '../utils/api';
+import { updateAgent, getAgentTools, type Tool } from '../utils/api';
 import { toast } from 'sonner';
 import { useAgentTabStore } from '../store/agentTabStore';
 
@@ -75,25 +77,34 @@ function AgentDetailSidebar({
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [tools, setTools] = useState<Tool[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const hasFetchedToolsRef = useRef(false);
     const { openTab } = useAgentTabStore();
 
     /**
-     * Fetch tools list on component mount.
+     * Fetch agent's enabled tools list.
      * Uses useRef to prevent duplicate fetches in React Strict Mode.
      */
     useEffect(() => {
         // Prevent duplicate fetches
         if (hasFetchedToolsRef.current) return;
+        if (!agent?.id) return;
 
         const fetchTools = async () => {
             hasFetchedToolsRef.current = true;
             setToolsLoading(true);
             try {
-                const toolsList = await getTools();
-                setTools(toolsList);
+                const toolsList = await getAgentTools(agent.id);
+                // Filter to only enabled tools and convert to Tool[] format
+                const enabledTools = toolsList.filter((t) => t.is_enabled);
+                const formattedTools: Tool[] = enabledTools.map((t) => ({
+                    name: t.name,
+                    description: t.description,
+                    parameters: { type: 'object', properties: {} },
+                }));
+                setTools(formattedTools);
             } catch (err) {
                 const error = err instanceof Error ? err : new Error(String(err));
                 console.error('Failed to fetch tools:', error);
@@ -104,7 +115,32 @@ function AgentDetailSidebar({
         };
 
         void fetchTools();
-    }, []);
+    }, [agent?.id]);
+
+    /**
+     * Refresh tools list after configuration changes.
+     */
+    const handleToolsUpdated = async () => {
+        if (!agent?.id) return;
+
+        setToolsLoading(true);
+        try {
+            const toolsList = await getAgentTools(agent.id);
+            // Filter to only enabled tools and convert to Tool[] format
+            const enabledTools = toolsList.filter((t) => t.is_enabled);
+            const formattedTools: Tool[] = enabledTools.map((t) => ({
+                name: t.name,
+                description: t.description,
+                parameters: { type: 'object', properties: {} },
+            }));
+            setTools(formattedTools);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to refresh tools:', error);
+        } finally {
+            setToolsLoading(false);
+        }
+    };
 
     const handleEditAgent = async (data: AgentFormData) => {
         if (!agent) return;
@@ -304,7 +340,7 @@ function AgentDetailSidebar({
                         </SidebarGroup>
                     </Collapsible>
 
-                    {/* Tools Section (Not Implemented) */}
+                    {/* Tools Section */}
                     <Collapsible
                         open={isToolsOpen}
                         onOpenChange={setIsToolsOpen}
@@ -335,24 +371,44 @@ function AgentDetailSidebar({
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {toolsLoading ? '...' : tools.length}
+                                        {tools.length}
                                     </span>
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
+                                    {/* Configure Tools Button */}
+                                    <SidebarMenu>
+                                        <SidebarMenuItem>
+                                            <SidebarMenuButton
+                                                onClick={() => setIsToolSelectorOpen(true)}
+                                                size="sm"
+                                                className="pl-3 text-sidebar-primary hover:bg-sidebar-primary/10"
+                                            >
+                                                <Settings2 className="size-4" />
+                                                <span>Configure Tools...</span>
+                                            </SidebarMenuButton>
+                                        </SidebarMenuItem>
+                                    </SidebarMenu>
+
+                                    {/* Divider between configure button and tool list */}
+                                    {tools.length > 0 && (
+                                        <div className="my-2 border-t border-sidebar-border/50" />
+                                    )}
+
+                                    {/* List of enabled tools */}
                                     {toolsLoading ? (
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading tools…
                                         </div>
                                     ) : tools.length === 0 ? (
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No tools available
+                                            No tools enabled
                                         </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {tools.map((tool) => (
+                                            {tools.slice(0, 5).map((tool) => (
                                                 <SidebarMenuItem key={tool.name}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
@@ -376,6 +432,13 @@ function AgentDetailSidebar({
                                                     </Tooltip>
                                                 </SidebarMenuItem>
                                             ))}
+                                            {tools.length > 5 && (
+                                                <SidebarMenuItem>
+                                                    <span className="pl-7 text-xs text-sidebar-foreground/50">
+                                                        +{tools.length - 5} more tools
+                                                    </span>
+                                                </SidebarMenuItem>
+                                            )}
                                         </SidebarMenu>
                                     )}
                                 </SidebarGroupContent>
@@ -473,6 +536,16 @@ function AgentDetailSidebar({
                 onClose={() => setIsEditModalOpen(false)}
                 onSave={handleEditAgent}
             />
+
+            {/* Tool Selector Dialog */}
+            {agent?.id && (
+                <ToolSelectorDialog
+                    open={isToolSelectorOpen}
+                    onOpenChange={setIsToolSelectorOpen}
+                    agentId={agent.id}
+                    onToolsUpdated={handleToolsUpdated}
+                />
+            )}
         </>
     );
 }
