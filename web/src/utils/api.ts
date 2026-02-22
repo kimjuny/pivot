@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM, ToolWithOwnership, ToolSource, ToolCreateRequest, ToolUpdateRequest } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 
 /**
@@ -598,7 +598,7 @@ export const getModels = async (): Promise<string[]> => {
 };
 
 /**
- * Tool metadata interface.
+ * Tool metadata interface (legacy - use ToolWithOwnership for new code).
  */
 export interface Tool {
   /** Tool name */
@@ -614,12 +614,73 @@ export interface Tool {
 }
 
 /**
- * Get all registered tools.
- * 
+ * Get all registered tools (legacy - returns basic tool info).
+ *
  * @returns Promise resolving to list of tool metadata
  */
 export const getTools = async (): Promise<Tool[]> => {
   return apiRequest('/tools') as Promise<Tool[]>;
+};
+
+/**
+ * Get all tools with ownership information.
+ *
+ * @returns Promise resolving to list of tools with ownership info
+ */
+export const getToolsWithOwnership = async (): Promise<ToolWithOwnership[]> => {
+  return apiRequest('/tools') as Promise<ToolWithOwnership[]>;
+};
+
+/**
+ * Get tool source code by name.
+ *
+ * @param name - Tool name
+ * @returns Promise resolving to tool source code
+ */
+export const getToolSource = async (name: string): Promise<ToolSource> => {
+  return apiRequest(`/tools/${name}/source`) as Promise<ToolSource>;
+};
+
+/**
+ * Create a new private tool.
+ *
+ * @param data - Tool creation data
+ * @returns Promise resolving to created tool
+ */
+export const createTool = async (data: ToolCreateRequest): Promise<ToolWithOwnership> => {
+  return apiRequest('/tools', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }) as Promise<ToolWithOwnership>;
+};
+
+/**
+ * Update an existing tool.
+ *
+ * @param name - Tool name
+ * @param data - Tool update data
+ * @returns Promise resolving to updated tool
+ */
+export const updateTool = async (
+  name: string,
+  data: ToolUpdateRequest
+): Promise<ToolWithOwnership> => {
+  return apiRequest(`/tools/${name}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }) as Promise<ToolWithOwnership>;
+};
+
+/**
+ * Delete a private tool.
+ *
+ * @param name - Tool name
+ * @returns Promise resolving when tool is deleted
+ */
+export const deleteTool = async (name: string): Promise<void> => {
+  await apiRequest(`/tools/${name}`, {
+    method: 'DELETE',
+  });
 };
 
 /**

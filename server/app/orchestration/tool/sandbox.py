@@ -179,9 +179,7 @@ class PodmanSidecarExecutor:
                     container = containers[0]
                     image_id = container.image.id
                     self._current_image = image_id
-                    logger.info(
-                        f"Detected current container image: {image_id[:12]}"
-                    )
+                    logger.info(f"Detected current container image: {image_id[:12]}")
                     return self._current_image
             except Exception as e:
                 logger.warning(
@@ -192,7 +190,9 @@ class PodmanSidecarExecutor:
         # Fall back to a well-known image name
         # In development, this should match the compose service name or
         # the SIDECAR_BASE_IMAGE environment variable if set
-        fallback_image = self.config.base_image or "docker.io/library/pivot-backend:latest"
+        fallback_image = (
+            self.config.base_image or "docker.io/library/pivot-backend:latest"
+        )
         self._current_image = fallback_image
         logger.warning(
             f"Could not detect current container image, using default: "
@@ -213,6 +213,7 @@ class PodmanSidecarExecutor:
         self,
         tool_name: str,
         tool_kwargs: dict[str, Any],
+        tool_source: str | None = None,
     ) -> ExecutionResult:
         """
         Execute a tool function in an isolated sidecar container.
@@ -223,16 +224,22 @@ class PodmanSidecarExecutor:
         Args:
             tool_name: The name of the registered tool to execute.
             tool_kwargs: Keyword arguments to pass to the tool function.
+            tool_source: Optional source code for user tools. If provided,
+                the sidecar will execute this source instead of loading from
+                the builtin directory. This is needed because the workspace
+                directory is not accessible from the Podman VM.
 
         Returns:
             An ExecutionResult containing the success status, return value,
             and any error message.
 
         Note:
-            The sidecar container uses --volumes-from to share the current
-            container's volumes, ensuring access to the same codebase and
-            data directories.
+            The sidecar container uses the same image as the main container,
+            which has the codebase baked in (via Containerfile.dev).
+            User tool source code is passed via command argument.
         """
+        import base64
+
         # Performance timing
         t_start = time.perf_counter()
         t_create_start = 0.0
@@ -244,7 +251,6 @@ class PodmanSidecarExecutor:
         try:
             client = self._get_client()
             image = self._detect_current_image()
-            current_hostname = self._get_container_hostname()
 
             # Prepare the command to run in the sidecar container
             # The entrypoint script handles tool execution
@@ -264,6 +270,15 @@ class PodmanSidecarExecutor:
                 tool_args_json,
             ]
 
+            # If tool source is provided (for user tools), pass it as base64
+            # This is needed because the workspace directory is not accessible
+            # from the Podman VM on macOS
+            if tool_source:
+                tool_source_b64 = base64.b64encode(tool_source.encode("utf-8")).decode(
+                    "ascii"
+                )
+                cmd.extend(["--tool-source", tool_source_b64])
+
             # Container configuration
             container_config: dict[str, Any] = {
                 "image": image,
@@ -276,7 +291,9 @@ class PodmanSidecarExecutor:
                 },
             }
 
-            # Note: volumes_from doesn't work reliably in podman machine environment
+            # Note: We don't mount the workspace directory because it doesn't work
+            # reliably in podman machine environment on macOS. Instead, user tool
+            # source code is passed via the --tool-source argument.
             # Instead, we rely on the fact that the sidecar uses the same image
             # which already has the codebase baked in (via Containerfile.dev)
 
@@ -341,7 +358,7 @@ class PodmanSidecarExecutor:
                     if isinstance(logs, str):
                         return logs
                     # Handle generator or iterator
-                    if hasattr(logs, "__iter__") and not isinstance(logs, (str, bytes)):
+                    if hasattr(logs, "__iter__") and not isinstance(logs, str | bytes):
                         # It's a generator or iterator, consume it
                         chunks = []
                         for chunk in logs:
@@ -404,9 +421,15 @@ class PodmanSidecarExecutor:
                 # Log performance statistics
                 t_total = (t_cleanup_end - t_start) * 1000  # Convert to ms
                 t_create = (t_create_end - t_create_start) * 1000
-                t_startup = (t_start_end - t_create_end) * 1000 if t_start_end > 0 else 0
+                t_startup = (
+                    (t_start_end - t_create_end) * 1000 if t_start_end > 0 else 0
+                )
                 t_exec = (t_exec_end - t_start_end) * 1000 if t_exec_end > 0 else 0
-                t_cleanup = (t_cleanup_end - t_exec_end) * 1000 if t_cleanup_end > t_exec_end else 0
+                t_cleanup = (
+                    (t_cleanup_end - t_exec_end) * 1000
+                    if t_cleanup_end > t_exec_end
+                    else 0
+                )
 
                 logger.info(
                     f"[SIDECAR STATS] tool='{tool_name}' "

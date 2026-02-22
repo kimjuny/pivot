@@ -5,6 +5,7 @@ import LoginPage from './components/LoginPage'
 import AgentList from './components/AgentList'
 import AgentDetailPage from './components/AgentDetailPage'
 import LLMList from './components/LLMList'
+import ToolsList from './components/ToolsList'
 import Navigation from './components/Navigation'
 import { AuthProvider, useAuth, isTokenValid } from './contexts/AuthContext'
 import { ThemeProvider } from '@/components/ui/theme-provider'
@@ -74,6 +75,25 @@ function LLMListPage() {
   );
 }
 
+/**
+ * Tools List Page with layout.
+ */
+function ToolsListPage() {
+  return (
+    <AuthenticatedLayout>
+      <div className="flex flex-col flex-1 p-4 sm:p-6 lg:p-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-semibold text-foreground">Tools</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Manage shared and private tools for agent workflows
+          </p>
+        </div>
+        <ToolsList />
+      </div>
+    </AuthenticatedLayout>
+  );
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="pivot-ui-theme">
@@ -87,6 +107,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/agents" element={<AgentListPage />} />
             <Route path="/agent/:agentId" element={<AgentDetailPage />} />
             <Route path="/llms" element={<LLMListPage />} />
+            <Route path="/tools" element={<ToolsListPage />} />
 
             {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />

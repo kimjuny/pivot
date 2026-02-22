@@ -7,6 +7,13 @@ from app.models.react import (
     ReactTask,
 )
 from app.models.session import Session, SessionMemory
+from app.models.tool import (
+    ToolCreate,
+    ToolResponse,
+    ToolSourceResponse,
+    ToolUpdate,
+    UserTool,
+)
 from app.models.user import User, UserLogin, UserResponse
 
 __all__ = [
@@ -21,7 +28,12 @@ __all__ = [
     "Session",
     "SessionMemory",
     "Subscene",
+    "ToolCreate",
+    "ToolResponse",
+    "ToolSourceResponse",
+    "ToolUpdate",
     "User",
     "UserLogin",
     "UserResponse",
+    "UserTool",
 ]
