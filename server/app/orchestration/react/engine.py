@@ -133,7 +133,14 @@ class ReactEngine:
         self.db.refresh(recursion)
 
         # Build system prompt with current context, available tools, and session memory
-        system_prompt = build_system_prompt(context, self.tool_manager, session_memory)
+        # Pass agent_id and db to filter tools by agent configuration
+        system_prompt = build_system_prompt(
+            context,
+            self.tool_manager,
+            session_memory,
+            agent_id=task.agent_id,
+            db=self.db,
+        )
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)
@@ -310,8 +317,13 @@ class ReactEngine:
 
                     try:
                         # Execute tool asynchronously via thread pool
+                        # Use execute_for_agent to check if tool is enabled for this agent
                         result = await run_in_threadpool(
-                            self.tool_manager.execute, func_name, **func_args
+                            self.tool_manager.execute_for_agent,
+                            task.agent_id,
+                            func_name,
+                            self.db,
+                            **func_args,
                         )
 
                         tool_results.append(
@@ -336,13 +348,21 @@ class ReactEngine:
                     except Exception as e:
                         logger.error(f"Tool {func_name} execution failed: {e}")
                         # Provide helpful error message with available tools
-                        if "not found in registry" in str(e):
-                            available_tools = self.tool_manager.list_tools()
-                            tool_names = [tool.name for tool in available_tools]
-                            error_msg = (
-                                f"Tool '{func_name}' not found. "
-                                f"Available tools: {', '.join(tool_names)}"
+                        if "not found" in str(e) or "not enabled" in str(e):
+                            available_tools = self.tool_manager.get_tools_for_agent(
+                                task.agent_id, self.db
                             )
+                            tool_names = [tool.name for tool in available_tools]
+                            if tool_names:
+                                error_msg = (
+                                    f"Tool '{func_name}' is not available. "
+                                    f"Available tools for this agent: {', '.join(tool_names)}"
+                                )
+                            else:
+                                error_msg = (
+                                    f"Tool '{func_name}' is not available. "
+                                    f"No tools have been configured for this agent."
+                                )
                         else:
                             error_msg = f"Tool execution failed: {e!s}"
                         tool_results.append(
@@ -444,7 +464,7 @@ class ReactEngine:
             }
 
             # --- 1. UPDATE IN-MEMORY STATE BEfORE SNAPSHOT ---
-            # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred 
+            # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred
             # in this recursion cycle so that the state snapshot is consistent.
 
             # Sync short-term memory to memory context if present
@@ -453,17 +473,17 @@ class ReactEngine:
                     if "memory" not in context.context:
                         context.context["memory"] = {}
                     context.context["memory"]["short_term"] = []
-                context.context["memory"]["short_term"].append({
-                    "trace_id": trace_id,
-                    "memory": short_term_memory_append
-                })
+                context.context["memory"]["short_term"].append(
+                    {"trace_id": trace_id, "memory": short_term_memory_append}
+                )
 
             # Sync RE_PLAN updates to database and memory context
             if action_type == "RE_PLAN":
                 plan_data = action_output.get("plan", [])
-                
+
                 # Delete old plan steps in DB
                 from sqlmodel import delete
+
                 delete_stmt = delete(ReactPlanStep).where(
                     ReactPlanStep.task_id == task.task_id
                 )
@@ -480,14 +500,16 @@ class ReactEngine:
                         status=step_data.get("status", "pending"),
                     )
                     self.db.add(step)
-                    
+
                     # Update in-memory context so the snapshot captures the new plan
-                    new_plan_context.append({
-                        "step_id": step.step_id,
-                        "description": step.description,
-                        "status": step.status,
-                        "recursion_history": [],
-                    })
+                    new_plan_context.append(
+                        {
+                            "step_id": step.step_id,
+                            "description": step.description,
+                            "status": step.status,
+                            "recursion_history": [],
+                        }
+                    )
                 self.db.commit()
                 context.context["plan"] = new_plan_context
 
@@ -777,11 +799,13 @@ class ReactEngine:
                     if task.session_id:
                         session_service = SessionMemoryService(self.db)
                         answer_output = event_data.get("output", {})
-                        
+
                         session_service.process_answer_updates(
                             session_id=task.session_id,
                             task=task,
-                            session_memory_delta=event_data.get("session_memory_delta", {}),
+                            session_memory_delta=event_data.get(
+                                "session_memory_delta", {}
+                            ),
                             session_subject=event_data.get("session_subject", {}),
                             session_goal=event_data.get("session_goal", {}),
                             agent_answer=answer_output.get("answer", ""),

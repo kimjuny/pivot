@@ -386,3 +386,81 @@ export interface LLM {
   /** UTC timestamp when LLM was last updated */
   updated_at: string;
 }
+
+/**
+ * Tool with ownership information.
+ */
+export interface ToolWithOwnership {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description: string;
+  /** Tool parameters schema */
+  parameters: {
+    type: string;
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+  /** Tool type: "shared" or "private" */
+  tool_type: 'shared' | 'private';
+  /** Owner user ID (null for shared tools) */
+  owner_id: number | null;
+  /** Owner username (null for shared tools) */
+  owner_username: string | null;
+  /** Whether current user can edit this tool */
+  can_edit: boolean;
+  /** Whether current user can delete this tool */
+  can_delete: boolean;
+}
+
+/**
+ * Tool source code response.
+ */
+export interface ToolSource {
+  /** Tool name */
+  name: string;
+  /** Full Python source code */
+  source_code: string;
+  /** Tool type: "shared" or "private" */
+  tool_type: 'shared' | 'private';
+}
+
+/**
+ * Tool creation request.
+ * Only source_code is required - name and description are extracted from @tool decorator.
+ */
+export interface ToolCreateRequest {
+  /** Python source code containing @tool decorated function */
+  source_code: string;
+}
+
+/**
+ * Tool update request.
+ * Only source_code is required - description is extracted from @tool decorator.
+ */
+export interface ToolUpdateRequest {
+  /** Updated Python source code */
+  source_code?: string;
+}
+
+/**
+ * Agent tool response with enabled status.
+ */
+export interface AgentToolResponse {
+  /** Tool name */
+  name: string;
+  /** Tool description */
+  description: string;
+  /** Tool type: "shared" or "private" */
+  tool_type: 'shared' | 'private';
+  /** Whether this tool is enabled for the agent */
+  is_enabled: boolean;
+}
+
+/**
+ * Agent tools update request.
+ */
+export interface AgentToolsUpdateRequest {
+  /** List of tool names to enable for the agent */
+  tool_names: string[];
+}

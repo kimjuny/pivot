@@ -15,6 +15,7 @@ sys.path.append(str(Path(server_dir).parent))
 
 # Import core modules after path is set up (noqa: E402 - must be after sys.path setup)
 # Import server modules (noqa: E402 - must be after sys.path setup)
+from app.api.agent_tools import router as agent_tools_router  # noqa: E402
 from app.api.agents import router as agents_router  # noqa: E402
 from app.api.auth import init_default_user, router as auth_router  # noqa: E402
 from app.api.build import router as build_router  # noqa: E402
@@ -51,7 +52,9 @@ class TimingMiddleware(BaseHTTPMiddleware):
         process_time_ms = (time.time() - start_time) * 1000
 
         # Log in uvicorn-like format with timing appended: client - "method path" status - Xms
-        client = f"{request.client.host}:{request.client.port}" if request.client else "-"
+        client = (
+            f"{request.client.host}:{request.client.port}" if request.client else "-"
+        )
         logger.info(
             f'{client} - "{request.method} {request.url.path} HTTP/{request.scope.get("http_version", "1.1")}" '
             f"{response.status_code} - {process_time_ms:.0f}ms"
@@ -74,6 +77,7 @@ app.add_middleware(TimingMiddleware)
 
 # Include API routes
 app.include_router(agents_router, prefix="/api")
+app.include_router(agent_tools_router, prefix="/api")
 app.include_router(scenes_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(build_router, prefix="/api")
@@ -93,7 +97,9 @@ if _static_dir.is_dir() and (_static_dir / "index.html").exists():
     from fastapi.staticfiles import StaticFiles
 
     # Serve assets (JS, CSS, images) before the catch-all
-    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets")
+    app.mount(
+        "/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets"
+    )
 
     @app.get("/{full_path:path}")
     async def _spa_fallback(full_path: str):

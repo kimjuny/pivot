@@ -2,6 +2,26 @@
 # Pivot — Dev Compose
 # Strategy: mount source code, pre-install deps in image, hot-reload both ends
 # Usage:    podman compose up
+#
+# Cross-platform Podman Socket Configuration:
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ Platform      │ Socket Path                                         │ Notes │
+# ├───────────────┼─────────────────────────────────────────────────────┼───────┤
+# │ macOS         │ /var/run/docker.sock (symlink to podman machine)    │ ✓     │
+# │ Linux (root)  │ /run/podman/podman.sock                             │ ✓     │
+# │ Linux (root)  │ /var/run/docker.sock (if Docker socket proxy used)  │ ✓     │
+# │ Linux (rootless) │ /run/user/$(id -u)/podman/podman.sock           │ ⚠️¹   │
+# │ Windows WSL2  │ /run/user/$(id -u)/podman/podman.sock              │ ⚠️¹   │
+# │ Windows (VM)  │ Use Podman Desktop provided socket                  │ ⚠️²   │
+# └─────────────────────────────────────────────────────────────────────────────┘
+# ¹ Rootless mode requires additional configuration for socket permissions
+# ² Podman Desktop on Windows creates a VM similar to macOS
+#
+# Quick setup by platform:
+#   macOS:         Use defaults (uses podman-machine socket symlink)
+#   Linux:         Change socket mount to: /run/podman/podman.sock:/run/podman/podman.sock
+#   Linux rootless: Set XDG_RUNTIME_DIR env and use /run/user/1000/podman/podman.sock
+#   Windows WSL2:  Same as Linux rootless inside WSL2 environment
 # =============================================================================
 
 services:
@@ -14,16 +34,28 @@ services:
     container_name: pivot-backend
     ports:
       - "8003:8003"
+    # Privileged mode is required for sidecar containers to access podman socket
+    # On Linux with rootless podman, this may not be needed - try without first
+    privileged: true
     volumes:
       - ./server:/app/server:z
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./poetry.lock:/app/poetry.lock:ro
+      # Podman socket for sidecar containers
+      # macOS (podman-machine): Uses Docker socket symlink
+      # Linux: Change to /run/podman/podman.sock:/run/podman/podman.sock
+      # Linux rootless: Use /run/user/1000/podman/podman.sock:/run/podman/podman.sock
+      - /var/run/docker.sock:/run/podman/podman.sock
       # Persist SQLite database across rebuilds
       - pivot-data:/app/server/data
     environment:
       - DATABASE_URL=sqlite:////app/server/data/pivot.db
       - ENV=development
       - PYTHONUNBUFFERED=1
+      # Sandbox configuration - sidecar mode is mandatory
+      - SANDBOX_MODE=sidecar
+      - PODMAN_SOCKET_PATH=/run/podman/podman.sock
+      - SIDECAR_BASE_IMAGE=docker.io/library/pivot-backend:latest
     # Hot-reload on code changes
     command: >
       poetry run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8003 --app-dir server

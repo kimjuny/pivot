@@ -49,10 +49,12 @@ COPY server/ ./server/
 # Copy built frontend into a directory the backend will serve
 COPY --from=frontend-build /build/web/dist ./server/static
 
-# Environment
-ENV DATABASE_URL="sqlite:///./server/pivot.db" \
-    ENV="production" \
-    PYTHONUNBUFFERED=1
+# Environment defaults (can be overridden at runtime)
+# Note: SANDBOX_MODE=sidecar requires podman socket to be mounted at runtime
+ENV ENV="production" \
+    PYTHONUNBUFFERED=1 \
+    SANDBOX_MODE="sidecar" \
+    PODMAN_SOCKET_PATH="/run/podman/podman.sock"
 
 EXPOSE 80
 
