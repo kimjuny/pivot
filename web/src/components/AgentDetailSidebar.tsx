@@ -280,60 +280,72 @@ function AgentDetailSidebar({
 
                             {/* Full header for expanded mode */}
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
-                                <CollapsibleTrigger
-                                    onClick={() => handleSectionClick('scenes')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
-                                >
-                                    <Layers className="size-4" />
-                                    <span className="flex-1 text-left">Scenes</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {scenes.length}
-                                    </span>
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                                </CollapsibleTrigger>
+                                {/* Use a plain div so the add button can sit inside without nesting <button> in <button> */}
+                                <div className="group/scenesheader flex w-full items-center gap-2 px-2 py-1.5 rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent">
+                                    <CollapsibleTrigger
+                                        onClick={() => handleSectionClick('scenes')}
+                                        className="flex flex-1 items-center gap-2 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors min-w-0"
+                                    >
+                                        <Layers className="size-4 shrink-0" />
+                                        <span className="flex-1 text-left">Scenes</span>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+                                            {scenes.length}
+                                        </span>
+                                        <ChevronDown className="size-3.5 shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    </CollapsibleTrigger>
+                                    {/* Add scene button — visible on header hover */}
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onCreateScene();
+                                                }}
+                                                className="shrink-0 p-0.5 rounded opacity-0 group-hover/scenesheader:opacity-100 focus-visible:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all"
+                                                aria-label="Add scene"
+                                            >
+                                                <Plus className="size-3.5" />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right">Add scene</TooltipContent>
+                                    </Tooltip>
+                                </div>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
                                     <SidebarMenu>
-                                        {scenes.map((scene) => (
-                                            <SidebarMenuItem key={scene.id} className="group/item">
-                                                <SidebarMenuButton
-                                                    isActive={selectedScene?.id === scene.id}
-                                                    onClick={() => handleSceneClick(scene)}
-                                                    tooltip={scene.name}
-                                                    size="sm"
-                                                    className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
-                                                >
-                                                    {/* Reserved icon slot */}
-                                                    <span className="w-4 shrink-0" />
-                                                    <span className="truncate">{scene.name}</span>
-                                                </SidebarMenuButton>
-                                                <SidebarMenuAction
-                                                    showOnHover
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onDeleteScene(scene);
-                                                    }}
-                                                    className="hover:bg-destructive/10 hover:text-destructive"
-                                                >
-                                                    <X className="size-3.5" />
-                                                    <span className="sr-only">Delete scene</span>
-                                                </SidebarMenuAction>
-                                            </SidebarMenuItem>
-                                        ))}
-                                        <SidebarMenuItem>
-                                            <SidebarMenuButton
-                                                onClick={onCreateScene}
-                                                className="pl-3 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-                                                size="sm"
-                                            >
-                                                {/* Icon slot with Plus */}
-                                                <span className="w-4 shrink-0 flex items-center justify-center">
-                                                    <Plus className="size-3.5" />
-                                                </span>
-                                                <span>Add Scene</span>
-                                            </SidebarMenuButton>
-                                        </SidebarMenuItem>
+                                        {scenes.length === 0 ? (
+                                            <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                                No scenes yet
+                                            </div>
+                                        ) : (
+                                            scenes.map((scene) => (
+                                                <SidebarMenuItem key={scene.id} className="group/item">
+                                                    <SidebarMenuButton
+                                                        isActive={selectedScene?.id === scene.id}
+                                                        onClick={() => handleSceneClick(scene)}
+                                                        tooltip={scene.name}
+                                                        size="sm"
+                                                        className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                                    >
+                                                        {/* Reserved icon slot */}
+                                                        <span className="w-4 shrink-0" />
+                                                        <span className="truncate">{scene.name}</span>
+                                                    </SidebarMenuButton>
+                                                    <SidebarMenuAction
+                                                        showOnHover
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onDeleteScene(scene);
+                                                        }}
+                                                        className="hover:bg-destructive/10 hover:text-destructive"
+                                                    >
+                                                        <X className="size-3.5" />
+                                                        <span className="sr-only">Delete scene</span>
+                                                    </SidebarMenuAction>
+                                                </SidebarMenuItem>
+                                            ))
+                                        )}
                                     </SidebarMenu>
                                 </SidebarGroupContent>
                             </CollapsibleContent>
@@ -364,38 +376,39 @@ function AgentDetailSidebar({
 
                             {/* Full header for expanded mode */}
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
-                                <CollapsibleTrigger
-                                    onClick={() => handleSectionClick('tools')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
-                                >
-                                    <Wrench className="size-4" />
-                                    <span className="flex-1 text-left">Tools</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {tools.length}
-                                    </span>
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                                </CollapsibleTrigger>
+                                {/* Use a plain div so the configure button can sit inside without nesting <button> in <button> */}
+                                <div className="group/toolsheader flex w-full items-center gap-2 px-2 py-1.5 rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent">
+                                    <CollapsibleTrigger
+                                        onClick={() => handleSectionClick('tools')}
+                                        className="flex flex-1 items-center gap-2 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors min-w-0"
+                                    >
+                                        <Wrench className="size-4 shrink-0" />
+                                        <span className="flex-1 text-left">Tools</span>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+                                            {tools.length}
+                                        </span>
+                                        <ChevronDown className="size-3.5 shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    </CollapsibleTrigger>
+                                    {/* Configure button — visible on header hover */}
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setIsToolSelectorOpen(true);
+                                                }}
+                                                className="shrink-0 p-0.5 rounded opacity-0 group-hover/toolsheader:opacity-100 focus-visible:opacity-100 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-all"
+                                                aria-label="Configure tools"
+                                            >
+                                                <Settings2 className="size-3.5" />
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right">Configure tools</TooltipContent>
+                                    </Tooltip>
+                                </div>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {/* Configure Tools Button */}
-                                    <SidebarMenu>
-                                        <SidebarMenuItem>
-                                            <SidebarMenuButton
-                                                onClick={() => setIsToolSelectorOpen(true)}
-                                                size="sm"
-                                                className="pl-3 text-sidebar-primary hover:bg-sidebar-primary/10"
-                                            >
-                                                <Settings2 className="size-4" />
-                                                <span>Configure Tools...</span>
-                                            </SidebarMenuButton>
-                                        </SidebarMenuItem>
-                                    </SidebarMenu>
-
-                                    {/* Divider between configure button and tool list */}
-                                    {tools.length > 0 && (
-                                        <div className="my-2 border-t border-sidebar-border/50" />
-                                    )}
 
                                     {/* List of enabled tools */}
                                     {toolsLoading ? (

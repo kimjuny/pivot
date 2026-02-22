@@ -13,8 +13,6 @@ Review these files for compliance: $ARGUMENTS
 
 Read files, check against rules below. Output concise but comprehensive—sacrifice grammar for brevity. High signal-to-noise.
 
-对于不理解的shadcn组件，可以阅读官方skills：https://ui.shadcn.com/llms.txt
-
 ## Rules
 
 ### Accessibility
