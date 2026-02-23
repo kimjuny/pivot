@@ -1,0 +1,469 @@
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Plus, Pencil, Trash2, Lock, User as UserIcon, Search } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  getSharedTools,
+  getPrivateTools,
+  getPrivateToolSource,
+  upsertPrivateTool,
+  deletePrivateTool,
+  type SharedTool,
+  type PrivateTool,
+} from '../utils/api';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import DraggableDialog from './DraggableDialog';
+import ToolEditor from './ToolEditor';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const PAGE_SIZE = 10;
+
+const NEW_TOOL_TEMPLATE = `from app.orchestration.tool import tool
+
+
+@tool
+def my_tool(input: str) -> str:
+    """Describe what your tool does.
+
+    Args:
+        input: Description of the input parameter.
+
+    Returns:
+        Description of the return value.
+    """
+    return input
+`;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type ToolRow =
+  | { kind: 'shared'; tool: SharedTool }
+  | { kind: 'private'; tool: PrivateTool };
+
+// ---------------------------------------------------------------------------
+// Pagination helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the page number list with ellipsis slots for a given total/current.
+ * Returns either a number or the string 'ellipsis'.
+ */
+function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+  const pages: (number | 'ellipsis')[] = [1];
+  if (current > 3) pages.push('ellipsis');
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (current < total - 2) pages.push('ellipsis');
+  pages.push(total);
+  return pages;
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+
+/**
+ * Tools management page.
+ *
+ * Displays all shared (built-in, read-only) and private (user-owned, editable)
+ * tools in a unified searchable, paginated table. Users can create, edit, and
+ * delete their own private tools via a DraggableDialog with a Python editor.
+ */
+function ToolsPage() {
+  const [sharedTools, setSharedTools] = useState<SharedTool[]>([]);
+  const [privateTools, setPrivateTools] = useState<PrivateTool[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Editor dialog state
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [editorSource, setEditorSource] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  // ---------------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------------
+
+  const loadTools = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const [shared, priv] = await Promise.all([getSharedTools(), getPrivateTools()]);
+      setSharedTools(shared);
+      setPrivateTools(priv);
+    } catch {
+      toast.error('Failed to load tools');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTools();
+  }, [loadTools]);
+
+  // ---------------------------------------------------------------------------
+  // Filtered + paginated rows
+  // ---------------------------------------------------------------------------
+
+  const allRows: ToolRow[] = useMemo(
+    () => [
+      ...sharedTools.map((t): ToolRow => ({ kind: 'shared', tool: t })),
+      ...privateTools.map((t): ToolRow => ({ kind: 'private', tool: t })),
+    ],
+    [sharedTools, privateTools]
+  );
+
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return allRows;
+    const q = searchQuery.toLowerCase();
+    return allRows.filter((row) => {
+      if (row.kind === 'shared') {
+        return (
+          row.tool.name.toLowerCase().includes(q) ||
+          row.tool.description.toLowerCase().includes(q)
+        );
+      }
+      return row.tool.name.toLowerCase().includes(q);
+    });
+  }, [allRows, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+
+  // Reset to page 1 when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  const pagedRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, currentPage]);
+
+  // ---------------------------------------------------------------------------
+  // Editor helpers
+  // ---------------------------------------------------------------------------
+
+  const openCreateDialog = () => {
+    setEditingName(null);
+    setEditorSource(NEW_TOOL_TEMPLATE);
+    setEditorOpen(true);
+  };
+
+  const openEditDialog = useCallback(async (toolName: string) => {
+    try {
+      const result = await getPrivateToolSource(toolName);
+      setEditingName(toolName);
+      setEditorSource(result.source);
+      setEditorOpen(true);
+    } catch {
+      toast.error(`Failed to load source for "${toolName}"`);
+    }
+  }, []);
+
+  /**
+   * Save callback – triggered by the Save button or Ctrl+S inside the editor.
+   * Tool name is derived from the decorated function name when creating new.
+   */
+  const handleSave = useCallback(
+    async (source: string) => {
+      let toolName = editingName;
+      if (!toolName) {
+        const match = /^def\s+(\w+)\s*\(/m.exec(source);
+        if (!match) {
+          toast.error('Cannot determine tool name: no function definition found');
+          return;
+        }
+        toolName = match[1];
+      }
+
+      setIsSaving(true);
+      try {
+        await upsertPrivateTool(toolName, source);
+        toast.success(`Tool "${toolName}" saved`);
+        setEditorOpen(false);
+        await loadTools();
+      } catch {
+        toast.error(`Failed to save tool "${toolName}"`);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [editingName, loadTools]
+  );
+
+  const handleDelete = useCallback(async (toolName: string) => {
+    try {
+      await deletePrivateTool(toolName);
+      toast.success(`Tool "${toolName}" deleted`);
+      await loadTools();
+    } catch {
+      toast.error(`Failed to delete tool "${toolName}"`);
+    }
+  }, [loadTools]);
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  return (
+    <div className="max-w-5xl mx-auto px-6 py-8">
+      {/* Page header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">Tools</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Shared tools are built-in and available to all users. Private tools are yours only.
+          </p>
+        </div>
+        <Button size="sm" onClick={openCreateDialog} className="flex items-center gap-1.5">
+          <Plus className="w-4 h-4" />
+          New Tool
+        </Button>
+      </div>
+
+      {/* Search bar */}
+      <div className="mb-4">
+        <ButtonGroup>
+          <Input
+            placeholder="Search by name or description…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search tools"
+            autoComplete="off"
+          />
+          <Button variant="outline" aria-label="Search" tabIndex={-1}>
+            <Search className="w-4 h-4" />
+          </Button>
+        </ButtonGroup>
+      </div>
+
+      {/* Tools table */}
+      {isLoading ? (
+        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
+          Loading tools…
+        </div>
+      ) : filteredRows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
+          {allRows.length === 0 ? (
+            <>
+              <p className="text-sm">No tools found.</p>
+              <Button size="sm" variant="outline" onClick={openCreateDialog}>
+                <Plus className="w-4 h-4 mr-1.5" />
+                Create your first tool
+              </Button>
+            </>
+          ) : (
+            <p className="text-sm">No tools match your search.</p>
+          )}
+        </div>
+      ) : (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[200px]">Name</TableHead>
+                <TableHead className="w-[80px]">Type</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead className="w-[160px]">Parameters</TableHead>
+                <TableHead className="w-[100px] text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pagedRows.map((row) => (
+                <ToolTableRow
+                  key={`${row.kind}-${row.tool.name}`}
+                  row={row}
+                  onEdit={openEditDialog}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </TableBody>
+          </Table>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">
+                {filteredRows.length} tool{filteredRows.length !== 1 ? 's' : ''}
+                {searchQuery ? ' found' : ' total'}
+              </span>
+              <Pagination className="w-auto mx-0 justify-end">
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (currentPage > 1) setCurrentPage((p) => p - 1);
+                      }}
+                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}
+                    />
+                  </PaginationItem>
+
+                  {buildPageList(currentPage, totalPages).map((page, idx) =>
+                    page === 'ellipsis' ? (
+                      <PaginationItem key={`ellipsis-${idx}`}>
+                        <PaginationEllipsis />
+                      </PaginationItem>
+                    ) : (
+                      <PaginationItem key={page}>
+                        <PaginationLink
+                          href="#"
+                          isActive={page === currentPage}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setCurrentPage(page);
+                          }}
+                        >
+                          {page}
+                        </PaginationLink>
+                      </PaginationItem>
+                    )
+                  )}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (currentPage < totalPages) setCurrentPage((p) => p + 1);
+                      }}
+                      className={currentPage === totalPages ? 'pointer-events-none opacity-50' : ''}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Editor dialog – Save button is now inside the editor status bar */}
+      <DraggableDialog
+        open={editorOpen}
+        onOpenChange={setEditorOpen}
+        title={editingName ? `Edit Tool: ${editingName}` : 'New Tool'}
+        size="large"
+      >
+        <ToolEditor
+          value={editorSource}
+          onChange={setEditorSource}
+          onSave={(src) => void handleSave(src)}
+          isSaving={isSaving}
+        />
+      </DraggableDialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ToolTableRow
+// ---------------------------------------------------------------------------
+
+interface ToolTableRowProps {
+  row: ToolRow;
+  onEdit: (name: string) => Promise<void>;
+  onDelete: (name: string) => Promise<void>;
+}
+
+/**
+ * Single row in the tools table.
+ * Shared tools are read-only and show a lock badge with no action buttons.
+ */
+function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
+  const isShared = row.kind === 'shared';
+  const name = row.tool.name;
+  const description = isShared ? (row.tool as SharedTool).description : '—';
+  const paramCount = isShared
+    ? Object.keys((row.tool as SharedTool).parameters?.properties ?? {}).length
+    : null;
+
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-xs font-medium">{name}</TableCell>
+
+      <TableCell>
+        {isShared ? (
+          <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
+            <Lock className="w-2.5 h-2.5" />
+            Shared
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
+            <UserIcon className="w-2.5 h-2.5" />
+            Private
+          </Badge>
+        )}
+      </TableCell>
+
+      <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
+        {description}
+      </TableCell>
+
+      <TableCell className="text-xs text-muted-foreground">
+        {paramCount !== null ? `${paramCount} param${paramCount !== 1 ? 's' : ''}` : '—'}
+      </TableCell>
+
+      <TableCell className="text-right">
+        {!isShared && (
+          <div className="flex items-center justify-end gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              aria-label={`Edit tool ${name}`}
+              onClick={() => void onEdit(name)}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-destructive hover:text-destructive"
+              aria-label={`Delete tool ${name}`}
+              onClick={() => void onDelete(name)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+export default ToolsPage;

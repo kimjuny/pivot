@@ -204,9 +204,8 @@ function Navigation() {
           <Button
             variant="ghost"
             size="sm"
-            disabled
-            className="opacity-50"
-            aria-label="Tools (coming soon)"
+            onClick={() => navigate('/tools')}
+            aria-label="Tools"
           >
             Tools
           </Button>

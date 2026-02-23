@@ -38,9 +38,16 @@ import {
 } from '@/components/ui/tooltip';
 import AgentModal, { AgentFormData } from './AgentModal';
 import type { Agent, Scene } from '../types';
-import { updateAgent, getTools, type Tool } from '../utils/api';
+import { updateAgent, getSharedTools, getPrivateTools, type SharedTool, type PrivateTool } from '../utils/api';
 import { toast } from 'sonner';
 import { useAgentTabStore } from '../store/agentTabStore';
+
+/** Unified tool entry for sidebar display. */
+interface SidebarTool {
+    name: string;
+    description: string;
+    kind: 'shared' | 'private';
+}
 
 interface AgentDetailSidebarProps {
     agent: Agent | null;
@@ -75,25 +82,40 @@ function AgentDetailSidebar({
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [tools, setTools] = useState<Tool[]>([]);
+    const [tools, setTools] = useState<SidebarTool[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const hasFetchedToolsRef = useRef(false);
     const { openTab } = useAgentTabStore();
 
     /**
-     * Fetch tools list on component mount.
+     * Fetch both shared (built-in) and private (user-workspace) tools in parallel.
+     * Merges them into a unified list for display.
      * Uses useRef to prevent duplicate fetches in React Strict Mode.
      */
     useEffect(() => {
-        // Prevent duplicate fetches
         if (hasFetchedToolsRef.current) return;
 
         const fetchTools = async () => {
             hasFetchedToolsRef.current = true;
             setToolsLoading(true);
             try {
-                const toolsList = await getTools();
-                setTools(toolsList);
+                const [shared, priv] = await Promise.all([
+                    getSharedTools(),
+                    getPrivateTools(),
+                ]);
+                const merged: SidebarTool[] = [
+                    ...shared.map((t: SharedTool) => ({
+                        name: t.name,
+                        description: t.description,
+                        kind: 'shared' as const,
+                    })),
+                    ...priv.map((t: PrivateTool) => ({
+                        name: t.name,
+                        description: '',
+                        kind: 'private' as const,
+                    })),
+                ];
+                setTools(merged);
             } catch (err) {
                 const error = err instanceof Error ? err : new Error(String(err));
                 console.error('Failed to fetch tools:', error);
@@ -352,8 +374,8 @@ function AgentDetailSidebar({
                                         </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {tools.map((tool) => (
-                                                <SidebarMenuItem key={tool.name}>
+                                            {tools.map((t) => (
+                                                <SidebarMenuItem key={`${t.kind}-${t.name}`}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
@@ -362,15 +384,28 @@ function AgentDetailSidebar({
                                                             >
                                                                 {/* Reserved icon slot */}
                                                                 <span className="w-4 shrink-0" />
-                                                                <span className="truncate">{tool.name}</span>
+                                                                <span className="truncate flex-1">{t.name}</span>
+                                                                {/* Private badge */}
+                                                                {t.kind === 'private' && (
+                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                        me
+                                                                    </span>
+                                                                )}
                                                             </SidebarMenuButton>
                                                         </TooltipTrigger>
                                                         <TooltipContent side="right" className="max-w-xs">
                                                             <div className="space-y-1">
-                                                                <p className="font-semibold">{tool.name}</p>
-                                                                <p className="text-xs text-muted-foreground">
-                                                                    {tool.description}
-                                                                </p>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <p className="font-semibold">{t.name}</p>
+                                                                    <span className="text-[10px] text-muted-foreground">
+                                                                        {t.kind === 'shared' ? '· shared' : '· private'}
+                                                                    </span>
+                                                                </div>
+                                                                {t.description && (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {t.description}
+                                                                    </p>
+                                                                )}
                                                             </div>
                                                         </TooltipContent>
                                                     </Tooltip>

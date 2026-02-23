@@ -98,17 +98,20 @@ class ToolManager:
         return tool_metadata.func(*args, **kwargs)
 
     def to_text_catalog(self) -> str:
-        """
-        Generate a text catalog of all registered tools for LLM consumption.
+        """Generate a JSON-structured catalog of all registered tools for LLM consumption.
+
+        Each tool is represented as a JSON object with ``name``, ``description``,
+        and ``parameters`` fields.  The entire catalog is a JSON array so the LLM
+        receives a consistently structured, unambiguous tool list regardless of
+        how complex the individual descriptions are.
 
         Returns:
-            A formatted string containing all tool descriptions.
+            Pretty-printed JSON array string, or the string ``"[]"`` when empty.
         """
-        if not self._registry:
-            return "No tools available."
+        import json
 
-        tool_descriptions = [metadata.to_text() for metadata in self._registry.values()]
-        return "\n\n".join(tool_descriptions)
+        tools = [meta.to_dict() for meta in self._registry.values()]
+        return json.dumps(tools, ensure_ascii=False, indent=2)
 
     def to_openai_tools(self) -> list[dict[str, Any]]:
         """
@@ -119,50 +122,48 @@ class ToolManager:
         """
         return [tool.to_openai_format() for tool in self._registry.values()]
 
-    def refresh(self, tools_dir: Path) -> None:
-        """
-        Refresh the tool registry by scanning a directory for tool modules.
+    def refresh(self, tools_dir: Path, *, module_prefix: str = "app.orchestration.tool.builtin") -> None:
+        """Refresh the tool registry by scanning a directory for tool modules.
 
-        This method discovers all Python modules in the given directory,
-        imports them, and registers any functions decorated with @tool.
+        Clears the existing registry then re-discovers all tools from the given
+        directory. Pass a custom ``module_prefix`` when loading tools from a
+        non-builtin location (e.g. a user workspace directory).
 
         Args:
             tools_dir: Path to the directory containing tool modules.
+            module_prefix: Dotted Python module prefix used when importing files
+                from ``tools_dir``. Defaults to the builtin package prefix.
 
         Note:
             This method clears the existing registry before scanning.
             Existing tools will be lost unless they are re-discovered.
         """
         self._registry.clear()
-        self._discover_tools(tools_dir)
+        self._discover_tools(tools_dir, module_prefix=module_prefix)
 
-    def _discover_tools(self, tools_dir: Path) -> None:
-        """
-        Discover and register tools from a directory.
+    def _discover_tools(self, tools_dir: Path, *, module_prefix: str = "app.orchestration.tool.builtin") -> None:
+        """Discover and register tools from a directory.
 
-        Scans all Python files in the directory (excluding __init__.py),
-        imports them, and registers any decorated tool functions.
+        Scans all Python files in the directory (excluding ``__init__.py`` and
+        other private modules), imports them, and registers any functions
+        decorated with ``@tool``.
 
         Args:
             tools_dir: Path to the directory containing tool modules.
+            module_prefix: Dotted Python module prefix for dynamic imports.
         """
         if not tools_dir.exists() or not tools_dir.is_dir():
             return
 
-        # Find all Python files in the directory
         for py_file in tools_dir.glob("*.py"):
             if py_file.name.startswith("_"):
-                # Skip private modules and __init__.py
                 continue
 
-            # Import the module dynamically
-            module_name = f"app.orchestration.tool.builtin.{py_file.stem}"
+            module_name = f"{module_prefix}.{py_file.stem}"
             try:
                 module = importlib.import_module(module_name)
 
-                # Scan the module for decorated functions
                 for _name, obj in inspect.getmembers(module, inspect.isfunction):
-                    # Check if the function has tool metadata
                     metadata = getattr(obj, "__tool_metadata__", None)
                     if (
                         metadata is not None
@@ -171,7 +172,6 @@ class ToolManager:
                     ):
                         self.add_entry(metadata)
             except ImportError:
-                # Skip modules that fail to import
                 continue
 
 

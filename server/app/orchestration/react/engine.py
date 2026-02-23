@@ -134,6 +134,7 @@ class ReactEngine:
 
         # Build system prompt with current context, available tools, and session memory
         system_prompt = build_system_prompt(context, self.tool_manager, session_memory)
+        print(f"System prompt: \n{system_prompt}")
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)

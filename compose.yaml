@@ -18,15 +18,21 @@ services:
       - ./server:/app/server:z
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./poetry.lock:/app/poetry.lock:ro
-      # Persist SQLite database across rebuilds
-      - pivot-data:/app/server/data
     environment:
+      # Bind-mounted via ./server above, so pivot.db is visible in the project tree
+      # at server/data/pivot.db. The directory is gitignored (see .gitignore).
       - DATABASE_URL=sqlite:////app/server/data/pivot.db
       - ENV=development
       - PYTHONUNBUFFERED=1
-    # Hot-reload on code changes
+    # Hot-reload only watches server/app; workspace/ changes must not trigger a restart
+    # because user tool files are loaded dynamically at request time, not at import time.
     command: >
-      poetry run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8003 --app-dir server
+      poetry run python -m uvicorn app.main:app
+      --reload
+      --reload-dir server/app
+      --host 0.0.0.0
+      --port 8003
+      --app-dir server
 
   # ---------- Frontend (Vite dev server) ----------
   frontend:
@@ -61,5 +67,5 @@ services:
       - backend
     command: npm run dev -- --host 0.0.0.0
 
-volumes:
-  pivot-data:
+# No named volumes needed — the SQLite database lives in ./server/data/
+# which is bind-mounted as part of ./server above.

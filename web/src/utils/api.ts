@@ -889,3 +889,154 @@ export interface FullSessionHistoryResponse {
 export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
   return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
 };
+
+// ---------------------------------------------------------------------------
+// Tools API
+// ---------------------------------------------------------------------------
+
+/**
+ * A tool parameter property descriptor.
+ */
+export interface ToolParameterProperty {
+  type: string;
+  description?: string;
+}
+
+/**
+ * JSON-Schema-style parameters object attached to a tool.
+ */
+export interface ToolParameters {
+  type?: string;
+  properties?: Record<string, ToolParameterProperty>;
+  required?: string[];
+  additionalProperties?: boolean;
+}
+
+/**
+ * A shared (built-in) tool returned by the server.
+ */
+export interface SharedTool {
+  name: string;
+  description: string;
+  parameters: ToolParameters;
+}
+
+/**
+ * A private (user-workspace) tool file entry.
+ */
+export interface PrivateTool {
+  name: string;
+  filename: string;
+}
+
+/**
+ * Source code payload for a private tool read response.
+ */
+export interface PrivateToolSource {
+  name: string;
+  source: string;
+}
+
+/**
+ * A Monaco-compatible editor diagnostic marker.
+ */
+export interface ToolDiagnostic {
+  line: number;
+  col: number;
+  endLine?: number;
+  endCol?: number;
+  message: string;
+  severity: string;
+  source: string;
+}
+
+/**
+ * Fetch all shared (built-in) tools.
+ *
+ * @returns Promise resolving to list of shared tools
+ */
+export const getSharedTools = async (): Promise<SharedTool[]> => {
+  return apiRequest('/tools/shared') as Promise<SharedTool[]>;
+};
+
+/**
+ * Fetch list of private tool files for the current user.
+ *
+ * @returns Promise resolving to list of private tool entries
+ */
+export const getPrivateTools = async (): Promise<PrivateTool[]> => {
+  return apiRequest('/tools/private') as Promise<PrivateTool[]>;
+};
+
+/**
+ * Fetch source code of a private tool.
+ *
+ * @param toolName - Tool name (file stem without .py)
+ * @returns Promise resolving to tool source payload
+ */
+export const getPrivateToolSource = async (toolName: string): Promise<PrivateToolSource> => {
+  return apiRequest(`/tools/private/${toolName}`) as Promise<PrivateToolSource>;
+};
+
+/**
+ * Create or update a private tool source file.
+ *
+ * @param toolName - Tool name (file stem without .py)
+ * @param source - Python source code
+ * @returns Promise resolving when saved
+ */
+export const upsertPrivateTool = async (toolName: string, source: string): Promise<void> => {
+  await apiRequest(`/tools/private/${toolName}`, {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  });
+};
+
+/**
+ * Delete a private tool.
+ *
+ * @param toolName - Tool name (file stem without .py)
+ * @returns Promise resolving when deleted
+ */
+export const deletePrivateTool = async (toolName: string): Promise<void> => {
+  await apiRequest(`/tools/private/${toolName}`, { method: 'DELETE' });
+};
+
+/**
+ * Check Python source code with ast.parse (fast syntax check).
+ *
+ * @param source - Python source code
+ * @returns Promise resolving to list of diagnostics
+ */
+export const checkToolAst = async (source: string): Promise<ToolDiagnostic[]> => {
+  return apiRequest('/tools/check/ast', {
+    method: 'POST',
+    body: JSON.stringify({ source }),
+  }) as Promise<ToolDiagnostic[]>;
+};
+
+/**
+ * Check Python source code with ruff (style and lint check).
+ *
+ * @param source - Python source code
+ * @returns Promise resolving to list of diagnostics
+ */
+export const checkToolRuff = async (source: string): Promise<ToolDiagnostic[]> => {
+  return apiRequest('/tools/check/ruff', {
+    method: 'POST',
+    body: JSON.stringify({ source }),
+  }) as Promise<ToolDiagnostic[]>;
+};
+
+/**
+ * Check Python source code with pyright (type check).
+ *
+ * @param source - Python source code
+ * @returns Promise resolving to list of diagnostics
+ */
+export const checkToolPyright = async (source: string): Promise<ToolDiagnostic[]> => {
+  return apiRequest('/tools/check/pyright', {
+    method: 'POST',
+    body: JSON.stringify({ source }),
+  }) as Promise<ToolDiagnostic[]>;
+};

@@ -19,7 +19,10 @@ from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
 from app.orchestration.react import ReactEngine
 from app.orchestration.tool import get_tool_manager
+from app.orchestration.tool.builtin.programmatic_tool_call import make_programmatic_tool_call
+from app.orchestration.tool.manager import ToolManager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
+from app.services.workspace_service import load_all_user_tool_metadata
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
@@ -202,9 +205,39 @@ async def react_chat_stream(
             # Ensure task_id is set
             task_id = task.task_id
 
-            # Initialize ReAct engine
-            tool_manager = get_tool_manager()
-            engine = ReactEngine(llm=llm, tool_manager=tool_manager, db=db)
+            # Build a request-scoped ToolManager that merges shared (builtin) tools
+            # with the current user's private workspace tools.
+            # We copy the shared registry into a fresh instance so the global
+            # singleton is never mutated across requests.
+            shared_manager = get_tool_manager()
+            request_tool_manager = ToolManager()
+            for meta in shared_manager.list_tools():
+                request_tool_manager.add_entry(meta)
+
+            # Dynamically load private tools from workspace at request time so that
+            # tools saved by the user are visible without a server restart.
+            private_metas = load_all_user_tool_metadata(current_user.username)
+            for meta in private_metas:
+                if request_tool_manager.get_tool(meta.name) is None:
+                    request_tool_manager.add_entry(meta)
+                else:
+                    logger.warning(
+                        "Private tool '%s' conflicts with a shared tool name and was skipped.",
+                        meta.name,
+                    )
+
+            # Rebind programmatic_tool_call so its exec sandbox sees the full
+            # request-scoped registry (shared + private tools).  The global stub
+            # only knows about shared tools; without this, private tools imported
+            # inside a snippet raise ModuleNotFoundError.
+            ptc_meta = request_tool_manager.get_tool("programmatic_tool_call")
+            if ptc_meta is not None:
+                full_callables = {
+                    m.name: m.func for m in request_tool_manager.list_tools()
+                }
+                ptc_meta.func = make_programmatic_tool_call(full_callables)
+
+            engine = ReactEngine(llm=llm, tool_manager=request_tool_manager, db=db)
 
             # Execute task and stream events
             async for event_data in engine.run_task(task):
