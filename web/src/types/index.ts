@@ -464,3 +464,48 @@ export interface AgentToolsUpdateRequest {
   /** List of tool names to enable for the agent */
   tool_names: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Tool lint / diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * A single diagnostic item returned by the lint endpoint.
+ * All line/column values are 1-based to match Monaco Editor's coordinate system.
+ */
+export interface LintDiagnostic {
+  /** Starting line number (1-based) */
+  line: number;
+  /** Starting column number (1-based) */
+  col: number;
+  /** Ending line number (1-based) */
+  end_line: number;
+  /** Ending column number (1-based) */
+  end_col: number;
+  /** Diagnostic severity */
+  severity: 'error' | 'warning' | 'info';
+  /** Human-readable diagnostic message */
+  message: string;
+  /** Which checker produced this diagnostic */
+  source: 'ast' | 'ruff' | 'pyright';
+  /** Optional rule / error code (e.g. "F401", "reportMissingImports") */
+  code: string | null;
+}
+
+/**
+ * Request body for the tool lint API.
+ */
+export interface ToolLintRequest {
+  /** Python source code to analyse */
+  source_code: string;
+  /** Which checker to run */
+  check: 'ast' | 'ruff' | 'pyright';
+}
+
+/**
+ * Response from the tool lint API.
+ */
+export interface ToolLintResponse {
+  /** List of diagnostics (empty when code is clean) */
+  diagnostics: LintDiagnostic[];
+}

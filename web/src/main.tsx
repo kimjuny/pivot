@@ -81,15 +81,7 @@ function LLMListPage() {
 function ToolsListPage() {
   return (
     <AuthenticatedLayout>
-      <div className="flex flex-col flex-1 p-4 sm:p-6 lg:p-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-foreground">Tools</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Manage shared and private tools for agent workflows
-          </p>
-        </div>
-        <ToolsList />
-      </div>
+      <ToolsList />
     </AuthenticatedLayout>
   );
 }

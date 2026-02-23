@@ -1,6 +1,6 @@
 import { useState, useEffect, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, User, MoreHorizontal, Search } from 'lucide-react';
+import { Plus, User, MoreHorizontal, Search, Bot } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
@@ -9,6 +9,7 @@ import AgentModal from './AgentModal';
 import ConfirmationModal from './ConfirmationModal';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import { Card } from '@/components/ui/card';
 import {
   DropdownMenu,
@@ -208,48 +209,73 @@ function AgentList() {
   }
 
   return (
-    <div className="flex-1 bg-background text-foreground">
-      <div className="w-full px-4 py-8">
-        <div className="flex items-center justify-between mb-8 gap-4">
-          <div className="flex-1 max-w-md relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
+    <div className="flex flex-col flex-1 min-h-0 bg-background text-foreground">
+      {/* Page header */}
+      <div className="flex flex-col gap-4 px-6 pt-6 pb-4">
+        {/* Title row */}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-primary" aria-hidden="true" />
+            </div>
+            <div>
+              <h1 className="text-base font-semibold leading-tight">Agents</h1>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {agents.length} agent{agents.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+          </div>
+
+          <Button size="sm" onClick={handleCreateAgent} className="gap-1.5" aria-label="Create a new agent">
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+            New Agent
+          </Button>
+        </div>
+
+        {/* Search row */}
+        <div className="relative max-w-sm">
+          <Search
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none z-10"
+            aria-hidden="true"
+          />
+          <ButtonGroup>
             <Input
               placeholder="Search agents…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-9 h-8 text-sm"
               autoComplete="off"
-              inputMode="search"
-              name="search"
               aria-label="Search agents"
             />
-          </div>
-          <Button
-            onClick={handleCreateAgent}
-            size="sm"
-            className="flex items-center gap-2"
-            aria-label="Create a new agent"
-          >
-            <Plus className="w-4 h-4" aria-hidden="true" />
-            <span>New Agent</span>
-          </Button>
+            <Button variant="outline" size="sm" className="h-8" aria-label="Execute search">
+              Search
+            </Button>
+          </ButtonGroup>
         </div>
+      </div>
+
+      {/* Content area */}
+      <div className="flex-1 overflow-auto px-6 pb-6">
 
         {filteredAgents.length === 0 && agents.length > 0 ? (
           <div className="text-center py-16">
-            <div className="text-6xl text-muted-foreground mb-4">🔍</div>
-            <h3 className="text-xl font-semibold text-foreground mb-2">No Results</h3>
-            <p className="text-muted-foreground">
+            <Bot className="w-12 h-12 mx-auto mb-3 opacity-20 text-muted-foreground" />
+            <h3 className="text-base font-semibold text-foreground mb-1">No Results</h3>
+            <p className="text-sm text-muted-foreground">
               Try adjusting your search query
             </p>
           </div>
         ) : agents.length === 0 ? (
           <div className="text-center py-16">
-            <div className="text-6xl text-muted-foreground mb-4">📭</div>
-            <h3 className="text-xl font-semibold text-foreground mb-2">No Agents</h3>
-            <p className="text-muted-foreground mb-6">
-              Click the "Create Agent" button to create your first agent
+            <Bot className="w-12 h-12 mx-auto mb-3 opacity-20 text-muted-foreground" />
+            <h3 className="text-base font-semibold text-foreground mb-1">No Agents</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Create your first agent to get started
             </p>
+            <Button variant="outline" size="sm" onClick={handleCreateAgent}>
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              Create your first agent
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
@@ -321,6 +347,14 @@ function AgentList() {
               </Card>
             ))}
           </div>
+        )}
+
+        {/* Footer count */}
+        {filteredAgents.length > 0 && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Showing {filteredAgents.length} of {agents.length} agent{agents.length !== 1 ? 's' : ''}
+            {searchQuery && ` matching "${searchQuery}"`}
+          </p>
         )}
       </div>
 
