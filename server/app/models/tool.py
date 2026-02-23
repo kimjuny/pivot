@@ -5,7 +5,7 @@ including database models for metadata tracking and request/response schemas.
 """
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from sqlmodel import Field, SQLModel
 
@@ -95,3 +95,60 @@ class ToolSourceResponse(SQLModel):
     name: str
     source_code: str
     tool_type: str
+
+
+# ---------------------------------------------------------------------------
+# Lint / diagnostics models
+# ---------------------------------------------------------------------------
+
+
+class ToolLintRequest(SQLModel):
+    """Request body for the tool lint endpoint.
+
+    Attributes:
+        source_code: Python source code to analyse.
+        check: Which checker to run.
+            - "ast"     — built-in syntax check only (fast, in-process).
+            - "ruff"    — style / bug lints via ruff CLI.
+            - "pyright" — type checking via pyright CLI.
+    """
+
+    source_code: str
+    check: Literal["ast", "ruff", "pyright"]
+
+
+class LintDiagnostic(SQLModel):
+    """A single diagnostic item from any checker.
+
+    All line / column values are 1-based to match Monaco Editor's coordinate
+    system, so the frontend can use them directly without transformation.
+
+    Attributes:
+        line: Starting line number (1-based).
+        col: Starting column number (1-based).
+        end_line: Ending line number (1-based).
+        end_col: Ending column number (1-based).
+        severity: "error", "warning", or "info".
+        message: Human-readable diagnostic message.
+        source: Which checker produced this diagnostic.
+        code: Optional rule / error code (e.g. "F401", "reportMissingImports").
+    """
+
+    line: int
+    col: int
+    end_line: int
+    end_col: int
+    severity: Literal["error", "warning", "info"]
+    message: str
+    source: Literal["ast", "ruff", "pyright"]
+    code: str | None
+
+
+class ToolLintResponse(SQLModel):
+    """Response from the tool lint endpoint.
+
+    Attributes:
+        diagnostics: List of diagnostic items (may be empty if code is clean).
+    """
+
+    diagnostics: list[LintDiagnostic]

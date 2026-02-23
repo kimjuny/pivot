@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM, ToolWithOwnership, ToolSource, ToolCreateRequest, ToolUpdateRequest, AgentToolResponse, AgentToolsUpdateRequest } from '../types';
+import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM, ToolWithOwnership, ToolSource, ToolCreateRequest, ToolUpdateRequest, AgentToolResponse, AgentToolsUpdateRequest, ToolLintRequest, ToolLintResponse } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
 
 /**
@@ -981,4 +981,26 @@ export const updateAgentTools = async (
     method: 'PUT',
     body: JSON.stringify(data),
   }) as Promise<AgentToolResponse[]>;
+};
+
+// ============================================
+// Tool Lint API Functions
+// ============================================
+
+/**
+ * Lint Python source code via the backend using ast, ruff, or pyright.
+ *
+ * The three tiers correspond to different latency / depth trade-offs:
+ * - "ast"     → syntax only, < 5 ms
+ * - "ruff"    → style / import / bug lints, ~100–300 ms
+ * - "pyright" → full type checking, ~1–3 s
+ *
+ * @param request - Source code and desired check type.
+ * @returns Promise resolving to a list of diagnostics.
+ */
+export const lintToolSource = async (request: ToolLintRequest): Promise<ToolLintResponse> => {
+  return apiRequest('/tools/lint', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  }) as Promise<ToolLintResponse>;
 };

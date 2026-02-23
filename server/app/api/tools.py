@@ -13,6 +13,8 @@ from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.models.tool import (
     ToolCreate,
+    ToolLintRequest,
+    ToolLintResponse,
     ToolResponse,
     ToolSourceResponse,
     ToolUpdate,
@@ -20,8 +22,10 @@ from app.models.tool import (
 )
 from app.models.user import User
 from app.orchestration.tool import ToolManager, get_tool_manager
+from app.services import lint_service
 from app.services.tool_service import get_tool_service
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlmodel import Session, select
 
 logger = logging.getLogger(__name__)
@@ -373,21 +377,29 @@ async def update_tool(
     )
 
 
-@router.delete("/tools/{name}", status_code=204)
+@router.delete("/tools/{name}")
 async def delete_tool(
     name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> None:
+) -> Response:
     """Delete a private tool.
 
     Only the owner can delete a private tool.
     Shared tools cannot be deleted.
 
+    Returns an explicit 204 No Content via ``Response`` rather than ``None``
+    to avoid a FastAPI 0.68 serialisation bug where returning ``None`` with
+    ``status_code=204`` still encodes a ``"null"`` body, causing h11 to raise
+    ``LocalProtocolError: Too much data for declared Content-Length``.
+
     Args:
         name: The tool name.
         db: Database session.
         current_user: The currently authenticated user.
+
+    Returns:
+        An empty 204 No Content response.
 
     Raises:
         HTTPException: If tool not found (404), not authorized (403),
@@ -426,4 +438,58 @@ async def delete_tool(
 
     logger.info(f"User {current_user.username} deleted tool '{name}'")
 
-    return None
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Lint endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/tools/lint")
+async def lint_tool_source(
+    lint_request: ToolLintRequest,
+    current_user: User = Depends(get_current_user),
+) -> ToolLintResponse:
+    """Lint Python source code using ast, ruff, or pyright.
+
+    Delegates to :mod:`app.services.lint_service` which handles subprocess
+    management, output parsing, and structured logging.
+
+    Check tiers:
+    - ``"ast"``     — syntax only, very fast (< 5 ms, in-process).
+    - ``"ruff"``    — style / import / bug lints (~100–300 ms).
+    - ``"pyright"`` — full type checking (~1–3 s).
+
+    All diagnostics use 1-based line and column numbers so the frontend
+    can pass them to Monaco ``setModelMarkers`` without transformation.
+
+    Args:
+        lint_request: Source code and requested check type.
+        current_user: Authenticated user (result is not persisted).
+
+    Returns:
+        ToolLintResponse containing zero or more diagnostics.
+    """
+    check = lint_request.check
+    source = lint_request.source_code
+    username = current_user.username
+
+    try:
+        if check == "ast":
+            result = lint_service.check_ast(
+                source, filename="tool_lint.py", username=username
+            )
+        elif check == "ruff":
+            result = lint_service.check_ruff(
+                source, filename="tool_lint.py", username=username
+            )
+        else:
+            result = lint_service.check_pyright(
+                source, filename="tool_lint.py", username=username
+            )
+    except Exception as exc:
+        logger.error("Lint check '%s' failed unexpectedly: %s", check, exc)
+        return ToolLintResponse(diagnostics=[])
+
+    return ToolLintResponse(diagnostics=result.diagnostics)

@@ -56,9 +56,16 @@ services:
       - SANDBOX_MODE=sidecar
       - PODMAN_SOCKET_PATH=/run/podman/podman.sock
       - SIDECAR_BASE_IMAGE=docker.io/library/pivot-backend:latest
-    # Hot-reload on code changes
+    # Hot-reload on code changes.
+    # --reload-dir narrows the watch scope to only the app/ package directory,
+    # which prevents user tool files under server/workspace/ from triggering
+    # a server restart every time a tool is saved or deleted.
+    # Note: --reload-exclude requires watchfiles (uvicorn[standard]) to work;
+    # using --reload-dir is the reliable, dependency-free alternative.
     command: >
-      poetry run python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8003 --app-dir server
+      poetry run python -m uvicorn app.main:app --reload
+      --reload-dir /app/server/app
+      --host 0.0.0.0 --port 8003 --app-dir server
 
   # ---------- Frontend (Vite dev server) ----------
   frontend:
