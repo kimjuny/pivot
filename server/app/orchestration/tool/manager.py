@@ -153,7 +153,13 @@ class ToolManager:
         """
         return list(self._registry.values())
 
-    def execute(self, name: str, *args: Any, **kwargs: Any) -> Any:
+    def execute(
+        self,
+        name: str,
+        *args: Any,
+        workspace_dir: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """
         Execute a tool by name with the given arguments.
 
@@ -167,6 +173,12 @@ class ToolManager:
         Args:
             name: The name of the tool to execute.
             *args: Positional arguments (not used in sidecar mode).
+            workspace_dir: Absolute host path of the agent's sandbox workspace
+                directory (e.g. ``server/workspace/{username}/agents/{agent_id}``).
+                Passed through to the sidecar executor which mounts it at
+                ``/workspace`` inside the container.  File-system tools read
+                ``PIVOT_WORKSPACE_DIR`` to resolve relative paths.
+                Has no effect in local execution mode.
             **kwargs: Keyword arguments to pass to the tool.
 
         Returns:
@@ -185,8 +197,16 @@ class ToolManager:
         if self._sandbox_mode == "sidecar":
             # For user tools, we need to pass the source code to the sidecar
             tool_source = self._get_user_tool_source(name)
-            return self._execute_sidecar(name, kwargs, tool_source=tool_source)
+            return self._execute_sidecar(
+                name, kwargs, tool_source=tool_source, workspace_dir=workspace_dir
+            )
         else:
+            # Expose the workspace path via env var for local execution too,
+            # so file-system tools behave identically regardless of mode.
+            if workspace_dir:
+                import os
+
+                os.environ.setdefault("PIVOT_WORKSPACE_DIR", workspace_dir)
             return self._execute_local(name, tool_metadata.func, kwargs)
 
     def _is_builtin_tool(self, name: str) -> bool:
@@ -233,7 +253,11 @@ class ToolManager:
         return None
 
     def _execute_sidecar(
-        self, name: str, kwargs: dict[str, Any], tool_source: str | None = None
+        self,
+        name: str,
+        kwargs: dict[str, Any],
+        tool_source: str | None = None,
+        workspace_dir: str | None = None,
     ) -> Any:
         """
         Execute a tool in a sidecar container.
@@ -244,6 +268,8 @@ class ToolManager:
             tool_source: Optional source code for user tools. If provided,
                 the sidecar will execute this source instead of loading from
                 the builtin directory.
+            workspace_dir: Absolute host path of the agent's sandbox workspace.
+                Mounted at ``/workspace`` in the container.
 
         Returns:
             The result from the tool execution.
@@ -253,7 +279,7 @@ class ToolManager:
         """
         executor = self._get_sidecar_executor()
         result: ExecutionResult = executor.execute(
-            name, kwargs, tool_source=tool_source
+            name, kwargs, tool_source=tool_source, workspace_dir=workspace_dir
         )
 
         if not result.success:
@@ -355,19 +381,29 @@ class ToolManager:
         agent_id: int,
         name: str,
         db: "Session",
+        username: str | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> Any:
         """
         Execute a tool by name for a specific agent.
 
-        This method checks if the tool is enabled for the agent before
-        executing it. If the tool is not enabled, raises a KeyError.
+        Checks that the tool is enabled for the agent, resolves the agent's
+        workspace sandbox directory, and delegates to :meth:`execute`.
+
+        The agent's workspace is located at::
+
+            server/workspace/{username}/agents/{agent_id}/
+
+        This directory is created if it doesn't already exist and is passed to
+        the sidecar executor so the container starts inside it.
 
         Args:
             agent_id: The ID of the agent.
             name: The name of the tool to execute.
             db: Database session for querying agent tool assignments.
+            username: Username of the agent's owner.  When provided, the
+                agent-scoped workspace is created and mounted in the sidecar.
             *args: Positional arguments (not used in sidecar mode).
             **kwargs: Keyword arguments to pass to the tool.
 
@@ -395,8 +431,18 @@ class ToolManager:
                 f"Enabled tools: {', '.join(available)}"
             )
 
-        # Execute the tool using the standard execute method
-        return self.execute(name, *args, **kwargs)
+        # Resolve the agent-scoped workspace sandbox directory.
+        # Each (user, agent) pair gets an isolated directory so concurrent
+        # agents never share a filesystem context.
+        workspace_dir: str | None = None
+        if username:
+            agent_workspace = (
+                WORKSPACE_BASE / username / "agents" / str(agent_id)
+            )
+            agent_workspace.mkdir(parents=True, exist_ok=True)
+            workspace_dir = str(agent_workspace)
+
+        return self.execute(name, *args, workspace_dir=workspace_dir, **kwargs)
 
     def to_openai_tools(self) -> list[dict[str, Any]]:
         """

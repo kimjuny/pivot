@@ -214,6 +214,7 @@ class PodmanSidecarExecutor:
         tool_name: str,
         tool_kwargs: dict[str, Any],
         tool_source: str | None = None,
+        workspace_dir: str | None = None,
     ) -> ExecutionResult:
         """
         Execute a tool function in an isolated sidecar container.
@@ -227,7 +228,21 @@ class PodmanSidecarExecutor:
             tool_source: Optional source code for user tools. If provided,
                 the sidecar will execute this source instead of loading from
                 the builtin directory. This is needed because the workspace
-                directory is not accessible from the Podman VM.
+                directory is not accessible from the Podman VM on macOS.
+            workspace_dir: Absolute host path of the agent's sandbox workspace
+                (e.g. ``server/workspace/{username}/agents/{agent_id}``).
+                When provided the path is:
+
+                - Mounted into the container at ``/workspace``.
+                - Set as ``PIVOT_WORKSPACE_DIR=/workspace`` env var so that
+                  builtin file-system tools know where to operate.
+                - Set as the container's ``working_dir`` so the agent process
+                  starts inside its own sandbox.
+
+                On platforms where volume mounts are not available (macOS
+                podman-machine without shared volumes) the mount silently
+                falls back to using the env var with the host path so tools
+                can still resolve paths, though writes will be in-process only.
 
         Returns:
             An ExecutionResult containing the success status, return value,
@@ -279,23 +294,46 @@ class PodmanSidecarExecutor:
                 )
                 cmd.extend(["--tool-source", tool_source_b64])
 
+            # The container working dir is /workspace when a workspace is provided,
+            # otherwise /app/server (correct Python module root).
+            container_working_dir = "/workspace" if workspace_dir else "/app/server"
+
+            # Environment variables available inside the sidecar
+            sidecar_env: dict[str, str] = {
+                "PYTHONUNBUFFERED": "1",
+            }
+            if workspace_dir:
+                # Let file-system tools resolve relative paths to the workspace.
+                # We expose the *container-side* mount point so tools always see
+                # a consistent path regardless of the host layout.
+                sidecar_env["PIVOT_WORKSPACE_DIR"] = "/workspace"
+
             # Container configuration
             container_config: dict[str, Any] = {
                 "image": image,
                 "command": cmd,
                 "detach": True,
                 "stdin_open": True,
-                "working_dir": "/app/server",  # Set correct working directory for app module
-                "environment": {
-                    "PYTHONUNBUFFERED": "1",
-                },
+                "working_dir": container_working_dir,
+                "environment": sidecar_env,
             }
 
-            # Note: We don't mount the workspace directory because it doesn't work
-            # reliably in podman machine environment on macOS. Instead, user tool
-            # source code is passed via the --tool-source argument.
-            # Instead, we rely on the fact that the sidecar uses the same image
-            # which already has the codebase baked in (via Containerfile.dev)
+            # Mount the agent workspace directory into the container so that
+            # file-system tools can read and write actual files.
+            # The mount uses "z" (selinux relabelling) for compatibility with
+            # SELinux-enforcing hosts.  On macOS podman-machine, shared volume
+            # mounts require the directory to be inside the podman machine's
+            # shared path — if unavailable the mount will fail silently at
+            # container creation and the env-var fallback still applies.
+            if workspace_dir:
+                container_config["mounts"] = [
+                    {
+                        "type": "bind",
+                        "source": workspace_dir,
+                        "target": "/workspace",
+                        "options": ["z"],
+                    }
+                ]
 
             # Configure network mode if specified
             if self.config.network_mode:
