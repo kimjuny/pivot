@@ -588,6 +588,25 @@ export const updateAgent = async (
 };
 
 /**
+ * Update the tool allowlist for an agent.
+ *
+ * @param agentId - Agent ID
+ * @param toolNames - Array of allowed tool names. Pass null to remove all
+ *   restrictions (agent can use every tool).
+ * @returns Promise resolving to the updated Agent
+ */
+export const updateAgentToolIds = async (
+  agentId: number,
+  toolNames: string[] | null
+): Promise<Agent> => {
+  const tool_ids = toolNames === null ? null : JSON.stringify(toolNames);
+  return apiRequest(`/agents/${agentId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ tool_ids }),
+  }) as Promise<Agent>;
+};
+
+/**
  * Get all available LLM models.
  * 
  * @returns Promise resolving to list of available model names

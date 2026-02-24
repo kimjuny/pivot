@@ -20,6 +20,8 @@ class AgentUpdate(BaseModel):
     llm_id: int | None = None
     is_active: bool | None = None
     max_iteration: int | None = None
+    # JSON-encoded list of tool names, or None to leave unchanged
+    tool_ids: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -30,6 +32,7 @@ class AgentResponse(BaseModel):
     model_name: str | None
     is_active: bool
     max_iteration: int
+    tool_ids: str | None
     created_at: datetime
     updated_at: datetime
 

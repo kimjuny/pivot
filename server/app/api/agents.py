@@ -73,6 +73,7 @@ async def get_agents(
                 "model_name": model_display,
                 "is_active": agent.is_active,
                 "max_iteration": agent.max_iteration,
+                "tool_ids": agent.tool_ids,
                 "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
                 "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
             }
@@ -136,6 +137,7 @@ async def create_agent(
         "model_name": model_display,
         "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
+        "tool_ids": agent.tool_ids,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
@@ -194,6 +196,11 @@ async def update_agent(
         update_data["is_active"] = agent_data.is_active
     if agent_data.max_iteration is not None:
         update_data["max_iteration"] = agent_data.max_iteration
+    # tool_ids uses a sentinel check: the field is present in the payload
+    # even when set to None (meaning "remove all restrictions"), so we check
+    # via __fields_set__ rather than `is not None`.
+    if "tool_ids" in agent_data.__fields_set__:
+        update_data["tool_ids"] = agent_data.tool_ids
 
     updated_agent = agent_crud.update(agent_id, db, **update_data)
     if not updated_agent:
@@ -214,6 +221,7 @@ async def update_agent(
         "model_name": model_display,
         "is_active": updated_agent.is_active,
         "max_iteration": updated_agent.max_iteration,
+        "tool_ids": updated_agent.tool_ids,
         "created_at": updated_agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": updated_agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
     }
@@ -305,6 +313,7 @@ async def get_agent(
         "model_name": model_display,
         "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
+        "tool_ids": agent.tool_ids,
         "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
         "scenes": scenes_graph_responses,

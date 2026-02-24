@@ -237,6 +237,21 @@ async def react_chat_stream(
                 }
                 ptc_meta.func = make_programmatic_tool_call(full_callables)
 
+            # Filter the tool registry to only tools the agent is allowed to use.
+            # agent.tool_ids is a JSON-encoded list of names, e.g. '["add","test_tool"]'.
+            # None means no restriction; '[]' means the agent has no tools.
+            if agent.tool_ids is not None:
+                import json as _json  # noqa: PLC0415
+                try:
+                    allowed: set[str] = set(_json.loads(agent.tool_ids))
+                except (ValueError, TypeError):
+                    allowed = set()
+                filtered_manager = ToolManager()
+                for meta in request_tool_manager.list_tools():
+                    if meta.name in allowed:
+                        filtered_manager.add_entry(meta)
+                request_tool_manager = filtered_manager
+
             engine = ReactEngine(llm=llm, tool_manager=request_tool_manager, db=db)
 
             # Execute task and stream events

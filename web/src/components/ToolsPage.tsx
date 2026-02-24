@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Lock, User as UserIcon, Search } from 'lucide-react';
+import { Plus, Pencil, Trash2, Lock, User as UserIcon, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getSharedTools,
@@ -102,8 +102,9 @@ function ToolsPage() {
   const [privateTools, setPrivateTools] = useState<PrivateTool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Search state
+  // Search + filter state
   const [searchQuery, setSearchQuery] = useState('');
+  const [kindFilter, setKindFilter] = useState<'all' | 'shared' | 'private'>('all');
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -148,18 +149,20 @@ function ToolsPage() {
   );
 
   const filteredRows = useMemo(() => {
-    if (!searchQuery.trim()) return allRows;
-    const q = searchQuery.toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
     return allRows.filter((row) => {
+      if (kindFilter !== 'all' && row.kind !== kindFilter) return false;
+      if (!q) return true;
       if (row.kind === 'shared') {
-        return (
-          row.tool.name.toLowerCase().includes(q) ||
-          row.tool.description.toLowerCase().includes(q)
-        );
+        return row.tool.name.toLowerCase().includes(q) || row.tool.description.toLowerCase().includes(q);
       }
       return row.tool.name.toLowerCase().includes(q);
     });
-  }, [allRows, searchQuery]);
+  }, [allRows, searchQuery, kindFilter]);
+
+  // Counts for badge labels
+  const sharedCount = allRows.filter(r => r.kind === 'shared').length;
+  const privateCount = allRows.filter(r => r.kind === 'private').length;
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
@@ -255,9 +258,46 @@ function ToolsPage() {
         </Button>
       </div>
 
-      {/* Search bar */}
-      <div className="mb-4">
-        <ButtonGroup>
+      {/* Filter + search bar */}
+      <div className="flex items-center gap-3 mb-4">
+        {/* Badge filter tags */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {(
+            [
+              { value: 'all', label: 'All', count: allRows.length },
+              { value: 'shared', label: 'Shared', count: sharedCount },
+              { value: 'private', label: 'Private', count: privateCount },
+            ] as const
+          ).map(({ value, label, count }) => (
+            <button
+              key={value}
+              onClick={() => setKindFilter(value)}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+            >
+              <Badge
+                variant={kindFilter === value ? 'default' : 'outline'}
+                className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+              >
+                {label}
+                <span className={kindFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                  {count}
+                </span>
+              </Badge>
+            </button>
+          ))}
+          {kindFilter !== 'all' && (
+            <button
+              onClick={() => setKindFilter('all')}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear filter"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Search */}
+        <ButtonGroup className="flex-1">
           <Input
             placeholder="Search by name or description…"
             value={searchQuery}

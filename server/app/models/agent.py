@@ -39,6 +39,9 @@ class Agent(SQLModel, table=True):
         model_name: Deprecated. Name of the LLM model to use (kept for migration).
         is_active: Whether the agent is currently active.
         max_iteration: Maximum number of iterations for ReAct recursion.
+        tool_ids: JSON-encoded list of tool names this agent is allowed to use.
+            ``None`` means no restriction (all tools visible); an empty list means
+            no tools are available to the agent.
         created_at: UTC timestamp when the agent was created.
         updated_at: UTC timestamp when the agent was last updated.
         scenes: List of scenes associated with this agent.
@@ -54,6 +57,10 @@ class Agent(SQLModel, table=True):
     is_active: bool = Field(default=True)
     max_iteration: int = Field(
         default=30, description="Maximum iterations for ReAct recursion"
+    )
+    tool_ids: str | None = Field(
+        default=None,
+        description="JSON array of allowed tool names. None = all tools; '[]' = none.",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

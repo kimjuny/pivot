@@ -19,6 +19,11 @@ export interface Agent {
   model_name?: string;
   /** Whether the agent is currently active */
   is_active: boolean;
+  /**
+   * JSON-encoded list of allowed tool names, e.g. '["add","test_tool"]'.
+   * null means no restriction (all tools visible); '[]' means no tools.
+   */
+  tool_ids?: string | null;
   /** UTC timestamp when agent was created */
   created_at: string;
   /** UTC timestamp when agent was last updated */

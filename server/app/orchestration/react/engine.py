@@ -134,7 +134,6 @@ class ReactEngine:
 
         # Build system prompt with current context, available tools, and session memory
         system_prompt = build_system_prompt(context, self.tool_manager, session_memory)
-        print(f"System prompt: \n{system_prompt}")
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)
@@ -353,6 +352,16 @@ class ReactEngine:
                                 "arguments": func_args,
                                 "error": error_msg,
                                 "success": False,
+                            }
+                        )
+                        # Always record the call attempt so the frontend knows
+                        # which function was invoked and with what arguments,
+                        # regardless of whether execution succeeded or failed.
+                        reconstructed_tool_calls.append(
+                            {
+                                "id": tool_call_id,
+                                "name": func_name,
+                                "arguments": func_args,
                             }
                         )
 

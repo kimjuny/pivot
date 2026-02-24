@@ -9,6 +9,7 @@ import {
     Plus,
     X,
     MessageSquare,
+    Settings2,
 } from 'lucide-react';
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -37,6 +38,7 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import AgentModal, { AgentFormData } from './AgentModal';
+import ToolSelectorDialog from './ToolSelectorDialog';
 import type { Agent, Scene } from '../types';
 import { updateAgent, getSharedTools, getPrivateTools, type SharedTool, type PrivateTool } from '../utils/api';
 import { toast } from 'sonner';
@@ -82,10 +84,18 @@ function AgentDetailSidebar({
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [tools, setTools] = useState<SidebarTool[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
+    // Local copy of the agent's tool_ids so it updates without a page reload
+    const [localToolIds, setLocalToolIds] = useState<string | null | undefined>(agent?.tool_ids);
     const hasFetchedToolsRef = useRef(false);
     const { openTab } = useAgentTabStore();
+
+    // Sync localToolIds when the agent prop changes
+    useEffect(() => {
+        setLocalToolIds(agent?.tool_ids);
+    }, [agent?.tool_ids]);
 
     /**
      * Fetch both shared (built-in) and private (user-workspace) tools in parallel.
@@ -356,9 +366,33 @@ function AgentDetailSidebar({
                                 >
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
+                                    {/* Count badge: shows enabled / total */}
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {toolsLoading ? '...' : tools.length}
+                                        {toolsLoading ? '…' : (() => {
+                                            if (localToolIds === null || localToolIds === undefined) return tools.length;
+                                            try { return JSON.parse(localToolIds).length; } catch { return 0; }
+                                        })()}
+                                        {' / '}
+                                        {toolsLoading ? '…' : tools.length}
                                     </span>
+                                    {/* Configure button */}
+                                    {agent?.id && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(e) => { e.stopPropagation(); setIsToolSelectorOpen(true); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setIsToolSelectorOpen(true); } }}
+                                                    className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                    aria-label="Configure tools"
+                                                >
+                                                    <Settings2 className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right">Configure tools</TooltipContent>
+                                        </Tooltip>
+                                    )}
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
@@ -508,6 +542,22 @@ function AgentDetailSidebar({
                 onClose={() => setIsEditModalOpen(false)}
                 onSave={handleEditAgent}
             />
+
+            {/* Tool Selector Dialog */}
+            {agent?.id && (
+                <ToolSelectorDialog
+                    open={isToolSelectorOpen}
+                    onOpenChange={setIsToolSelectorOpen}
+                    agentId={agent.id}
+                    currentToolIds={localToolIds}
+                    onSaved={(newToolIds) => {
+                        setLocalToolIds(newToolIds);
+                        if (onAgentUpdate && agent) {
+                            onAgentUpdate({ ...agent, tool_ids: newToolIds });
+                        }
+                    }}
+                />
+            )}
         </>
     );
 }

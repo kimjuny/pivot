@@ -195,23 +195,27 @@
   color: #facc15;
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling — uses theme variables so it adapts to light/dark mode */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: oklch(0.145 0 0);
+  /* Light: near-white background; Dark: matches the dark background (#0A0A0A) */
+  background: oklch(var(--background));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: oklch(0.371 0 0);
+  /* Light: visible but subtle neutral grey; Dark: the existing dark-mode grey */
+  background: oklch(var(--muted-foreground) / 0.3);
   border-radius: 4px;
+  /* Give the thumb a thin gap from the track edge so it floats cleanly */
+  border: 2px solid oklch(var(--background));
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.45 0 0);
+  background: oklch(var(--muted-foreground) / 0.5);
 }
 
 /* Card styles with subtle borders */

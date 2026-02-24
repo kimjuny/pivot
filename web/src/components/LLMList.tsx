@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Search, Server } from 'lucide-react';
+import { Plus, Pencil, Trash2, Search, Server, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { getLLMs, deleteLLM, updateLLM, createLLM } from '../utils/api';
 import type { LLM } from '../types';
@@ -78,8 +78,9 @@ function LLMList() {
     llm: LLM | null;
   }>({ isOpen: false, llm: null });
 
-  // Search + pagination state
+  // Search + filter + pagination state
   const [searchQuery, setSearchQuery] = useState('');
+  const [protocolFilter, setProtocolFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
 
   // ---------------------------------------------------------------------------
@@ -108,23 +109,31 @@ function LLMList() {
   // Filtered + paginated rows
   // ---------------------------------------------------------------------------
 
+  // Unique protocol values for badge filters
+  const protocols = useMemo(
+    () => Array.from(new Set(llms.map(l => l.protocol).filter(Boolean))).sort(),
+    [llms]
+  );
+
   const filteredLLMs = useMemo(() => {
-    if (!searchQuery.trim()) return llms;
-    const q = searchQuery.toLowerCase();
-    return llms.filter(
-      (llm) =>
+    const q = searchQuery.toLowerCase().trim();
+    return llms.filter((llm) => {
+      if (protocolFilter !== 'all' && llm.protocol !== protocolFilter) return false;
+      if (!q) return true;
+      return (
         llm.name.toLowerCase().includes(q) ||
         llm.model.toLowerCase().includes(q) ||
         llm.endpoint.toLowerCase().includes(q) ||
         llm.protocol.toLowerCase().includes(q)
-    );
-  }, [llms, searchQuery]);
+      );
+    });
+  }, [llms, searchQuery, protocolFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLLMs.length / PAGE_SIZE));
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+  }, [searchQuery, protocolFilter]);
 
   const pagedLLMs = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -229,9 +238,57 @@ function LLMList() {
         </Button>
       </div>
 
-      {/* Search bar */}
-      <div className="mb-4">
-        <ButtonGroup>
+      {/* Filter + search bar */}
+      <div className="flex items-center gap-3 mb-4">
+        {/* Protocol badge filters */}
+        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+          <button
+            onClick={() => setProtocolFilter('all')}
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+          >
+            <Badge
+              variant={protocolFilter === 'all' ? 'default' : 'outline'}
+              className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+            >
+              All
+              <span className={protocolFilter === 'all' ? 'opacity-70' : 'text-muted-foreground'}>
+                {llms.length}
+              </span>
+            </Badge>
+          </button>
+          {protocols.map((proto) => {
+            const count = llms.filter(l => l.protocol === proto).length;
+            return (
+              <button
+                key={proto}
+                onClick={() => setProtocolFilter(proto)}
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+              >
+                <Badge
+                  variant={protocolFilter === proto ? 'default' : 'outline'}
+                  className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+                >
+                  {proto}
+                  <span className={protocolFilter === proto ? 'opacity-70' : 'text-muted-foreground'}>
+                    {count}
+                  </span>
+                </Badge>
+              </button>
+            );
+          })}
+          {protocolFilter !== 'all' && (
+            <button
+              onClick={() => setProtocolFilter('all')}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear filter"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Search */}
+        <ButtonGroup className="flex-1">
           <Input
             placeholder="Search by name, model, endpoint or protocol…"
             value={searchQuery}
