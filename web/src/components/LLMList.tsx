@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Search, Server, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Plus, Pencil, Trash2, Search, Server, X, Download, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { getLLMs, deleteLLM, updateLLM, createLLM } from '../utils/api';
 import type { LLM } from '../types';
@@ -82,6 +82,10 @@ function LLMList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [protocolFilter, setProtocolFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Import state
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ---------------------------------------------------------------------------
   // Data loading
@@ -174,6 +178,97 @@ function LLMList() {
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // Export
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Serialise all LLMs (stripping server-generated fields id / created_at / updated_at)
+   * and trigger a JSON file download in the browser.
+   */
+  const handleExport = () => {
+    const exportable = llms.map(({ id: _id, created_at: _ca, updated_at: _ua, ...rest }) => rest);
+    const json = JSON.stringify(exportable, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pivot-llms-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${llms.length} LLM${llms.length !== 1 ? 's' : ''}`);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Import
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Read a JSON file, validate the shape, then create each entry via the API.
+   * Duplicate names (server-side 400) are skipped with a warning.
+   */
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset so the same file can be re-selected after a failed import
+    e.target.value = '';
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      toast.error('Invalid JSON file');
+      return;
+    }
+
+    if (!Array.isArray(parsed)) {
+      toast.error('Expected a JSON array of LLM objects');
+      return;
+    }
+
+    setIsImporting(true);
+    let created = 0;
+    let skipped = 0;
+
+    for (const item of parsed as Record<string, unknown>[]) {
+      if (typeof item.name !== 'string' || typeof item.endpoint !== 'string') {
+        skipped++;
+        continue;
+      }
+      try {
+        await createLLM({
+          name: item.name as string,
+          endpoint: item.endpoint as string,
+          model: (item.model as string) ?? '',
+          api_key: (item.api_key as string) ?? '',
+          protocol: (item.protocol as string) ?? 'openai_chat_v1',
+          chat: (item.chat as boolean) ?? true,
+          system_role: (item.system_role as boolean) ?? false,
+          tool_calling: (item.tool_calling as string) ?? 'none',
+          json_schema: (item.json_schema as string) ?? 'none',
+          streaming: (item.streaming as boolean) ?? false,
+          max_context: (item.max_context as number) ?? 8192,
+          extra_config: (item.extra_config as string) ?? '{}',
+        });
+        created++;
+      } catch {
+        // Name collision or validation error — skip silently and count
+        skipped++;
+      }
+    }
+
+    setIsImporting(false);
+    await loadLLMs();
+
+    if (created > 0 && skipped === 0) {
+      toast.success(`Imported ${created} LLM${created !== 1 ? 's' : ''}`);
+    } else if (created > 0) {
+      toast.success(`Imported ${created}, skipped ${skipped} (duplicates or invalid)`);
+    } else {
+      toast.error('No LLMs were imported. Check the file format.');
+    }
+  };
+
   const handleModalSave = async (llmData: {
     name: string;
     endpoint: string;
@@ -232,10 +327,46 @@ function LLMList() {
             Manage LLM configurations used by your agents.
           </p>
         </div>
-        <Button size="sm" onClick={handleCreate} className="flex items-center gap-1.5">
-          <Plus className="w-4 h-4" />
-          New LLM
-        </Button>
+
+        <div className="flex items-center gap-2">
+          {/* Export */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleExport}
+            disabled={llms.length === 0}
+            className="flex items-center gap-1.5"
+            aria-label="Export all LLMs as JSON"
+          >
+            <Download className="w-4 h-4" />
+            Export
+          </Button>
+
+          {/* Import — hidden file input triggered by button */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={e => void handleImportFile(e)}
+            aria-label="Import LLMs from JSON file"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isImporting}
+            className="flex items-center gap-1.5"
+          >
+            <Upload className="w-4 h-4" />
+            {isImporting ? 'Importing…' : 'Import'}
+          </Button>
+
+          <Button size="sm" onClick={handleCreate} className="flex items-center gap-1.5">
+            <Plus className="w-4 h-4" />
+            New LLM
+          </Button>
+        </div>
       </div>
 
       {/* Filter + search bar */}
