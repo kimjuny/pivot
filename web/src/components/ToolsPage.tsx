@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Lock, User as UserIcon, Search, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Lock, User as UserIcon, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getSharedTools,
@@ -259,7 +259,7 @@ function ToolsPage() {
       </div>
 
       {/* Filter + search bar */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         {/* Badge filter tags */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {(
@@ -297,7 +297,7 @@ function ToolsPage() {
         </div>
 
         {/* Search */}
-        <ButtonGroup className="flex-1">
+        <ButtonGroup className="list-search-group">
           <Input
             placeholder="Search by name or description…"
             value={searchQuery}
@@ -305,8 +305,8 @@ function ToolsPage() {
             aria-label="Search tools"
             autoComplete="off"
           />
-          <Button variant="outline" aria-label="Search" tabIndex={-1}>
-            <Search className="w-4 h-4" />
+          <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
+            Search
           </Button>
         </ButtonGroup>
       </div>

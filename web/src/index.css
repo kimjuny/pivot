@@ -406,3 +406,17 @@
 .status-icon-exit {
   animation: statusIconExit 0.6s ease-out;
 }
+
+@layer components {
+  .list-search-group {
+    @apply w-full md:ml-auto md:w-[420px] md:flex-none;
+  }
+
+  .list-search-group > input {
+    @apply !h-8 !py-0 text-sm;
+  }
+
+  .list-search-group > button {
+    @apply !h-8 min-w-[84px] px-3;
+  }
+}

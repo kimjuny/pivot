@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Bot, MoreHorizontal, Search, X } from 'lucide-react';
+import { Plus, Bot, MoreHorizontal, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
@@ -236,9 +236,9 @@ function AgentList() {
       </div>
 
       {/* Filter + search bar */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         {/* Status badge filters */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
           {(
             [
               { value: 'all', label: 'All', count: agents.length },
@@ -274,7 +274,7 @@ function AgentList() {
         </div>
 
         {/* Search */}
-        <ButtonGroup className="flex-1">
+        <ButtonGroup className="list-search-group">
           <Input
             placeholder="Search by name or description…"
             value={searchQuery}
@@ -282,8 +282,8 @@ function AgentList() {
             aria-label="Search agents"
             autoComplete="off"
           />
-          <Button variant="outline" aria-label="Search" tabIndex={-1}>
-            <Search className="w-4 h-4" />
+          <Button variant="outline" size="sm" aria-label="Search agents" tabIndex={-1}>
+            Search
           </Button>
         </ButtonGroup>
       </div>

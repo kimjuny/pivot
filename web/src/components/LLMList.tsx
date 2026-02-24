@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Plus, Pencil, Trash2, Search, Server, X, Download, Upload } from 'lucide-react';
+import { Plus, Pencil, Trash2, Server, X, Download, Upload, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { getLLMs, deleteLLM, updateLLM, createLLM } from '../utils/api';
 import type { LLM } from '../types';
@@ -68,6 +68,7 @@ function LLMList() {
   const [llms, setLLMs] = useState<LLM[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [copyingLLMId, setCopyingLLMId] = useState<number | null>(null);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -163,6 +164,42 @@ function LLMList() {
   const handleDelete = useCallback((llm: LLM) => {
     setDeleteConfirmation({ isOpen: true, llm });
   }, []);
+
+  const handleCopy = useCallback(async (llm: LLM) => {
+    const escapedName = llm.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const copyNamePattern = new RegExp(`^${escapedName}_copy_(\\d+)$`);
+    const nextIndex = llms.reduce((max, item) => {
+      const match = item.name.match(copyNamePattern);
+      if (!match) return max;
+      const index = Number.parseInt(match[1], 10);
+      return Number.isNaN(index) ? max : Math.max(max, index);
+    }, 0) + 1;
+
+    setCopyingLLMId(llm.id);
+    try {
+      await createLLM({
+        name: `${llm.name}_copy_${nextIndex}`,
+        endpoint: llm.endpoint,
+        model: llm.model,
+        api_key: llm.api_key,
+        protocol: llm.protocol,
+        chat: llm.chat,
+        system_role: llm.system_role,
+        tool_calling: llm.tool_calling,
+        json_schema: llm.json_schema,
+        streaming: llm.streaming,
+        max_context: llm.max_context,
+        extra_config: llm.extra_config,
+      });
+      toast.success('LLM copied');
+      await loadLLMs();
+    } catch (err) {
+      const e = err as Error;
+      toast.error(`Failed to copy: ${e.message}`);
+    } finally {
+      setCopyingLLMId(null);
+    }
+  }, [llms, loadLLMs]);
 
   const confirmDelete = async () => {
     if (!deleteConfirmation.llm) return;
@@ -370,7 +407,7 @@ function LLMList() {
       </div>
 
       {/* Filter + search bar */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         {/* Protocol badge filters */}
         <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
           <button
@@ -419,7 +456,7 @@ function LLMList() {
         </div>
 
         {/* Search */}
-        <ButtonGroup className="flex-1">
+        <ButtonGroup className="list-search-group">
           <Input
             placeholder="Search by name, model, endpoint or protocol…"
             value={searchQuery}
@@ -427,8 +464,8 @@ function LLMList() {
             aria-label="Search LLMs"
             autoComplete="off"
           />
-          <Button variant="outline" aria-label="Search" tabIndex={-1}>
-            <Search className="w-4 h-4" />
+          <Button variant="outline" size="sm" aria-label="Search LLMs" tabIndex={-1}>
+            Search
           </Button>
         </ButtonGroup>
       </div>
@@ -458,7 +495,7 @@ function LLMList() {
                 <TableHead>Endpoint</TableHead>
                 <TableHead className="w-[130px]">Protocol</TableHead>
                 <TableHead className="w-[120px]">Capabilities</TableHead>
-                <TableHead className="w-[100px] text-right">Actions</TableHead>
+                <TableHead className="w-[130px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -466,7 +503,9 @@ function LLMList() {
                 <LLMTableRow
                   key={llm.id}
                   llm={llm}
+                  isCopying={copyingLLMId === llm.id}
                   onEdit={handleEdit}
+                  onCopy={handleCopy}
                   onDelete={handleDelete}
                 />
               ))}
@@ -577,7 +616,9 @@ function LLMList() {
 
 interface LLMTableRowProps {
   llm: LLM;
+  isCopying: boolean;
   onEdit: (llm: LLM) => void;
+  onCopy: (llm: LLM) => void;
   onDelete: (llm: LLM) => void;
 }
 
@@ -585,7 +626,7 @@ interface LLMTableRowProps {
  * Single row in the LLM table.
  * Shows key fields and a compact capability badge list.
  */
-function LLMTableRow({ llm, onEdit, onDelete }: LLMTableRowProps) {
+function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowProps) {
   return (
     <TableRow>
       {/* Name + icon */}
@@ -642,6 +683,16 @@ function LLMTableRow({ llm, onEdit, onDelete }: LLMTableRowProps) {
       {/* Actions */}
       <TableCell className="text-right">
         <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label={`Copy LLM ${llm.name}`}
+            onClick={() => onCopy(llm)}
+            disabled={isCopying}
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"
