@@ -18,7 +18,7 @@ from app.models.react import (
     ReactRecursionState,
     ReactTask,
 )
-from app.orchestration.tool.manager import ToolManager
+from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.services.session_memory_service import SessionMemoryService
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
@@ -41,7 +41,11 @@ class ReactEngine:
     """
 
     def __init__(
-        self, llm: AbstractLLM, tool_manager: ToolManager, db: Session
+        self,
+        llm: AbstractLLM,
+        tool_manager: ToolManager,
+        db: Session,
+        tool_execution_context: ToolExecutionContext | None = None,
     ) -> None:
         """
         Initialize ReAct engine.
@@ -54,6 +58,7 @@ class ReactEngine:
         self.llm = llm
         self.tool_manager = tool_manager
         self.db = db
+        self.tool_execution_context = tool_execution_context
         self.cancelled = False  # Flag to signal cancellation
 
     def _safe_load_json(self, json_str: str) -> dict[str, Any]:
@@ -311,7 +316,10 @@ class ReactEngine:
                     try:
                         # Execute tool asynchronously via thread pool
                         result = await run_in_threadpool(
-                            self.tool_manager.execute, func_name, **func_args
+                            self.tool_manager.execute,
+                            func_name,
+                            context=self.tool_execution_context,
+                            **func_args,
                         )
 
                         tool_results.append(
@@ -454,7 +462,7 @@ class ReactEngine:
             }
 
             # --- 1. UPDATE IN-MEMORY STATE BEfORE SNAPSHOT ---
-            # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred 
+            # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred
             # in this recursion cycle so that the state snapshot is consistent.
 
             # Sync short-term memory to memory context if present
@@ -463,17 +471,17 @@ class ReactEngine:
                     if "memory" not in context.context:
                         context.context["memory"] = {}
                     context.context["memory"]["short_term"] = []
-                context.context["memory"]["short_term"].append({
-                    "trace_id": trace_id,
-                    "memory": short_term_memory_append
-                })
+                context.context["memory"]["short_term"].append(
+                    {"trace_id": trace_id, "memory": short_term_memory_append}
+                )
 
             # Sync RE_PLAN updates to database and memory context
             if action_type == "RE_PLAN":
                 plan_data = action_output.get("plan", [])
-                
+
                 # Delete old plan steps in DB
                 from sqlmodel import delete
+
                 delete_stmt = delete(ReactPlanStep).where(
                     ReactPlanStep.task_id == task.task_id
                 )
@@ -490,14 +498,16 @@ class ReactEngine:
                         status=step_data.get("status", "pending"),
                     )
                     self.db.add(step)
-                    
+
                     # Update in-memory context so the snapshot captures the new plan
-                    new_plan_context.append({
-                        "step_id": step.step_id,
-                        "description": step.description,
-                        "status": step.status,
-                        "recursion_history": [],
-                    })
+                    new_plan_context.append(
+                        {
+                            "step_id": step.step_id,
+                            "description": step.description,
+                            "status": step.status,
+                            "recursion_history": [],
+                        }
+                    )
                 self.db.commit()
                 context.context["plan"] = new_plan_context
 
@@ -787,11 +797,13 @@ class ReactEngine:
                     if task.session_id:
                         session_service = SessionMemoryService(self.db)
                         answer_output = event_data.get("output", {})
-                        
+
                         session_service.process_answer_updates(
                             session_id=task.session_id,
                             task=task,
-                            session_memory_delta=event_data.get("session_memory_delta", {}),
+                            session_memory_delta=event_data.get(
+                                "session_memory_delta", {}
+                            ),
                             session_subject=event_data.get("session_subject", {}),
                             session_goal=event_data.get("session_goal", {}),
                             agent_answer=answer_output.get("answer", ""),

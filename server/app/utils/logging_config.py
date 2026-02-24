@@ -67,23 +67,34 @@ def _create_console_handler() -> logging.Handler:
     return handler
 
 
-def _create_file_handler() -> logging.FileHandler:
+def _create_file_handler() -> logging.FileHandler | None:
     """Create a file handler with plain text output (no ANSI codes).
 
     Returns:
         FileHandler: A configured file handler for log file output.
+        None: If the log file cannot be opened due to permission issues.
     """
-    _ensure_log_dir()
+    try:
+        _ensure_log_dir()
 
-    handler = logging.FileHandler(
-        filename=LOG_FILE,
-        mode="a",
-        encoding="utf-8",
-    )
-    handler.setLevel(logging.DEBUG)
-    # Use standard formatter for file (no colors)
-    handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
-    return handler
+        handler = logging.FileHandler(
+            filename=LOG_FILE,
+            mode="a",
+            encoding="utf-8",
+        )
+        handler.setLevel(logging.DEBUG)
+        # Use standard formatter for file (no colors)
+        handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
+        return handler
+    except OSError as exc:
+        # In containerized dev environments, mounted workspace permissions may
+        # block writing to /app/server/logs. Fall back to console-only logging
+        # so the application can still boot.
+        print(
+            f"[logging] file handler disabled for {LOG_FILE}: {exc}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def _get_handlers() -> list[logging.Handler]:
@@ -92,7 +103,11 @@ def _get_handlers() -> list[logging.Handler]:
     Returns:
         List of configured logging handlers.
     """
-    return [_create_console_handler(), _create_file_handler()]
+    handlers: list[logging.Handler] = [_create_console_handler()]
+    file_handler = _create_file_handler()
+    if file_handler is not None:
+        handlers.append(file_handler)
+    return handlers
 
 
 # Add both handlers to the core logger

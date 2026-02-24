@@ -4,7 +4,9 @@ Tool metadata structure for storing tool information.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+ToolType = Literal["normal", "sandbox"]
 
 
 @dataclass
@@ -16,6 +18,7 @@ class ToolMetadata:
         name: The unique identifier for the tool.
         description: A brief description of what the tool does.
         parameters: JSON Schema describing the expected parameters (OpenAI format).
+        tool_type: Execution category for this tool.
         func: The actual callable function.
     """
 
@@ -23,6 +26,7 @@ class ToolMetadata:
     description: str
     parameters: dict[str, Any]
     func: Callable[..., Any]
+    tool_type: ToolType = "normal"
 
     def to_text(self) -> str:
         """
@@ -34,6 +38,7 @@ class ToolMetadata:
         import json
 
         return f"""Tool: {self.name}
+Type: {self.tool_type}
 Description: {self.description}
 Parameters: {json.dumps(self.parameters, ensure_ascii=False)}"""
 
@@ -48,6 +53,7 @@ Parameters: {json.dumps(self.parameters, ensure_ascii=False)}"""
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
+            "tool_type": self.tool_type,
         }
 
     def to_openai_format(self) -> dict[str, Any]:

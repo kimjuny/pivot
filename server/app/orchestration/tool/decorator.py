@@ -31,20 +31,22 @@ docstring is already the description and the LLM is expected to read it.
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
-from typing import Any, Protocol, cast, get_type_hints
+from typing import TYPE_CHECKING, Any, Protocol, cast, get_type_hints
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ToolFunction(Protocol):
     """Protocol for functions decorated with @tool."""
 
-    __tool_metadata__: "ToolMetadata"
+    __tool_metadata__: ToolMetadata
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 # Import after protocol definition to avoid circular import
-from .metadata import ToolMetadata  # noqa: E402
+from .metadata import ToolMetadata, ToolType  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Type → JSON Schema mapping
@@ -85,6 +87,7 @@ def _py_type_to_json_schema_type(annotation: Any) -> str:
 # Schema builder
 # ---------------------------------------------------------------------------
 
+
 def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
     """Build an OpenAI-compatible JSON Schema from a function's signature.
 
@@ -101,7 +104,7 @@ def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
     """
     try:
         hints = get_type_hints(func)
-    except Exception:  # noqa: BLE001
+    except Exception:
         hints = {}
 
     sig = inspect.signature(func)
@@ -124,7 +127,12 @@ def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
 # Public decorator
 # ---------------------------------------------------------------------------
 
-def tool(func: Callable[..., Any]) -> ToolFunction:
+
+def tool(
+    func: Callable[..., Any] | None = None,
+    *,
+    tool_type: ToolType = "normal",
+) -> ToolFunction | Callable[[Callable[..., Any]], ToolFunction]:
     """Register a typed function as a callable tool.
 
     Args:
@@ -144,11 +152,18 @@ def tool(func: Callable[..., Any]) -> ToolFunction:
             \"\"\"
             return a + b
     """
-    metadata = ToolMetadata(
-        name=func.__name__,
-        description=inspect.getdoc(func) or "",
-        parameters=_build_parameters_schema(func),
-        func=func,
-    )
-    object.__setattr__(func, "__tool_metadata__", metadata)
-    return cast(ToolFunction, func)
+
+    def _decorate(target: Callable[..., Any]) -> ToolFunction:
+        metadata = ToolMetadata(
+            name=target.__name__,
+            description=inspect.getdoc(target) or "",
+            parameters=_build_parameters_schema(target),
+            func=target,
+            tool_type=tool_type,
+        )
+        object.__setattr__(target, "__tool_metadata__", metadata)
+        return cast(ToolFunction, target)
+
+    if func is None:
+        return _decorate
+    return _decorate(func)

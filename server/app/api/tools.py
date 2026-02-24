@@ -10,10 +10,6 @@ All endpoints require authentication.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlmodel import Session
-
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.models.user import User
@@ -27,6 +23,9 @@ from app.services.workspace_service import (
     read_user_tool,
     write_user_tool,
 )
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlmodel import Session
 
 router = APIRouter()
 
@@ -53,6 +52,7 @@ async def get_shared_tools(
             "name": t.name,
             "description": t.description,
             "parameters": t.parameters,
+            "tool_type": t.tool_type,
         }
         for t in tool_manager.list_tools()
     ]
@@ -151,7 +151,7 @@ async def delete_private_tool(
 
 
 # ---------------------------------------------------------------------------
-# Legacy endpoint – kept for backward compatibility
+# Legacy endpoint - kept for backward compatibility
 # ---------------------------------------------------------------------------
 
 
@@ -171,6 +171,7 @@ async def get_tools(
             "name": t.name,
             "description": t.description,
             "parameters": t.parameters,
+            "tool_type": t.tool_type,
         }
         for t in tool_manager.list_tools()
     ]

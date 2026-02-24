@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     DOUBAO_SEED_API_KEY: str | None = None
     GLM_API_KEY: str | None = None
 
+    # Sandbox manager
+    SANDBOX_MANAGER_URL: str = "http://sandbox-manager:8051"
+    SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
+    SANDBOX_MANAGER_TIMEOUT_SECONDS: int = 30
+
     class Config:  # type: ignore
         env_file = ".env"
 

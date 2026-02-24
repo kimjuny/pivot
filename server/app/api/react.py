@@ -19,12 +19,18 @@ from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
 from app.orchestration.react import ReactEngine
 from app.orchestration.tool import get_tool_manager
-from app.orchestration.tool.builtin.programmatic_tool_call import make_programmatic_tool_call
-from app.orchestration.tool.manager import ToolManager
+from app.orchestration.tool.builtin.programmatic_tool_call import (
+    make_programmatic_tool_call,
+)
+from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
-from app.services.workspace_service import load_all_user_tool_metadata
+from app.services.workspace_service import (
+    ensure_agent_workspace,
+    load_all_user_tool_metadata,
+)
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import desc
 from sqlmodel import Session, select
 
 # Get logger for this module
@@ -144,7 +150,7 @@ async def react_chat_stream(
                         rec_stmt = (
                             select(ReactRecursion)
                             .where(ReactRecursion.task_id == existing_task.task_id)
-                            .order_by(ReactRecursion.iteration_index.desc())
+                            .order_by(desc(ReactRecursion.iteration_index))
                         )
                         last_rec = db.exec(rec_stmt).first()
 
@@ -209,6 +215,7 @@ async def react_chat_stream(
             # with the current user's private workspace tools.
             # We copy the shared registry into a fresh instance so the global
             # singleton is never mutated across requests.
+            ensure_agent_workspace(current_user.username, agent.id or 0)
             shared_manager = get_tool_manager()
             request_tool_manager = ToolManager()
             for meta in shared_manager.list_tools():
@@ -241,9 +248,8 @@ async def react_chat_stream(
             # agent.tool_ids is a JSON-encoded list of names, e.g. '["add","test_tool"]'.
             # None means no restriction; '[]' means the agent has no tools.
             if agent.tool_ids is not None:
-                import json as _json  # noqa: PLC0415
                 try:
-                    allowed: set[str] = set(_json.loads(agent.tool_ids))
+                    allowed: set[str] = set(json.loads(agent.tool_ids))
                 except (ValueError, TypeError):
                     allowed = set()
                 filtered_manager = ToolManager()
@@ -252,7 +258,15 @@ async def react_chat_stream(
                         filtered_manager.add_entry(meta)
                 request_tool_manager = filtered_manager
 
-            engine = ReactEngine(llm=llm, tool_manager=request_tool_manager, db=db)
+            engine = ReactEngine(
+                llm=llm,
+                tool_manager=request_tool_manager,
+                db=db,
+                tool_execution_context=ToolExecutionContext(
+                    username=current_user.username,
+                    agent_id=agent.id or 0,
+                ),
+            )
 
             # Execute task and stream events
             async for event_data in engine.run_task(task):

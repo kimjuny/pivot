@@ -30,6 +30,12 @@ logger = get_logger("workspace_service")
 _WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent / "workspace"
 
 
+def workspace_root() -> Path:
+    """Return the root directory that stores all user workspaces."""
+    _WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+    return _WORKSPACE_ROOT
+
+
 def _user_tools_dir(username: str) -> Path:
     """Return (and create if needed) the tools directory for a user.
 
@@ -39,9 +45,19 @@ def _user_tools_dir(username: str) -> Path:
     Returns:
         Absolute path to ``server/workspace/{username}/tools/``.
     """
-    tools_dir = _WORKSPACE_ROOT / username / "tools"
+    tools_dir = workspace_root() / username / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
     return tools_dir
+
+
+def ensure_agent_workspace(username: str, agent_id: int) -> Path:
+    """Return (and create) an agent workspace directory.
+
+    Path format: ``server/workspace/{username}/agents/{agent_id}/``.
+    """
+    agent_dir = workspace_root() / username / "agents" / str(agent_id)
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    return agent_dir
 
 
 # ---------------------------------------------------------------------------
@@ -168,15 +184,15 @@ def load_user_tool_metadata(username: str, tool_name: str) -> ToolMetadata | Non
     sys.modules[module_key] = module
     try:
         spec.loader.exec_module(module)  # type: ignore[union-attr]
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Failed to load tool module '%s': %s", tool_name, exc)
         return None
 
-    from app.orchestration.tool.metadata import ToolMetadata as _TM  # noqa: PLC0415
+    from app.orchestration.tool.metadata import ToolMetadata
 
     for _name, obj in inspect.getmembers(module, inspect.isfunction):
         metadata = getattr(obj, "__tool_metadata__", None)
-        if metadata is not None and isinstance(metadata, _TM):
+        if metadata is not None and isinstance(metadata, ToolMetadata):
             return metadata
 
     return None
@@ -257,7 +273,12 @@ def check_ruff(source: str) -> list[dict[str, Any]]:
             }
             for d in diagnostics
         ]
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, FileNotFoundError):
+    except (
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        KeyError,
+        FileNotFoundError,
+    ):
         return []
 
 
@@ -315,7 +336,12 @@ def check_pyright(source: str) -> list[dict[str, Any]]:
             }
             for d in diagnostics
         ]
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, FileNotFoundError):
+    except (
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        KeyError,
+        FileNotFoundError,
+    ):
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
         return []

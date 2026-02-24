@@ -23,6 +23,7 @@ anthropic = "^0.79.0"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 bcrypt = "^4.0.0"
 aiofiles = "^23.2.1"
+podman = "^5.4.0"
 
 [tool.poetry.group.dev.dependencies]
 # Development tools kept separate from production environment

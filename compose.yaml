@@ -1,11 +1,11 @@
 # =============================================================================
 # Pivot — Dev Compose
 # Strategy: mount source code, pre-install deps in image, hot-reload both ends
-# Usage:    podman compose up
+# Usage:    podman compose up --build
 # =============================================================================
 
 services:
-  # ---------- Backend (FastAPI + Uvicorn) ----------
+  # ---------- Backend (FastAPI + Uvicorn, non-privileged) ----------
   backend:
     build:
       context: .
@@ -14,18 +14,21 @@ services:
     container_name: pivot-backend
     ports:
       - "8003:8003"
+    privileged: false
     volumes:
       - ./server:/app/server:z
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./poetry.lock:/app/poetry.lock:ro
+      - pivot-data:/app/server/data
     environment:
-      # Bind-mounted via ./server above, so pivot.db is visible in the project tree
-      # at server/data/pivot.db. The directory is gitignored (see .gitignore).
       - DATABASE_URL=sqlite:////app/server/data/pivot.db
       - ENV=development
       - PYTHONUNBUFFERED=1
-    # Hot-reload only watches server/app; workspace/ changes must not trigger a restart
-    # because user tool files are loaded dynamically at request time, not at import time.
+      - SANDBOX_MANAGER_URL=http://sandbox-manager:8051
+      - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
+      - SANDBOX_MANAGER_TIMEOUT_SECONDS=30
+    depends_on:
+      - sandbox-manager
     command: >
       poetry run python -m uvicorn app.main:app
       --reload
@@ -34,7 +37,42 @@ services:
       --port 8003
       --app-dir server
 
-  # ---------- Frontend (Vite dev server) ----------
+  # ---------- Sandbox Manager (privileged, Podman API owner) ----------
+  sandbox-manager:
+    build:
+      context: .
+      dockerfile: Containerfile.dev
+      target: backend-dev
+    container_name: pivot-sandbox-manager
+    privileged: true
+    volumes:
+      # macOS podman-machine: /var/run/docker.sock usually points to Podman API.
+      # Linux users can override with: /run/podman/podman.sock:/run/podman/podman.sock
+      - /var/run/docker.sock:/run/podman/podman.sock
+      - ./server:/app/server:z
+    environment:
+      - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
+      - SANDBOX_PODMAN_BASE_URL=unix:///run/podman/podman.sock
+      - SANDBOX_BASE_IMAGE=docker.io/library/python:3.10-slim
+      - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
+      - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
+      - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30
+      # Explicit host-side workspace root avoids inspect-format differences.
+      - SANDBOX_WORKSPACE_HOST_ROOT=${PWD}/server/workspace
+      # Pooling: timeout cleanup + LRU cap fallback.
+      - SANDBOX_POOL_SCAN_INTERVAL_SECONDS=30
+      - SANDBOX_POOL_IDLE_TTL_SECONDS=300
+      - SANDBOX_POOL_MAX_SIZE=100
+    command: >
+      poetry run python -m uvicorn server.sandbox_manager.main:app
+      --reload
+      --reload-dir /app/server/sandbox_manager
+      --no-access-log
+      --host 0.0.0.0
+      --port 8051
+      --app-dir /app
+
+  # ---------- Frontend (Vite dev server, non-privileged) ----------
   frontend:
     build:
       context: .
@@ -43,6 +81,7 @@ services:
     container_name: pivot-frontend
     ports:
       - "3000:3000"
+    privileged: false
     volumes:
       - ./web/src:/app/web/src:z
       - ./web/public:/app/web/public:z
@@ -55,17 +94,11 @@ services:
       - ./web/eslint.config.js:/app/web/eslint.config.js:ro
       - ./web/components.json:/app/web/components.json:ro
     environment:
-      # BACKEND_URL is used by the Vite proxy config (server-side) to forward
-      # /api/* requests to the backend container. It is NOT a VITE_* var so it
-      # is never inlined into the browser bundle.
       - BACKEND_URL=http://backend:8003
-      # VITE_API_BASE_URL is inlined into the React app — use a relative path
-      # so the browser sends /api/* to the same origin (Vite dev server), which
-      # then proxies to the backend container via BACKEND_URL above.
       - VITE_API_BASE_URL=/api
     depends_on:
       - backend
     command: npm run dev -- --host 0.0.0.0
 
-# No named volumes needed — the SQLite database lives in ./server/data/
-# which is bind-mounted as part of ./server above.
+volumes:
+  pivot-data:

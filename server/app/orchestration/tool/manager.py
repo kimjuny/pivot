@@ -4,10 +4,30 @@ Tool manager for discovering, registering, and managing tools.
 
 import importlib
 import inspect
+from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .metadata import ToolMetadata
+
+_tool_execution_context: ContextVar["ToolExecutionContext | None"] = ContextVar(
+    "tool_execution_context",
+    default=None,
+)
+
+
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    """Execution context for a single tool call."""
+
+    username: str
+    agent_id: int
+
+
+def get_current_tool_execution_context() -> ToolExecutionContext | None:
+    """Return the current tool execution context, if any."""
+    return _tool_execution_context.get()
 
 
 class ToolManager:
@@ -77,7 +97,13 @@ class ToolManager:
         """
         return list(self._registry.values())
 
-    def execute(self, name: str, *args: Any, **kwargs: Any) -> Any:
+    def execute(
+        self,
+        name: str,
+        *args: Any,
+        context: ToolExecutionContext | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """
         Execute a tool by name with the given arguments.
 
@@ -95,7 +121,14 @@ class ToolManager:
         tool_metadata = self.get_tool(name)
         if tool_metadata is None:
             raise KeyError(f"Tool '{name}' not found in registry.")
-        return tool_metadata.func(*args, **kwargs)
+        token = None
+        if context is not None:
+            token = _tool_execution_context.set(context)
+        try:
+            return tool_metadata.func(*args, **kwargs)
+        finally:
+            if token is not None:
+                _tool_execution_context.reset(token)
 
     def to_text_catalog(self) -> str:
         """Generate a JSON-structured catalog of all registered tools for LLM consumption.
@@ -122,7 +155,9 @@ class ToolManager:
         """
         return [tool.to_openai_format() for tool in self._registry.values()]
 
-    def refresh(self, tools_dir: Path, *, module_prefix: str = "app.orchestration.tool.builtin") -> None:
+    def refresh(
+        self, tools_dir: Path, *, module_prefix: str = "app.orchestration.tool.builtin"
+    ) -> None:
         """Refresh the tool registry by scanning a directory for tool modules.
 
         Clears the existing registry then re-discovers all tools from the given
@@ -141,7 +176,9 @@ class ToolManager:
         self._registry.clear()
         self._discover_tools(tools_dir, module_prefix=module_prefix)
 
-    def _discover_tools(self, tools_dir: Path, *, module_prefix: str = "app.orchestration.tool.builtin") -> None:
+    def _discover_tools(
+        self, tools_dir: Path, *, module_prefix: str = "app.orchestration.tool.builtin"
+    ) -> None:
         """Discover and register tools from a directory.
 
         Scans all Python files in the directory (excluding ``__init__.py`` and
