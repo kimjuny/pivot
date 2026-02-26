@@ -1,10 +1,23 @@
-import { useState, useRef, useEffect, ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback, ReactNode } from 'react';
 import { X, Minus, Maximize2 } from 'lucide-react';
 
 /**
  * Dialog size preset.
  */
 type DialogSize = 'default' | 'large';
+
+/**
+ * Dialogs are rendered without a modal backdrop, so we need explicit stacking
+ * management to mimic desktop-window behavior.
+ */
+const BASE_DIALOG_Z_INDEX = 50;
+let topDialogZIndex = BASE_DIALOG_Z_INDEX;
+
+/** Allocates the next top-most z-index for a dialog instance. */
+function getNextDialogZIndex(): number {
+    topDialogZIndex += 1;
+    return topDialogZIndex;
+}
 
 /**
  * Props for DraggableDialog component.
@@ -37,10 +50,16 @@ interface DraggableDialogProps {
  */
 function DraggableDialog({ open, onOpenChange, title, headerAction, children, size = 'default' }: DraggableDialogProps) {
     const [isMinimized, setIsMinimized] = useState(false);
+    const [zIndex, setZIndex] = useState(BASE_DIALOG_Z_INDEX);
     const dialogRef = useRef<HTMLDivElement>(null);
     const isDraggingRef = useRef(false);
     const dragStartRef = useRef({ x: 0, y: 0, elemX: 0, elemY: 0 });
     const currentPosRef = useRef({ x: 0, y: 0 });
+
+    /** Brings this dialog above other dialogs on open/click/drag. */
+    const bringToFront = useCallback(() => {
+        setZIndex(getNextDialogZIndex());
+    }, []);
 
     // Calculate dimensions based on size
     const getDimensions = () => {
@@ -65,13 +84,14 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
     // Initialize position to center on first render
     useEffect(() => {
         if (open && dialogRef.current) {
+            bringToFront();
             const dims = getDimensions();
             const initialX = (window.innerWidth - dims.width) / 2;
             const initialY = (window.innerHeight - dims.height) / 2;
             currentPosRef.current = { x: initialX, y: initialY };
             dialogRef.current.style.transform = `translate(${initialX}px, ${initialY}px)`;
         }
-    }, [open, size]);
+    }, [open, size, bringToFront]);
 
     /**
      * Start dragging when mouse down on header.
@@ -171,8 +191,10 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
     return (
         <div
             ref={dialogRef}
-            className="fixed z-50 left-0 top-0"
+            className="fixed left-0 top-0"
+            onMouseDownCapture={bringToFront}
             style={{
+                zIndex,
                 width: `${dims.width}px`,
                 height: isMinimized ? '40px' : `${dims.height}px`,
                 willChange: 'transform'

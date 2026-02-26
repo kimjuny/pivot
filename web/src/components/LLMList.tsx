@@ -627,6 +627,15 @@ interface LLMTableRowProps {
  * Shows key fields and a compact capability badge list.
  */
 function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowProps) {
+  const capabilityLabels = [
+    llm.streaming ? "Stream" : null,
+    llm.tool_calling === "native" ? "Tools" : null,
+    llm.json_schema === "strong" ? "JSON" : null,
+    llm.chat ? "Chat" : null,
+  ].filter((label): label is string => Boolean(label));
+
+  const capabilityText = capabilityLabels.join(" · ");
+
   return (
     <TableRow>
       {/* Name + icon */}
@@ -654,30 +663,15 @@ function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowPr
         {llm.protocol}
       </TableCell>
 
-      {/* Capability badges */}
+      {/* Capabilities: keep one line to preserve consistent row heights */}
       <TableCell>
-        <div className="flex flex-wrap gap-1">
-          {llm.streaming && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-              Stream
-            </Badge>
-          )}
-          {llm.tool_calling === 'native' && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-              Tools
-            </Badge>
-          )}
-          {llm.json_schema === 'strong' && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-              JSON
-            </Badge>
-          )}
-          {llm.chat && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0.5">
-              Chat
-            </Badge>
-          )}
-        </div>
+        <Badge
+          variant="outline"
+          title={capabilityText || "None"}
+          className="block max-w-[120px] truncate text-[10px] px-1.5 py-0.5 font-normal"
+        >
+          {capabilityText || "None"}
+        </Badge>
       </TableCell>
 
       {/* Actions */}

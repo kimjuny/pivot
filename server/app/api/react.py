@@ -29,6 +29,7 @@ from app.services.workspace_service import (
     load_all_user_tool_metadata,
 )
 from fastapi import APIRouter, Depends, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc
 from sqlmodel import Session, select
@@ -197,7 +198,9 @@ async def react_chat_stream(
                     agent_id=agent.id or 0,
                     user=request.user,
                     user_message=request.message,
-                    objective=request.message,  # Use message as objective
+                    # Persist in the legacy column while treating it semantically
+                    # as task-level user intent.
+                    objective=request.message,
                     status="pending",
                     iteration=0,
                     max_iteration=agent.max_iteration,
@@ -382,7 +385,11 @@ async def get_react_task(
     if not task:
         return {"error": "Task not found"}, 404
 
-    return task
+    payload = jsonable_encoder(task)
+    payload["user_intent"] = task.user_intent
+    # Keep legacy field for older clients.
+    payload["objective"] = task.objective
+    return payload
 
 
 @router.get("/react/tasks/{task_id}/recursions")

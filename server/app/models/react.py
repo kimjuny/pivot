@@ -27,7 +27,7 @@ class ReactTask(SQLModel, table=True):
         agent_id: Foreign key to the agent executing this task.
         user: Username of the user who initiated the task.
         user_message: Original user input message.
-        objective: Task objective/goal.
+        user_intent: Task-level user intent (raw user input).
         status: Current status (pending, running, completed, failed).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
@@ -47,7 +47,9 @@ class ReactTask(SQLModel, table=True):
     agent_id: int = Field(foreign_key="agent.id", index=True)
     user: str = Field(index=True, description="Username")
     user_message: str = Field(description="Original user input")
-    objective: str = Field(description="Task objective")
+    # Keep the persisted DB column name "objective" for compatibility with
+    # existing deployments/data. Use the user_intent property in application code.
+    objective: str = Field(description="Task user intent (legacy column: objective)")
     status: str = Field(
         default="pending",
         description="Status: pending, running, completed, failed",
@@ -75,6 +77,24 @@ class ReactTask(SQLModel, table=True):
         back_populates="task",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
+
+    @property
+    def user_intent(self) -> str:
+        """Returns task-level user intent.
+
+        Returns:
+            The original user input stored in the legacy ``objective`` column.
+        """
+        return self.objective
+
+    @user_intent.setter
+    def user_intent(self, value: str) -> None:
+        """Sets task-level user intent.
+
+        Args:
+            value: New user intent text to persist.
+        """
+        self.objective = value
 
 
 class ReactRecursion(SQLModel, table=True):

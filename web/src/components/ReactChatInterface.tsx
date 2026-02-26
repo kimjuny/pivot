@@ -65,6 +65,19 @@ interface ReactStreamEvent {
 }
 
 /**
+ * Plan step payload shape from RE_PLAN output.
+ * Supports both new schema (general_goal/specific_description) and legacy
+ * schema (description) for backward compatibility.
+ */
+interface PlanStepData {
+  step_id: string;
+  general_goal?: string;
+  specific_description?: string;
+  description?: string;
+  status: string;
+}
+
+/**
  * Recursion record in chat history.
  */
 interface RecursionRecord {
@@ -142,7 +155,7 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
             <AlertCircle className="w-3.5 h-3.5" />
           </button>
         </TooltipTrigger>
-        <TooltipContent className="max-w-[500px] max-h-[400px] overflow-auto p-4 font-mono text-xs z-50 shadow-lg border border-border">
+        <TooltipContent className="max-w-[500px] max-h-[400px] overflow-auto p-4 font-mono text-xs shadow-lg border border-border">
           {loading ? (
             <div className="flex items-center gap-2 text-muted-foreground">
               <Loader2 className="w-3 h-3 animate-spin" />
@@ -1354,11 +1367,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
               if (event.type === 'plan_update') {
                 const planData = event.data as {
-                  plan?: Array<{
-                    step_id: string;
-                    description: string;
-                    status: string
-                  }>
+                  plan?: PlanStepData[]
                 } | undefined;
 
                 return (
@@ -1371,7 +1380,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       <div className="space-y-1 pl-5">
                         {planData.plan.map((step, sidx) => (
                           <div key={sidx} className="text-xs text-muted-foreground">
-                            {sidx + 1}. {step.description}
+                            {sidx + 1}. {step.general_goal || step.description || 'Untitled step'}
                           </div>
                         ))}
                       </div>

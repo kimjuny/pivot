@@ -83,7 +83,11 @@ class ReactTaskResponse(BaseModel):
     agent_id: int
     user: str
     user_message: str
-    objective: str
+    user_intent: str
+    objective: str | None = Field(
+        default=None,
+        description="Deprecated alias of user_intent for backward compatibility",
+    )
     status: str
     iteration: int
     max_iteration: int

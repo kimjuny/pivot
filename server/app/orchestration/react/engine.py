@@ -139,6 +139,7 @@ class ReactEngine:
 
         # Build system prompt with current context, available tools, and session memory
         system_prompt = build_system_prompt(context, self.tool_manager, session_memory)
+        print(f"system prompt: \n{system_prompt}")
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)
@@ -155,7 +156,6 @@ class ReactEngine:
 
             # Parse JSON from content to get observe, thought, abstract, action_type
             content = message.content or "{}"
-            logger.info(f"LLM response: \n{content}")
 
             # Use safe JSON parser to handle all common LLM formatting issues
             try:
@@ -452,6 +452,7 @@ class ReactEngine:
                         tc["success"] = matched.get("success", False)
 
             current_rec_dict = {
+                "iteration": task.iteration,
                 "trace_id": trace_id,
                 "observe": observe,
                 "thought": thought,
@@ -490,11 +491,18 @@ class ReactEngine:
                 # Create new plan steps in DB and rebuild memory representation
                 new_plan_context = []
                 for step_data in plan_data:
+                    general_goal = step_data.get("general_goal") or step_data.get(
+                        "description", ""
+                    )
+                    specific_description = step_data.get(
+                        "specific_description"
+                    ) or step_data.get("description") or general_goal
                     step = ReactPlanStep(
                         task_id=task.task_id,
                         react_task_id=task.id or 0,
                         step_id=step_data.get("step_id", ""),
-                        description=step_data.get("description", ""),
+                        # Legacy DB column: preserve the agent-facing detail text.
+                        description=specific_description,
                         status=step_data.get("status", "pending"),
                     )
                     self.db.add(step)
@@ -503,7 +511,8 @@ class ReactEngine:
                     new_plan_context.append(
                         {
                             "step_id": step.step_id,
-                            "description": step.description,
+                            "general_goal": general_goal,
+                            "specific_description": specific_description,
                             "status": step.status,
                             "recursion_history": [],
                         }

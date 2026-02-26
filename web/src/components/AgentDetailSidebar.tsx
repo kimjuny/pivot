@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
     Bot,
     ChevronDown,
@@ -51,6 +51,34 @@ interface SidebarTool {
     kind: 'shared' | 'private';
 }
 
+/**
+ * Parses the serialized tool allowlist from agent.tool_ids.
+ *
+ * Returns:
+ * - null: unrestricted (all tools allowed)
+ * - Set<string>: explicit enabled tool names
+ */
+function parseToolIds(toolIds: string | null | undefined): Set<string> | null {
+    if (toolIds === null || toolIds === undefined) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(toolIds) as unknown;
+        if (!Array.isArray(parsed)) {
+            return new Set<string>();
+        }
+        return new Set(
+            parsed
+                .filter((item): item is string => typeof item === 'string')
+                .map((name) => name.trim())
+                .filter((name) => name.length > 0)
+        );
+    } catch {
+        return new Set<string>();
+    }
+}
+
 interface AgentDetailSidebarProps {
     agent: Agent | null;
     scenes: Scene[];
@@ -96,6 +124,29 @@ function AgentDetailSidebar({
     useEffect(() => {
         setLocalToolIds(agent?.tool_ids);
     }, [agent?.tool_ids]);
+
+    /**
+     * Sidebar should display tools that are currently configured for this agent,
+     * instead of the global tool catalog, to avoid configuration mismatch.
+     */
+    const enabledToolNameSet = useMemo(
+        () => parseToolIds(localToolIds),
+        [localToolIds]
+    );
+
+    const displayedTools = useMemo(() => {
+        if (enabledToolNameSet === null) {
+            return tools;
+        }
+        return tools.filter((tool) => enabledToolNameSet.has(tool.name));
+    }, [tools, enabledToolNameSet]);
+
+    const enabledCount = useMemo(() => {
+        if (enabledToolNameSet === null) {
+            return tools.length;
+        }
+        return displayedTools.length;
+    }, [tools.length, displayedTools.length, enabledToolNameSet]);
 
     /**
      * Fetch both shared (built-in) and private (user-workspace) tools in parallel.
@@ -368,10 +419,7 @@ function AgentDetailSidebar({
                                     <span className="flex-1 text-left">Tools</span>
                                     {/* Count badge: shows enabled / total */}
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {toolsLoading ? '…' : (() => {
-                                            if (localToolIds === null || localToolIds === undefined) return tools.length;
-                                            try { return JSON.parse(localToolIds).length; } catch { return 0; }
-                                        })()}
+                                        {toolsLoading ? '…' : enabledCount}
                                         {' / '}
                                         {toolsLoading ? '…' : tools.length}
                                     </span>
@@ -406,9 +454,13 @@ function AgentDetailSidebar({
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             No tools available
                                         </div>
+                                    ) : displayedTools.length === 0 ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            No tools configured for this agent
+                                        </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {tools.map((t) => (
+                                            {displayedTools.map((t) => (
                                                 <SidebarMenuItem key={`${t.kind}-${t.name}`}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
@@ -436,7 +488,7 @@ function AgentDetailSidebar({
                                                                     </span>
                                                                 </div>
                                                                 {t.description && (
-                                                                    <p className="text-xs text-muted-foreground">
+                                                                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">
                                                                         {t.description}
                                                                     </p>
                                                                 )}

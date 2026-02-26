@@ -75,7 +75,8 @@
       "plan": [
         {
           "step_id": "1",
-          "description": "...",
+          "general_goal": "...",
+          "specific_description": "...",
           "status": "pending"
         }
       ]
@@ -189,6 +190,7 @@
 - short-term：仅当前 recursion
 - session-memory：跨对话持久化
 - 仅在ANSWER时可提交修改
+- 仅在task的第一轮iteration & iteration有异常事件时，系统才会注入
 
 以下为真实注入的session-memory
 ```json

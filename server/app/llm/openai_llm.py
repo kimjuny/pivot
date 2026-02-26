@@ -127,7 +127,7 @@ class OpenAILLM(AbstractLLM):
             choices.append(choice)
 
         usage = None
-        raw_usage = raw_dict.get("usage", None)
+        raw_usage = raw_dict.get("usage")
         if raw_usage:
             usage = UsageInfo(
                 prompt_tokens=raw_usage.get("prompt_tokens", 0),

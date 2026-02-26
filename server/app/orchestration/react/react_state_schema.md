@@ -40,14 +40,15 @@
 ### 5.4. context
 
 {
-  "objective": "string",
-  "constraints": ["string", "..."],
+  "user_intent": "该task中用户的输入",
+  "constraints": ["string"],
   "plan": [
     {
       "step_id": "string",
-      "description": "string",
+      "general_goal": "string",
+      "specific_description": "string",
       "status": "pending | running | done | error",
-      "recursion_history": [] // 外围程序将在这里维护每一个与step相关联的recursion的完整快照
+      "recursion_history": [] // 外围程序将在这里维护每一个与step相关联的recursion的完整快照，也要加上iteration索引
     }
   ],
 
@@ -70,6 +71,7 @@
 ### 5.5. recursion_history
 
 [{
+  "iteration": 0,
   "trace_id": "上一轮recursion的trace_id",
   "observe": "你对当前状态机和输入的客观观察",
   "thought": "你的分析与决策理由",

@@ -22,7 +22,7 @@ class ReactContext:
     Attributes:
         global_state: Global task information (task_id, iteration, status, etc.)
         current_recursion: Current recursion state (trace_id, status, etc.)
-        context: Task context including objective, constraints, plan, and memory
+        context: Task context including user_intent, constraints, plan, and memory
         recursion_history: History of previous recursions
     """
 
@@ -92,7 +92,9 @@ class ReactContext:
 
         # Build context
         context_dict: dict[str, Any] = {
-            "objective": task.objective,
+            # Use "user_intent" to reflect that this is the original user input.
+            # Fall back to legacy "objective" storage for backward compatibility.
+            "user_intent": task.user_intent,
             "constraints": [],  # Can be extended
             "plan": [],
             "memory": {"short_term": []},
@@ -109,10 +111,39 @@ class ReactContext:
                 )
 
         # Initialize plan steps
+        latest_replan_by_step_id: dict[str, dict[str, Any]] = {}
+        for rec in reversed(recursions):
+            if rec.action_type != "RE_PLAN" or not rec.action_output:
+                continue
+            try:
+                output_data = json.loads(rec.action_output)
+            except json.JSONDecodeError:
+                continue
+
+            plan_items = output_data.get("plan", [])
+            if not isinstance(plan_items, list):
+                continue
+
+            for item in plan_items:
+                if not isinstance(item, dict):
+                    continue
+                step_id = item.get("step_id")
+                if isinstance(step_id, str) and step_id and step_id not in latest_replan_by_step_id:
+                    latest_replan_by_step_id[step_id] = item
+            break
+
         for step in plan_steps:
+            latest_step_data = latest_replan_by_step_id.get(step.step_id, {})
+            general_goal = latest_step_data.get("general_goal") or latest_step_data.get(
+                "description"
+            ) or step.description
+            specific_description = latest_step_data.get(
+                "specific_description"
+            ) or latest_step_data.get("description") or step.description
             plan_step = {
                 "step_id": step.step_id,
-                "description": step.description,
+                "general_goal": general_goal,
+                "specific_description": specific_description,
                 "status": step.status,
                 "recursion_history": [],
             }
@@ -133,6 +164,7 @@ class ReactContext:
                     action_output = {}
 
                 rec_dict = {
+                    "iteration": rec.iteration_index,
                     "trace_id": rec.trace_id,
                     "observe": rec.observe or "",
                     "thought": rec.thought or "",

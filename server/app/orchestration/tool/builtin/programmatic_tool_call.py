@@ -93,8 +93,8 @@ def _run_snippet(python_code: str, tool_callables: dict[str, Any]) -> str:
 
     def _sandboxed_import(
         name: str,
-        globals: dict[str, Any] | None = None,  # noqa: A002
-        locals: dict[str, Any] | None = None,  # noqa: A002
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
         fromlist: tuple[str, ...] = (),
         level: int = 0,
     ) -> Any:
@@ -112,7 +112,7 @@ def _run_snippet(python_code: str, tool_callables: dict[str, Any]) -> str:
     }
 
     try:
-        exec(python_code, sandbox_globals)  # noqa: S102
+        exec(python_code, sandbox_globals)
     except Exception as exc:
         # Re-raise so the engine marks this tool call as failed and the LLM
         # receives a structured error result instead of a silent "Error:" string.
@@ -124,7 +124,7 @@ def _run_snippet(python_code: str, tool_callables: dict[str, Any]) -> str:
         )
         raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
 
-    output = sandbox_globals.get("result", None)
+    output = sandbox_globals.get("result")
     if output is None:
         raise RuntimeError("No 'result' variable was assigned in the snippet.")
 
@@ -191,7 +191,7 @@ def programmatic_tool_call(python_code: str) -> str:
         RuntimeError: If the snippet raises any exception or does not assign
             ``result``.
     """
-    from app.orchestration.tool import get_tool_manager  # noqa: PLC0415
+    from app.orchestration.tool import get_tool_manager
 
     tool_callables: dict[str, Any] = {
         meta.name: meta.func for meta in get_tool_manager().list_tools()
