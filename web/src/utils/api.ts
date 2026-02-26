@@ -116,6 +116,7 @@ export const createAgent = async (agentData: {
   name: string;
   description?: string;
   llm_id: number;
+  skill_resolution_llm_id?: number | null;
   is_active?: boolean;
 }): Promise<Agent> => {
   return apiRequest('/agents', {
@@ -578,7 +579,9 @@ export const updateAgent = async (
     name?: string;
     description?: string;
     llm_id?: number;
+    skill_resolution_llm_id?: number | null;
     is_active?: boolean;
+    skill_ids?: string | null;
   }
 ): Promise<Agent> => {
   return apiRequest(`/agents/${agentId}`, {
@@ -603,6 +606,25 @@ export const updateAgentToolIds = async (
   return apiRequest(`/agents/${agentId}`, {
     method: 'PUT',
     body: JSON.stringify({ tool_ids }),
+  }) as Promise<Agent>;
+};
+
+/**
+ * Update the skill allowlist for an agent.
+ *
+ * @param agentId - Agent ID
+ * @param skillNames - Array of allowed skill names. Pass null to remove all
+ *   restrictions (agent can use every skill).
+ * @returns Promise resolving to the updated Agent
+ */
+export const updateAgentSkillIds = async (
+  agentId: number,
+  skillNames: string[] | null
+): Promise<Agent> => {
+  const skill_ids = skillNames === null ? null : JSON.stringify(skillNames);
+  return apiRequest(`/agents/${agentId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ skill_ids }),
   }) as Promise<Agent>;
 };
 
@@ -968,6 +990,100 @@ export interface ToolDiagnostic {
   severity: string;
   source: string;
 }
+
+/**
+ * Shared skill metadata returned by the server.
+ */
+export interface SharedSkill {
+  name: string;
+  description: string;
+  filename: string;
+  kind: 'shared';
+  source: 'builtin' | 'user';
+  md5: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * User skill metadata entry.
+ */
+export interface UserSkill {
+  name: string;
+  description: string;
+  filename: string;
+  kind: 'private' | 'shared';
+  source: 'user';
+  md5: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Source code payload for a skill read response.
+ */
+export interface SkillSourcePayload {
+  name: string;
+  source: string;
+  metadata: SharedSkill | UserSkill;
+}
+
+/**
+ * Fetch all shared skills (builtin + user shared).
+ */
+export const getSharedSkills = async (): Promise<SharedSkill[]> => {
+  return apiRequest('/skills/shared') as Promise<SharedSkill[]>;
+};
+
+/**
+ * Fetch list of private skills for the current user.
+ */
+export const getPrivateSkills = async (): Promise<UserSkill[]> => {
+  return apiRequest('/skills/private') as Promise<UserSkill[]>;
+};
+
+/**
+ * Fetch a user-owned skill source from private/shared namespace.
+ */
+export const getUserSkillSource = async (
+  kind: 'private' | 'shared',
+  skillName: string
+): Promise<SkillSourcePayload> => {
+  return apiRequest(`/skills/${kind}/${skillName}`) as Promise<SkillSourcePayload>;
+};
+
+/**
+ * Fetch shared skill source (user-shared preferred over builtin).
+ */
+export const getSharedSkillSource = async (skillName: string): Promise<SkillSourcePayload> => {
+  return apiRequest(`/skills/shared/${skillName}`) as Promise<SkillSourcePayload>;
+};
+
+/**
+ * Create or update a user-owned markdown skill.
+ */
+export const upsertUserSkill = async (
+  kind: 'private' | 'shared',
+  skillName: string,
+  source: string
+): Promise<void> => {
+  await apiRequest(`/skills/${kind}/${skillName}`, {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  });
+};
+
+/**
+ * Delete a user-owned markdown skill.
+ */
+export const deleteUserSkill = async (
+  kind: 'private' | 'shared',
+  skillName: string
+): Promise<void> => {
+  await apiRequest(`/skills/${kind}/${skillName}`, {
+    method: 'DELETE',
+  });
+};
 
 /**
  * Fetch all shared (built-in) tools.

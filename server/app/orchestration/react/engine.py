@@ -107,6 +107,7 @@ class ReactEngine:
         context: ReactContext,
         messages: list[dict[str, Any]],
         session_memory: dict[str, Any] | None = None,
+        skills: str = "",
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """
         Execute a single recursion cycle.
@@ -137,9 +138,13 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build system prompt with current context, available tools, and session memory
-        system_prompt = build_system_prompt(context, self.tool_manager, session_memory)
-        print(f"system prompt: \n{system_prompt}")
+        # Build system prompt with current context, available tools, session memory, and skills.
+        system_prompt = build_system_prompt(
+            context=context,
+            tool_manager=self.tool_manager,
+            session_memory=session_memory,
+            skills=skills,
+        )
 
         # Update system message at index 0 (MUST be first for most LLMs)
         # messages[0] = system prompt (updated each recursion)
@@ -616,7 +621,11 @@ class ReactEngine:
                 "error": error_msg,
             }
 
-    async def run_task(self, task: ReactTask) -> AsyncIterator[dict[str, Any]]:
+    async def run_task(
+        self,
+        task: ReactTask,
+        selected_skills_text: str = "",
+    ) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
 
@@ -654,6 +663,7 @@ class ReactEngine:
         self.db.commit()
 
         try:
+            previous_recursion_failed = False
             while task.iteration < task.max_iteration:
                 # Check if task was cancelled
                 if self.cancelled:
@@ -674,9 +684,15 @@ class ReactEngine:
                 }
 
                 # Execute recursion
+                inject_extra_context = task.iteration == 0 or previous_recursion_failed
                 recursion, event_data = await self.execute_recursion(
-                    task, context, messages, session_memory_dict
+                    task=task,
+                    context=context,
+                    messages=messages,
+                    session_memory=session_memory_dict if inject_extra_context else None,
+                    skills=selected_skills_text if inject_extra_context else "",
                 )
+                previous_recursion_failed = recursion.status == "error"
 
                 # Yield Observe, Thought, Action events with token info
                 if recursion.observe:

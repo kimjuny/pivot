@@ -182,13 +182,12 @@ function Navigation() {
 
           <Separator orientation="vertical" className="h-4 mx-2" />
 
-          {/* Future navigation items - disabled for now */}
+          {/* Center navigation */}
           <Button
             variant="ghost"
             size="sm"
-            disabled
-            className="opacity-50"
-            aria-label="Skills (coming soon)"
+            onClick={() => navigate('/skills')}
+            aria-label="Skills"
           >
             Skills
           </Button>

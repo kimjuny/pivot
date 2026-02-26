@@ -28,6 +28,7 @@ export interface AgentFormData {
   name: string;
   description: string | undefined;
   llm_id: number | undefined;
+  skill_resolution_llm_id?: number | null;
   is_active: boolean;
 }
 
@@ -49,6 +50,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
     name: '',
     description: '',
     llm_id: undefined,
+    skill_resolution_llm_id: null,
     is_active: true
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -63,6 +65,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           name: initialData.name || '',
           description: initialData.description || '',
           llm_id: initialData.llm_id,
+          skill_resolution_llm_id: initialData.skill_resolution_llm_id ?? null,
           is_active: initialData.is_active !== undefined ? initialData.is_active : true
         });
       } else {
@@ -70,6 +73,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           name: '',
           description: '',
           llm_id: undefined,
+          skill_resolution_llm_id: null,
           is_active: true
         });
       }
@@ -109,6 +113,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         name: formData.name.trim(),
         description: formData.description?.trim() || undefined,
         llm_id: formData.llm_id,
+        skill_resolution_llm_id: formData.skill_resolution_llm_id ?? null,
         is_active: formData.is_active
       });
       onClose();
@@ -164,7 +169,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
 
           <div className="space-y-2">
             <Label htmlFor="llm">
-              LLM <span className="text-destructive">*</span>
+              Primary <span className="text-destructive">*</span>
             </Label>
             {loadingLLMs ? (
               <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
@@ -212,6 +217,41 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                       <span>Add New LLM</span>
                     </div>
                   </SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="skill_resolution_llm">Skill Resolution</Label>
+            {loadingLLMs ? (
+              <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
+                Loading LLMs…
+              </div>
+            ) : (
+              <Select
+                value={formData.skill_resolution_llm_id?.toString() || '__none__'}
+                onValueChange={(value) => {
+                  setFormData({
+                    ...formData,
+                    skill_resolution_llm_id: value === '__none__' ? null : parseInt(value),
+                  });
+                }}
+                disabled={isSubmitting}
+              >
+                <SelectTrigger id="skill_resolution_llm">
+                  <SelectValue placeholder="Optional: select an LLM…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None</SelectItem>
+                  {availableLLMs.map((llm) => (
+                    <SelectItem key={`skill-resolution-${llm.id}`} value={llm.id.toString()}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{llm.name}</span>
+                        <span className="text-xs text-muted-foreground">({llm.model})</span>
+                      </div>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             )}

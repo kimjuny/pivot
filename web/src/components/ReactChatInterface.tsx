@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, FormEvent, KeyboardEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, FormEvent, KeyboardEvent } from 'react';
 import { ArrowUp, Plus, Paperclip, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
@@ -25,6 +25,8 @@ interface ReactChatInterfaceProps {
  * Stream event type from ReAct backend.
  */
 type ReactStreamEventType =
+  | 'skill_resolution_start'
+  | 'skill_resolution_result'
   | 'recursion_start'
   | 'observe'
   | 'thought'
@@ -96,6 +98,18 @@ interface RecursionRecord {
 }
 
 /**
+ * Skill selection status shown before recursion starts.
+ */
+interface SkillSelectionState {
+  status: 'loading' | 'done';
+  count: number;
+  selectedSkills: string[];
+  totalSkills?: number;
+  candidateSkills?: number;
+  durationMs?: number;
+}
+
+/**
  * Message in chat history.
  */
 interface ChatMessage {
@@ -105,8 +119,9 @@ interface ChatMessage {
   timestamp: string;
   task_id?: string;
   recursions?: RecursionRecord[];
-  status?: 'running' | 'completed' | 'error' | 'waiting_input';
+  status?: 'running' | 'skill_resolving' | 'completed' | 'error' | 'waiting_input';
   totalTokens?: TokenUsage;
+  skillSelection?: SkillSelectionState;
 }
 
 /**
@@ -196,9 +211,19 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
 
   /**
+   * Reload the session list for current agent.
+   * Used after task completion so subject/message_count update immediately.
+   */
+  const refreshSessionList = useCallback(async (): Promise<SessionListItem[]> => {
+    const response = await listSessions(agentId);
+    setSessions(response.sessions);
+    return response.sessions;
+  }, [agentId]);
+
+  /**
    * Initialize sessions on mount.
-   * Loads existing sessions and creates a new one only if none exist.
-   * This prevents duplicate session creation.
+   * Loads existing sessions without creating one implicitly.
+   * New sessions are created only by explicit user action or first send.
    */
   useEffect(() => {
     const initSessions = async () => {
@@ -207,13 +232,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       setIsLoadingSession(true);
       try {
         // First, load existing sessions
-        const response = await listSessions(agentId);
-        setSessions(response.sessions);
+        const existingSessions = await refreshSessionList();
 
         // If there are existing sessions, select the most recent one and load its history
-        // Otherwise, create a new session
-        if (response.sessions.length > 0) {
-          const firstSessionId = response.sessions[0].session_id;
+        if (existingSessions.length > 0) {
+          const firstSessionId = existingSessions[0].session_id;
           setCurrentSessionId(firstSessionId);
 
           // Load history for the first session
@@ -336,18 +359,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             console.error('Failed to load initial session history:', historyErr);
           }
         } else {
-          // Only create a new session if no sessions exist
-          const session = await createSession(agentId);
-          setCurrentSessionId(session.session_id);
-          setSessions([{
-            session_id: session.session_id,
-            agent_id: session.agent_id,
-            status: session.status,
-            subject: session.subject?.content || null,
-            created_at: session.created_at,
-            updated_at: session.updated_at,
-            message_count: 0,
-          }]);
+          // Keep empty state. Session is created only by explicit user action
+          // or lazily on first message send.
+          setCurrentSessionId(null);
+          setMessages([]);
         }
 
         setIsInitialized(true);
@@ -359,7 +374,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       }
     };
     void initSessions();
-  }, [agentId, isInitialized, isLoadingSession]);
+  }, [agentId, isInitialized, isLoadingSession, refreshSessionList]);
 
   /**
    * Create a new session and switch to it.
@@ -635,6 +650,23 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     abortControllerRef.current = new AbortController();
 
     try {
+      // Lazily create a session only when user sends the first message.
+      let activeSessionId = currentSessionId;
+      if (!activeSessionId) {
+        const session = await createSession(agentId);
+        activeSessionId = session.session_id;
+        setCurrentSessionId(activeSessionId);
+        setSessions((prev) => [{
+          session_id: session.session_id,
+          agent_id: session.agent_id,
+          status: session.status,
+          subject: session.subject?.content || null,
+          created_at: session.created_at,
+          updated_at: session.updated_at,
+          message_count: 0,
+        }, ...prev]);
+      }
+
       // Check token validity before making request
       if (!isTokenValid()) {
         window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
@@ -662,7 +694,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           message: userMessage.content,
           user: 'web-user',
           task_id: currentReplyTaskId,
-          session_id: currentSessionId,
+          session_id: activeSessionId,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -704,7 +736,56 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           try {
             const event = JSON.parse(data) as ReactStreamEvent;
 
-            if (event.type === 'recursion_start') {
+            if (event.type === 'skill_resolution_start') {
+              currentTaskId = event.task_id;
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? {
+                      ...msg,
+                      task_id: currentTaskId ?? undefined,
+                      status: 'skill_resolving' as const,
+                      skillSelection: {
+                        status: 'loading',
+                        count: 0,
+                        selectedSkills: [],
+                      },
+                    }
+                    : msg
+                )
+              );
+            } else if (event.type === 'skill_resolution_result') {
+              const skillData = event.data as {
+                count?: number;
+                selected_skills?: string[];
+                total_skill_count?: number;
+                candidate_skill_count?: number;
+                duration_ms?: number;
+              } | undefined;
+              const selectedSkills = skillData?.selected_skills ?? [];
+              const selectedCount = typeof skillData?.count === 'number'
+                ? skillData.count
+                : selectedSkills.length;
+
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? {
+                      ...msg,
+                      status: 'running' as const,
+                      skillSelection: {
+                        status: 'done',
+                        count: selectedCount,
+                        selectedSkills,
+                        totalSkills: skillData?.total_skill_count,
+                        candidateSkills: skillData?.candidate_skill_count,
+                        durationMs: skillData?.duration_ms,
+                      },
+                    }
+                    : msg
+                )
+              );
+            } else if (event.type === 'recursion_start') {
               // Mark previous recursion as completed if it's still running.
               // Capture a snapshot before setMessages — the callback is enqueued
               // and executed later; by then currentRecursion may point elsewhere.
@@ -742,12 +823,21 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               };
 
               // Capture snapshot here for the same stale-closure reason
-              const newRecursionSnapshot = currentRecursion;
+                const newRecursionSnapshot = currentRecursion;
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
                     ? {
                       ...msg,
+                      status: 'running',
+                      skillSelection: msg.skillSelection?.status === 'loading'
+                        ? {
+                          ...msg.skillSelection,
+                          status: 'done',
+                          count: 0,
+                          selectedSkills: [],
+                        }
+                        : msg.skillSelection,
                       task_id: currentTaskId ?? undefined,
                       // Filter out any nulls from previous state before adding new recursion
                       recursions: [...(msg.recursions?.filter((r): r is RecursionRecord => r !== null) || []), newRecursionSnapshot],
@@ -864,6 +954,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       return {
                         ...msg,
                         status: 'completed',
+                        skillSelection: msg.skillSelection?.status === 'loading'
+                          ? {
+                            ...msg.skillSelection,
+                            status: 'done',
+                            count: 0,
+                            selectedSkills: [],
+                          }
+                          : msg.skillSelection,
                         recursions: updatedRecursions,
                         timestamp: event.timestamp,  // Update to task completion time
                         totalTokens: event.total_tokens,  // Save total token usage
@@ -875,6 +973,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 // Don't update currentRecursion for task_complete - it's handled above
                 // Skip the general setMessages call below
                 currentRecursion = null;
+
+                // Refresh session list so updated subject/message_count are visible
+                // immediately in sidebar without re-entering the page.
+                void refreshSessionList().catch((refreshErr) => {
+                  console.error('Failed to refresh session list after task completion:', refreshErr);
+                });
               } else {
                 // Handle other events (plan_update, reflect, etc.) - just add to events
                 currentRecursion = {
@@ -934,6 +1038,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 ...msg,
                 status: 'error',
                 content: msg.content || 'Execution stopped by user',
+                skillSelection: msg.skillSelection?.status === 'loading'
+                  ? {
+                    ...msg.skillSelection,
+                    status: 'done',
+                    count: 0,
+                    selectedSkills: [],
+                  }
+                  : msg.skillSelection,
                 recursions: updatedRecursions,
                 timestamp: cancelTime,  // Update to cancellation time
               };
@@ -952,6 +1064,14 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 ...msg,
                 status: 'error',
                 content: `Error: ${error.message}`,
+                skillSelection: msg.skillSelection?.status === 'loading'
+                  ? {
+                    ...msg.skillSelection,
+                    status: 'done',
+                    count: 0,
+                    selectedSkills: [],
+                  }
+                  : msg.skillSelection,
                 timestamp: errorTime,  // Update to error time
               }
               : msg
@@ -1242,9 +1362,20 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               </span>
             )}
             {recursion.tokens && (
-              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                {formatTokenCount(recursion.tokens.total_tokens)} tokens
-              </span>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap cursor-help underline decoration-dotted underline-offset-2">
+                      {formatTokenCount(recursion.tokens.total_tokens)} tokens
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs leading-relaxed">
+                    <div>Input: {formatTokenCount(recursion.tokens.prompt_tokens)}</div>
+                    <div>Output: {formatTokenCount(recursion.tokens.completion_tokens)}</div>
+                    <div>Total: {formatTokenCount(recursion.tokens.total_tokens)}</div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
         </button>
@@ -1594,6 +1725,47 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     </div>
                   ) : (
                     <div className="space-y-2">
+                      {/* Skill resolution */}
+                      {message.skillSelection && (
+                        <div className="bg-background/50 border border-border rounded-md p-2.5">
+                          <div className="flex items-center gap-2">
+                            {message.skillSelection.status === 'loading' ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                                <span className="text-xs text-muted-foreground">Loading Skills...</span>
+                              </>
+                            ) : message.skillSelection.count > 0 ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-success" />
+                                <span className="text-xs text-muted-foreground">
+                                  Selected {message.skillSelection.count} skill{message.skillSelection.count > 1 ? 's' : ''}:
+                                  {' '}
+                                  {message.skillSelection.selectedSkills.join(', ')}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">No skills selected</span>
+                              </>
+                            )}
+                          </div>
+                          {message.skillSelection.status === 'done' && (
+                            <div className="mt-1.5 pl-[1.125rem] text-[11px] text-muted-foreground space-y-0.5">
+                              {typeof message.skillSelection.totalSkills === 'number' && (
+                                <div>Total skills: {formatTokenCount(message.skillSelection.totalSkills)}</div>
+                              )}
+                              {typeof message.skillSelection.candidateSkills === 'number' && (
+                                <div>Candidates after allowlist: {formatTokenCount(message.skillSelection.candidateSkills)}</div>
+                              )}
+                              {typeof message.skillSelection.durationMs === 'number' && (
+                                <div>Resolution time: {(message.skillSelection.durationMs / 1000).toFixed(2)}s</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Recursions */}
                       {message.recursions && message.recursions.length > 0 && (
                         <div className="space-y-2">
@@ -1642,6 +1814,12 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                           <>
                             <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
                             <span className="text-xs text-muted-foreground">Processing...</span>
+                          </>
+                        )}
+                        {message.status === 'skill_resolving' && (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+                            <span className="text-xs text-muted-foreground">Loading Skills...</span>
                           </>
                         )}
                         {message.status === 'completed' && (

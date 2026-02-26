@@ -9,6 +9,7 @@ import logging
 import traceback
 import uuid
 from datetime import datetime, timezone
+from time import perf_counter
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
@@ -18,12 +19,18 @@ from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
 from app.orchestration.react import ReactEngine
+from app.orchestration.skills import select_skills
 from app.orchestration.tool import get_tool_manager
 from app.orchestration.tool.builtin.programmatic_tool_call import (
     make_programmatic_tool_call,
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
+from app.services.session_memory_service import SessionMemoryService
+from app.services.skill_service import (
+    build_selected_skills_prompt_block,
+    list_all_skills,
+)
 from app.services.workspace_service import (
     ensure_agent_workspace,
     load_all_user_tool_metadata,
@@ -271,8 +278,101 @@ async def react_chat_stream(
                 ),
             )
 
+            selected_skills: list[str] = []
+            selected_skills_text = ""
+            total_skill_count = 0
+            candidate_skill_count = 0
+            resolution_duration_ms = 0
+            # Skill resolution is optional and only runs when a resolver LLM is configured.
+            if agent.skill_resolution_llm_id:
+                skill_start_event = {
+                    "type": "skill_resolution_start",
+                    "task_id": task_id,
+                    "iteration": task.iteration,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                yield f"data: {json.dumps(skill_start_event, ensure_ascii=False)}\n\n"
+                resolution_started_at = perf_counter()
+                try:
+                    resolver_llm_config = llm_crud.get(agent.skill_resolution_llm_id, db)
+                    if resolver_llm_config:
+                        resolver_llm = create_llm_from_config(resolver_llm_config)
+                        available_skills = list_all_skills(current_user.username)
+                        total_skill_count = len(available_skills)
+                        candidate_skill_count = total_skill_count
+                        if agent.skill_ids is not None:
+                            try:
+                                allowed_skills = set(json.loads(agent.skill_ids))
+                            except (ValueError, TypeError):
+                                allowed_skills = set()
+                            available_skills = [
+                                item for item in available_skills if item.get("name") in allowed_skills
+                            ]
+                            candidate_skill_count = len(available_skills)
+
+                        session_memory = {}
+                        if task.session_id:
+                            session_memory = SessionMemoryService(db).get_full_session_memory_dict(task.session_id)
+
+                        selected_skills = select_skills(
+                            llm=resolver_llm,
+                            user_intent=request.message,
+                            skill_metadata=available_skills,
+                            session_memory=session_memory,
+                        )
+                        selected_skills_text = build_selected_skills_prompt_block(
+                            username=current_user.username,
+                            selected_skills=selected_skills,
+                        )
+                        resolution_duration_ms = int(
+                            (perf_counter() - resolution_started_at) * 1000
+                        )
+                        logger.info(
+                            "Skill resolution finished: task_id=%s session_id=%s total=%d candidates=%d selected=%d selected_names=%s duration_ms=%d",
+                            task_id,
+                            task.session_id,
+                            total_skill_count,
+                            candidate_skill_count,
+                            len(selected_skills),
+                            selected_skills,
+                            resolution_duration_ms,
+                        )
+                    else:
+                        resolution_duration_ms = int(
+                            (perf_counter() - resolution_started_at) * 1000
+                        )
+                        logger.warning(
+                            "Skill resolution skipped because resolver LLM not found: task_id=%s resolver_llm_id=%s duration_ms=%d",
+                            task_id,
+                            agent.skill_resolution_llm_id,
+                            resolution_duration_ms,
+                        )
+                except Exception as skill_err:
+                    logger.warning("Skill resolution failed: %s", skill_err)
+                    resolution_duration_ms = int(
+                        (perf_counter() - resolution_started_at) * 1000
+                    )
+
+                skill_result_event = {
+                    "type": "skill_resolution_result",
+                    "task_id": task_id,
+                    "iteration": task.iteration,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "data": {
+                        "count": len(selected_skills),
+                        "selected_skills": selected_skills,
+                        "total_skill_count": total_skill_count,
+                        "candidate_skill_count": candidate_skill_count,
+                        "duration_ms": resolution_duration_ms,
+                    },
+                }
+                yield f"data: {json.dumps(skill_result_event, ensure_ascii=False)}\n\n"
+
             # Execute task and stream events
-            async for event_data in engine.run_task(task):
+            async for event_data in engine.run_task(
+                task=task,
+                selected_skills_text=selected_skills_text,
+            ):
                 # Check if client disconnected via Request object
                 if await raw_request.is_disconnected():
                     logger.info(f"Client disconnected, stopping task {task_id}")

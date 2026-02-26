@@ -15,6 +15,8 @@ export interface Agent {
   description?: string;
   /** LLM configuration ID used by this agent */
   llm_id?: number;
+  /** Optional LLM configuration ID for skill resolution only */
+  skill_resolution_llm_id?: number | null;
   /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
   /** Whether the agent is currently active */
@@ -24,6 +26,11 @@ export interface Agent {
    * null means no restriction (all tools visible); '[]' means no tools.
    */
   tool_ids?: string | null;
+  /**
+   * JSON-encoded list of allowed skill names, e.g. '["research","writer"]'.
+   * null means no restriction (all skills visible); '[]' means no skills.
+   */
+  skill_ids?: string | null;
   /** UTC timestamp when agent was created */
   created_at: string;
   /** UTC timestamp when agent was last updated */

@@ -8,6 +8,9 @@ class AgentCreate(BaseModel):
     name: str = Field(..., description="Agent name")
     description: str | None = Field(None, description="Agent description")
     llm_id: int = Field(..., description="LLM configuration ID")
+    skill_resolution_llm_id: int | None = Field(
+        None, description="Optional LLM ID for skill selection only"
+    )
     is_active: bool = Field(default=True, description="Whether agent is active")
     max_iteration: int = Field(
         default=30, description="Maximum iterations for ReAct recursion"
@@ -18,10 +21,13 @@ class AgentUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     llm_id: int | None = None
+    skill_resolution_llm_id: int | None = None
     is_active: bool | None = None
     max_iteration: int | None = None
     # JSON-encoded list of tool names, or None to leave unchanged
     tool_ids: str | None = None
+    # JSON-encoded list of skill names, or None to leave unchanged
+    skill_ids: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -29,10 +35,12 @@ class AgentResponse(BaseModel):
     name: str
     description: str | None
     llm_id: int | None
+    skill_resolution_llm_id: int | None
     model_name: str | None
     is_active: bool
     max_iteration: int
     tool_ids: str | None
+    skill_ids: str | None
     created_at: datetime
     updated_at: datetime
 

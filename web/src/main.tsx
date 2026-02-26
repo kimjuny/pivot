@@ -6,6 +6,7 @@ import AgentList from './components/AgentList'
 import AgentDetailPage from './components/AgentDetailPage'
 import LLMList from './components/LLMList'
 import ToolsPage from './components/ToolsPage'
+import SkillsPage from './components/SkillsPage'
 import Navigation from './components/Navigation'
 import { AuthProvider, useAuth, isTokenValid } from './contexts/AuthContext'
 import { ThemeProvider } from '@/components/ui/theme-provider'
@@ -86,6 +87,17 @@ function ToolsListPage() {
   );
 }
 
+/**
+ * Skills Page with layout.
+ */
+function SkillsListPage() {
+  return (
+    <AuthenticatedLayout>
+      <SkillsPage />
+    </AuthenticatedLayout>
+  );
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="pivot-ui-theme">
@@ -100,6 +112,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/agent/:agentId" element={<AgentDetailPage />} />
             <Route path="/llms" element={<LLMListPage />} />
             <Route path="/tools" element={<ToolsListPage />} />
+            <Route path="/skills" element={<SkillsListPage />} />
 
             {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />

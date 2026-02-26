@@ -27,9 +27,11 @@ def build_system_prompt(
     context: ReactContext,
     tool_manager: ToolManager | None = None,
     session_memory: dict[str, Any] | None = None,
+    skills: str = "",
 ) -> str:
     """
-    Build system prompt with injected context state, available tools, and session memory.
+    Build system prompt with injected context state, available tools, session memory,
+    and selected skills.
 
     The template is loaded from context_template.md at server startup,
     and this function injects the current state machine snapshot, tool descriptions,
@@ -39,6 +41,7 @@ def build_system_prompt(
         context: ReactContext containing current state machine state
         tool_manager: Optional tool manager to get available tools description
         session_memory: Optional session memory dictionary for context injection
+        skills: Selected skills full-text block for prompt injection
 
     Returns:
         Complete system prompt with context, tools, and session memory injected
@@ -62,5 +65,6 @@ def build_system_prompt(
         session_memory_json = json.dumps({}, ensure_ascii=False, indent=2)
 
     prompt = prompt.replace("{{session_memory}}", session_memory_json)
+    prompt = prompt.replace("{{skills}}", skills)
 
     return prompt

@@ -36,12 +36,16 @@ class Agent(SQLModel, table=True):
         name: Unique name of the agent.
         description: Optional description of the agent's purpose.
         llm_id: Foreign key to the LLM configuration to use.
+        skill_resolution_llm_id: Optional LLM used only for skill selection.
         model_name: Deprecated. Name of the LLM model to use (kept for migration).
         is_active: Whether the agent is currently active.
         max_iteration: Maximum number of iterations for ReAct recursion.
         tool_ids: JSON-encoded list of tool names this agent is allowed to use.
             ``None`` means no restriction (all tools visible); an empty list means
             no tools are available to the agent.
+        skill_ids: JSON-encoded list of skill names this agent is allowed to use.
+            ``None`` means no restriction (all skills visible); an empty list means
+            no skills are available to the agent.
         created_at: UTC timestamp when the agent was created.
         updated_at: UTC timestamp when the agent was last updated.
         scenes: List of scenes associated with this agent.
@@ -51,6 +55,11 @@ class Agent(SQLModel, table=True):
     name: str = Field(index=True, unique=True)
     description: str | None = Field(default=None)
     llm_id: int | None = Field(default=None, foreign_key="llm.id", index=True)
+    skill_resolution_llm_id: int | None = Field(
+        default=None,
+        foreign_key="llm.id",
+        index=True,
+    )
     model_name: str | None = Field(
         default=None, description="Deprecated: Use llm_id instead"
     )
@@ -61,6 +70,10 @@ class Agent(SQLModel, table=True):
     tool_ids: str | None = Field(
         default=None,
         description="JSON array of allowed tool names. None = all tools; '[]' = none.",
+    )
+    skill_ids: str | None = Field(
+        default=None,
+        description="JSON array of allowed skill names. None = all skills; '[]' = none.",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

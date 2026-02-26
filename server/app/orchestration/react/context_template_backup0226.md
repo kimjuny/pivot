@@ -190,18 +190,9 @@
 - short-term：仅当前 recursion
 - session-memory：跨对话持久化
 - 仅在ANSWER时可提交修改
-- 仅在task的首次iteration & iteration有异常时，系统才会注入
+- 仅在task的第一轮iteration & iteration有异常事件时，系统才会注入
 
 以下为真实注入的session-memory
 ```json
 {{session_memory}}
-```
-
-## 7. Skills
-
-- 当你看到具体注入的skills时，意味着当前在首次recursion或上一轮recursion发生了异常
-- Skills如有注入，请仔细阅读，如果要运用skill，请用`RE_PLAN`仔细策划使用计划，在step的`specific_description`中讲述要用到怎么用，以及使用计划，因为后续recursion为了节省token不会再注入skill信息
-
-```
-{{skills}}
 ```

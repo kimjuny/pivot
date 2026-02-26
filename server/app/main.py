@@ -24,6 +24,7 @@ from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
+from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.db.session import get_engine, get_session  # noqa: E402
 from app.orchestration.tool import get_tool_manager  # noqa: E402
@@ -82,6 +83,7 @@ app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
+app.include_router(skills_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 
 # ---------- Production: serve frontend static files ----------
@@ -125,19 +127,20 @@ async def startup_event():
     # Incremental column migrations.
     # SQLite does not support ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so we
     # inspect the existing schema and only add missing columns.
-    _MIGRATIONS: list[tuple[str, str, str]] = [
+    migration_defs: list[tuple[str, str, str]] = [
         # (table_name, column_name, column_definition)
         ("agent", "tool_ids", "VARCHAR"),
+        ("agent", "skill_ids", "VARCHAR"),
+        ("agent", "skill_resolution_llm_id", "INTEGER"),
     ]
-    with engine.connect() as conn:
+    with engine.begin() as conn:
         inspector = sa_inspect(engine)
-        for table_name, col_name, col_def in _MIGRATIONS:
+        for table_name, col_name, col_def in migration_defs:
             existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
             if col_name not in existing_cols:
                 conn.execute(
                     text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
                 )
-                conn.commit()
                 logger.info("Migration: added column '%s' to table '%s'", col_name, table_name)
 
     logger.info("Database initialized successfully")
