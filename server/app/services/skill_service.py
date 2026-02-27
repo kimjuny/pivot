@@ -1,11 +1,11 @@
 """Skill service for managing shared/private markdown skills and metadata.
 
 This service stores user-editable skills under:
-- ``server/workspace/{username}/skills/private/*.md``
-- ``server/workspace/{username}/skills/shared/*.md``
+- ``server/workspace/{username}/skills/private/{name}/{name}.md``
+- ``server/workspace/{username}/skills/shared/{name}/{name}.md``
 
 Built-in skills are loaded from:
-- ``server/app/orchestration/skills/builtin/*.md``
+- ``server/app/orchestration/skills/builtin/{name}/{name}.md``
 
 For each user skill file, a structured metadata JSON is stored under:
 - ``.../skills/{kind}/.metadata/{name}.json``
@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,60 @@ def _user_skills_dir(username: str, kind: str) -> Path:
 
 def _meta_path(base_dir: Path, skill_name: str) -> Path:
     return base_dir / ".metadata" / f"{skill_name}.json"
+
+
+def _canonical_skill_path(base_dir: Path, skill_name: str) -> Path:
+    return base_dir / skill_name / f"{skill_name}.md"
+
+
+def _legacy_skill_path(base_dir: Path, skill_name: str) -> Path:
+    return base_dir / f"{skill_name}.md"
+
+
+def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
+    canonical = _canonical_skill_path(base_dir, skill_name)
+    if canonical.exists():
+        return canonical
+    legacy = _legacy_skill_path(base_dir, skill_name)
+    if legacy.exists():
+        return legacy
+    return None
+
+
+def _list_skill_paths(base_dir: Path) -> list[Path]:
+    """List canonical skill markdown files plus legacy flat files."""
+    paths: list[Path] = []
+    canonical_names: set[str] = set()
+
+    for item in sorted(base_dir.iterdir()):
+        if not item.is_dir() or item.name.startswith("_") or item.name == ".metadata":
+            continue
+        canonical = item / f"{item.name}.md"
+        if canonical.exists():
+            paths.append(canonical)
+            canonical_names.add(item.name)
+
+    for md_file in sorted(base_dir.glob("*.md")):
+        if md_file.name.startswith("_"):
+            continue
+        if md_file.stem in canonical_names:
+            continue
+        paths.append(md_file)
+
+    return paths
+
+
+def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
+    """Move legacy ``{name}.md`` to canonical ``{name}/{name}.md`` layout."""
+    canonical = _canonical_skill_path(base_dir, skill_name)
+    legacy = _legacy_skill_path(base_dir, skill_name)
+    if canonical.exists() or not legacy.exists():
+        return canonical
+
+    canonical.parent.mkdir(parents=True, exist_ok=True)
+    legacy.replace(canonical)
+    logger.info("Migrated legacy skill layout: %s -> %s", legacy, canonical)
+    return canonical
 
 
 def _file_md5(path: Path) -> str:
@@ -124,9 +179,7 @@ def list_builtin_skills() -> list[dict[str, Any]]:
         return []
 
     result: list[dict[str, Any]] = []
-    for md_file in sorted(root.glob("*.md")):
-        if md_file.name.startswith("_"):
-            continue
+    for md_file in _list_skill_paths(root):
         try:
             result.append(_build_metadata(md_file, kind="shared", source_type="builtin"))
         except Exception as exc:
@@ -139,11 +192,9 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
     base = _user_skills_dir(username, kind)
     result: list[dict[str, Any]] = []
 
-    for md_file in sorted(base.glob("*.md")):
-        if md_file.name.startswith("_"):
-            continue
-
+    for md_file in _list_skill_paths(base):
         skill_name = md_file.stem
+        md_file = _migrate_legacy_user_skill(base, skill_name)
         meta_file = _meta_path(base, skill_name)
         existing_created: str | None = None
         if meta_file.exists():
@@ -179,9 +230,11 @@ def read_user_skill(username: str, kind: str, skill_name: str) -> dict[str, Any]
     """Read markdown source and metadata for a user skill."""
     _validate_skill_name(skill_name)
     base = _user_skills_dir(username, kind)
-    skill_path = base / f"{skill_name}.md"
-    if not skill_path.exists():
+    skill_path = _resolve_skill_path(base, skill_name)
+    if skill_path is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found in {kind}.")
+    if skill_path == _legacy_skill_path(base, skill_name):
+        skill_path = _migrate_legacy_user_skill(base, skill_name)
 
     meta_file = _meta_path(base, skill_name)
     existing_created: str | None = None
@@ -208,12 +261,14 @@ def read_shared_skill(username: str, skill_name: str) -> dict[str, Any]:
     """
     _validate_skill_name(skill_name)
 
-    user_shared_path = _user_skills_dir(username, "shared") / f"{skill_name}.md"
-    if user_shared_path.exists():
+    user_shared_base = _user_skills_dir(username, "shared")
+    user_shared_path = _resolve_skill_path(user_shared_base, skill_name)
+    if user_shared_path is not None:
         return read_user_skill(username, "shared", skill_name)
 
-    builtin_path = _builtin_skills_dir() / f"{skill_name}.md"
-    if not builtin_path.exists():
+    builtin_base = _builtin_skills_dir()
+    builtin_path = _resolve_skill_path(builtin_base, skill_name)
+    if builtin_path is None:
         raise FileNotFoundError(f"Shared skill '{skill_name}' not found.")
 
     meta = _build_metadata(builtin_path, kind="shared", source_type="builtin")
@@ -228,12 +283,15 @@ def read_skill_content_for_prompt(username: str, skill_name: str) -> str:
     """Read skill source by name from user shared/private first, then builtin."""
     _validate_skill_name(skill_name)
     for kind in ("private", "shared"):
-        path = _user_skills_dir(username, kind) / f"{skill_name}.md"
-        if path.exists():
+        base = _user_skills_dir(username, kind)
+        path = _resolve_skill_path(base, skill_name)
+        if path is not None:
+            if path == _legacy_skill_path(base, skill_name):
+                path = _migrate_legacy_user_skill(base, skill_name)
             return path.read_text(encoding="utf-8")
 
-    builtin_path = _builtin_skills_dir() / f"{skill_name}.md"
-    if builtin_path.exists():
+    builtin_path = _resolve_skill_path(_builtin_skills_dir(), skill_name)
+    if builtin_path is not None:
         return builtin_path.read_text(encoding="utf-8")
 
     raise FileNotFoundError(f"Skill '{skill_name}' not found.")
@@ -258,7 +316,9 @@ def upsert_user_skill(username: str, kind: str, skill_name: str, source: str) ->
     """Create or update a user skill markdown file and metadata."""
     _validate_skill_name(skill_name)
     base = _user_skills_dir(username, kind)
-    skill_path = base / f"{skill_name}.md"
+    legacy_path = _legacy_skill_path(base, skill_name)
+    skill_path = _canonical_skill_path(base, skill_name)
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
     meta_file = _meta_path(base, skill_name)
 
     existing_created: str | None = None
@@ -269,6 +329,8 @@ def upsert_user_skill(username: str, kind: str, skill_name: str, source: str) ->
             existing_created = None
 
     skill_path.write_text(source, encoding="utf-8")
+    if legacy_path.exists():
+        legacy_path.unlink()
     meta = _build_metadata(skill_path, kind=kind, source_type="user", created_at=existing_created)
     meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -280,11 +342,15 @@ def delete_user_skill(username: str, kind: str, skill_name: str) -> None:
     """Delete a user skill markdown file and metadata."""
     _validate_skill_name(skill_name)
     base = _user_skills_dir(username, kind)
-    skill_path = base / f"{skill_name}.md"
-    if not skill_path.exists():
+    canonical_path = _canonical_skill_path(base, skill_name)
+    legacy_path = _legacy_skill_path(base, skill_name)
+    if not canonical_path.exists() and not legacy_path.exists():
         raise FileNotFoundError(f"Skill '{skill_name}' not found in {kind}.")
 
-    skill_path.unlink()
+    if canonical_path.exists():
+        shutil.rmtree(canonical_path.parent, ignore_errors=True)
+    if legacy_path.exists():
+        legacy_path.unlink()
     meta_file = _meta_path(base, skill_name)
     if meta_file.exists():
         meta_file.unlink()

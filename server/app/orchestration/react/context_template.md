@@ -199,8 +199,8 @@
 
 ## 7. Skills
 
-- 当你看到具体注入的skills时，意味着当前在首次recursion或上一轮recursion发生了异常
-- Skills如有注入，请仔细阅读，如果要运用skill，请用`RE_PLAN`仔细策划使用计划，在step的`specific_description`中讲述要用到怎么用，以及使用计划，因为后续recursion为了节省token不会再注入skill信息
+- 当你看到具体注入的skills时，意味着当前在首次recursion或上一轮recursion发生了异常。
+- Skills如有注入，请仔细阅读，**并立即采取`action = RE_PLAN`仔细制定策划执行计划**，在step的`specific_description`中讲计划用哪些tools/functions，因为后续recursion为了节省token不会再注入skill信息。
 
 ```
 {{skills}}

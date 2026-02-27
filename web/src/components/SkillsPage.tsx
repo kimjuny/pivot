@@ -1,5 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Lock, Globe2, User as UserIcon, X } from 'lucide-react';
+import {
+  ChevronDown,
+  Globe2,
+  KeyRound,
+  Lock,
+  Pencil,
+  Plus,
+  Share2,
+  Trash2,
+  User as UserIcon,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getSharedSkills,
@@ -32,6 +43,12 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import DraggableDialog from './DraggableDialog';
 import SkillEditor from './SkillEditor';
 
@@ -101,6 +118,7 @@ function SkillsPage() {
   const [editingKind, setEditingKind] = useState<'private' | 'shared'>('private');
   const [editorSource, setEditorSource] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
 
   const loadSkills = useCallback(async () => {
     setIsLoading(true);
@@ -240,15 +258,46 @@ function SkillsPage() {
             Built-in shared skills are read-only. You can create private/shared markdown skills.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => openCreateDialog('shared')} className="flex items-center gap-1.5">
-            <Globe2 className="w-4 h-4" />
-            New Shared
-          </Button>
-          <Button size="sm" onClick={() => openCreateDialog('private')} className="flex items-center gap-1.5">
-            <Plus className="w-4 h-4" />
-            New Private
-          </Button>
+        <div
+          onMouseEnter={() => setIsCreateMenuOpen(true)}
+          onMouseLeave={() => setIsCreateMenuOpen(false)}
+        >
+          <DropdownMenu open={isCreateMenuOpen} onOpenChange={setIsCreateMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="flex items-center gap-1.5">
+                <Plus className="w-4 h-4" />
+                New
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-44"
+              onMouseEnter={() => setIsCreateMenuOpen(true)}
+              onMouseLeave={() => setIsCreateMenuOpen(false)}
+            >
+              <DropdownMenuItem
+                onClick={() => {
+                  openCreateDialog('shared');
+                  setIsCreateMenuOpen(false);
+                }}
+                className="gap-2"
+              >
+                <Share2 className="w-4 h-4" />
+                Shared
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  openCreateDialog('private');
+                  setIsCreateMenuOpen(false);
+                }}
+                className="gap-2"
+              >
+                <KeyRound className="w-4 h-4" />
+                Private
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

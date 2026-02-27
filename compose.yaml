@@ -57,8 +57,9 @@ services:
       - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
       - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
       - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30
-      # Explicit host-side workspace root avoids inspect-format differences.
-      - SANDBOX_WORKSPACE_HOST_ROOT=${PWD}/server/workspace
+      # Do not pin SANDBOX_WORKSPACE_HOST_ROOT with ${PWD}; it is shell-cwd dependent
+      # and may incorrectly resolve to ".../web/server/workspace". Let sandbox-manager
+      # discover the workspace host root from backend container mounts.
       # Pooling: timeout cleanup + LRU cap fallback.
       - SANDBOX_POOL_SCAN_INTERVAL_SECONDS=30
       - SANDBOX_POOL_IDLE_TTL_SECONDS=300

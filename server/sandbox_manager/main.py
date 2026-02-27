@@ -178,11 +178,6 @@ def _mount_source(mount: dict[str, Any]) -> str | None:
 
 def _resolve_workspace_host_root() -> str:
     """Resolve host-side root path for ``server/workspace`` from backend mounts."""
-    settings = get_settings()
-    configured = settings.SANDBOX_WORKSPACE_HOST_ROOT
-    if configured:
-        return configured.rstrip("/")
-
     mount_sets: list[list[dict[str, Any]]] = []
     with suppress(HTTPException):
         mount_sets.append(_get_container_mounts(_backend_container()))
@@ -202,6 +197,15 @@ def _resolve_workspace_host_root() -> str:
                 return source.rstrip("/")
             if destination == "/app/server":
                 return f"{source.rstrip('/')}/workspace"
+
+    settings = get_settings()
+    configured = settings.SANDBOX_WORKSPACE_HOST_ROOT
+    if configured:
+        logger.warning(
+            "Workspace host root mount auto-discovery failed; falling back to SANDBOX_WORKSPACE_HOST_ROOT=%s",
+            configured,
+        )
+        return configured.rstrip("/")
 
     raise HTTPException(
         status_code=500,

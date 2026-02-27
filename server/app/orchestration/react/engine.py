@@ -146,10 +146,10 @@ class ReactEngine:
             skills=skills,
         )
 
-        # Update system message at index 0 (MUST be first for most LLMs)
-        # messages[0] = system prompt (updated each recursion)
-        # messages[1] = user message (fixed)
-        # messages[2+] = conversation history (assistant responses, tool results, etc.)
+        # Update system message at index 0 (MUST be first for most LLMs).
+        # We intentionally keep only [system, user] in messages for every recursion
+        # because all prior state is already represented inside system prompt context.
+        # This avoids duplicating history payload and wasting tokens.
         messages[0] = {"role": "system", "content": system_prompt}
 
         # Call LLM WITHOUT tools parameter (using prompt-based approach)
@@ -638,13 +638,6 @@ class ReactEngine:
         Raises:
             asyncio.CancelledError: If the task is cancelled by client disconnect
         """
-        # Initialize messages with system placeholder first (will be filled in first recursion)
-        # System message MUST be at index 0 for most LLMs
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": ""},  # Placeholder, updated each recursion
-            {"role": "user", "content": task.user_message},
-        ]
-
         # Load session memory if session_id is provided
         session_memory_dict: dict[str, Any] | None = None
         if task.session_id:
@@ -688,7 +681,10 @@ class ReactEngine:
                 recursion, event_data = await self.execute_recursion(
                     task=task,
                     context=context,
-                    messages=messages,
+                    messages=[
+                        {"role": "system", "content": ""},
+                        {"role": "user", "content": task.user_message},
+                    ],
                     session_memory=session_memory_dict if inject_extra_context else None,
                     skills=selected_skills_text if inject_extra_context else "",
                 )

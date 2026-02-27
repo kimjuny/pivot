@@ -1,5 +1,15 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Pencil, Trash2, Lock, User as UserIcon, X } from 'lucide-react';
+import {
+  ChevronDown,
+  KeyRound,
+  Pencil,
+  Plus,
+  Share2,
+  Trash2,
+  Lock,
+  User as UserIcon,
+  X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getSharedTools,
@@ -31,6 +41,12 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import DraggableDialog from './DraggableDialog';
 import ToolEditor from './ToolEditor';
 
@@ -114,6 +130,7 @@ function ToolsPage() {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editorSource, setEditorSource] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Data loading
@@ -252,10 +269,47 @@ function ToolsPage() {
             Shared tools are built-in and available to all users. Private tools are yours only.
           </p>
         </div>
-        <Button size="sm" onClick={openCreateDialog} className="flex items-center gap-1.5">
-          <Plus className="w-4 h-4" />
-          New Tool
-        </Button>
+        <div
+          onMouseEnter={() => setIsCreateMenuOpen(true)}
+          onMouseLeave={() => setIsCreateMenuOpen(false)}
+        >
+          <DropdownMenu open={isCreateMenuOpen} onOpenChange={setIsCreateMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="flex items-center gap-1.5">
+                <Plus className="w-4 h-4" />
+                New
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-44"
+              onMouseEnter={() => setIsCreateMenuOpen(true)}
+              onMouseLeave={() => setIsCreateMenuOpen(false)}
+            >
+              <DropdownMenuItem
+                onClick={() => {
+                  toast.info('Shared tools are built-in and read-only');
+                  setIsCreateMenuOpen(false);
+                }}
+                className="gap-2"
+              >
+                <Share2 className="w-4 h-4" />
+                Shared
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  openCreateDialog();
+                  setIsCreateMenuOpen(false);
+                }}
+                className="gap-2"
+              >
+                <KeyRound className="w-4 h-4" />
+                Private
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* Filter + search bar */}
