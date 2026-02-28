@@ -4,6 +4,7 @@ This is a generic implementation that works with any OpenAI-compatible API,
 including OpenAI, Azure OpenAI, and other providers that follow the same protocol.
 """
 
+import contextlib
 import json
 import time
 import uuid
@@ -117,11 +118,8 @@ class OpenAILLM(AbstractLLM):
             finish_reason = None
             raw_fr = raw_choice.get("finish_reason", None)
             if raw_fr:
-                try:
+                with contextlib.suppress(ValueError):
                     finish_reason = FinishReason(raw_fr)
-                except ValueError:
-                    # Depending on API, custom or invalid finish reasons might exist
-                    pass
 
             choice = Choice(index=i, message=message, finish_reason=finish_reason)
             choices.append(choice)
@@ -133,6 +131,7 @@ class OpenAILLM(AbstractLLM):
                 prompt_tokens=raw_usage.get("prompt_tokens", 0),
                 completion_tokens=raw_usage.get("completion_tokens", 0),
                 total_tokens=raw_usage.get("total_tokens", 0),
+                cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
             )
 
         return Response(
@@ -180,6 +179,8 @@ class OpenAILLM(AbstractLLM):
                 timeout=self.timeout
             )
             response.raise_for_status()
+
+            # print(f"response: \n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
             
             return self._parse_dict_response(response.json(), self.model)
 

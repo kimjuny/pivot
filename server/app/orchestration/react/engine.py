@@ -24,7 +24,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
 from .context import ReactContext
-from .prompt_template import build_system_prompt
+from .prompt_template import build_system_messages
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -138,22 +138,25 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build system prompt with current context, available tools, session memory, and skills.
-        system_prompt = build_system_prompt(
+        # Build split system prompt messages with current context, available tools,
+        # session memory, and selected skills.
+        system_messages = build_system_messages(
             context=context,
             tool_manager=self.tool_manager,
             session_memory=session_memory,
             skills=skills,
         )
 
-        # Update system message at index 0 (MUST be first for most LLMs).
-        # We intentionally keep only [system, user] in messages for every recursion
-        # because all prior state is already represented inside system prompt context.
-        # This avoids duplicating history payload and wasting tokens.
-        messages[0] = {"role": "system", "content": system_prompt}
+        # Message layout is fixed per recursion to maximize cache reuse:
+        # [0] immutable system prompt, [1] weak-cache system prompt,
+        # [2] no-cache system prompt, [3] user message.
+        messages[0] = {"role": "system", "content": system_messages[0]}
+        messages[1] = {"role": "system", "content": system_messages[1]}
+        messages[2] = {"role": "system", "content": system_messages[2]}
 
-        # Call LLM WITHOUT tools parameter (using prompt-based approach)
-        # Tools are described in the system prompt, and LLM returns tool calls in action.output
+        # Call LLM WITHOUT tools parameter (using prompt-based approach).
+        # Tools are described in the system prompt, and LLM returns tool calls
+        # in action.output.
         try:
             response = await run_in_threadpool(self.llm.chat, messages=messages)  # type: ignore[arg-type]
             choice = response.first()
@@ -189,6 +192,7 @@ class ReactEngine:
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
                         "total_tokens": response.usage.total_tokens,
+                        "cached_input_tokens": response.usage.cached_input_tokens,
                     }
 
                 recursion.status = "error"
@@ -210,6 +214,7 @@ class ReactEngine:
             action = react_output.get("action", {})
             action_type = action.get("action_type", "")
             action_output = action.get("output", {})
+            step_status_update = action.get("step_status_update", {})
 
             # Extract the plan step this recursion belongs to.
             # The LLM returns action.step_id when executing as part of a plan.
@@ -238,6 +243,7 @@ class ReactEngine:
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
                         "total_tokens": response.usage.total_tokens,
+                        "cached_input_tokens": response.usage.cached_input_tokens,
                     }
 
                 # Mark recursion as error
@@ -260,9 +266,6 @@ class ReactEngine:
             if action_type == "CALL_TOOL":
                 # Extract tool_calls from action.output (prompt-based approach)
                 tool_calls_from_output = action_output.get("tool_calls", [])
-                logger.info(
-                    f"Tool calls from action.output: {json.dumps(tool_calls_from_output, ensure_ascii=False, indent=2)}"
-                )
 
                 # Validate that tool_calls exist when action_type is CALL_TOOL
                 if not tool_calls_from_output:
@@ -279,6 +282,7 @@ class ReactEngine:
                             "prompt_tokens": response.usage.prompt_tokens,
                             "completion_tokens": response.usage.completion_tokens,
                             "total_tokens": response.usage.total_tokens,
+                            "cached_input_tokens": response.usage.cached_input_tokens,
                         }
 
                     recursion.status = "error"
@@ -415,6 +419,31 @@ class ReactEngine:
 
             recursion.plan_step_id = action_step_id
 
+            # Validate optional step status update requested by the LLM.
+            step_status_update_validated: dict[str, str] | None = None
+            if step_status_update:
+                step_id_to_update = step_status_update.get("step_id")
+                status_to_update = step_status_update.get("status")
+                allowed_step_statuses = {"pending", "running", "done", "error"}
+                if not isinstance(step_id_to_update, str) or not step_id_to_update:
+                    logger.warning(
+                        "Ignoring invalid step_status_update with missing/invalid step_id. "
+                        f"trace_id={trace_id}, task_id={task.task_id}, payload={step_status_update}"
+                    )
+                elif (
+                    not isinstance(status_to_update, str)
+                    or status_to_update not in allowed_step_statuses
+                ):
+                    logger.warning(
+                        "Ignoring invalid step_status_update with unsupported status. "
+                        f"trace_id={trace_id}, task_id={task.task_id}, payload={step_status_update}"
+                    )
+                else:
+                    step_status_update_validated = {
+                        "step_id": step_id_to_update,
+                        "status": status_to_update,
+                    }
+
             # Save short_term_memory if any
             if short_term_memory_append:
                 recursion.short_term_memory = short_term_memory_append
@@ -464,6 +493,7 @@ class ReactEngine:
                 "action": {
                     "action_type": action_type,
                     "output": action_output,
+                    "step_status_update": step_status_update_validated,
                 },
             }
 
@@ -502,6 +532,11 @@ class ReactEngine:
                     specific_description = step_data.get(
                         "specific_description"
                     ) or step_data.get("description") or general_goal
+                    completion_criteria = (
+                        step_data.get("completion_criteria")
+                        or step_data.get("completionCriteria")
+                        or ""
+                    )
                     step = ReactPlanStep(
                         task_id=task.task_id,
                         react_task_id=task.id or 0,
@@ -518,12 +553,42 @@ class ReactEngine:
                             "step_id": step.step_id,
                             "general_goal": general_goal,
                             "specific_description": specific_description,
+                            "completion_criteria": completion_criteria,
                             "status": step.status,
                             "recursion_history": [],
                         }
                     )
                 self.db.commit()
                 context.context["plan"] = new_plan_context
+
+            # Sync explicit step status update from LLM to task state.
+            if step_status_update_validated is not None:
+                step_id_to_update = step_status_update_validated["step_id"]
+                status_to_update = step_status_update_validated["status"]
+
+                plan_step_stmt = (
+                    select(ReactPlanStep)
+                    .where(ReactPlanStep.task_id == task.task_id)
+                    .where(ReactPlanStep.step_id == step_id_to_update)
+                )
+                plan_step = self.db.exec(plan_step_stmt).first()
+                if plan_step is None:
+                    logger.warning(
+                        "Ignoring step_status_update for unknown step_id. "
+                        f"trace_id={trace_id}, task_id={task.task_id}, "
+                        f"step_id={step_id_to_update}, status={status_to_update}"
+                    )
+                else:
+                    plan_step.status = status_to_update
+                    plan_step.updated_at = datetime.now(timezone.utc)
+                    self.db.add(plan_step)
+                    self.db.commit()
+
+                    # Keep in-memory snapshot context aligned with DB status.
+                    for plan_step_ctx in context.context.get("plan", []):
+                        if plan_step_ctx.get("step_id") == step_id_to_update:
+                            plan_step_ctx["status"] = status_to_update
+                            break
 
             # --- 2. LINK TARGET RECURSION ---
             # Sync the current recursion into its matching plan step for the snapshot
@@ -587,6 +652,7 @@ class ReactEngine:
                 "session_subject": session_subject,
                 "session_goal": session_goal,
                 "task_summary": task_summary,
+                "step_status_update": step_status_update_validated,
             }
 
             # Add token usage if available
@@ -595,6 +661,7 @@ class ReactEngine:
                     "prompt_tokens": response.usage.prompt_tokens,
                     "completion_tokens": response.usage.completion_tokens,
                     "total_tokens": response.usage.total_tokens,
+                    "cached_input_tokens": response.usage.cached_input_tokens,
                 }
 
             return recursion, event_data
@@ -683,9 +750,13 @@ class ReactEngine:
                     context=context,
                     messages=[
                         {"role": "system", "content": ""},
+                        {"role": "system", "content": ""},
+                        {"role": "system", "content": ""},
                         {"role": "user", "content": task.user_message},
                     ],
-                    session_memory=session_memory_dict if inject_extra_context else None,
+                    # Session memory is always injected in message[1] to improve
+                    # response quality while preserving cacheability split.
+                    session_memory=session_memory_dict,
                     skills=selected_skills_text if inject_extra_context else "",
                 )
                 previous_recursion_failed = recursion.status == "error"
@@ -845,6 +916,7 @@ class ReactEngine:
                             "prompt_tokens": task.total_prompt_tokens,
                             "completion_tokens": task.total_completion_tokens,
                             "total_tokens": task.total_tokens,
+                            "cached_input_tokens": 0,
                         },
                     }
                     break

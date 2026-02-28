@@ -895,6 +895,7 @@ export interface RecursionDetail {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cached_input_tokens?: number;
   created_at: string;
   updated_at: string;
 }

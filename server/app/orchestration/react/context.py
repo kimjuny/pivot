@@ -140,10 +140,16 @@ class ReactContext:
             specific_description = latest_step_data.get(
                 "specific_description"
             ) or latest_step_data.get("description") or step.description
+            completion_criteria = (
+                latest_step_data.get("completion_criteria")
+                or latest_step_data.get("completionCriteria")
+                or ""
+            )
             plan_step = {
                 "step_id": step.step_id,
                 "general_goal": general_goal,
                 "specific_description": specific_description,
+                "completion_criteria": completion_criteria,
                 "status": step.status,
                 "recursion_history": [],
             }

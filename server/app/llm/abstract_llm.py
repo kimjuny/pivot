@@ -27,6 +27,7 @@ class UsageInfo:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cached_input_tokens: int = 0
 
 
 @dataclass
@@ -107,6 +108,7 @@ class Response:
             logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
             logger.info(f"    Completion Tokens: {self.usage.completion_tokens}")
             logger.info(f"    Total Tokens: {self.usage.total_tokens}")
+            logger.info(f"    Cached Input Tokens: {self.usage.cached_input_tokens}")
 
     def pretty_print_full(self) -> None:
         """Print all information of the response in a formatted way."""
@@ -130,6 +132,7 @@ class Response:
             logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
             logger.info(f"    Completion Tokens: {self.usage.completion_tokens}")
             logger.info(f"    Total Tokens: {self.usage.total_tokens}")
+            logger.info(f"    Cached Input Tokens: {self.usage.cached_input_tokens}")
 
     def first(self) -> Choice:
         """Return the first choice in the response.
@@ -147,6 +150,49 @@ class Response:
         if not self.choices:
             raise IndexError("No choices available in response")
         return self.choices[0]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Converts response object into a plain dictionary.
+
+        This method is useful when persisting/transmitting the response as JSON,
+        because dataclass instances and enum objects are converted to primitive
+        serializable values.
+
+        Returns:
+            A JSON-serializable dictionary representation of the response.
+        """
+        return {
+            "id": self.id,
+            "choices": [
+                {
+                    "index": choice.index,
+                    "message": {
+                        "role": choice.message.role,
+                        "content": choice.message.content,
+                        "reasoning_content": choice.message.reasoning_content,
+                        "tool_calls": choice.message.tool_calls,
+                        "tool_call_id": choice.message.tool_call_id,
+                    },
+                    "finish_reason": (
+                        choice.finish_reason.value if choice.finish_reason else None
+                    ),
+                }
+                for choice in self.choices
+            ],
+            "created": self.created,
+            "model": self.model,
+            "usage": (
+                {
+                    "prompt_tokens": self.usage.prompt_tokens,
+                    "completion_tokens": self.usage.completion_tokens,
+                    "total_tokens": self.usage.total_tokens,
+                    "cached_input_tokens": self.usage.cached_input_tokens,
+                }
+                if self.usage
+                else None
+            ),
+            "object": self.object,
+        }
 
 
 class AbstractLLM(ABC):
@@ -284,6 +330,7 @@ class AbstractLLM(ABC):
                 prompt_tokens=getattr(raw_usage, "prompt_tokens", 0),
                 completion_tokens=getattr(raw_usage, "completion_tokens", 0),
                 total_tokens=getattr(raw_usage, "total_tokens", 0),
+                cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
             )
 
         return Response(
@@ -293,3 +340,69 @@ class AbstractLLM(ABC):
             model=response_model,
             usage=usage,
         )
+
+    def _extract_cached_input_tokens(self, raw_usage: Any) -> int:
+        """Extract cached input token count across provider-specific usage formats.
+
+        Args:
+            raw_usage: Usage payload as either dict-like or object-like structure.
+
+        Returns:
+            Number of input tokens served from cache. Returns 0 when unavailable.
+        """
+
+        def _read(source: Any, key: str) -> Any:
+            if source is None:
+                return None
+            if isinstance(source, dict):
+                return source.get(key)
+            return getattr(source, key, None)
+
+        def _to_int(value: Any) -> int | None:
+            if value is None:
+                return None
+            try:
+                return max(int(value), 0)
+            except (TypeError, ValueError):
+                return None
+
+        direct_keys = (
+            # OpenAI/Groq compatible variants
+            "cached_input_tokens",
+            "cache_hit_tokens",
+            "cached_prompt_tokens",
+            # Anthropic cache usage variants
+            "cache_read_input_tokens",
+            "cache_read_prompt_tokens",
+            # Some vendors may use this generic name
+            "cached_tokens",
+        )
+        for key in direct_keys:
+            parsed = _to_int(_read(raw_usage, key))
+            if parsed is not None:
+                return parsed
+
+        nested_detail_keys = (
+            "prompt_tokens_details",
+            "prompt_token_details",
+            "input_tokens_details",
+            "input_token_details",
+            "token_details",
+        )
+        nested_cached_keys = (
+            "cached_tokens",
+            "cached_input_tokens",
+            "cache_hit_tokens",
+            "cached_prompt_tokens",
+            "cache_read_input_tokens",
+        )
+        for detail_key in nested_detail_keys:
+            details = _read(raw_usage, detail_key)
+            if details is None:
+                continue
+            for cached_key in nested_cached_keys:
+                parsed = _to_int(_read(details, cached_key))
+                if parsed is not None:
+                    return parsed
+
+        return 0

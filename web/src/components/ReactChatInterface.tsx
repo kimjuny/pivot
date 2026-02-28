@@ -47,6 +47,7 @@ interface TokenUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  cached_input_tokens?: number;
 }
 
 /**
@@ -75,6 +76,7 @@ interface PlanStepData {
   step_id: string;
   general_goal?: string;
   specific_description?: string;
+  completion_criteria?: string;
   description?: string;
   status: string;
 }
@@ -1371,6 +1373,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   </TooltipTrigger>
                   <TooltipContent side="top" className="text-xs leading-relaxed">
                     <div>Input: {formatTokenCount(recursion.tokens.prompt_tokens)}</div>
+                    <div>Cached Input: {formatTokenCount(recursion.tokens.cached_input_tokens ?? 0)}</div>
                     <div>Output: {formatTokenCount(recursion.tokens.completion_tokens)}</div>
                     <div>Total: {formatTokenCount(recursion.tokens.total_tokens)}</div>
                   </TooltipContent>

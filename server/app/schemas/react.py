@@ -15,6 +15,10 @@ class TokenUsage(BaseModel):
         ..., description="Number of tokens in the completion"
     )
     total_tokens: int = Field(..., description="Total tokens used")
+    cached_input_tokens: int = Field(
+        default=0,
+        description="Number of input tokens served from cache",
+    )
 
 
 class ReactChatRequest(BaseModel):

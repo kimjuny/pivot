@@ -259,6 +259,7 @@ class AnthropicLLM(AbstractLLM):
                 completion_tokens=getattr(raw_usage, "output_tokens", 0),
                 total_tokens=getattr(raw_usage, "input_tokens", 0)
                 + getattr(raw_usage, "output_tokens", 0),
+                cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
             )
 
         return Response(
