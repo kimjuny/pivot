@@ -379,6 +379,8 @@ export interface LLM {
   api_key: string;
   /** Protocol specification (e.g., 'openai_completion_llm', 'openai_response_llm') */
   protocol: string;
+  /** Protocol-specific cache strategy */
+  cache_policy: string;
   /** Whether the model supports multi-turn conversation with message roles */
   chat: boolean;
   /** Whether the model truly distinguishes system role with higher priority */

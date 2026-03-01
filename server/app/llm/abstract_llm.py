@@ -242,6 +242,15 @@ class AbstractLLM(ABC):
         """
         pass
 
+    def uses_incremental_request_messages(self) -> bool:
+        """Whether this LLM should receive only incremental messages.
+
+        Returns:
+            True when transport protocol expects incremental input chunks instead
+            of full conversation history.
+        """
+        return False
+
     def _convert_response(self, raw_response: Any, model: str) -> Response:
         """
         Convert an OpenAI-compatible API response to our structured Response format.

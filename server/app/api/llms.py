@@ -11,6 +11,7 @@ from typing import Any
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.crud.llm import llm as llm_crud
+from app.llm.cache_policy import validate_cache_policy
 from app.models.user import User
 from app.schemas.schemas import LLMCreate, LLMResponse, LLMUpdate
 from fastapi import APIRouter, Depends, HTTPException
@@ -48,6 +49,7 @@ async def get_llms(
             "model": llm.model,
             "api_key": llm.api_key,
             "protocol": llm.protocol,
+            "cache_policy": llm.cache_policy,
             "chat": llm.chat,
             "system_role": llm.system_role,
             "tool_calling": llm.tool_calling,
@@ -84,6 +86,14 @@ async def create_llm(
     if existing_llm:
         raise HTTPException(status_code=400, detail="LLM with this name already exists")
 
+    try:
+        normalized_cache_policy = validate_cache_policy(
+            llm_data.protocol,
+            llm_data.cache_policy,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     llm = llm_crud.create(
         db,
         name=llm_data.name,
@@ -91,6 +101,7 @@ async def create_llm(
         model=llm_data.model,
         api_key=llm_data.api_key,
         protocol=llm_data.protocol,
+        cache_policy=normalized_cache_policy,
         chat=llm_data.chat,
         system_role=llm_data.system_role,
         tool_calling=llm_data.tool_calling,
@@ -106,6 +117,7 @@ async def create_llm(
         "model": llm.model,
         "api_key": llm.api_key,
         "protocol": llm.protocol,
+        "cache_policy": llm.cache_policy,
         "chat": llm.chat,
         "system_role": llm.system_role,
         "tool_calling": llm.tool_calling,
@@ -147,6 +159,7 @@ async def get_llm(
         "model": llm.model,
         "api_key": llm.api_key,
         "protocol": llm.protocol,
+        "cache_policy": llm.cache_policy,
         "chat": llm.chat,
         "system_role": llm.system_role,
         "tool_calling": llm.tool_calling,
@@ -203,6 +216,19 @@ async def update_llm(
         update_data["api_key"] = llm_data.api_key
     if llm_data.protocol is not None:
         update_data["protocol"] = llm_data.protocol
+    if llm_data.cache_policy is not None:
+        update_data["cache_policy"] = llm_data.cache_policy
+
+    # Ensure protocol/cache_policy pair remains valid after partial update.
+    target_protocol = update_data.get("protocol", llm.protocol)
+    target_cache_policy = update_data.get("cache_policy", llm.cache_policy)
+    try:
+        update_data["cache_policy"] = validate_cache_policy(
+            target_protocol,
+            target_cache_policy,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if llm_data.chat is not None:
         update_data["chat"] = llm_data.chat
     if llm_data.system_role is not None:
@@ -229,6 +255,7 @@ async def update_llm(
         "model": updated_llm.model,
         "api_key": updated_llm.api_key,
         "protocol": updated_llm.protocol,
+        "cache_policy": updated_llm.cache_policy,
         "chat": updated_llm.chat,
         "system_role": updated_llm.system_role,
         "tool_calling": updated_llm.tool_calling,

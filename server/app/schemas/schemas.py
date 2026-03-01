@@ -1,7 +1,36 @@
+import json
 from datetime import datetime, timezone
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
+
+
+def _normalize_extra_config(extra_config: str | None) -> str | None:
+    """Normalize and validate LLM extra_config payload.
+
+    Args:
+        extra_config: JSON string provided by API caller.
+
+    Returns:
+        Canonical JSON string for object payloads, or None when blank.
+
+    Raises:
+        ValueError: If value is not valid JSON or not a JSON object.
+    """
+    if extra_config is None:
+        return None
+    stripped = extra_config.strip()
+    if not stripped:
+        return None
+
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        raise ValueError("extra_config must be valid JSON") from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError("extra_config must be a JSON object")
+    return json.dumps(parsed, separators=(",", ":"))
 
 
 class AgentCreate(BaseModel):
@@ -347,6 +376,10 @@ class LLMCreate(BaseModel):
             "('openai_completion_llm', 'openai_response_llm', or 'anthropic_compatible')"
         ),
     )
+    cache_policy: str = Field(
+        default="none",
+        description="Cache policy selected for this protocol",
+    )
     chat: bool = Field(
         default=True, description="Supports multi-turn conversation with message roles"
     )
@@ -368,6 +401,13 @@ class LLMCreate(BaseModel):
         description="Additional kwargs for API calls (JSON format). E.g.: {'extra_body': {'reasoning_split': true}}",
     )
 
+    @validator("extra_config")
+    def validate_extra_config(
+        cls, extra_config: str | None  # noqa: N805
+    ) -> str | None:
+        """Validate that extra_config is a JSON object string."""
+        return _normalize_extra_config(extra_config)
+
 
 class LLMUpdate(BaseModel):
     """Schema for updating an existing LLM."""
@@ -377,6 +417,7 @@ class LLMUpdate(BaseModel):
     model: str | None = None
     api_key: str | None = None
     protocol: str | None = None
+    cache_policy: str | None = None
     chat: bool | None = None
     system_role: bool | None = None
     tool_calling: str | None = None
@@ -384,6 +425,13 @@ class LLMUpdate(BaseModel):
     streaming: bool | None = None
     max_context: int | None = None
     extra_config: str | None = None
+
+    @validator("extra_config")
+    def validate_extra_config(
+        cls, extra_config: str | None  # noqa: N805
+    ) -> str | None:
+        """Validate that extra_config is a JSON object string."""
+        return _normalize_extra_config(extra_config)
 
 
 class LLMResponse(BaseModel):
@@ -395,6 +443,7 @@ class LLMResponse(BaseModel):
     model: str
     api_key: str
     protocol: str
+    cache_policy: str
     chat: bool
     system_role: bool
     tool_calling: str

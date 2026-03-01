@@ -19,6 +19,7 @@ from .abstract_llm import (
     Response,
     UsageInfo,
 )
+from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 
 
 class AnthropicLLM(AbstractLLM):
@@ -37,6 +38,7 @@ class AnthropicLLM(AbstractLLM):
         endpoint: str,
         model: str,
         api_key: str,
+        cache_policy: str = DEFAULT_CACHE_POLICY,
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -63,6 +65,7 @@ class AnthropicLLM(AbstractLLM):
         self.endpoint = endpoint
         self.model = model
         self.api_key = api_key
+        self.cache_policy = validate_cache_policy("anthropic_compatible", cache_policy)
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 
@@ -134,6 +137,34 @@ class AnthropicLLM(AbstractLLM):
                 anthropic_tools.append(anthropic_tool)
 
         return anthropic_tools if anthropic_tools else None
+
+    def _apply_block_cache_to_messages(
+        self, formatted_messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Apply ephemeral cache control to the last message content block."""
+        if not formatted_messages:
+            return formatted_messages
+
+        cached_messages = [dict(message) for message in formatted_messages]
+        last_message = dict(cached_messages[-1])
+        last_content = last_message.get("content", "")
+
+        if isinstance(last_content, str):
+            last_message["content"] = [
+                {
+                    "type": "text",
+                    "text": last_content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        elif isinstance(last_content, list) and last_content:
+            content_blocks = [dict(block) for block in last_content]
+            if isinstance(content_blocks[-1], dict):
+                content_blocks[-1]["cache_control"] = {"type": "ephemeral"}
+            last_message["content"] = content_blocks
+
+        cached_messages[-1] = last_message
+        return cached_messages
 
     def _convert_anthropic_response(
         self, raw_response: Any, is_stream_chunk: bool = False
@@ -285,6 +316,8 @@ class AnthropicLLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
+            kwargs.pop("_pivot_task_id", None)
+            kwargs.pop("_pivot_previous_response_id", None)
             # Convert messages to Anthropic format
             system_message, formatted_messages = self._convert_messages(messages)
 
@@ -313,6 +346,22 @@ class AnthropicLLM(AbstractLLM):
             # Add tools if present
             if anthropic_tools:
                 api_params["tools"] = anthropic_tools
+
+            if self.cache_policy == "anthropic-auto-cache":
+                api_params["cache_control"] = {"type": "ephemeral"}
+            elif self.cache_policy == "anthropic-block-cache":
+                if system_message:
+                    api_params["system"] = [
+                        {
+                            "type": "text",
+                            "text": system_message,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                else:
+                    api_params["messages"] = self._apply_block_cache_to_messages(
+                        formatted_messages
+                    )
 
             # Call Anthropic API
             response = self.client.messages.create(**api_params)
@@ -342,6 +391,8 @@ class AnthropicLLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
+            kwargs.pop("_pivot_task_id", None)
+            kwargs.pop("_pivot_previous_response_id", None)
             # Convert messages to Anthropic format
             system_message, formatted_messages = self._convert_messages(messages)
 
@@ -370,6 +421,22 @@ class AnthropicLLM(AbstractLLM):
             # Add tools if present
             if anthropic_tools:
                 api_params["tools"] = anthropic_tools
+
+            if self.cache_policy == "anthropic-auto-cache":
+                api_params["cache_control"] = {"type": "ephemeral"}
+            elif self.cache_policy == "anthropic-block-cache":
+                if system_message:
+                    api_params["system"] = [
+                        {
+                            "type": "text",
+                            "text": system_message,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                else:
+                    api_params["messages"] = self._apply_block_cache_to_messages(
+                        formatted_messages
+                    )
 
             # Call Anthropic API with streaming
             with self.client.messages.stream(**api_params) as stream:

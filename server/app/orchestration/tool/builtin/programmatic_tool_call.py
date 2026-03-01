@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Reusable exec core – extracted so both the default stub and any dynamically
+# Reusable exec core - extracted so both the default stub and any dynamically
 # bound closure share exactly the same logic.
 # ---------------------------------------------------------------------------
 
@@ -133,7 +133,7 @@ def _run_snippet(python_code: str, tool_callables: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Factory – called by react.py to create a request-scoped closure
+# Factory - called by react.py to create a request-scoped closure
 # ---------------------------------------------------------------------------
 
 
@@ -162,7 +162,7 @@ def make_programmatic_tool_call(tool_callables: dict[str, Any]):
 
 
 # ---------------------------------------------------------------------------
-# Registered @tool stub – uses only the global singleton (shared tools).
+# Registered @tool stub - uses only the global singleton (shared tools).
 # react.py replaces .func at request time via make_programmatic_tool_call().
 # ---------------------------------------------------------------------------
 

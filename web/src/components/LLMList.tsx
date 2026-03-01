@@ -193,6 +193,7 @@ function LLMList() {
         model: llm.model,
         api_key: llm.api_key,
         protocol: llm.protocol,
+        cache_policy: llm.cache_policy,
         chat: llm.chat,
         system_role: llm.system_role,
         tool_calling: llm.tool_calling,
@@ -289,6 +290,7 @@ function LLMList() {
           model: (item.model as string) ?? '',
           api_key: (item.api_key as string) ?? '',
           protocol: (item.protocol as string) ?? 'openai_completion_llm',
+          cache_policy: (item.cache_policy as string) ?? 'none',
           chat: (item.chat as boolean) ?? true,
           system_role: (item.system_role as boolean) ?? false,
           tool_calling: (item.tool_calling as string) ?? 'none',
@@ -322,6 +324,7 @@ function LLMList() {
     model: string;
     api_key: string;
     protocol: string;
+    cache_policy: string;
     chat: boolean;
     system_role: boolean;
     tool_calling: string;
@@ -594,6 +597,7 @@ function LLMList() {
                 model: editingLLM.model,
                 api_key: editingLLM.api_key,
                 protocol: editingLLM.protocol,
+                cache_policy: editingLLM.cache_policy,
                 chat: editingLLM.chat,
                 system_role: editingLLM.system_role,
                 tool_calling: editingLLM.tool_calling,
@@ -671,6 +675,7 @@ function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowPr
       {/* Protocol */}
       <TableCell className="text-xs text-muted-foreground">
         {formatProtocolLabel(llm.protocol)}
+        {llm.cache_policy !== 'none' && ` · ${llm.cache_policy}`}
       </TableCell>
 
       {/* Capabilities: keep one line to preserve consistent row heights */}

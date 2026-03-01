@@ -20,6 +20,7 @@ from .abstract_llm import (
     Response,
     UsageInfo,
 )
+from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 
 
 class OpenAIResponseLLM(AbstractLLM):
@@ -32,6 +33,7 @@ class OpenAIResponseLLM(AbstractLLM):
         endpoint: str,
         model: str,
         api_key: str,
+        cache_policy: str = DEFAULT_CACHE_POLICY,
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -54,10 +56,17 @@ class OpenAIResponseLLM(AbstractLLM):
         self.endpoint = endpoint
         self.model = model
         self.api_key = api_key
+        self.cache_policy = validate_cache_policy("openai_response_llm", cache_policy)
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 
-    def _build_input_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def uses_incremental_request_messages(self) -> bool:
+        """Whether this LLM expects incremental input chunks only."""
+        return self.cache_policy == "doubao-response-previous-id"
+
+    def _build_input_messages(
+        self, messages: list[dict[str, str]]
+    ) -> list[dict[str, str]]:
         """Convert chat message history to Responses API input message format."""
         input_messages: list[dict[str, str]] = []
         for message in messages:
@@ -113,6 +122,16 @@ class OpenAIResponseLLM(AbstractLLM):
 
         return text, tool_calls or None
 
+    @staticmethod
+    def _merge_extra_body_kwargs(merged_kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Flatten SDK-style ``extra_body`` into raw Responses API payload."""
+        normalized_kwargs = dict(merged_kwargs)
+        extra_body = normalized_kwargs.pop("extra_body", None)
+        if isinstance(extra_body, dict):
+            for key, value in extra_body.items():
+                normalized_kwargs.setdefault(key, value)
+        return normalized_kwargs
+
     def _parse_dict_response(self, raw_dict: dict[str, Any], model: str) -> Response:
         """Parse raw Responses API JSON dict into structured Response object."""
         response_id = raw_dict.get("id", str(uuid.uuid4()))
@@ -160,7 +179,10 @@ class OpenAIResponseLLM(AbstractLLM):
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
         """Process a conversation with the Responses API."""
         try:
+            pivot_task_id = kwargs.pop("_pivot_task_id", "")
+            previous_response_id = kwargs.pop("_pivot_previous_response_id", "")
             merged_kwargs = {**self.extra_config, **kwargs}
+            normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -169,8 +191,18 @@ class OpenAIResponseLLM(AbstractLLM):
             payload = {
                 "model": self.model,
                 "input": self._build_input_messages(messages),
-                **merged_kwargs,
+                **normalized_kwargs,
             }
+            if (
+                self.cache_policy == "openai-response-prompt-cache-key"
+                and isinstance(pivot_task_id, str)
+                and pivot_task_id
+            ):
+                payload["prompt_cache_key"] = pivot_task_id
+            elif self.cache_policy == "doubao-response-previous-id":
+                payload["caching"] = {"type": "enabled"}
+                if isinstance(previous_response_id, str) and previous_response_id:
+                    payload["previous_response_id"] = previous_response_id
 
             response = requests.post(
                 url, headers=headers, json=payload, timeout=self.timeout
@@ -194,7 +226,10 @@ class OpenAIResponseLLM(AbstractLLM):
     ) -> Iterator[Response]:
         """Process a conversation with the Responses API in streaming mode."""
         try:
+            pivot_task_id = kwargs.pop("_pivot_task_id", "")
+            previous_response_id = kwargs.pop("_pivot_previous_response_id", "")
             merged_kwargs = {**self.extra_config, **kwargs}
+            normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -204,8 +239,18 @@ class OpenAIResponseLLM(AbstractLLM):
                 "model": self.model,
                 "input": self._build_input_messages(messages),
                 "stream": True,
-                **merged_kwargs,
+                **normalized_kwargs,
             }
+            if (
+                self.cache_policy == "openai-response-prompt-cache-key"
+                and isinstance(pivot_task_id, str)
+                and pivot_task_id
+            ):
+                payload["prompt_cache_key"] = pivot_task_id
+            elif self.cache_policy == "doubao-response-previous-id":
+                payload["caching"] = {"type": "enabled"}
+                if isinstance(previous_response_id, str) and previous_response_id:
+                    payload["previous_response_id"] = previous_response_id
 
             with requests.post(
                 url, headers=headers, json=payload, timeout=self.timeout, stream=True

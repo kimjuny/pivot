@@ -39,6 +39,10 @@ class LLM(SQLModel, table=True):
             "('openai_completion_llm', 'openai_response_llm', or 'anthropic_compatible')"
         ),
     )
+    cache_policy: str = Field(
+        default="none",
+        description="Cache policy selected for this protocol",
+    )
     chat: bool = Field(
         default=True, description="Supports multi-turn conversation with message roles"
     )
@@ -73,6 +77,10 @@ class LLM(SQLModel, table=True):
         if not self.extra_config:
             return {}
         try:
-            return json.loads(self.extra_config)
+            parsed = json.loads(self.extra_config)
+            # Keep kwargs contract stable for LLM clients.
+            if isinstance(parsed, dict):
+                return parsed
+            return {}
         except json.JSONDecodeError:
             return {}

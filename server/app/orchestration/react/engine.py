@@ -29,6 +29,8 @@ from .prompt_template import build_runtime_system_prompt
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
+ALLOWED_ACTION_TYPES = {"CALL_TOOL", "RE_PLAN", "REFLECT", "CLARIFY", "ANSWER"}
+
 
 class ReactEngine:
     """ReAct state machine execution engine.
@@ -100,6 +102,28 @@ class ReactEngine:
             raise ValueError(
                 f"Failed to parse JSON {e.msg} at position {e.pos}: {json_str}"
             ) from e
+
+    def _is_timeout_error(self, exc: Exception) -> bool:
+        """Whether an exception chain represents an LLM request timeout.
+
+        Why: timeout retries should not consume iteration budget or pollute
+        persisted LLM messages, same as malformed JSON rollback behavior.
+        """
+        timeout_keywords = ("timed out", "timeout")
+        current: BaseException | None = exc
+        while current is not None:
+            if isinstance(current, TimeoutError):
+                return True
+
+            class_name = type(current).__name__.lower()
+            message = str(current).lower()
+            if "timeout" in class_name:
+                return True
+            if any(keyword in message for keyword in timeout_keywords):
+                return True
+
+            current = current.__cause__ or current.__context__
+        return False
 
     def _normalize_assistant_message_json(self, content: str) -> str | None:
         """Normalize assistant content to strict JSON string for persistence.
@@ -290,6 +314,33 @@ class ReactEngine:
             else None
         )
 
+    def _load_llm_cache_state(self, task: ReactTask) -> dict[str, Any]:
+        """Load protocol-specific LLM cache runtime state from task.
+
+        Args:
+            task: Task containing serialized cache state.
+
+        Returns:
+            Parsed cache state dictionary. Invalid payloads become empty dict.
+        """
+        if not task.llm_cache_state:
+            return {}
+        try:
+            payload = json.loads(task.llm_cache_state)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Invalid llm_cache_state JSON detected; resetting. task_id=%s",
+                task.task_id,
+            )
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return payload
+
+    def _set_llm_cache_state(self, task: ReactTask, state: dict[str, Any]) -> None:
+        """Persist protocol-specific LLM cache runtime state to task."""
+        task.llm_cache_state = json.dumps(state, ensure_ascii=False)
+
     def _clear_task_runtime_messages(self, task: ReactTask) -> None:
         """Clear ephemeral per-task message/action state after task completion.
 
@@ -298,9 +349,14 @@ class ReactEngine:
         """
         task.llm_messages = "[]"
         task.pending_action_result = None
+        task.llm_cache_state = "{}"
         task.updated_at = datetime.now(timezone.utc)
         self.db.add(task)
         self.db.commit()
+
+    def _uses_incremental_request_messages(self) -> bool:
+        """Whether current LLM transport uses incremental-only request messages."""
+        return self.llm.uses_incremental_request_messages()
 
     def _build_current_plan_payload(
         self, context: ReactContext
@@ -395,6 +451,7 @@ class ReactEngine:
         task: ReactTask,
         context: ReactContext,
         messages: list[dict[str, Any]],
+        llm_chat_kwargs: dict[str, Any] | None = None,
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """
         Execute a single recursion cycle.
@@ -403,6 +460,7 @@ class ReactEngine:
             task: The ReactTask being executed
             context: Current context state
             messages: Message history for LLM
+            llm_chat_kwargs: Extra runtime kwargs passed to LLM chat call.
 
         Returns:
             Tuple of (ReactRecursion record, event data for streaming)
@@ -429,7 +487,11 @@ class ReactEngine:
         # Tools are described in the system prompt, and LLM returns tool calls
         # in action.output.
         try:
-            response = await run_in_threadpool(self.llm.chat, messages=messages)  # type: ignore[arg-type]
+            response = await run_in_threadpool(
+                self.llm.chat,
+                messages=messages,
+                **(llm_chat_kwargs or {}),
+            )  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
@@ -481,6 +543,7 @@ class ReactEngine:
                     "tokens": tokens_data,
                     "assistant_message": None,
                     "rollback_messages": True,
+                    "llm_response_id": response.id,
                 }
 
             observe = react_output.get("observe", "")
@@ -489,8 +552,21 @@ class ReactEngine:
             short_term_memory_append = react_output.get("short_term_memory_append", "")
             action = react_output.get("action", {})
             action_type = action.get("action_type", "")
+            if isinstance(action_type, str):
+                action_type = action_type.strip()
             action_output = action.get("output", {})
-            step_status_update = action.get("step_status_update", [])
+            # LLMs may place step_status_update in different locations.
+            # We accept all known variants and normalize later.
+            step_status_update = action.get("step_status_update")
+            if not isinstance(step_status_update, list):
+                step_status_update = react_output.get("step_status_update")
+            if (
+                not isinstance(step_status_update, list)
+                and isinstance(action_output, dict)
+            ):
+                step_status_update = action_output.get("step_status_update")
+            if not isinstance(step_status_update, list):
+                step_status_update = []
 
             # Extract the plan step this recursion belongs to.
             # The LLM returns action.step_id when executing as part of a plan.
@@ -534,6 +610,46 @@ class ReactEngine:
                     "trace_id": trace_id,
                     "action_type": "ERROR",
                     "error": "Empty action_type from LLM",
+                    "tokens": tokens_data,
+                    "assistant_message": assistant_message_json,
+                }
+
+            if action_type not in ALLOWED_ACTION_TYPES:
+                tokens_data = None
+                if response.usage:
+                    recursion.prompt_tokens = response.usage.prompt_tokens
+                    recursion.completion_tokens = response.usage.completion_tokens
+                    recursion.total_tokens = response.usage.total_tokens
+                    recursion.cached_input_tokens = response.usage.cached_input_tokens
+                    task.total_prompt_tokens += response.usage.prompt_tokens
+                    task.total_completion_tokens += response.usage.completion_tokens
+                    task.total_tokens += response.usage.total_tokens
+                    task.total_cached_input_tokens += response.usage.cached_input_tokens
+                    tokens_data = {
+                        "prompt_tokens": response.usage.prompt_tokens,
+                        "completion_tokens": response.usage.completion_tokens,
+                        "total_tokens": response.usage.total_tokens,
+                        "cached_input_tokens": response.usage.cached_input_tokens,
+                    }
+
+                recursion.status = "error"
+                recursion.error_log = (
+                    "LLM returned unsupported action_type: "
+                    f"{action_type}. Allowed: {sorted(ALLOWED_ACTION_TYPES)}"
+                )
+                recursion.observe = observe
+                recursion.thought = thought
+                recursion.abstract = abstract
+                recursion.updated_at = datetime.now(timezone.utc)
+                self.db.commit()
+
+                return recursion, {
+                    "trace_id": trace_id,
+                    "action_type": "ERROR",
+                    "error": (
+                        f"Unsupported action_type: {action_type}. "
+                        f"Allowed values: {sorted(ALLOWED_ACTION_TYPES)}"
+                    ),
                     "tokens": tokens_data,
                     "assistant_message": assistant_message_json,
                 }
@@ -717,9 +833,23 @@ class ReactEngine:
                             f"trace_id={trace_id}, task_id={task.task_id}, payload={raw_update}"
                         )
                         continue
-                    step_id_to_update = raw_update.get("step_id")
-                    status_to_update = raw_update.get("status")
-                    if not isinstance(step_id_to_update, str) or not step_id_to_update:
+                    raw_step_id = raw_update.get("step_id")
+                    raw_status = raw_update.get("status")
+                    if isinstance(raw_step_id, str):
+                        step_id_to_update = raw_step_id.strip()
+                    elif isinstance(raw_step_id, int):
+                        # Some providers may coerce IDs to numbers.
+                        step_id_to_update = str(raw_step_id)
+                    else:
+                        step_id_to_update = ""
+
+                    status_to_update = (
+                        raw_status.strip().lower()
+                        if isinstance(raw_status, str)
+                        else ""
+                    )
+
+                    if not step_id_to_update:
                         logger.warning(
                             "Ignoring invalid step_status_update with missing/invalid step_id. "
                             f"trace_id={trace_id}, task_id={task.task_id}, payload={raw_update}"
@@ -851,21 +981,26 @@ class ReactEngine:
                 context.context["plan"] = new_plan_context
 
             # Sync explicit step status update from LLM to task state.
+            plan_step_rows = self.db.exec(
+                select(ReactPlanStep).where(ReactPlanStep.task_id == task.task_id)
+            ).all()
+            plan_step_by_normalized_id = {
+                step.step_id.strip(): step
+                for step in plan_step_rows
+                if isinstance(step.step_id, str)
+            }
+
             for validated_update in step_status_updates_validated:
                 step_id_to_update = validated_update["step_id"]
                 status_to_update = validated_update["status"]
 
-                plan_step_stmt = (
-                    select(ReactPlanStep)
-                    .where(ReactPlanStep.task_id == task.task_id)
-                    .where(ReactPlanStep.step_id == step_id_to_update)
-                )
-                plan_step = self.db.exec(plan_step_stmt).first()
+                plan_step = plan_step_by_normalized_id.get(step_id_to_update.strip())
                 if plan_step is None:
                     logger.warning(
                         "Ignoring step_status_update for unknown step_id. "
                         f"trace_id={trace_id}, task_id={task.task_id}, "
-                        f"step_id={step_id_to_update}, status={status_to_update}"
+                        f"step_id={step_id_to_update}, status={status_to_update}, "
+                        f"known_step_ids={sorted(plan_step_by_normalized_id.keys())}"
                     )
                     continue
 
@@ -876,7 +1011,11 @@ class ReactEngine:
 
                 # Keep in-memory snapshot context aligned with DB status.
                 for plan_step_ctx in context.context.get("plan", []):
-                    if plan_step_ctx.get("step_id") == step_id_to_update:
+                    plan_step_ctx_id = plan_step_ctx.get("step_id")
+                    if (
+                        isinstance(plan_step_ctx_id, str)
+                        and plan_step_ctx_id.strip() == step_id_to_update.strip()
+                    ):
                         plan_step_ctx["status"] = status_to_update
                         break
 
@@ -924,6 +1063,7 @@ class ReactEngine:
             event_data = {
                 "trace_id": trace_id,
                 "action_type": action_type,
+                "llm_response_id": response.id,
                 "observe": observe,
                 "thought": thought,
                 "abstract": abstract,
@@ -953,6 +1093,7 @@ class ReactEngine:
         except Exception as e:
             # Handle errors with detailed logging
             error_msg = str(e)
+            is_timeout_error = self._is_timeout_error(e)
             logger.error(
                 f"Recursion execution failed for trace_id={trace_id}\n"
                 f"Error type: {type(e).__name__}\n"
@@ -966,11 +1107,18 @@ class ReactEngine:
             recursion.updated_at = datetime.now(timezone.utc)
             self.db.commit()
 
+            rollback_messages = is_timeout_error
+
             return recursion, {
                 "trace_id": trace_id,
                 "action_type": "ERROR",
-                "error": error_msg,
+                "error": (
+                    f"LLM request timeout: {error_msg}"
+                    if is_timeout_error
+                    else error_msg
+                ),
                 "assistant_message": None,
+                "rollback_messages": rollback_messages,
             }
 
     async def run_task(
@@ -1026,6 +1174,7 @@ class ReactEngine:
             ]
             self._persist_task_messages(task, runtime_messages)
         logged_message_count = len(runtime_messages)
+        llm_cache_state = self._load_llm_cache_state(task)
 
         try:
             while task.iteration < task.max_iteration:
@@ -1068,11 +1217,22 @@ class ReactEngine:
                 )
                 logged_message_count = len(runtime_messages)
 
+                messages_for_llm = runtime_messages
+                llm_chat_kwargs: dict[str, Any] = {"_pivot_task_id": task.task_id}
+                if self._uses_incremental_request_messages():
+                    previous_response_id = llm_cache_state.get("previous_response_id")
+                    if isinstance(previous_response_id, str) and previous_response_id:
+                        llm_chat_kwargs["_pivot_previous_response_id"] = (
+                            previous_response_id
+                        )
+                        messages_for_llm = runtime_messages[-1:]
+
                 # Execute recursion against the fully accumulated message history.
                 recursion, event_data = await self.execute_recursion(
                     task=task,
                     context=context,
-                    messages=runtime_messages,
+                    messages=messages_for_llm,
+                    llm_chat_kwargs=llm_chat_kwargs,
                 )
                 rollback_messages = bool(event_data.get("rollback_messages", False))
                 if rollback_messages:
@@ -1082,6 +1242,10 @@ class ReactEngine:
                         runtime_messages.pop()
                     self._persist_task_messages(task, runtime_messages)
                     logged_message_count = len(runtime_messages)
+                    if self._uses_incremental_request_messages():
+                        # Drop chained cache linkage so malformed outputs do not keep
+                        # poisoning subsequent retries.
+                        llm_cache_state.pop("previous_response_id", None)
                 else:
                     assistant_message = event_data.get("assistant_message")
                     if isinstance(assistant_message, str) and assistant_message:
@@ -1099,14 +1263,21 @@ class ReactEngine:
                             iteration_message_start=2,
                         )
                         logged_message_count = len(runtime_messages)
+                    if self._uses_incremental_request_messages():
+                        response_id = event_data.get("llm_response_id")
+                        if isinstance(response_id, str) and response_id:
+                            llm_cache_state["previous_response_id"] = response_id
 
                 action_type = event_data.get("action_type", "")
+                if isinstance(action_type, str):
+                    action_type = action_type.strip()
                 next_action_result = self._build_next_pending_action_result(event_data)
                 if next_action_result is not None:
                     self._set_pending_action_result(task, next_action_result)
                 elif action_type != "ERROR":
                     # Keep previous action_result only when this recursion failed.
                     self._set_pending_action_result(task, None)
+                self._set_llm_cache_state(task, llm_cache_state)
                 self.db.add(task)
                 self.db.commit()
 

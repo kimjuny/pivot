@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Info, ChevronDown, ChevronUp } from 'lucide-react';
+import { Info, ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -31,6 +31,7 @@ export interface LLMFormData {
   model: string;
   api_key: string;
   protocol: string;
+  cache_policy: string;
   chat: boolean;
   system_role: boolean;
   tool_calling: string;
@@ -48,6 +49,126 @@ interface LLMModalProps {
   onSave: (data: LLMFormData) => Promise<void>;
 }
 
+interface ExtraConfigEntry {
+  id: string;
+  key: string;
+  value: string;
+}
+
+function createExtraConfigEntry(key = '', value = ''): ExtraConfigEntry {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    key,
+    value,
+  };
+}
+
+/**
+ * Parses raw JSON object string into editable key/value rows.
+ *
+ * Why: row-based editor is easier to use than free-form JSON for most users.
+ */
+function parseExtraConfigEntries(rawExtraConfig: string): ExtraConfigEntry[] {
+  const trimmed = rawExtraConfig.trim();
+  if (!trimmed) {
+    return [createExtraConfigEntry()];
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const entries = Object.entries(parsed as Record<string, unknown>).map(([key, value]) =>
+        createExtraConfigEntry(
+          key,
+          typeof value === 'string' ? value : JSON.stringify(value),
+        ),
+      );
+      return entries.length > 0 ? entries : [createExtraConfigEntry()];
+    }
+  } catch {
+    return [createExtraConfigEntry('', rawExtraConfig)];
+  }
+
+  return [createExtraConfigEntry('', rawExtraConfig)];
+}
+
+/**
+ * Validates and normalizes row-based extra config entries.
+ *
+ * Why: callers can type plain strings or JSON blocks as values, and each row
+ * must become a payload key-value pair sent to LLM request parameters.
+ */
+function validateAndNormalizeExtraConfigEntries(
+  entries: ExtraConfigEntry[],
+): { normalized: string; error: string | null } {
+  const normalizedObject: Record<string, unknown> = {};
+
+  for (const entry of entries) {
+    const key = entry.key.trim();
+    if (!key) {
+      if (entry.value.trim()) {
+        return { normalized: '', error: 'Extra Config key cannot be empty' };
+      }
+      continue;
+    }
+    if (key in normalizedObject) {
+      return { normalized: '', error: `Duplicate Extra Config key: ${key}` };
+    }
+
+    const rawValue = entry.value.trim();
+    if (!rawValue) {
+      normalizedObject[key] = '';
+      continue;
+    }
+
+    try {
+      normalizedObject[key] = JSON.parse(rawValue) as unknown;
+      continue;
+    } catch {
+      // Keep non-JSON value as plain string for user-friendly editing.
+    }
+
+    if (rawValue.startsWith('{') || rawValue.startsWith('[')) {
+      return {
+        normalized: '',
+        error: `Extra Config value for "${key}" looks like JSON but is invalid`,
+      };
+    }
+
+    normalizedObject[key] = entry.value;
+  }
+
+  if (Object.keys(normalizedObject).length === 0) {
+    return { normalized: '', error: null };
+  }
+
+  return { normalized: JSON.stringify(normalizedObject), error: null };
+}
+
+const CACHE_POLICY_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  openai_completion_llm: [
+    { value: 'none', label: 'None' },
+    { value: 'qwen-completion-block-cache', label: 'Qwen Completion Block Cache' },
+    {
+      value: 'kimi-completion-prompt-cache-key',
+      label: 'Kimi Completion Prompt Cache Key',
+    },
+  ],
+  openai_response_llm: [
+    { value: 'none', label: 'None' },
+    {
+      value: 'openai-response-prompt-cache-key',
+      label: 'OpenAI Response Prompt Cache Key',
+    },
+    { value: 'doubao-response-previous-id', label: 'Doubao Response Previous ID' },
+  ],
+  anthropic_compatible: [
+    { value: 'none', label: 'None' },
+    { value: 'anthropic-auto-cache', label: 'Anthropic Auto Cache' },
+    { value: 'anthropic-block-cache', label: 'Anthropic Block Cache' },
+  ],
+};
+
 /**
  * Modal for creating or editing an LLM configuration.
  * Uses shadcn Dialog with form inputs for LLM properties.
@@ -59,6 +180,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     model: '',
     api_key: '',
     protocol: 'openai_completion_llm',
+    cache_policy: 'none',
     chat: true,
     system_role: true,
     tool_calling: 'native',
@@ -69,7 +191,11 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showCacheControl, setShowCacheControl] = useState<boolean>(true);
   const [showAdvanced, setShowAdvanced] = useState<boolean>(false);
+  const [extraConfigEntries, setExtraConfigEntries] = useState<ExtraConfigEntry[]>([
+    createExtraConfigEntry(),
+  ]);
 
   useEffect(() => {
     if (isOpen) {
@@ -80,6 +206,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           model: initialData.model || '',
           api_key: initialData.api_key || '',
           protocol: initialData.protocol || 'openai_completion_llm',
+          cache_policy: initialData.cache_policy || 'none',
           chat: initialData.chat !== undefined ? initialData.chat : true,
           system_role: initialData.system_role !== undefined ? initialData.system_role : true,
           tool_calling: initialData.tool_calling || 'native',
@@ -88,6 +215,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           max_context: initialData.max_context || 128000,
           extra_config: initialData.extra_config || '',
         });
+        setExtraConfigEntries(parseExtraConfigEntries(initialData.extra_config || ''));
       } else {
         setFormData({
           name: '',
@@ -95,6 +223,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           model: '',
           api_key: '',
           protocol: 'openai_completion_llm',
+          cache_policy: 'none',
           chat: true,
           system_role: true,
           tool_calling: 'native',
@@ -103,10 +232,19 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           max_context: 128000,
           extra_config: '',
         });
+        setExtraConfigEntries([createExtraConfigEntry()]);
       }
       setServerError(null);
     }
   }, [isOpen, mode, initialData]);
+
+  useEffect(() => {
+    const options = CACHE_POLICY_OPTIONS[formData.protocol] ?? [{ value: 'none', label: 'None' }];
+    const isCurrentValid = options.some((option) => option.value === formData.cache_policy);
+    if (!isCurrentValid) {
+      setFormData((prev) => ({ ...prev, cache_policy: 'none' }));
+    }
+  }, [formData.protocol, formData.cache_policy]);
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
@@ -125,12 +263,20 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
       setServerError('API Key is required');
       return;
     }
+    const { normalized, error } = validateAndNormalizeExtraConfigEntries(extraConfigEntries);
+    if (error) {
+      setServerError(error);
+      return;
+    }
 
     setIsSubmitting(true);
     setServerError(null);
 
     try {
-      await onSave(formData);
+      await onSave({
+        ...formData,
+        extra_config: normalized,
+      });
       onClose();
     } catch (err) {
       const error = err as Error;
@@ -138,6 +284,27 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const updateExtraConfigEntry = (
+    id: string,
+    field: 'key' | 'value',
+    value: string,
+  ) => {
+    setExtraConfigEntries((prev) =>
+      prev.map((entry) => (entry.id === id ? { ...entry, [field]: value } : entry)),
+    );
+  };
+
+  const addExtraConfigEntry = () => {
+    setExtraConfigEntries((prev) => [...prev, createExtraConfigEntry()]);
+  };
+
+  const removeExtraConfigEntry = (id: string) => {
+    setExtraConfigEntries((prev) => {
+      const next = prev.filter((entry) => entry.id !== id);
+      return next.length > 0 ? next : [createExtraConfigEntry()];
+    });
   };
 
   return (
@@ -290,6 +457,48 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Cache Control Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowCacheControl(!showCacheControl)}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {showCacheControl ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              <span>Cache Control</span>
+            </button>
+
+            {showCacheControl && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="cache_policy">Cache Policy</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      <p>Protocol-specific caching strategy. None means non-cached communication.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <Select
+                  value={formData.cache_policy}
+                  onValueChange={(value) => setFormData({ ...formData, cache_policy: value })}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger id="cache_policy">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(CACHE_POLICY_OPTIONS[formData.protocol] ?? []).map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             {/* Advanced Options Toggle */}
             <button
@@ -449,25 +658,65 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
 
                 {/* Extra Config */}
                 <div className="space-y-2 pt-2">
-                  <div className="flex items-center gap-1.5">
-                    <Label htmlFor="extra_config">Extra Config (JSON)</Label>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs">
-                        <p>Additional kwargs to pass to LLM API calls. Example: {"{"}"extra_body": {"{"}"reasoning_split": true{"}"}{"}"} or {"{"}"temperature": 0.7{"}"}</p>
-                      </TooltipContent>
-                    </Tooltip>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Label>Extra Config</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p>Each key-value pair is sent as request params to the LLM API. Value supports JSON (object/array/number/boolean) or plain string.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addExtraConfigEntry}
+                      disabled={isSubmitting}
+                      className="h-8 px-2"
+                      aria-label="Add extra config row"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
                   </div>
-                  <textarea
-                    id="extra_config"
-                    value={formData.extra_config}
-                    onChange={(e) => setFormData({ ...formData, extra_config: e.target.value })}
-                    disabled={isSubmitting}
-                    placeholder='{"extra_body": {"reasoning_split": true}}'
-                    className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 font-mono"
-                  />
+                  <div className="space-y-2">
+                    {extraConfigEntries.map((entry) => (
+                      <div key={entry.id} className="grid grid-cols-[1fr_auto_2fr_auto] gap-2 items-center">
+                        <Input
+                          value={entry.key}
+                          onChange={(e) => updateExtraConfigEntry(entry.id, 'key', e.target.value)}
+                          disabled={isSubmitting}
+                          placeholder="key (e.g. response_format)"
+                          autoComplete="off"
+                        />
+                        <span className="text-muted-foreground text-sm px-1" aria-hidden="true">
+                          =
+                        </span>
+                        <Input
+                          value={entry.value}
+                          onChange={(e) => updateExtraConfigEntry(entry.id, 'value', e.target.value)}
+                          disabled={isSubmitting}
+                          placeholder='value (e.g. {"type":"json_object"} or hello)'
+                          className="font-mono"
+                          autoComplete="off"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeExtraConfigEntry(entry.id)}
+                          disabled={isSubmitting}
+                          className="h-9 w-9 p-0"
+                          aria-label="Remove extra config row"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

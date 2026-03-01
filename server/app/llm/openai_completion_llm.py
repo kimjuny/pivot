@@ -20,6 +20,7 @@ from .abstract_llm import (
     Response,
     UsageInfo,
 )
+from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 
 
 class OpenAICompletionLLM(AbstractLLM):
@@ -45,6 +46,7 @@ class OpenAICompletionLLM(AbstractLLM):
         endpoint: str,
         model: str,
         api_key: str,
+        cache_policy: str = DEFAULT_CACHE_POLICY,
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -71,8 +73,40 @@ class OpenAICompletionLLM(AbstractLLM):
         self.endpoint = endpoint
         self.model = model
         self.api_key = api_key
+        self.cache_policy = validate_cache_policy(
+            "openai_completion_llm",
+            cache_policy,
+        )
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
+
+    def _messages_with_cached_last_block(
+        self, messages: list[dict[str, str]]
+    ) -> list[dict[str, Any]]:
+        """Return messages with ephemeral cache control on the last block."""
+        if not messages:
+            return []
+
+        cached_messages: list[dict[str, Any]] = [dict(m) for m in messages]
+        last_message = dict(cached_messages[-1])
+        last_content = last_message.get("content", "")
+
+        if isinstance(last_content, str):
+            last_message["content"] = [
+                {
+                    "type": "text",
+                    "text": last_content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        elif isinstance(last_content, list) and last_content:
+            content_blocks = [dict(block) for block in last_content]
+            if isinstance(content_blocks[-1], dict):
+                content_blocks[-1]["cache_control"] = {"type": "ephemeral"}
+            last_message["content"] = content_blocks
+
+        cached_messages[-1] = last_message
+        return cached_messages
 
     def _parse_dict_response(self, raw_dict: dict[str, Any], model: str) -> Response:
         """Parse raw JSON dict into structured Response object."""
@@ -87,6 +121,8 @@ class OpenAICompletionLLM(AbstractLLM):
             role = message_data.get("role", "assistant")
             content = message_data.get("content", "") or ""
             reasoning_content = message_data.get("reasoning_content", None)
+            if not isinstance(reasoning_content, str) or not reasoning_content:
+                reasoning_content = self._extract_reasoning_details_text(message_data)
 
             tool_calls = None
             raw_tool_calls = message_data.get("tool_calls", None)
@@ -141,6 +177,39 @@ class OpenAICompletionLLM(AbstractLLM):
             usage=usage,
         )
 
+    @staticmethod
+    def _extract_reasoning_details_text(message_data: dict[str, Any]) -> str | None:
+        """Extract reasoning text from MiniMax-style ``reasoning_details`` blocks."""
+        raw_details = message_data.get("reasoning_details")
+        if not isinstance(raw_details, list):
+            return None
+
+        parts: list[str] = []
+        for detail in raw_details:
+            if not isinstance(detail, dict):
+                continue
+            detail_text = detail.get("text")
+            if isinstance(detail_text, str) and detail_text:
+                parts.append(detail_text)
+        if not parts:
+            return None
+        return "".join(parts)
+
+    @staticmethod
+    def _merge_extra_body_kwargs(merged_kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Normalize OpenAI SDK-style ``extra_body`` into raw HTTP payload keys.
+
+        Why: this implementation sends raw HTTP JSON. ``extra_body`` is an SDK-level
+        argument (used by OpenAI SDK) and should be flattened when present.
+        """
+        normalized_kwargs = dict(merged_kwargs)
+        extra_body = normalized_kwargs.pop("extra_body", None)
+        if isinstance(extra_body, dict):
+            # Preserve explicit top-level kwargs if both are provided.
+            for key, value in extra_body.items():
+                normalized_kwargs.setdefault(key, value)
+        return normalized_kwargs
+
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
         """Process a conversation with the LLM.
 
@@ -156,8 +225,10 @@ class OpenAICompletionLLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
+            pivot_task_id = kwargs.pop("_pivot_task_id", "")
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
+            normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {
@@ -165,7 +236,21 @@ class OpenAICompletionLLM(AbstractLLM):
                 "Content-Type": "application/json",
             }
 
-            payload = {"model": self.model, "messages": messages, **merged_kwargs}
+            request_messages: list[dict[str, Any]] = list(messages)
+            if self.cache_policy == "qwen-completion-block-cache":
+                request_messages = self._messages_with_cached_last_block(messages)
+
+            payload: dict[str, Any] = {
+                "model": self.model,
+                "messages": request_messages,
+                **normalized_kwargs,
+            }
+            if (
+                self.cache_policy == "kimi-completion-prompt-cache-key"
+                and isinstance(pivot_task_id, str)
+                and pivot_task_id
+            ):
+                payload["prompt_cache_key"] = pivot_task_id
 
             response = requests.post(
                 url, headers=headers, json=payload, timeout=self.timeout
@@ -205,8 +290,10 @@ class OpenAICompletionLLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
+            pivot_task_id = kwargs.pop("_pivot_task_id", "")
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
+            normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {
@@ -214,12 +301,22 @@ class OpenAICompletionLLM(AbstractLLM):
                 "Content-Type": "application/json",
             }
 
-            payload = {
+            request_messages: list[dict[str, Any]] = list(messages)
+            if self.cache_policy == "qwen-completion-block-cache":
+                request_messages = self._messages_with_cached_last_block(messages)
+
+            payload: dict[str, Any] = {
                 "model": self.model,
-                "messages": messages,
+                "messages": request_messages,
                 "stream": True,
-                **merged_kwargs,
+                **normalized_kwargs,
             }
+            if (
+                self.cache_policy == "kimi-completion-prompt-cache-key"
+                and isinstance(pivot_task_id, str)
+                and pivot_task_id
+            ):
+                payload["prompt_cache_key"] = pivot_task_id
 
             with requests.post(
                 url, headers=headers, json=payload, timeout=self.timeout, stream=True
