@@ -47,6 +47,7 @@
       "step_id": "string",
       "general_goal": "string",
       "specific_description": "string",
+      "completion_criteria": "string",
       "status": "pending | running | done | error",
       "recursion_history": [] // 外围程序将在这里维护每一个与step相关联的recursion的完整快照，也要加上iteration索引
     }

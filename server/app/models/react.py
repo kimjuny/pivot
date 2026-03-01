@@ -28,6 +28,8 @@ class ReactTask(SQLModel, table=True):
         user: Username of the user who initiated the task.
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
+        llm_messages: Serialized OpenAI-style message list used during recursion.
+        pending_action_result: Serialized action result to inject into next user message.
         status: Current status (pending, running, completed, failed).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
@@ -50,6 +52,20 @@ class ReactTask(SQLModel, table=True):
     # Keep the persisted DB column name "objective" for compatibility with
     # existing deployments/data. Use the user_intent property in application code.
     objective: str = Field(description="Task user intent (legacy column: objective)")
+    llm_messages: str = Field(
+        default="[]",
+        description=(
+            "Serialized list[message] sent to LLM during this task. "
+            "Messages are appended per recursion to maximize prompt cache reuse."
+        ),
+    )
+    pending_action_result: str | None = Field(
+        default=None,
+        description=(
+            "Serialized action result payload to inject into the next recursion "
+            "user message as action_result."
+        ),
+    )
     status: str = Field(
         default="pending",
         description="Status: pending, running, completed, failed",

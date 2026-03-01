@@ -24,7 +24,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
 from .context import ReactContext
-from .prompt_template import build_system_messages
+from .prompt_template import build_runtime_system_prompt
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -101,13 +101,284 @@ class ReactEngine:
                 f"Failed to parse JSON {e.msg} at position {e.pos}: {json_str}"
             ) from e
 
+    def _normalize_assistant_message_json(self, content: str) -> str | None:
+        """Normalize assistant content to strict JSON string for persistence.
+
+        Args:
+            content: Raw assistant content from LLM.
+
+        Returns:
+            Canonical JSON string if valid; otherwise None.
+        """
+        try:
+            parsed = self._safe_load_json(content)
+        except ValueError:
+            return None
+        return json.dumps(parsed, ensure_ascii=False)
+
+    def _format_message_content_for_log(self, content: str) -> str:
+        """Format one message content for human-readable logging.
+
+        Args:
+            content: Raw message content.
+
+        Returns:
+            Pretty-printed string for log output.
+        """
+        try:
+            parsed = self._safe_load_json(content)
+        except ValueError:
+            return content
+        return json.dumps(parsed, ensure_ascii=False, indent=2)
+
+    def _log_messages_pretty(
+        self,
+        messages: list[dict[str, Any]],
+        task_id: str,
+        iteration: int,
+        trace_id: str,
+    ) -> None:
+        """Log full message history with readable per-message formatting.
+
+        Args:
+            messages: Full message history sent to LLM.
+            task_id: Current task UUID.
+            iteration: Current iteration index.
+            trace_id: Current recursion trace ID.
+        """
+        rendered_lines = [
+            (
+                "LLM messages snapshot\n"
+                f"task_id={task_id} iteration={iteration} trace_id={trace_id} "
+                f"count={len(messages)}"
+            )
+        ]
+        for idx, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            if role == "system":
+                continue
+            raw_content = msg.get("content", "")
+            content = raw_content if isinstance(raw_content, str) else str(raw_content)
+            rendered_lines.append(f"[{idx}] role={role}")
+            rendered_lines.append(self._format_message_content_for_log(content))
+
+        logger.info("\n%s", "\n".join(rendered_lines))
+
+    def _load_task_messages(self, task: ReactTask) -> list[dict[str, str]]:
+        """Load persisted task-level LLM messages from database.
+
+        Args:
+            task: Task containing serialized message history.
+
+        Returns:
+            Sanitized OpenAI-style message list.
+        """
+        if not task.llm_messages:
+            return []
+
+        try:
+            raw_messages = json.loads(task.llm_messages)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Invalid llm_messages JSON detected; resetting task messages. task_id=%s",
+                task.task_id,
+            )
+            return []
+
+        if not isinstance(raw_messages, list):
+            logger.warning(
+                "Invalid llm_messages payload type; expected list. task_id=%s",
+                task.task_id,
+            )
+            return []
+
+        normalized: list[dict[str, str]] = []
+        for item in raw_messages:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if (
+                isinstance(role, str)
+                and role in {"system", "user", "assistant"}
+                and isinstance(content, str)
+            ):
+                normalized.append({"role": role, "content": content})
+        return normalized
+
+    def _persist_task_messages(
+        self, task: ReactTask, messages: list[dict[str, str]]
+    ) -> None:
+        """Persist full task-level LLM message history.
+
+        Args:
+            task: Task to update.
+            messages: Full OpenAI-style message list.
+        """
+        task.llm_messages = json.dumps(messages, ensure_ascii=False)
+        task.updated_at = datetime.now(timezone.utc)
+        self.db.add(task)
+        self.db.commit()
+
+    def _load_pending_action_result(
+        self, task: ReactTask
+    ) -> list[dict[str, Any]] | None:
+        """Load pending action_result payload for next recursion user message.
+
+        Args:
+            task: Task containing serialized pending action result.
+
+        Returns:
+            Parsed action result list, or None if absent/invalid.
+        """
+        if not task.pending_action_result:
+            return None
+
+        try:
+            payload = json.loads(task.pending_action_result)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Invalid pending_action_result JSON; dropping it. task_id=%s",
+                task.task_id,
+            )
+            return None
+
+        if not isinstance(payload, list):
+            return None
+        normalized_results: list[dict[str, Any]] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            normalized_item: dict[str, Any] = {}
+            item_id = item.get("id")
+            if isinstance(item_id, str) and item_id:
+                normalized_item["id"] = item_id
+            if "result" in item:
+                normalized_item["result"] = item["result"]
+            elif "error" in item:
+                normalized_item["error"] = item["error"]
+            if normalized_item:
+                normalized_results.append(normalized_item)
+        return normalized_results
+
+    def _set_pending_action_result(
+        self, task: ReactTask, action_result: list[dict[str, Any]] | None
+    ) -> None:
+        """Update pending action result payload persisted on task.
+
+        Args:
+            task: Task to update.
+            action_result: Payload list to persist; None clears the value.
+        """
+        task.pending_action_result = (
+            json.dumps(action_result, ensure_ascii=False)
+            if action_result is not None
+            else None
+        )
+
+    def _clear_task_runtime_messages(self, task: ReactTask) -> None:
+        """Clear ephemeral per-task message/action state after task completion.
+
+        Args:
+            task: Task whose runtime prompting state should be reset.
+        """
+        task.llm_messages = "[]"
+        task.pending_action_result = None
+        task.updated_at = datetime.now(timezone.utc)
+        self.db.add(task)
+        self.db.commit()
+
+    def _build_current_plan_payload(self, context: ReactContext) -> list[dict[str, Any]]:
+        """Convert current in-memory plan context to compact user-message payload.
+
+        Args:
+            context: Current ReAct context snapshot.
+
+        Returns:
+            List of plan step dictionaries for user-message injection.
+        """
+        current_plan: list[dict[str, Any]] = []
+        for step in context.context.get("plan", []):
+            if not isinstance(step, dict):
+                continue
+            step_id = step.get("step_id")
+            if not isinstance(step_id, str):
+                continue
+            current_plan.append(
+                {
+                    "step_id": step_id,
+                    "general_goal": step.get("general_goal", ""),
+                    "specific_description": step.get("specific_description", ""),
+                    "completion_criteria": step.get("completion_criteria", ""),
+                    "status": step.get("status", "pending"),
+                }
+            )
+        return current_plan
+
+    def _build_recursion_user_payload(
+        self, task: ReactTask, context: ReactContext
+    ) -> dict[str, Any]:
+        """Build the per-recursion user payload appended to messages.
+
+        Args:
+            task: Current running task.
+            context: Current context snapshot.
+
+        Returns:
+            Serializable payload for the recursion user message.
+        """
+        payload: dict[str, Any] = {
+            "iteration": task.iteration + 1,
+            "user_intent": task.user_intent,
+            "current_plan": self._build_current_plan_payload(context),
+        }
+        pending_action_result = self._load_pending_action_result(task)
+        if pending_action_result is not None:
+            payload["action_result"] = pending_action_result
+        return payload
+
+    def _build_next_pending_action_result(
+        self, event_data: dict[str, Any]
+    ) -> list[dict[str, Any]] | None:
+        """Derive next recursion's action_result payload from current action output.
+
+        Args:
+            event_data: Recursion event payload produced by execute_recursion.
+
+        Returns:
+            action_result payload list for next recursion, or None when not needed.
+        """
+        action_type = event_data.get("action_type")
+        if action_type == "CALL_TOOL":
+            tool_results = event_data.get("tool_results", [])
+            if not isinstance(tool_results, list):
+                return [{"error": "Invalid tool_results payload"}]
+            compact_results: list[dict[str, Any]] = []
+            for result_item in tool_results:
+                if not isinstance(result_item, dict):
+                    continue
+                compact_item: dict[str, Any] = {}
+                tool_call_id = result_item.get("tool_call_id")
+                if isinstance(tool_call_id, str) and tool_call_id:
+                    compact_item["id"] = tool_call_id
+                if result_item.get("success") is True:
+                    compact_item["result"] = result_item.get("result")
+                else:
+                    compact_item["error"] = result_item.get(
+                        "error", "Tool execution failed"
+                    )
+                compact_results.append(compact_item)
+            return compact_results
+        if action_type == "CLARIFY":
+            output = event_data.get("output", {})
+            return [{"result": output if isinstance(output, dict) else {}}]
+        return None
+
     async def execute_recursion(
         self,
         task: ReactTask,
         context: ReactContext,
         messages: list[dict[str, Any]],
-        session_memory: dict[str, Any] | None = None,
-        skills: str = "",
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """
         Execute a single recursion cycle.
@@ -138,32 +409,23 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Build split system prompt messages with current context, available tools,
-        # session memory, and selected skills.
-        system_messages = build_system_messages(
-            context=context,
-            tool_manager=self.tool_manager,
-            session_memory=session_memory,
-            skills=skills,
-        )
-
-        # Message layout is fixed per recursion to maximize cache reuse:
-        # [0] immutable system prompt, [1] weak-cache system prompt,
-        # [2] no-cache system prompt, [3] user message.
-        messages[0] = {"role": "system", "content": system_messages[0]}
-        messages[1] = {"role": "system", "content": system_messages[1]}
-        messages[2] = {"role": "system", "content": system_messages[2]}
-
         # Call LLM WITHOUT tools parameter (using prompt-based approach).
         # Tools are described in the system prompt, and LLM returns tool calls
         # in action.output.
         try:
+            self._log_messages_pretty(
+                messages=messages,
+                task_id=task.task_id,
+                iteration=task.iteration,
+                trace_id=trace_id,
+            )
             response = await run_in_threadpool(self.llm.chat, messages=messages)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
             # Parse JSON from content to get observe, thought, abstract, action_type
             content = message.content or "{}"
+            assistant_message_json = self._normalize_assistant_message_json(content)
 
             # Use safe JSON parser to handle all common LLM formatting issues
             try:
@@ -207,6 +469,8 @@ class ReactEngine:
                     "action_type": "ERROR",
                     "error": str(e),
                     "tokens": tokens_data,
+                    "assistant_message": None,
+                    "rollback_messages": True,
                 }
 
             observe = react_output.get("observe", "")
@@ -216,7 +480,7 @@ class ReactEngine:
             action = react_output.get("action", {})
             action_type = action.get("action_type", "")
             action_output = action.get("output", {})
-            step_status_update = action.get("step_status_update", {})
+            step_status_update = action.get("step_status_update", [])
 
             # Extract the plan step this recursion belongs to.
             # The LLM returns action.step_id when executing as part of a plan.
@@ -261,6 +525,7 @@ class ReactEngine:
                     "action_type": "ERROR",
                     "error": "Empty action_type from LLM",
                     "tokens": tokens_data,
+                    "assistant_message": assistant_message_json,
                 }
 
             # Handle CALL_TOOL with native function calling
@@ -311,6 +576,7 @@ class ReactEngine:
                         "action_type": "ERROR",
                         "error": "CALL_TOOL requires tool_calls in action.output",
                         "tokens": tokens_data,
+                        "assistant_message": assistant_message_json,
                     }
 
                 # Process tool_calls from action.output
@@ -429,30 +695,42 @@ class ReactEngine:
 
             recursion.plan_step_id = action_step_id
 
-            # Validate optional step status update requested by the LLM.
-            step_status_update_validated: dict[str, str] | None = None
-            if step_status_update:
-                step_id_to_update = step_status_update.get("step_id")
-                status_to_update = step_status_update.get("status")
+            # Validate optional step status updates requested by the LLM.
+            raw_step_updates = (
+                [step_status_update]
+                if isinstance(step_status_update, dict)
+                else step_status_update
+            )
+            step_status_updates_validated: list[dict[str, str]] = []
+            if raw_step_updates and isinstance(raw_step_updates, list):
                 allowed_step_statuses = {"pending", "running", "done", "error"}
-                if not isinstance(step_id_to_update, str) or not step_id_to_update:
-                    logger.warning(
-                        "Ignoring invalid step_status_update with missing/invalid step_id. "
-                        f"trace_id={trace_id}, task_id={task.task_id}, payload={step_status_update}"
+                for raw_update in raw_step_updates:
+                    if not isinstance(raw_update, dict):
+                        logger.warning(
+                            "Ignoring invalid step_status_update item (not object). "
+                            f"trace_id={trace_id}, task_id={task.task_id}, payload={raw_update}"
+                        )
+                        continue
+                    step_id_to_update = raw_update.get("step_id")
+                    status_to_update = raw_update.get("status")
+                    if not isinstance(step_id_to_update, str) or not step_id_to_update:
+                        logger.warning(
+                            "Ignoring invalid step_status_update with missing/invalid step_id. "
+                            f"trace_id={trace_id}, task_id={task.task_id}, payload={raw_update}"
+                        )
+                        continue
+                    if (
+                        not isinstance(status_to_update, str)
+                        or status_to_update not in allowed_step_statuses
+                    ):
+                        logger.warning(
+                            "Ignoring invalid step_status_update with unsupported status. "
+                            f"trace_id={trace_id}, task_id={task.task_id}, payload={raw_update}"
+                        )
+                        continue
+                    step_status_updates_validated.append(
+                        {"step_id": step_id_to_update, "status": status_to_update}
                     )
-                elif (
-                    not isinstance(status_to_update, str)
-                    or status_to_update not in allowed_step_statuses
-                ):
-                    logger.warning(
-                        "Ignoring invalid step_status_update with unsupported status. "
-                        f"trace_id={trace_id}, task_id={task.task_id}, payload={step_status_update}"
-                    )
-                else:
-                    step_status_update_validated = {
-                        "step_id": step_id_to_update,
-                        "status": status_to_update,
-                    }
 
             # Save short_term_memory if any
             if short_term_memory_append:
@@ -502,12 +780,12 @@ class ReactEngine:
                 "trace_id": trace_id,
                 "observe": observe,
                 "thought": thought,
-                "action": {
-                    "action_type": action_type,
-                    "output": action_output,
-                    "step_status_update": step_status_update_validated,
-                },
-            }
+                    "action": {
+                        "action_type": action_type,
+                        "output": action_output,
+                        "step_status_update": step_status_updates_validated,
+                    },
+                }
 
             # --- 1. UPDATE IN-MEMORY STATE BEfORE SNAPSHOT ---
             # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred
@@ -576,9 +854,9 @@ class ReactEngine:
                 context.context["plan"] = new_plan_context
 
             # Sync explicit step status update from LLM to task state.
-            if step_status_update_validated is not None:
-                step_id_to_update = step_status_update_validated["step_id"]
-                status_to_update = step_status_update_validated["status"]
+            for validated_update in step_status_updates_validated:
+                step_id_to_update = validated_update["step_id"]
+                status_to_update = validated_update["status"]
 
                 plan_step_stmt = (
                     select(ReactPlanStep)
@@ -592,17 +870,18 @@ class ReactEngine:
                         f"trace_id={trace_id}, task_id={task.task_id}, "
                         f"step_id={step_id_to_update}, status={status_to_update}"
                     )
-                else:
-                    plan_step.status = status_to_update
-                    plan_step.updated_at = datetime.now(timezone.utc)
-                    self.db.add(plan_step)
-                    self.db.commit()
+                    continue
 
-                    # Keep in-memory snapshot context aligned with DB status.
-                    for plan_step_ctx in context.context.get("plan", []):
-                        if plan_step_ctx.get("step_id") == step_id_to_update:
-                            plan_step_ctx["status"] = status_to_update
-                            break
+                plan_step.status = status_to_update
+                plan_step.updated_at = datetime.now(timezone.utc)
+                self.db.add(plan_step)
+                self.db.commit()
+
+                # Keep in-memory snapshot context aligned with DB status.
+                for plan_step_ctx in context.context.get("plan", []):
+                    if plan_step_ctx.get("step_id") == step_id_to_update:
+                        plan_step_ctx["status"] = status_to_update
+                        break
 
             # --- 2. LINK TARGET RECURSION ---
             # Sync the current recursion into its matching plan step for the snapshot
@@ -631,13 +910,10 @@ class ReactEngine:
             self.db.add(recursion_state)
             self.db.commit()
 
-            # Do NOT add assistant messages to avoid confusing LLM
-            # The state machine injection in next recursion's system prompt
-            # will include tool_call_results in last_recursion
-            # This is sufficient for LLM to understand what happened
+            # Runtime LLM messages are managed in run_task, where each recursion
+            # appends one user payload and one assistant JSON response.
             if action_type == "ANSWER":
-                # For ANSWER, don't add to messages as the task is complete
-                # Task status will be updated to 'completed' in run_task
+                # ANSWER task finalization is handled in run_task.
                 pass
 
             if action_type == "CLARIFY":
@@ -647,10 +923,6 @@ class ReactEngine:
                 task.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
 
-            # For all other action types (CALL_TOOL, RE_PLAN, etc.),
-            # we rely on the state machine context to convey the results
-            # No need to append to messages
-
             # Prepare event data
             event_data = {
                 "trace_id": trace_id,
@@ -659,6 +931,7 @@ class ReactEngine:
                 "thought": thought,
                 "abstract": abstract,
                 "output": action_output,
+                "assistant_message": assistant_message_json,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
                 # Session memory related fields (for ANSWER action)
@@ -666,7 +939,7 @@ class ReactEngine:
                 "session_subject": session_subject,
                 "session_goal": session_goal,
                 "task_summary": task_summary,
-                "step_status_update": step_status_update_validated,
+                "step_status_update": step_status_updates_validated,
             }
 
             # Add token usage if available
@@ -700,18 +973,22 @@ class ReactEngine:
                 "trace_id": trace_id,
                 "action_type": "ERROR",
                 "error": error_msg,
+                "assistant_message": None,
             }
 
     async def run_task(
         self,
         task: ReactTask,
         selected_skills_text: str = "",
+        turn_user_message: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
 
         Args:
-            task: The ReactTask to execute
+            task: The ReactTask to execute.
+            selected_skills_text: Selected skill markdown block injected in system prompt.
+            turn_user_message: User input of the current turn (used for chat history).
 
         Yields:
             Stream events for each recursion cycle
@@ -728,7 +1005,9 @@ class ReactEngine:
             )
             # Update chat history with user input
             session_service.update_chat_history(
-                task.session_id, "user", task.user_message
+                task.session_id,
+                "user",
+                turn_user_message or task.user_message,
             )
 
         # Update task status
@@ -736,8 +1015,21 @@ class ReactEngine:
         task.updated_at = datetime.now(timezone.utc)
         self.db.commit()
 
+        runtime_messages = self._load_task_messages(task)
+        if not runtime_messages:
+            runtime_messages = [
+                {
+                    "role": "system",
+                    "content": build_runtime_system_prompt(
+                        tool_manager=self.tool_manager,
+                        session_memory=session_memory_dict,
+                        skills=selected_skills_text,
+                    ),
+                }
+            ]
+            self._persist_task_messages(task, runtime_messages)
+
         try:
-            previous_recursion_failed = False
             while task.iteration < task.max_iteration:
                 # Check if task was cancelled
                 if self.cancelled:
@@ -745,6 +1037,7 @@ class ReactEngine:
                     task.status = "cancelled"
                     task.updated_at = datetime.now(timezone.utc)
                     self.db.commit()
+                    self._clear_task_runtime_messages(task)
                     break
                 # Load current context
                 context = ReactContext.from_task(task, self.db)
@@ -757,23 +1050,46 @@ class ReactEngine:
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
-                # Execute recursion
-                inject_extra_context = task.iteration == 0 or previous_recursion_failed
+                # Append iteration payload as a new user message.
+                user_payload = self._build_recursion_user_payload(task, context)
+                runtime_messages.append(
+                    {
+                        "role": "user",
+                        "content": json.dumps(user_payload, ensure_ascii=False),
+                    }
+                )
+                self._persist_task_messages(task, runtime_messages)
+
+                # Execute recursion against the fully accumulated message history.
                 recursion, event_data = await self.execute_recursion(
                     task=task,
                     context=context,
-                    messages=[
-                        {"role": "system", "content": ""},
-                        {"role": "system", "content": ""},
-                        {"role": "system", "content": ""},
-                        {"role": "user", "content": task.user_message},
-                    ],
-                    # Session memory is always injected in message[1] to improve
-                    # response quality while preserving cacheability split.
-                    session_memory=session_memory_dict,
-                    skills=selected_skills_text if inject_extra_context else "",
+                    messages=runtime_messages,
                 )
-                previous_recursion_failed = recursion.status == "error"
+                rollback_messages = bool(event_data.get("rollback_messages", False))
+                if rollback_messages:
+                    # Parse errors should be visible to users, but must not pollute
+                    # persisted LLM messages. Roll back the just-appended user payload.
+                    if runtime_messages and runtime_messages[-1].get("role") == "user":
+                        runtime_messages.pop()
+                    self._persist_task_messages(task, runtime_messages)
+                else:
+                    assistant_message = event_data.get("assistant_message")
+                    if isinstance(assistant_message, str) and assistant_message:
+                        runtime_messages.append(
+                            {"role": "assistant", "content": assistant_message}
+                        )
+                        self._persist_task_messages(task, runtime_messages)
+
+                action_type = event_data.get("action_type", "")
+                next_action_result = self._build_next_pending_action_result(event_data)
+                if next_action_result is not None:
+                    self._set_pending_action_result(task, next_action_result)
+                elif action_type != "ERROR":
+                    # Keep previous action_result only when this recursion failed.
+                    self._set_pending_action_result(task, None)
+                self.db.add(task)
+                self.db.commit()
 
                 # Yield Observe, Thought, Action events with token info
                 if recursion.observe:
@@ -816,7 +1132,6 @@ class ReactEngine:
                     }
 
                 # Yield action event with type and token info
-                action_type = event_data.get("action_type", "")
                 yield {
                     "type": "action",
                     "task_id": task.task_id,
@@ -920,6 +1235,7 @@ class ReactEngine:
                     task.status = "completed"
                     task.updated_at = datetime.now(timezone.utc)
                     self.db.commit()
+                    self._clear_task_runtime_messages(task)
 
                     yield {
                         "type": "task_complete",
@@ -952,10 +1268,12 @@ class ReactEngine:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
-                    # Increment iteration and continue (retry)
-                    task.iteration += 1
-                    task.updated_at = datetime.now(timezone.utc)
-                    self.db.commit()
+                    # For malformed JSON we roll back this recursion from the LLM
+                    # conversation and retry without consuming iteration budget.
+                    if not rollback_messages:
+                        task.iteration += 1
+                        task.updated_at = datetime.now(timezone.utc)
+                        self.db.commit()
                     continue
 
                 # Update iteration count
@@ -968,6 +1286,7 @@ class ReactEngine:
                 task.status = "failed"
                 task.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
+                self._clear_task_runtime_messages(task)
 
                 yield {
                     "type": "error",
@@ -981,6 +1300,7 @@ class ReactEngine:
             task.status = "failed"
             task.updated_at = datetime.now(timezone.utc)
             self.db.commit()
+            self._clear_task_runtime_messages(task)
 
             yield {
                 "type": "error",

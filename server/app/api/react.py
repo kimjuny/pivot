@@ -175,6 +175,13 @@ async def react_chat_stream(
                             )
                             last_rec.updated_at = datetime.now(timezone.utc)
                             db.add(last_rec)
+                            # Persist reply as the next recursion's action_result
+                            # input so the model can continue from CLARIFY context.
+                            existing_task.pending_action_result = json.dumps(
+                                [{"result": output}],
+                                ensure_ascii=False,
+                            )
+                            db.add(existing_task)
 
                             # Resume task
                             task = existing_task
@@ -378,6 +385,7 @@ async def react_chat_stream(
             async for event_data in engine.run_task(
                 task=task,
                 selected_skills_text=selected_skills_text,
+                turn_user_message=request.message,
             ):
                 # Check if client disconnected via Request object
                 if await raw_request.is_disconnected():

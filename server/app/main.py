@@ -137,6 +137,8 @@ async def startup_event():
         ("agent", "skill_ids", "VARCHAR"),
         ("agent", "skill_resolution_llm_id", "INTEGER"),
         ("reacttask", "total_cached_input_tokens", "INTEGER DEFAULT 0"),
+        ("reacttask", "llm_messages", "TEXT DEFAULT '[]'"),
+        ("reacttask", "pending_action_result", "TEXT"),
         ("reactrecursion", "cached_input_tokens", "INTEGER DEFAULT 0"),
     ]
     with engine.begin() as conn:

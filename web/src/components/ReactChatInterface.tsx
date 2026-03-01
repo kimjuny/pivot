@@ -85,6 +85,7 @@ interface PlanStepData {
  * Recursion record in chat history.
  */
 interface RecursionRecord {
+  uid: string;
   iteration: number;
   trace_id: string | null;
   observe?: string;
@@ -318,6 +319,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 }
 
                 return {
+                  uid: `history-${task.task_id}-${r.trace_id || `iter-${r.iteration}`}`,
                   iteration: r.iteration,
                   trace_id: r.trace_id,
                   observe: r.observe || undefined,
@@ -509,6 +511,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           }
 
           return {
+            uid: `history-${task.task_id}-${r.trace_id || `iter-${r.iteration}`}`,
             iteration: r.iteration,
             trace_id: r.trace_id,
             observe: r.observe || undefined,
@@ -839,7 +842,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       // Filter out nulls and update matching recursion
                       const filtered = (msg.recursions || []).filter((r): r is RecursionRecord => r !== null);
                       const updatedRecursions = filtered.map((r) =>
-                        r.iteration === prevRecursionSnapshot.iteration ? prevRecursionSnapshot : r
+                        r.uid === prevRecursionSnapshot.uid ? prevRecursionSnapshot : r
                       );
                       return { ...msg, recursions: updatedRecursions };
                     }
@@ -851,6 +854,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               // Start new recursion
               currentTaskId = event.task_id;
               currentRecursion = {
+                uid: `live-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
                 iteration: event.iteration,
                 trace_id: event.trace_id,
                 events: [event],
@@ -889,6 +893,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               if (event.type === 'observe') {
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   observe: event.delta ?? '',
                   tokens: event.tokens ?? existingRecursion.tokens,
@@ -896,6 +901,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               } else if (event.type === 'thought') {
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   thought: event.delta ?? '',
                   tokens: event.tokens ?? existingRecursion.tokens,
@@ -903,6 +909,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               } else if (event.type === 'abstract') {
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   abstract: event.delta ?? '',
                   tokens: event.tokens ?? existingRecursion.tokens,
@@ -911,6 +918,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 // Mark recursion as completed after action event
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   action: event.delta ?? '',
                   status: 'completed' as const,
@@ -921,11 +929,13 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 // Tool call event - just add to events, no special field update needed
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                 };
               } else if (event.type === 'error') {
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   status: 'error' as const,
                   endTime: event.timestamp,
@@ -949,6 +959,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 }
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   status: 'completed' as const,
                   endTime: event.timestamp,
@@ -971,6 +982,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 }
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                   status: 'completed' as const,
                   endTime: event.timestamp,
@@ -1019,6 +1031,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 // Handle other events (plan_update, reflect, etc.) - just add to events
                 currentRecursion = {
                   ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
                 };
               }
@@ -1038,7 +1051,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       // Filter out nulls and update matching recursion
                       const filtered = (msg.recursions || []).filter((r): r is RecursionRecord => r !== null);
                       const updatedRecursions = filtered.map((r) =>
-                        r.iteration === frozenRecursion.iteration
+                        r.uid === frozenRecursion.uid
                           ? { ...frozenRecursion }
                           : r
                       );
@@ -1121,8 +1134,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   /**
    * Toggle recursion expansion.
    */
-  const toggleRecursion = (messageId: string, iteration: number) => {
-    const key = `${messageId}-${iteration}`;
+  const toggleRecursion = (messageId: string, recursionUid: string) => {
+    const key = `${messageId}-${recursionUid}`;
     setExpandedRecursions((prev) => ({
       ...prev,
       [key]: !prev[key],
@@ -1349,7 +1362,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
    * Render a recursion record.
    */
   const renderRecursion = (messageId: string, recursion: RecursionRecord, taskId?: string) => {
-    const key = `${messageId}-${recursion.iteration}`;
+    const key = `${messageId}-${recursion.uid}`;
     const isExpanded = expandedRecursions[key];
     const effectiveStatus = getRecursionStatus(recursion);
 
@@ -1359,7 +1372,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       <div key={key} className="border border-border rounded-md mb-3 overflow-hidden bg-muted/20">
         {/* Header */}
         <button
-          onClick={() => toggleRecursion(messageId, recursion.iteration)}
+          onClick={() => toggleRecursion(messageId, recursion.uid)}
           className="w-full flex items-center justify-between px-3 py-2 hover:bg-muted/30 transition-colors"
         >
           <div className="flex items-center gap-2 flex-1 min-w-0">

@@ -17,6 +17,7 @@ _TEMPLATE_DIR = Path(__file__).parent
 _IMMUTABLE_TEMPLATE_PATH = _TEMPLATE_DIR / "1.system_prompt_immutable.md"
 _WEAK_CACHE_TEMPLATE_PATH = _TEMPLATE_DIR / "2.system_prompt_weak_cache.md"
 _NO_CACHE_TEMPLATE_PATH = _TEMPLATE_DIR / "3.system_prompt_no_cache.md"
+_MONO_TEMPLATE_PATH = _TEMPLATE_DIR / "system_prompt.md"
 
 
 def _read_template(path: Path) -> str:
@@ -40,6 +41,42 @@ def _read_template(path: Path) -> str:
 _REACT_SYSTEM_PROMPT_IMMUTABLE = _read_template(_IMMUTABLE_TEMPLATE_PATH)
 _REACT_SYSTEM_PROMPT_WEAK_CACHE = _read_template(_WEAK_CACHE_TEMPLATE_PATH)
 _REACT_SYSTEM_PROMPT_NO_CACHE = _read_template(_NO_CACHE_TEMPLATE_PATH)
+_REACT_SYSTEM_PROMPT_MONO = _read_template(_MONO_TEMPLATE_PATH)
+
+
+def build_runtime_system_prompt(
+    tool_manager: ToolManager | None = None,
+    session_memory: dict[str, Any] | None = None,
+    skills: str = "",
+) -> str:
+    """Build a single system prompt used for an entire task lifecycle.
+
+    This prompt intentionally excludes per-recursion mutable fields so that task
+    execution can append user/assistant messages incrementally without mutating
+    existing prompt tokens, which improves provider-side context cache hit rates.
+
+    Args:
+        tool_manager: Optional tool manager to get available tools description.
+        session_memory: Optional session memory dictionary for context injection.
+        skills: Selected skills full-text block for prompt injection.
+
+    Returns:
+        System prompt text with tools/session-memory/skills injected.
+    """
+    tools_description = ""
+    if tool_manager:
+        tools_description = tool_manager.to_text_catalog()
+
+    if session_memory:
+        session_memory_json = json.dumps(session_memory, ensure_ascii=False, indent=2)
+    else:
+        session_memory_json = json.dumps({}, ensure_ascii=False, indent=2)
+
+    return (
+        _REACT_SYSTEM_PROMPT_MONO.replace("{{tools_description}}", tools_description)
+        .replace("{{session_memory}}", session_memory_json)
+        .replace("{{skills}}", skills)
+    )
 
 
 def build_system_messages(
