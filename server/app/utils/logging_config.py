@@ -14,17 +14,19 @@ LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
 LOG_FILE = LOG_DIR / "app.log"
 
 # Log format (used by both handlers)
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+LOG_FORMAT = (
+    "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s"
+)
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # ANSI color codes for terminal output
 COLORS = {
-    "DEBUG": "\033[36m",     # Cyan
-    "INFO": "\033[32m",      # Green
-    "WARNING": "\033[33m",   # Yellow
-    "ERROR": "\033[31m",     # Red
+    "DEBUG": "\033[36m",  # Cyan
+    "INFO": "\033[32m",  # Green
+    "WARNING": "\033[33m",  # Yellow
+    "ERROR": "\033[31m",  # Red
     "CRITICAL": "\033[35m",  # Magenta
-    "RESET": "\033[0m",      # Reset
+    "RESET": "\033[0m",  # Reset
 }
 
 

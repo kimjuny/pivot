@@ -335,9 +335,25 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     prompt_tokens: r.prompt_tokens,
                     completion_tokens: r.completion_tokens,
                     total_tokens: r.total_tokens,
+                    cached_input_tokens: r.cached_input_tokens ?? 0,
                   },
                 };
               });
+
+              const aggregatedTaskTokens = recursions.reduce<TokenUsage>(
+                (acc, recursion) => ({
+                  prompt_tokens: acc.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
+                  completion_tokens: acc.completion_tokens + (recursion.tokens?.completion_tokens ?? 0),
+                  total_tokens: acc.total_tokens + (recursion.tokens?.total_tokens ?? 0),
+                  cached_input_tokens: (acc.cached_input_tokens ?? 0) + (recursion.tokens?.cached_input_tokens ?? 0),
+                }),
+                {
+                  prompt_tokens: 0,
+                  completion_tokens: 0,
+                  total_tokens: 0,
+                  cached_input_tokens: 0,
+                }
+              );
 
               // Add assistant message with recursions
               loadedMessages.push({
@@ -349,9 +365,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 recursions: recursions,
                 status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
                 totalTokens: {
-                  prompt_tokens: 0,
-                  completion_tokens: 0,
-                  total_tokens: task.total_tokens,
+                  prompt_tokens: aggregatedTaskTokens.prompt_tokens,
+                  completion_tokens: aggregatedTaskTokens.completion_tokens,
+                  total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
+                  cached_input_tokens: aggregatedTaskTokens.cached_input_tokens ?? 0,
                 },
               });
             }
@@ -509,9 +526,25 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               prompt_tokens: r.prompt_tokens,
               completion_tokens: r.completion_tokens,
               total_tokens: r.total_tokens,
+              cached_input_tokens: r.cached_input_tokens ?? 0,
             },
           };
         });
+
+        const aggregatedTaskTokens = recursions.reduce<TokenUsage>(
+          (acc, recursion) => ({
+            prompt_tokens: acc.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
+            completion_tokens: acc.completion_tokens + (recursion.tokens?.completion_tokens ?? 0),
+            total_tokens: acc.total_tokens + (recursion.tokens?.total_tokens ?? 0),
+            cached_input_tokens: (acc.cached_input_tokens ?? 0) + (recursion.tokens?.cached_input_tokens ?? 0),
+          }),
+          {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cached_input_tokens: 0,
+          }
+        );
 
         // Add assistant message with recursions
         loadedMessages.push({
@@ -523,9 +556,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           recursions: recursions,
           status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
           totalTokens: {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: task.total_tokens,
+            prompt_tokens: aggregatedTaskTokens.prompt_tokens,
+            completion_tokens: aggregatedTaskTokens.completion_tokens,
+            total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
+            cached_input_tokens: aggregatedTaskTokens.cached_input_tokens ?? 0,
           },
         });
       }
@@ -1255,6 +1289,29 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   };
 
   /**
+   * Render token usage with hoverable details.
+   */
+  const renderTokenUsage = (tokens: TokenUsage, label: string, className?: string) => {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className={className ?? "text-xs text-muted-foreground tabular-nums whitespace-nowrap cursor-help underline decoration-dotted underline-offset-2"}>
+              {label}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="text-xs leading-relaxed">
+            <div>Input: {formatTokenCount(tokens.prompt_tokens)}</div>
+            <div>Cached Input: {formatTokenCount(tokens.cached_input_tokens ?? 0)}</div>
+            <div>Output: {formatTokenCount(tokens.completion_tokens)}</div>
+            <div>Total: {formatTokenCount(tokens.total_tokens)}</div>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
+  };
+
+  /**
    * Check if recursion has any failed tool calls.
    */
   const hasFailedTools = (recursion: RecursionRecord): boolean => {
@@ -1364,21 +1421,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               </span>
             )}
             {recursion.tokens && (
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap cursor-help underline decoration-dotted underline-offset-2">
-                      {formatTokenCount(recursion.tokens.total_tokens)} tokens
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="text-xs leading-relaxed">
-                    <div>Input: {formatTokenCount(recursion.tokens.prompt_tokens)}</div>
-                    <div>Cached Input: {formatTokenCount(recursion.tokens.cached_input_tokens ?? 0)}</div>
-                    <div>Output: {formatTokenCount(recursion.tokens.completion_tokens)}</div>
-                    <div>Total: {formatTokenCount(recursion.tokens.total_tokens)}</div>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+              renderTokenUsage(
+                recursion.tokens,
+                `${formatTokenCount(recursion.tokens.total_tokens)} tokens`
+              )
             )}
           </div>
         </button>
@@ -1830,9 +1876,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                             <CheckCircle2 className="w-3.5 h-3.5 text-success" />
                             <span className="text-xs text-muted-foreground">Completed</span>
                             {message.totalTokens && (
-                              <span className="text-xs text-muted-foreground ml-2">
-                                • Total: {formatTokenCount(message.totalTokens.total_tokens)} tokens
-                              </span>
+                              renderTokenUsage(
+                                message.totalTokens,
+                                `• Total: ${formatTokenCount(message.totalTokens.total_tokens)} tokens`,
+                                "text-xs text-muted-foreground ml-2 tabular-nums whitespace-nowrap cursor-help underline decoration-dotted underline-offset-2"
+                              )
                             )}
                           </>
                         )}

@@ -321,9 +321,7 @@ def _should_recreate_container(container: Any) -> tuple[bool, str]:
         return False, "inspect_unavailable"
 
     destinations = {
-        _mount_destination(m)
-        for m in mounts
-        if isinstance(_mount_destination(m), str)
+        _mount_destination(m) for m in mounts if isinstance(_mount_destination(m), str)
     }
 
     if workdir != "/workspace":
@@ -487,7 +485,9 @@ def _cleanup_pool_once() -> None:
         try:
             _remove_container_fast(container, reason="pool_idle_ttl")
         except Exception as exc:
-            logger.warning("sandbox.pool cleanup idle remove failed name=%s err=%s", name, exc)
+            logger.warning(
+                "sandbox.pool cleanup idle remove failed name=%s err=%s", name, exc
+            )
             continue
         with _pool_lock:
             _last_used_by_name.pop(name, None)
@@ -513,7 +513,9 @@ def _cleanup_pool_once() -> None:
         try:
             _remove_container_fast(container, reason="pool_lru_overflow")
         except Exception as exc:
-            logger.warning("sandbox.pool cleanup lru remove failed name=%s err=%s", name, exc)
+            logger.warning(
+                "sandbox.pool cleanup lru remove failed name=%s err=%s", name, exc
+            )
             continue
         with _pool_lock:
             _last_used_by_name.pop(name, None)
@@ -537,7 +539,9 @@ def startup_pool_cleanup() -> None:
     global _cleanup_started
     if _cleanup_started:
         return
-    thread = threading.Thread(target=_cleanup_loop, daemon=True, name="sandbox-pool-cleaner")
+    thread = threading.Thread(
+        target=_cleanup_loop, daemon=True, name="sandbox-pool-cleaner"
+    )
     thread.start()
     _cleanup_started = True
     logger.info(

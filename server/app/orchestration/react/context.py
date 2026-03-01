@@ -128,18 +128,26 @@ class ReactContext:
                 if not isinstance(item, dict):
                     continue
                 step_id = item.get("step_id")
-                if isinstance(step_id, str) and step_id and step_id not in latest_replan_by_step_id:
+                if (
+                    isinstance(step_id, str)
+                    and step_id
+                    and step_id not in latest_replan_by_step_id
+                ):
                     latest_replan_by_step_id[step_id] = item
             break
 
         for step in plan_steps:
             latest_step_data = latest_replan_by_step_id.get(step.step_id, {})
-            general_goal = latest_step_data.get("general_goal") or latest_step_data.get(
-                "description"
-            ) or step.description
-            specific_description = latest_step_data.get(
-                "specific_description"
-            ) or latest_step_data.get("description") or step.description
+            general_goal = (
+                latest_step_data.get("general_goal")
+                or latest_step_data.get("description")
+                or step.description
+            )
+            specific_description = (
+                latest_step_data.get("specific_description")
+                or latest_step_data.get("description")
+                or step.description
+            )
             completion_criteria = (
                 latest_step_data.get("completion_criteria")
                 or latest_step_data.get("completionCriteria")
@@ -209,8 +217,8 @@ class ReactContext:
                             plan_step["recursion_history"].append(rec_dict)
                             added_to_plan = True
                             break
-                
-                # If it doesn't belong to a plan step (or the step was deleted), 
+
+                # If it doesn't belong to a plan step (or the step was deleted),
                 # keep it in the top-level recursion list.
                 if not added_to_plan:
                     recursions_list.append(rec_dict)

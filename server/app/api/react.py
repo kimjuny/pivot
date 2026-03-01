@@ -294,7 +294,9 @@ async def react_chat_stream(
                 yield f"data: {json.dumps(skill_start_event, ensure_ascii=False)}\n\n"
                 resolution_started_at = perf_counter()
                 try:
-                    resolver_llm_config = llm_crud.get(agent.skill_resolution_llm_id, db)
+                    resolver_llm_config = llm_crud.get(
+                        agent.skill_resolution_llm_id, db
+                    )
                     if resolver_llm_config:
                         resolver_llm = create_llm_from_config(resolver_llm_config)
                         available_skills = list_all_skills(current_user.username)
@@ -306,13 +308,17 @@ async def react_chat_stream(
                             except (ValueError, TypeError):
                                 allowed_skills = set()
                             available_skills = [
-                                item for item in available_skills if item.get("name") in allowed_skills
+                                item
+                                for item in available_skills
+                                if item.get("name") in allowed_skills
                             ]
                             candidate_skill_count = len(available_skills)
 
                         session_memory = {}
                         if task.session_id:
-                            session_memory = SessionMemoryService(db).get_full_session_memory_dict(task.session_id)
+                            session_memory = SessionMemoryService(
+                                db
+                            ).get_full_session_memory_dict(task.session_id)
 
                         selected_skills = select_skills(
                             llm=resolver_llm,

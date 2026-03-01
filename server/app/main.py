@@ -52,7 +52,9 @@ class TimingMiddleware(BaseHTTPMiddleware):
         process_time_ms = (time.time() - start_time) * 1000
 
         # Log in uvicorn-like format with timing appended: client - "method path" status - Xms
-        client = f"{request.client.host}:{request.client.port}" if request.client else "-"
+        client = (
+            f"{request.client.host}:{request.client.port}" if request.client else "-"
+        )
         logger.info(
             f'{client} - "{request.method} {request.url.path} HTTP/{request.scope.get("http_version", "1.1")}" '
             f"{response.status_code} - {process_time_ms:.0f}ms"
@@ -95,7 +97,9 @@ if _static_dir.is_dir() and (_static_dir / "index.html").exists():
     from fastapi.staticfiles import StaticFiles
 
     # Serve assets (JS, CSS, images) before the catch-all
-    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets")
+    app.mount(
+        "/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets"
+    )
 
     @app.get("/{full_path:path}")
     async def _spa_fallback(full_path: str):
@@ -132,6 +136,8 @@ async def startup_event():
         ("agent", "tool_ids", "VARCHAR"),
         ("agent", "skill_ids", "VARCHAR"),
         ("agent", "skill_resolution_llm_id", "INTEGER"),
+        ("reacttask", "total_cached_input_tokens", "INTEGER DEFAULT 0"),
+        ("reactrecursion", "cached_input_tokens", "INTEGER DEFAULT 0"),
     ]
     with engine.begin() as conn:
         inspector = sa_inspect(engine)
@@ -141,7 +147,9 @@ async def startup_event():
                 conn.execute(
                     text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
                 )
-                logger.info("Migration: added column '%s' to table '%s'", col_name, table_name)
+                logger.info(
+                    "Migration: added column '%s' to table '%s'", col_name, table_name
+                )
 
     logger.info("Database initialized successfully")
 

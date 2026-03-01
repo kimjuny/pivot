@@ -235,12 +235,20 @@ class SessionMemoryService:
                 if item_id is not None:
                     for i, existing in enumerate(memory_items):
                         if existing.get("id") == item_id:
-                            memory_items[i] = self._build_memory_item(update_item, item_id)
+                            memory_items[i] = self._build_memory_item(
+                                update_item, item_id
+                            )
                             break
 
-            delete_ids = {d.get("id") for d in session_memory_delta.get("delete", []) if d.get("id")}
+            delete_ids = {
+                d.get("id")
+                for d in session_memory_delta.get("delete", [])
+                if d.get("id")
+            }
             if delete_ids:
-                memory_items = [item for item in memory_items if item.get("id") not in delete_ids]
+                memory_items = [
+                    item for item in memory_items if item.get("id") not in delete_ids
+                ]
 
             memory.memory_items = json.dumps(memory_items, ensure_ascii=False)
             memory_updated = True
@@ -252,14 +260,16 @@ class SessionMemoryService:
             conversations = []
 
         task_index = len(conversations) + 1
-        conversations.append({
-            "task_index": task_index,
-            "task_id": task.task_id,
-            "user_input": task.user_message,
-            "final_answer": agent_answer or "",
-            "status": task.status,
-            "summary": task_summary,
-        })
+        conversations.append(
+            {
+                "task_index": task_index,
+                "task_id": task.task_id,
+                "user_input": task.user_message,
+                "final_answer": agent_answer or "",
+                "status": task.status,
+                "summary": task_summary,
+            }
+        )
         memory.conversations = json.dumps(conversations, ensure_ascii=False)
         memory_updated = True
 
@@ -278,18 +288,22 @@ class SessionMemoryService:
         # 4. Process Chat History
         if agent_answer:
             try:
-                history = json.loads(session.chat_history or '{"version": 1, "messages": []}')
+                history = json.loads(
+                    session.chat_history or '{"version": 1, "messages": []}'
+                )
             except json.JSONDecodeError:
                 history = {"version": 1, "messages": []}
 
             if "messages" not in history:
                 history["messages"] = []
 
-            history["messages"].append({
-                "type": "assistant",
-                "content": agent_answer,
-                "timestamp": now.isoformat(),
-            })
+            history["messages"].append(
+                {
+                    "type": "assistant",
+                    "content": agent_answer,
+                    "timestamp": now.isoformat(),
+                }
+            )
             session.chat_history = json.dumps(history, ensure_ascii=False)
             session_updated = True
 
@@ -356,7 +370,9 @@ class SessionMemoryService:
 
         # Process deletions
         delete_ids = {d.get("id") for d in delta.get("delete", []) if d.get("id")}
-        memory_items = [item for item in memory_items if item.get("id") not in delete_ids]
+        memory_items = [
+            item for item in memory_items if item.get("id") not in delete_ids
+        ]
 
         # Save updated memory
         memory.memory_items = json.dumps(memory_items, ensure_ascii=False)
@@ -512,18 +528,22 @@ class SessionMemoryService:
             return False
 
         try:
-            history = json.loads(session.chat_history or '{"version": 1, "messages": []}')
+            history = json.loads(
+                session.chat_history or '{"version": 1, "messages": []}'
+            )
         except json.JSONDecodeError:
             history = {"version": 1, "messages": []}
 
         if "messages" not in history:
             history["messages"] = []
 
-        history["messages"].append({
-            "type": message_type,
-            "content": content,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        history["messages"].append(
+            {
+                "type": message_type,
+                "content": content,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         session.chat_history = json.dumps(history, ensure_ascii=False)
         session.updated_at = datetime.now(timezone.utc)
@@ -630,23 +650,26 @@ class SessionMemoryService:
             # Build recursion list
             recursion_list = []
             for recursion in recursions:
-                recursion_list.append({
-                    "iteration": recursion.iteration_index,
-                    "trace_id": recursion.trace_id,
-                    "observe": recursion.observe,
-                    "thought": recursion.thought,
-                    "abstract": recursion.abstract,
-                    "action_type": recursion.action_type,
-                    "action_output": recursion.action_output,
-                    "tool_call_results": recursion.tool_call_results,
-                    "status": recursion.status,
-                    "error_log": recursion.error_log,
-                    "prompt_tokens": recursion.prompt_tokens,
-                    "completion_tokens": recursion.completion_tokens,
-                    "total_tokens": recursion.total_tokens,
-                    "created_at": recursion.created_at,
-                    "updated_at": recursion.updated_at,
-                })
+                recursion_list.append(
+                    {
+                        "iteration": recursion.iteration_index,
+                        "trace_id": recursion.trace_id,
+                        "observe": recursion.observe,
+                        "thought": recursion.thought,
+                        "abstract": recursion.abstract,
+                        "action_type": recursion.action_type,
+                        "action_output": recursion.action_output,
+                        "tool_call_results": recursion.tool_call_results,
+                        "status": recursion.status,
+                        "error_log": recursion.error_log,
+                        "prompt_tokens": recursion.prompt_tokens,
+                        "completion_tokens": recursion.completion_tokens,
+                        "total_tokens": recursion.total_tokens,
+                        "cached_input_tokens": recursion.cached_input_tokens,
+                        "created_at": recursion.created_at,
+                        "updated_at": recursion.updated_at,
+                    }
+                )
 
             # Extract agent answer from the last recursion with ANSWER action
             agent_answer = None
@@ -660,15 +683,17 @@ class SessionMemoryService:
                     except json.JSONDecodeError:
                         pass
 
-            result.append({
-                "task_id": task.task_id,
-                "user_message": task.user_message,
-                "agent_answer": agent_answer,
-                "status": task.status,
-                "total_tokens": task.total_tokens,
-                "recursions": recursion_list,
-                "created_at": task.created_at,
-                "updated_at": task.updated_at,
-            })
+            result.append(
+                {
+                    "task_id": task.task_id,
+                    "user_message": task.user_message,
+                    "agent_answer": agent_answer,
+                    "status": task.status,
+                    "total_tokens": task.total_tokens,
+                    "recursions": recursion_list,
+                    "created_at": task.created_at,
+                    "updated_at": task.updated_at,
+                }
+            )
 
         return result

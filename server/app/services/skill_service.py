@@ -31,7 +31,9 @@ _ALLOWED_KINDS = {"private", "shared"}
 
 
 def _builtin_skills_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "orchestration" / "skills" / "builtin"
+    return (
+        Path(__file__).resolve().parent.parent / "orchestration" / "skills" / "builtin"
+    )
 
 
 def _user_skills_dir(username: str, kind: str) -> Path:
@@ -136,7 +138,9 @@ def _parse_front_matter(source: str) -> dict[str, str]:
     return meta
 
 
-def _build_metadata(path: Path, kind: str, source_type: str, created_at: str | None = None) -> dict[str, Any]:
+def _build_metadata(
+    path: Path, kind: str, source_type: str, created_at: str | None = None
+) -> dict[str, Any]:
     raw = path.read_text(encoding="utf-8")
     parsed = _parse_front_matter(raw)
 
@@ -145,7 +149,9 @@ def _build_metadata(path: Path, kind: str, source_type: str, created_at: str | N
 
     created_iso = created_at
     if created_iso is None:
-        created_iso = datetime.fromtimestamp(from_stat_created, tz=timezone.utc).isoformat()
+        created_iso = datetime.fromtimestamp(
+            from_stat_created, tz=timezone.utc
+        ).isoformat()
 
     updated_iso = datetime.fromtimestamp(from_stat_updated, tz=timezone.utc).isoformat()
 
@@ -181,7 +187,9 @@ def list_builtin_skills() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for md_file in _list_skill_paths(root):
         try:
-            result.append(_build_metadata(md_file, kind="shared", source_type="builtin"))
+            result.append(
+                _build_metadata(md_file, kind="shared", source_type="builtin")
+            )
         except Exception as exc:
             logger.warning("Failed to parse builtin skill '%s': %s", md_file.name, exc)
     return result
@@ -204,8 +212,12 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 existing_created = None
 
-        meta = _build_metadata(md_file, kind=kind, source_type="user", created_at=existing_created)
-        meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        meta = _build_metadata(
+            md_file, kind=kind, source_type="user", created_at=existing_created
+        )
+        meta_file.write_text(
+            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         result.append(meta)
 
     return result
@@ -240,12 +252,18 @@ def read_user_skill(username: str, kind: str, skill_name: str) -> dict[str, Any]
     existing_created: str | None = None
     if meta_file.exists():
         try:
-            existing_created = json.loads(meta_file.read_text(encoding="utf-8")).get("created_at")
+            existing_created = json.loads(meta_file.read_text(encoding="utf-8")).get(
+                "created_at"
+            )
         except json.JSONDecodeError:
             existing_created = None
 
-    meta = _build_metadata(skill_path, kind=kind, source_type="user", created_at=existing_created)
-    meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta = _build_metadata(
+        skill_path, kind=kind, source_type="user", created_at=existing_created
+    )
+    meta_file.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     return {
         "name": skill_name,
@@ -297,7 +315,9 @@ def read_skill_content_for_prompt(username: str, skill_name: str) -> str:
     raise FileNotFoundError(f"Skill '{skill_name}' not found.")
 
 
-def build_selected_skills_prompt_block(username: str, selected_skills: list[str]) -> str:
+def build_selected_skills_prompt_block(
+    username: str, selected_skills: list[str]
+) -> str:
     """Build a markdown block containing selected skills full text for prompt injection."""
     if not selected_skills:
         return ""
@@ -312,7 +332,9 @@ def build_selected_skills_prompt_block(username: str, selected_skills: list[str]
     return "\n".join(blocks).strip()
 
 
-def upsert_user_skill(username: str, kind: str, skill_name: str, source: str) -> dict[str, Any]:
+def upsert_user_skill(
+    username: str, kind: str, skill_name: str, source: str
+) -> dict[str, Any]:
     """Create or update a user skill markdown file and metadata."""
     _validate_skill_name(skill_name)
     base = _user_skills_dir(username, kind)
@@ -324,15 +346,21 @@ def upsert_user_skill(username: str, kind: str, skill_name: str, source: str) ->
     existing_created: str | None = None
     if meta_file.exists():
         try:
-            existing_created = json.loads(meta_file.read_text(encoding="utf-8")).get("created_at")
+            existing_created = json.loads(meta_file.read_text(encoding="utf-8")).get(
+                "created_at"
+            )
         except json.JSONDecodeError:
             existing_created = None
 
     skill_path.write_text(source, encoding="utf-8")
     if legacy_path.exists():
         legacy_path.unlink()
-    meta = _build_metadata(skill_path, kind=kind, source_type="user", created_at=existing_created)
-    meta_file.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    meta = _build_metadata(
+        skill_path, kind=kind, source_type="user", created_at=existing_created
+    )
+    meta_file.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     logger.info("Saved %s skill '%s' for user '%s'", kind, skill_name, username)
     return meta

@@ -2,6 +2,10 @@
 trigger: always_on
 ---
 
+---
+trigger: always_on
+---
+
 # Project Rules & Guidelines
 
 ## Project Overview
@@ -128,11 +132,22 @@ web/
 
 ### Development Workflow
 
-**Required Before Committing**: Execute these commands in the `server` directory:
+**Required Before Committing**: Execute lint/type-check commands with Podman
+using the existing services defined in `compose.yaml` (not on the host machine).
 
-1. `ruff check . --fix` - Resolve linting and import issues
-2. `ruff format .` - Ensure consistent code styling
-3. `pyright .` - Verify type integrity
+Use these service targets:
+- Backend Python checks: `backend`
+- Frontend TypeScript/ESLint checks: `frontend`
+
+Preferred command style (when services are already running):
+
+1. `podman compose exec backend poetry run ruff check server --fix` - Resolve backend lint/import issues
+2. `podman compose exec backend poetry run ruff format server` - Ensure backend formatting consistency
+3. `podman compose exec backend poetry run pyright server` - Verify backend type integrity
+4. `podman compose exec frontend npm run lint` - Run frontend lint
+5. `podman compose exec frontend npm run type-check` - Run frontend type check
+
+Fallback (if services are not running): use `podman compose run --rm <service> <command>`.
 
 ### Strategic Coding Requirements
 
@@ -228,7 +243,7 @@ def get_agent_status(agent_id: str, verbose: bool = False) -> dict | None:
 | Rule | Details |
 |-------|---------|
 | **Pyproject.toml** | Strictly follow all configuration and code style requirements |
-| **Prohibited** | Never modify `pyproject.toml` under any circumstances |
+| **Prohibited** | Never modify `pyproject.toml` under any circumstances, unless you want to add some dependency |
 
 ### TypeScript Error Handling
 

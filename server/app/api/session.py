@@ -244,7 +244,9 @@ async def get_session_history(
     )
 
 
-@router.get("/sessions/{session_id}/full-history", response_model=FullSessionHistoryResponse)
+@router.get(
+    "/sessions/{session_id}/full-history", response_model=FullSessionHistoryResponse
+)
 async def get_full_session_history(
     session_id: str,
     db: DBSession = Depends(get_db),
@@ -295,22 +297,29 @@ async def get_full_session_history(
                 prompt_tokens=r["prompt_tokens"],
                 completion_tokens=r["completion_tokens"],
                 total_tokens=r["total_tokens"],
+                cached_input_tokens=r["cached_input_tokens"],
                 created_at=r["created_at"].replace(tzinfo=timezone.utc).isoformat(),
                 updated_at=r["updated_at"].replace(tzinfo=timezone.utc).isoformat(),
             )
             for r in task_data["recursions"]
         ]
 
-        tasks.append(TaskMessage(
-            task_id=task_data["task_id"],
-            user_message=task_data["user_message"],
-            agent_answer=task_data["agent_answer"],
-            status=task_data["status"],
-            total_tokens=task_data["total_tokens"],
-            recursions=recursions,
-            created_at=task_data["created_at"].replace(tzinfo=timezone.utc).isoformat(),
-            updated_at=task_data["updated_at"].replace(tzinfo=timezone.utc).isoformat(),
-        ))
+        tasks.append(
+            TaskMessage(
+                task_id=task_data["task_id"],
+                user_message=task_data["user_message"],
+                agent_answer=task_data["agent_answer"],
+                status=task_data["status"],
+                total_tokens=task_data["total_tokens"],
+                recursions=recursions,
+                created_at=task_data["created_at"]
+                .replace(tzinfo=timezone.utc)
+                .isoformat(),
+                updated_at=task_data["updated_at"]
+                .replace(tzinfo=timezone.utc)
+                .isoformat(),
+            )
+        )
 
     return FullSessionHistoryResponse(
         session_id=session_id,

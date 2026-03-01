@@ -91,7 +91,9 @@ async def upsert_skill_source(
 ) -> dict[str, Any]:
     """Create or update a user-owned markdown skill."""
     try:
-        metadata = upsert_user_skill(current_user.username, kind, skill_name, body.source)
+        metadata = upsert_user_skill(
+            current_user.username, kind, skill_name, body.source
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

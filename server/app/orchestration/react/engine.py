@@ -185,9 +185,11 @@ class ReactEngine:
                     recursion.prompt_tokens = response.usage.prompt_tokens
                     recursion.completion_tokens = response.usage.completion_tokens
                     recursion.total_tokens = response.usage.total_tokens
+                    recursion.cached_input_tokens = response.usage.cached_input_tokens
                     task.total_prompt_tokens += response.usage.prompt_tokens
                     task.total_completion_tokens += response.usage.completion_tokens
                     task.total_tokens += response.usage.total_tokens
+                    task.total_cached_input_tokens += response.usage.cached_input_tokens
                     tokens_data = {
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
@@ -236,9 +238,11 @@ class ReactEngine:
                     recursion.prompt_tokens = response.usage.prompt_tokens
                     recursion.completion_tokens = response.usage.completion_tokens
                     recursion.total_tokens = response.usage.total_tokens
+                    recursion.cached_input_tokens = response.usage.cached_input_tokens
                     task.total_prompt_tokens += response.usage.prompt_tokens
                     task.total_completion_tokens += response.usage.completion_tokens
                     task.total_tokens += response.usage.total_tokens
+                    task.total_cached_input_tokens += response.usage.cached_input_tokens
                     tokens_data = {
                         "prompt_tokens": response.usage.prompt_tokens,
                         "completion_tokens": response.usage.completion_tokens,
@@ -275,9 +279,15 @@ class ReactEngine:
                         recursion.prompt_tokens = response.usage.prompt_tokens
                         recursion.completion_tokens = response.usage.completion_tokens
                         recursion.total_tokens = response.usage.total_tokens
+                        recursion.cached_input_tokens = (
+                            response.usage.cached_input_tokens
+                        )
                         task.total_prompt_tokens += response.usage.prompt_tokens
                         task.total_completion_tokens += response.usage.completion_tokens
                         task.total_tokens += response.usage.total_tokens
+                        task.total_cached_input_tokens += (
+                            response.usage.cached_input_tokens
+                        )
                         tokens_data = {
                             "prompt_tokens": response.usage.prompt_tokens,
                             "completion_tokens": response.usage.completion_tokens,
@@ -458,11 +468,13 @@ class ReactEngine:
                 recursion.prompt_tokens = response.usage.prompt_tokens
                 recursion.completion_tokens = response.usage.completion_tokens
                 recursion.total_tokens = response.usage.total_tokens
+                recursion.cached_input_tokens = response.usage.cached_input_tokens
 
                 # Update task-level token accumulation
                 task.total_prompt_tokens += response.usage.prompt_tokens
                 task.total_completion_tokens += response.usage.completion_tokens
                 task.total_tokens += response.usage.total_tokens
+                task.total_cached_input_tokens += response.usage.cached_input_tokens
 
             recursion.status = "done"
             recursion.updated_at = datetime.now(timezone.utc)
@@ -529,9 +541,11 @@ class ReactEngine:
                     general_goal = step_data.get("general_goal") or step_data.get(
                         "description", ""
                     )
-                    specific_description = step_data.get(
-                        "specific_description"
-                    ) or step_data.get("description") or general_goal
+                    specific_description = (
+                        step_data.get("specific_description")
+                        or step_data.get("description")
+                        or general_goal
+                    )
                     completion_criteria = (
                         step_data.get("completion_criteria")
                         or step_data.get("completionCriteria")
@@ -916,7 +930,7 @@ class ReactEngine:
                             "prompt_tokens": task.total_prompt_tokens,
                             "completion_tokens": task.total_completion_tokens,
                             "total_tokens": task.total_tokens,
-                            "cached_input_tokens": 0,
+                            "cached_input_tokens": task.total_cached_input_tokens,
                         },
                     }
                     break

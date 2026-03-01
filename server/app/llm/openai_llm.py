@@ -84,11 +84,11 @@ class OpenAILLM(AbstractLLM):
         choices = []
         for i, raw_choice in enumerate(raw_dict.get("choices", [])):
             message_data = raw_choice.get("message") or raw_choice.get("delta") or {}
-            
+
             role = message_data.get("role", "assistant")
             content = message_data.get("content", "") or ""
             reasoning_content = message_data.get("reasoning_content", None)
-            
+
             tool_calls = None
             raw_tool_calls = message_data.get("tool_calls", None)
             if raw_tool_calls:
@@ -101,7 +101,7 @@ class OpenAILLM(AbstractLLM):
                         "function": {
                             "name": func_data.get("name", ""),
                             "arguments": func_data.get("arguments", ""),
-                        }
+                        },
                     }
                     tool_calls.append(tool_call_dict)
 
@@ -159,33 +159,28 @@ class OpenAILLM(AbstractLLM):
         try:
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
-            
+
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-            
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                **merged_kwargs
-            }
-            
+
+            payload = {"model": self.model, "messages": messages, **merged_kwargs}
+
             response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout
+                url, headers=headers, json=payload, timeout=self.timeout
             )
             response.raise_for_status()
 
             # print(f"response: \n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
-            
+
             return self._parse_dict_response(response.json(), self.model)
 
         except requests.exceptions.HTTPError as e:
-            text = e.response.text if getattr(e, 'response', None) is not None else str(e)
+            text = (
+                e.response.text if getattr(e, "response", None) is not None else str(e)
+            )
             raise RuntimeError(
                 f"OpenAI-compatible API request failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
             ) from e
@@ -213,37 +208,33 @@ class OpenAILLM(AbstractLLM):
         try:
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
-            
+
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-            
+
             payload = {
                 "model": self.model,
                 "messages": messages,
                 "stream": True,
-                **merged_kwargs
+                **merged_kwargs,
             }
-            
+
             with requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-                stream=True
+                url, headers=headers, json=payload, timeout=self.timeout, stream=True
             ) as response:
                 response.raise_for_status()
-                
+
                 for line in response.iter_lines():
                     if line:
                         line = line.decode("utf-8")
                         if line.startswith("data: "):
-                            data_str = line[len("data: "):].strip()
+                            data_str = line[len("data: ") :].strip()
                             if data_str == "[DONE]":
                                 break
-                            
+
                             try:
                                 data_dict = json.loads(data_str)
                                 yield self._parse_dict_response(data_dict, self.model)
@@ -251,7 +242,9 @@ class OpenAILLM(AbstractLLM):
                                 continue
 
         except requests.exceptions.HTTPError as e:
-            text = e.response.text if getattr(e, 'response', None) is not None else str(e)
+            text = (
+                e.response.text if getattr(e, "response", None) is not None else str(e)
+            )
             raise RuntimeError(
                 f"OpenAI-compatible streaming failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
             ) from e

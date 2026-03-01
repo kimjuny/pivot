@@ -65,6 +65,9 @@ class ReactTask(SQLModel, table=True):
     total_tokens: int = Field(
         default=0, description="Total tokens consumed by this task"
     )
+    total_cached_input_tokens: int = Field(
+        default=0, description="Total cached input tokens consumed by this task"
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -167,6 +170,9 @@ class ReactRecursion(SQLModel, table=True):
     )
     total_tokens: int = Field(
         default=0, description="Total tokens consumed in this recursion"
+    )
+    cached_input_tokens: int = Field(
+        default=0, description="Cached input tokens consumed in this recursion"
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

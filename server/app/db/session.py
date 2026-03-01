@@ -23,7 +23,7 @@ def get_engine():
         db_path_str = database_url.lstrip("sqlite:///").lstrip("/")
         if database_url.startswith("sqlite:////"):
             # Absolute path form sqlite:////abs/path
-            db_path = Path("/" + database_url[len("sqlite:////"):])
+            db_path = Path("/" + database_url[len("sqlite:////") :])
         else:
             db_path = Path(db_path_str)
         db_path.parent.mkdir(parents=True, exist_ok=True)

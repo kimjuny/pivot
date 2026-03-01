@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 # bound closure share exactly the same logic.
 # ---------------------------------------------------------------------------
 
+
 def _run_snippet(python_code: str, tool_callables: dict[str, Any]) -> str:
     """Execute *python_code* inside a sandbox with *tool_callables* available.
 
@@ -135,6 +136,7 @@ def _run_snippet(python_code: str, tool_callables: dict[str, Any]) -> str:
 # Factory – called by react.py to create a request-scoped closure
 # ---------------------------------------------------------------------------
 
+
 def make_programmatic_tool_call(tool_callables: dict[str, Any]):
     """Return a bound implementation of programmatic_tool_call.
 
@@ -163,6 +165,7 @@ def make_programmatic_tool_call(tool_callables: dict[str, Any]):
 # Registered @tool stub – uses only the global singleton (shared tools).
 # react.py replaces .func at request time via make_programmatic_tool_call().
 # ---------------------------------------------------------------------------
+
 
 @tool
 def programmatic_tool_call(python_code: str) -> str:
