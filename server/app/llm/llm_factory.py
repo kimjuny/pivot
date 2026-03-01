@@ -3,7 +3,8 @@
 from app.models.llm import LLM
 
 from .abstract_llm import AbstractLLM
-from .openai_llm import OpenAILLM
+from .openai_completion_llm import OpenAICompletionLLM
+from .openai_response_llm import OpenAIResponseLLM
 
 
 def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
@@ -24,9 +25,15 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
     protocol = llm_config.protocol.lower()
     extra_config = llm_config.get_extra_config()
 
-    if protocol == "openai_compatible":
-        # OpenAI-compatible APIs (OpenAI, GLM, DeepSeek, etc.)
-        return OpenAILLM(
+    if protocol == "openai_completion_llm":
+        return OpenAICompletionLLM(
+            endpoint=llm_config.endpoint,
+            model=llm_config.model,
+            api_key=llm_config.api_key,
+            extra_config=extra_config,
+        )
+    elif protocol == "openai_response_llm":
+        return OpenAIResponseLLM(
             endpoint=llm_config.endpoint,
             model=llm_config.model,
             api_key=llm_config.api_key,
@@ -45,5 +52,5 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
     else:
         raise ValueError(
             f"Unsupported protocol: {llm_config.protocol}. "
-            f"Supported protocols: openai_compatible, anthropic_compatible"
+            f"Supported protocols: openai_completion_llm, openai_response_llm, anthropic_compatible"
         )

@@ -13,7 +13,8 @@ class LLM(SQLModel, table=True):
         endpoint: HTTP API Base URL for the LLM service.
         model: Model identifier passed to the API.
         api_key: Authentication credential for the LLM (encrypted storage recommended).
-        protocol: Protocol specification (e.g., 'openai_chat_v1', 'anthropic_messages_v1').
+        protocol: Protocol specification
+            (e.g., 'openai_completion_llm', 'openai_response_llm').
         chat: Whether the model supports multi-turn conversation with message roles.
         system_role: Whether the model truly distinguishes system role with higher priority.
         tool_calling: Tool calling support level ('native', 'prompt', 'none').
@@ -32,8 +33,11 @@ class LLM(SQLModel, table=True):
     model: str = Field(description="Model identifier for API")
     api_key: str = Field(description="Authentication credential (should be encrypted)")
     protocol: str = Field(
-        default="openai_compatible",
-        description="Protocol specification ('openai_compatible' or 'anthropic_compatible')",
+        default="openai_completion_llm",
+        description=(
+            "Protocol specification "
+            "('openai_completion_llm', 'openai_response_llm', or 'anthropic_compatible')"
+        ),
     )
     chat: bool = Field(
         default=True, description="Supports multi-turn conversation with message roles"

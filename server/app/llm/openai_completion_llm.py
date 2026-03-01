@@ -1,7 +1,6 @@
-"""OpenAI-compatible LLM implementation.
+"""OpenAI Chat Completions API LLM implementation.
 
-This is a generic implementation that works with any OpenAI-compatible API,
-including OpenAI, Azure OpenAI, and other providers that follow the same protocol.
+This implementation targets `/chat/completions` compatible providers.
 """
 
 import contextlib
@@ -23,8 +22,8 @@ from .abstract_llm import (
 )
 
 
-class OpenAILLM(AbstractLLM):
-    """Generic implementation for OpenAI-compatible APIs.
+class OpenAICompletionLLM(AbstractLLM):
+    """Implementation for OpenAI Chat Completions-compatible APIs.
 
     This implementation works with any provider that follows the OpenAI Chat
     Completions API specification, including:
@@ -49,7 +48,7 @@ class OpenAILLM(AbstractLLM):
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
-        """Initialize the OpenAI-compatible LLM implementation.
+        """Initialize the OpenAI Chat Completions implementation.
 
         Args:
             endpoint: The base URL for the API (e.g., "https://api.openai.com/v1")
@@ -182,11 +181,11 @@ class OpenAILLM(AbstractLLM):
                 e.response.text if getattr(e, "response", None) is not None else str(e)
             )
             raise RuntimeError(
-                f"OpenAI-compatible API request failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
+                f"OpenAI completion API request failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
             ) from e
         except Exception as e:
             raise RuntimeError(
-                f"OpenAI-compatible API request failed for {self.endpoint}: {e!s}"
+                f"OpenAI completion API request failed for {self.endpoint}: {e!s}"
             ) from e
 
     def chat_stream(
@@ -246,9 +245,9 @@ class OpenAILLM(AbstractLLM):
                 e.response.text if getattr(e, "response", None) is not None else str(e)
             )
             raise RuntimeError(
-                f"OpenAI-compatible streaming failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
+                f"OpenAI completion streaming failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
             ) from e
         except Exception as e:
             raise RuntimeError(
-                f"OpenAI-compatible streaming failed for {self.endpoint}: {e!s}"
+                f"OpenAI completion streaming failed for {self.endpoint}: {e!s}"
             ) from e

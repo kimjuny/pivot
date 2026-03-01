@@ -23,7 +23,7 @@ class ReactTask(SQLModel, table=True):
     Attributes:
         id: Primary key of the task.
         task_id: UUID string for global unique task identification.
-        session_id: UUID string linking to the parent session (optional for backward compatibility).
+        session_id: UUID string linking to the parent session.
         agent_id: Foreign key to the agent executing this task.
         user: Username of the user who initiated the task.
         user_message: Original user input message.
@@ -49,9 +49,7 @@ class ReactTask(SQLModel, table=True):
     agent_id: int = Field(foreign_key="agent.id", index=True)
     user: str = Field(index=True, description="Username")
     user_message: str = Field(description="Original user input")
-    # Keep the persisted DB column name "objective" for compatibility with
-    # existing deployments/data. Use the user_intent property in application code.
-    objective: str = Field(description="Task user intent (legacy column: objective)")
+    user_intent: str = Field(description="Task user intent")
     llm_messages: str = Field(
         default="[]",
         description=(
@@ -96,24 +94,6 @@ class ReactTask(SQLModel, table=True):
         back_populates="task",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-
-    @property
-    def user_intent(self) -> str:
-        """Returns task-level user intent.
-
-        Returns:
-            The original user input stored in the legacy ``objective`` column.
-        """
-        return self.objective
-
-    @user_intent.setter
-    def user_intent(self, value: str) -> None:
-        """Sets task-level user intent.
-
-        Args:
-            value: New user intent text to persist.
-        """
-        self.objective = value
 
 
 class ReactRecursion(SQLModel, table=True):
@@ -208,7 +188,9 @@ class ReactPlanStep(SQLModel, table=True):
         task_id: Foreign key to the parent task (string UUID).
         react_task_id: Foreign key to ReactTask table (integer).
         step_id: Step identifier within the plan.
-        description: Description of the step.
+        general_goal: High-level goal of the step.
+        specific_description: Detailed execution guidance for the step.
+        completion_criteria: Explicit done criteria for the step.
         status: Current status (pending, running, done, error).
         created_at: UTC timestamp when step was created.
         updated_at: UTC timestamp when step was last updated.
@@ -219,7 +201,9 @@ class ReactPlanStep(SQLModel, table=True):
     task_id: str = Field(index=True, description="Task UUID")
     react_task_id: int = Field(foreign_key="reacttask.id", index=True)
     step_id: str = Field(description="Step identifier")
-    description: str = Field(description="Step description")
+    general_goal: str = Field(description="Step high-level goal")
+    specific_description: str = Field(description="Step detailed description")
+    completion_criteria: str = Field(description="Step completion criteria")
     status: str = Field(
         default="pending",
         description="Status: pending, running, done, error",

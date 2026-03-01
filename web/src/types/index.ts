@@ -377,7 +377,7 @@ export interface LLM {
   model: string;
   /** Authentication credential for the LLM */
   api_key: string;
-  /** Protocol specification (e.g., 'openai_chat_v1', 'anthropic_messages_v1') */
+  /** Protocol specification (e.g., 'openai_completion_llm', 'openai_response_llm') */
   protocol: string;
   /** Whether the model supports multi-turn conversation with message roles */
   chat: boolean;

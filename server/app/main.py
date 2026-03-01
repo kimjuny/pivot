@@ -122,36 +122,10 @@ async def startup_event():
     logger.info("=" * 50)
 
     logger.info("Initializing database...")
-    from sqlalchemy import inspect as sa_inspect, text
     from sqlmodel import SQLModel
 
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
-
-    # Incremental column migrations.
-    # SQLite does not support ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so we
-    # inspect the existing schema and only add missing columns.
-    migration_defs: list[tuple[str, str, str]] = [
-        # (table_name, column_name, column_definition)
-        ("agent", "tool_ids", "VARCHAR"),
-        ("agent", "skill_ids", "VARCHAR"),
-        ("agent", "skill_resolution_llm_id", "INTEGER"),
-        ("reacttask", "total_cached_input_tokens", "INTEGER DEFAULT 0"),
-        ("reacttask", "llm_messages", "TEXT DEFAULT '[]'"),
-        ("reacttask", "pending_action_result", "TEXT"),
-        ("reactrecursion", "cached_input_tokens", "INTEGER DEFAULT 0"),
-    ]
-    with engine.begin() as conn:
-        inspector = sa_inspect(engine)
-        for table_name, col_name, col_def in migration_defs:
-            existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
-            if col_name not in existing_cols:
-                conn.execute(
-                    text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}")
-                )
-                logger.info(
-                    "Migration: added column '%s' to table '%s'", col_name, table_name
-                )
 
     logger.info("Database initialized successfully")
 

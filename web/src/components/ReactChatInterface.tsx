@@ -69,15 +69,12 @@ interface ReactStreamEvent {
 
 /**
  * Plan step payload shape from RE_PLAN output.
- * Supports both new schema (general_goal/specific_description) and legacy
- * schema (description) for backward compatibility.
  */
 interface PlanStepData {
   step_id: string;
-  general_goal?: string;
-  specific_description?: string;
-  completion_criteria?: string;
-  description?: string;
+  general_goal: string;
+  specific_description: string;
+  completion_criteria: string;
   status: string;
 }
 
@@ -1573,7 +1570,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       <div className="space-y-1 pl-5">
                         {planData.plan.map((step, sidx) => (
                           <div key={sidx} className="text-xs text-muted-foreground">
-                            {sidx + 1}. {step.general_goal || step.description || 'Untitled step'}
+                            {sidx + 1}. {step.general_goal || 'Untitled step'}
                           </div>
                         ))}
                       </div>

@@ -92,8 +92,6 @@ class ReactContext:
 
         # Build context
         context_dict: dict[str, Any] = {
-            # Use "user_intent" to reflect that this is the original user input.
-            # Fall back to legacy "objective" storage for backward compatibility.
             "user_intent": task.user_intent,
             "constraints": [],  # Can be extended
             "plan": [],
@@ -138,20 +136,12 @@ class ReactContext:
 
         for step in plan_steps:
             latest_step_data = latest_replan_by_step_id.get(step.step_id, {})
-            general_goal = (
-                latest_step_data.get("general_goal")
-                or latest_step_data.get("description")
-                or step.description
+            general_goal = latest_step_data.get("general_goal", step.general_goal)
+            specific_description = latest_step_data.get(
+                "specific_description", step.specific_description
             )
-            specific_description = (
-                latest_step_data.get("specific_description")
-                or latest_step_data.get("description")
-                or step.description
-            )
-            completion_criteria = (
-                latest_step_data.get("completion_criteria")
-                or latest_step_data.get("completionCriteria")
-                or ""
+            completion_criteria = latest_step_data.get(
+                "completion_criteria", step.completion_criteria
             )
             plan_step = {
                 "step_id": step.step_id,

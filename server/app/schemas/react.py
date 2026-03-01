@@ -90,10 +90,6 @@ class ReactTaskResponse(BaseModel):
     user: str
     user_message: str
     user_intent: str
-    objective: str | None = Field(
-        default=None,
-        description="Deprecated alias of user_intent for backward compatibility",
-    )
     status: str
     iteration: int
     max_iteration: int
@@ -133,7 +129,9 @@ class ReactPlanStepResponse(BaseModel):
     id: int
     task_id: str
     step_id: str
-    description: str
+    general_goal: str
+    specific_description: str
+    completion_criteria: str
     status: str
     created_at: datetime
     updated_at: datetime

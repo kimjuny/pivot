@@ -33,6 +33,16 @@ import { Badge } from '@/components/ui/badge';
 
 const PAGE_SIZE = 10;
 
+const PROTOCOL_LABELS: Record<string, string> = {
+  openai_completion_llm: 'OpenAI Completion LLM',
+  openai_response_llm: 'OpenAI Response LLM',
+  anthropic_compatible: 'Anthropic Compatible',
+};
+
+function formatProtocolLabel(protocol: string): string {
+  return PROTOCOL_LABELS[protocol] ?? protocol;
+}
+
 // ---------------------------------------------------------------------------
 // Pagination helper
 // ---------------------------------------------------------------------------
@@ -278,7 +288,7 @@ function LLMList() {
           endpoint: item.endpoint as string,
           model: (item.model as string) ?? '',
           api_key: (item.api_key as string) ?? '',
-          protocol: (item.protocol as string) ?? 'openai_chat_v1',
+          protocol: (item.protocol as string) ?? 'openai_completion_llm',
           chat: (item.chat as boolean) ?? true,
           system_role: (item.system_role as boolean) ?? false,
           tool_calling: (item.tool_calling as string) ?? 'none',
@@ -436,7 +446,7 @@ function LLMList() {
                   variant={protocolFilter === proto ? 'default' : 'outline'}
                   className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
                 >
-                  {proto}
+                    {formatProtocolLabel(proto)}
                   <span className={protocolFilter === proto ? 'opacity-70' : 'text-muted-foreground'}>
                     {count}
                   </span>
@@ -660,7 +670,7 @@ function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowPr
 
       {/* Protocol */}
       <TableCell className="text-xs text-muted-foreground">
-        {llm.protocol}
+        {formatProtocolLabel(llm.protocol)}
       </TableCell>
 
       {/* Capabilities: keep one line to preserve consistent row heights */}

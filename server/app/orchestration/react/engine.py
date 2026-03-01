@@ -137,30 +137,44 @@ class ReactEngine:
         task_id: str,
         iteration: int,
         trace_id: str,
+        phase: str,
+        start_index: int = 0,
+        iteration_message_start: int = 1,
     ) -> None:
-        """Log full message history with readable per-message formatting.
+        """Log incremental LLM messages with readable per-message formatting.
 
         Args:
             messages: Full message history sent to LLM.
             task_id: Current task UUID.
-            iteration: Current iteration index.
+            iteration: Current human-facing iteration (1-based).
             trace_id: Current recursion trace ID.
+            phase: Logging phase, typically "send" or "receive".
+            start_index: Start index (inclusive) of incremental messages to log.
+            iteration_message_start: Display index for the first logged message.
         """
+        delta_messages = messages[start_index:]
+        if not delta_messages:
+            return
+
         rendered_lines = [
             (
-                "LLM messages snapshot\n"
+                "LLM messages delta\n"
                 f"task_id={task_id} iteration={iteration} trace_id={trace_id} "
-                f"count={len(messages)}"
+                f"phase={phase} delta_count={len(delta_messages)}"
             )
         ]
-        for idx, msg in enumerate(messages):
+        display_message_index = iteration_message_start
+        for msg in delta_messages:
             role = msg.get("role", "unknown")
             if role == "system":
                 continue
             raw_content = msg.get("content", "")
             content = raw_content if isinstance(raw_content, str) else str(raw_content)
-            rendered_lines.append(f"[{idx}] role={role}")
+            rendered_lines.append(
+                f"[iteration-{iteration}, message-{display_message_index}] role={role}"
+            )
             rendered_lines.append(self._format_message_content_for_log(content))
+            display_message_index += 1
 
         logger.info("\n%s", "\n".join(rendered_lines))
 
@@ -288,7 +302,9 @@ class ReactEngine:
         self.db.add(task)
         self.db.commit()
 
-    def _build_current_plan_payload(self, context: ReactContext) -> list[dict[str, Any]]:
+    def _build_current_plan_payload(
+        self, context: ReactContext
+    ) -> list[dict[str, Any]]:
         """Convert current in-memory plan context to compact user-message payload.
 
         Args:
@@ -413,12 +429,6 @@ class ReactEngine:
         # Tools are described in the system prompt, and LLM returns tool calls
         # in action.output.
         try:
-            self._log_messages_pretty(
-                messages=messages,
-                task_id=task.task_id,
-                iteration=task.iteration,
-                trace_id=trace_id,
-            )
             response = await run_in_threadpool(self.llm.chat, messages=messages)  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
@@ -696,11 +706,7 @@ class ReactEngine:
             recursion.plan_step_id = action_step_id
 
             # Validate optional step status updates requested by the LLM.
-            raw_step_updates = (
-                [step_status_update]
-                if isinstance(step_status_update, dict)
-                else step_status_update
-            )
+            raw_step_updates = step_status_update
             step_status_updates_validated: list[dict[str, str]] = []
             if raw_step_updates and isinstance(raw_step_updates, list):
                 allowed_step_statuses = {"pending", "running", "done", "error"}
@@ -780,12 +786,12 @@ class ReactEngine:
                 "trace_id": trace_id,
                 "observe": observe,
                 "thought": thought,
-                    "action": {
-                        "action_type": action_type,
-                        "output": action_output,
-                        "step_status_update": step_status_updates_validated,
-                    },
-                }
+                "action": {
+                    "action_type": action_type,
+                    "output": action_output,
+                    "step_status_update": step_status_updates_validated,
+                },
+            }
 
             # --- 1. UPDATE IN-MEMORY STATE BEfORE SNAPSHOT ---
             # A snapshot must reflect all mutations (RE_PLAN, memory) that occurred
@@ -816,25 +822,16 @@ class ReactEngine:
                 # Create new plan steps in DB and rebuild memory representation
                 new_plan_context = []
                 for step_data in plan_data:
-                    general_goal = step_data.get("general_goal") or step_data.get(
-                        "description", ""
-                    )
-                    specific_description = (
-                        step_data.get("specific_description")
-                        or step_data.get("description")
-                        or general_goal
-                    )
-                    completion_criteria = (
-                        step_data.get("completion_criteria")
-                        or step_data.get("completionCriteria")
-                        or ""
-                    )
+                    general_goal = step_data.get("general_goal", "")
+                    specific_description = step_data.get("specific_description", "")
+                    completion_criteria = step_data.get("completion_criteria", "")
                     step = ReactPlanStep(
                         task_id=task.task_id,
                         react_task_id=task.id or 0,
                         step_id=step_data.get("step_id", ""),
-                        # Legacy DB column: preserve the agent-facing detail text.
-                        description=specific_description,
+                        general_goal=general_goal,
+                        specific_description=specific_description,
+                        completion_criteria=completion_criteria,
                         status=step_data.get("status", "pending"),
                     )
                     self.db.add(step)
@@ -1028,6 +1025,7 @@ class ReactEngine:
                 }
             ]
             self._persist_task_messages(task, runtime_messages)
+        logged_message_count = len(runtime_messages)
 
         try:
             while task.iteration < task.max_iteration:
@@ -1059,6 +1057,16 @@ class ReactEngine:
                     }
                 )
                 self._persist_task_messages(task, runtime_messages)
+                self._log_messages_pretty(
+                    messages=runtime_messages,
+                    task_id=task.task_id,
+                    iteration=task.iteration + 1,
+                    trace_id="pending",
+                    phase="send",
+                    start_index=logged_message_count,
+                    iteration_message_start=1,
+                )
+                logged_message_count = len(runtime_messages)
 
                 # Execute recursion against the fully accumulated message history.
                 recursion, event_data = await self.execute_recursion(
@@ -1073,6 +1081,7 @@ class ReactEngine:
                     if runtime_messages and runtime_messages[-1].get("role") == "user":
                         runtime_messages.pop()
                     self._persist_task_messages(task, runtime_messages)
+                    logged_message_count = len(runtime_messages)
                 else:
                     assistant_message = event_data.get("assistant_message")
                     if isinstance(assistant_message, str) and assistant_message:
@@ -1080,6 +1089,16 @@ class ReactEngine:
                             {"role": "assistant", "content": assistant_message}
                         )
                         self._persist_task_messages(task, runtime_messages)
+                        self._log_messages_pretty(
+                            messages=runtime_messages,
+                            task_id=task.task_id,
+                            iteration=task.iteration + 1,
+                            trace_id=str(event_data.get("trace_id", "")),
+                            phase="receive",
+                            start_index=logged_message_count,
+                            iteration_message_start=2,
+                        )
+                        logged_message_count = len(runtime_messages)
 
                 action_type = event_data.get("action_type", "")
                 next_action_result = self._build_next_pending_action_result(event_data)
