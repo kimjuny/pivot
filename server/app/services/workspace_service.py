@@ -72,14 +72,22 @@ def list_user_tools(username: str) -> list[dict[str, str]]:
         username: The authenticated username.
 
     Returns:
-        List of dicts with ``name`` (stem) and ``filename`` keys.
+        List of dicts with ``name`` (stem), ``filename``, and ``tool_type`` keys.
     """
     tools_dir = _user_tools_dir(username)
-    return [
-        {"name": f.stem, "filename": f.name}
-        for f in sorted(tools_dir.glob("*.py"))
-        if not f.name.startswith("_")
-    ]
+    tools: list[dict[str, str]] = []
+    for py_file in sorted(tools_dir.glob("*.py")):
+        if py_file.name.startswith("_"):
+            continue
+        metadata = load_user_tool_metadata(username, py_file.stem)
+        tools.append(
+            {
+                "name": py_file.stem,
+                "filename": py_file.name,
+                "tool_type": metadata.tool_type if metadata is not None else "normal",
+            }
+        )
+    return tools
 
 
 def read_user_tool(username: str, tool_name: str) -> str:

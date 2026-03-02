@@ -62,7 +62,7 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
     }, []);
 
     // Calculate dimensions based on size
-    const getDimensions = () => {
+    const getDimensions = useCallback(() => {
         if (size === 'large') {
             return {
                 width: window.innerWidth * 0.75,
@@ -77,7 +77,7 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
             minWidth: 480,
             minHeight: 300
         };
-    };
+    }, [size]);
 
     const dimensions = getDimensions();
 
@@ -91,7 +91,7 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
             currentPosRef.current = { x: initialX, y: initialY };
             dialogRef.current.style.transform = `translate(${initialX}px, ${initialY}px)`;
         }
-    }, [open, size, bringToFront]);
+    }, [open, bringToFront, getDimensions]);
 
     /**
      * Start dragging when mouse down on header.
@@ -166,7 +166,7 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isMinimized, size]);
+    }, [isMinimized, getDimensions]);
 
     /**
      * Toggle between minimized and expanded states.

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LogIn, Eye, EyeOff } from 'lucide-react';
-import { useAuth, isTokenValid } from '../contexts/AuthContext';
+import { useAuth, isTokenValid } from '../contexts/auth-core';
 import Navigation from './Navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

@@ -134,7 +134,10 @@ function ToolSelectorDialog({
       } else {
         setAllowAll(false);
         try {
-          const names: string[] = JSON.parse(currentToolIds);
+          const parsed: unknown = JSON.parse(currentToolIds);
+          const names = Array.isArray(parsed)
+            ? parsed.filter((item): item is string => typeof item === 'string')
+            : [];
           setChecked(new Set(names));
         } catch {
           setChecked(new Set());

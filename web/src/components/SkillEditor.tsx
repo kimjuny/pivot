@@ -41,8 +41,9 @@ function SkillEditor({ value, onChange, onSave, isSaving = false }: SkillEditorP
   }, [value]);
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
+    const monacoApi = monaco as typeof Monaco;
     editorRef.current = editor;
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => {
       if (onSave) {
         onSave(valueRef.current);
       }

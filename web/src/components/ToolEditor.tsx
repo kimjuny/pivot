@@ -148,28 +148,19 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
   /** Mount callback – capture monaco and editor instances, bind Ctrl+S. */
   const handleMount: OnMount = useCallback(
     (editor, monaco) => {
+      const monacoApi = monaco as typeof Monaco;
       editorRef.current = editor;
-      monacoRef.current = monaco;
+      monacoRef.current = monacoApi;
 
       // Bind save shortcut; always reads the latest value via ref
       editor.addCommand(
-        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+        monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS,
         () => {
           if (onSave) {
             const current = valueRef.current;
             setIsChecking(true);
-            console.log('[ToolEditor] pyright check triggered by save shortcut');
             void checkToolPyright(current)
               .then((diagnostics) => {
-                const count = countDiagnostics(diagnostics);
-                if (diagnostics.length === 0) {
-                  console.log('[ToolEditor] pyright: all clear ✓');
-                } else {
-                  console.log(
-                    `[ToolEditor] pyright: ${count.errors} error(s), ${count.warnings} warning(s)`,
-                    diagnostics
-                  );
-                }
                 if (monacoRef.current) {
                   markersRef.current.pyright = toMarkers(monacoRef.current, diagnostics);
                   const merged = [
@@ -180,9 +171,7 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
                 }
                 onSave(current);
               })
-              .catch((err: unknown) => {
-                console.error('[ToolEditor] pyright: request failed', err);
-              })
+              .catch(() => {})
               .finally(() => {
                 setIsChecking(false);
               });
@@ -206,18 +195,8 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
       // AST check: fast, runs 200 ms after last keystroke
       astTimerRef.current = setTimeout(() => {
         setIsChecking(true);
-        console.log('[ToolEditor] ast check triggered');
         void checkToolAst(code)
           .then((diagnostics) => {
-            const count = countDiagnostics(diagnostics);
-            if (diagnostics.length === 0) {
-              console.log('[ToolEditor] ast: syntax OK ✓');
-            } else {
-              console.log(
-                `[ToolEditor] ast: ${count.errors} syntax error(s)`,
-                diagnostics
-              );
-            }
             if (monacoRef.current) {
               markersRef.current.ast = toMarkers(monacoRef.current, diagnostics);
               const merged = [
@@ -244,27 +223,15 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
               flushMarkers(merged);
             }
           })
-          .catch((err: unknown) => {
-            console.error('[ToolEditor] ast: request failed', err);
-          })
+          .catch(() => {})
           .finally(() => setIsChecking(false));
       }, 200);
 
       // Ruff check: heavier, runs 2 000 ms after last keystroke
       ruffTimerRef.current = setTimeout(() => {
         setIsChecking(true);
-        console.log('[ToolEditor] ruff check triggered');
         void checkToolRuff(code)
           .then((diagnostics) => {
-            const count = countDiagnostics(diagnostics);
-            if (diagnostics.length === 0) {
-              console.log('[ToolEditor] ruff: all clear ✓');
-            } else {
-              console.log(
-                `[ToolEditor] ruff: ${count.errors} error(s), ${count.warnings} warning(s)`,
-                diagnostics
-              );
-            }
             if (monacoRef.current) {
               markersRef.current.ruff = toMarkers(monacoRef.current, diagnostics);
               const merged = [
@@ -291,9 +258,7 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
               flushMarkers(merged);
             }
           })
-          .catch((err: unknown) => {
-            console.error('[ToolEditor] ruff: request failed', err);
-          })
+          .catch(() => {})
           .finally(() => setIsChecking(false));
       }, 2000);
     },

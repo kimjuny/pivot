@@ -90,7 +90,10 @@ function SkillSelectorDialog({
       } else {
         setAllowAll(false);
         try {
-          const names: string[] = JSON.parse(currentSkillIds);
+          const parsed: unknown = JSON.parse(currentSkillIds);
+          const names = Array.isArray(parsed)
+            ? parsed.filter((item): item is string => typeof item === 'string')
+            : [];
           setChecked(new Set(names));
         } catch {
           setChecked(new Set());

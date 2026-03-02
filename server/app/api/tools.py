@@ -77,7 +77,7 @@ async def get_private_tools(
     """List all private tools belonging to the current user.
 
     Returns:
-        List of dicts with ``name`` and ``filename`` keys.
+        List of dicts with ``name``, ``filename``, and ``tool_type`` keys.
     """
     return list_user_tools(current_user.username)
 

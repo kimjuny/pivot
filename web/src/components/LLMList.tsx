@@ -285,8 +285,8 @@ function LLMList() {
       }
       try {
         await createLLM({
-          name: item.name as string,
-          endpoint: item.endpoint as string,
+          name: item.name,
+          endpoint: item.endpoint,
           model: (item.model as string) ?? '',
           api_key: (item.api_key as string) ?? '',
           protocol: (item.protocol as string) ?? 'openai_completion_llm',
@@ -518,7 +518,7 @@ function LLMList() {
                   llm={llm}
                   isCopying={copyingLLMId === llm.id}
                   onEdit={handleEdit}
-                  onCopy={handleCopy}
+                  onCopy={(targetLlm) => void handleCopy(targetLlm)}
                   onDelete={handleDelete}
                 />
               ))}

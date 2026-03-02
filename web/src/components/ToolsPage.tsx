@@ -47,6 +47,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import DraggableDialog from './DraggableDialog';
 import ToolEditor from './ToolEditor';
 
@@ -260,7 +266,8 @@ function ToolsPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <TooltipProvider>
+      <div className="max-w-5xl mx-auto px-6 py-8">
       {/* Page header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -391,8 +398,8 @@ function ToolsPage() {
               <TableRow>
                 <TableHead className="w-[200px]">Name</TableHead>
                 <TableHead className="w-[80px]">Type</TableHead>
+                <TableHead className="w-[120px]">Sandbox</TableHead>
                 <TableHead>Description</TableHead>
-                <TableHead className="w-[160px]">Parameters</TableHead>
                 <TableHead className="w-[100px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -467,20 +474,21 @@ function ToolsPage() {
       )}
 
       {/* Editor dialog – Save button is now inside the editor status bar */}
-      <DraggableDialog
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        title={editingName ? `Edit Tool: ${editingName}` : 'New Tool'}
-        size="large"
-      >
-        <ToolEditor
-          value={editorSource}
-          onChange={setEditorSource}
-          onSave={(src) => void handleSave(src)}
-          isSaving={isSaving}
-        />
-      </DraggableDialog>
-    </div>
+        <DraggableDialog
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          title={editingName ? `Edit Tool: ${editingName}` : 'New Tool'}
+          size="large"
+        >
+          <ToolEditor
+            value={editorSource}
+            onChange={setEditorSource}
+            onSave={(src) => void handleSave(src)}
+            isSaving={isSaving}
+          />
+        </DraggableDialog>
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -501,10 +509,9 @@ interface ToolTableRowProps {
 function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
   const isShared = row.kind === 'shared';
   const name = row.tool.name;
-  const description = isShared ? (row.tool as SharedTool).description : '—';
-  const paramCount = isShared
-    ? Object.keys((row.tool as SharedTool).parameters?.properties ?? {}).length
-    : null;
+  const description = isShared ? (row.tool).description : '—';
+  const toolType = row.tool.tool_type;
+  const isSandboxTool = toolType === 'sandbox';
 
   return (
     <TableRow>
@@ -524,12 +531,30 @@ function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
         )}
       </TableCell>
 
-      <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
-        {description}
+      <TableCell>
+        <Badge
+          variant={isSandboxTool ? 'default' : 'outline'}
+          className="w-fit text-[11px] px-1.5"
+        >
+          {isSandboxTool ? 'Yes' : 'No'}
+        </Badge>
       </TableCell>
 
-      <TableCell className="text-xs text-muted-foreground">
-        {paramCount !== null ? `${paramCount} param${paramCount !== 1 ? 's' : ''}` : '—'}
+      <TableCell className="max-w-xs">
+        {description === '—' ? (
+          <span className="text-sm text-muted-foreground">{description}</span>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="text-sm text-muted-foreground truncate cursor-help">
+                {description}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-md whitespace-pre-wrap break-words">
+              {description}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </TableCell>
 
       <TableCell className="text-right">

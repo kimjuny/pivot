@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, FormEvent, KeyboardEvent } from 'react';
 import { ArrowUp, Plus, Paperclip, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
-import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
+import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -65,6 +65,42 @@ interface ReactStreamEvent {
   updated_at?: string;
   tokens?: TokenUsage;
   total_tokens?: TokenUsage;
+}
+
+/**
+ * Safely parse JSON text and return unknown on success.
+ */
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Narrow unknown values to plain object records.
+ */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Runtime guard for backend stream event payloads.
+ */
+function isReactStreamEvent(value: unknown): value is ReactStreamEvent {
+  const record = asRecord(value);
+  if (!record) return false;
+  return (
+    typeof record.type === 'string'
+    && typeof record.task_id === 'string'
+    && (typeof record.trace_id === 'string' || record.trace_id === null)
+    && typeof record.iteration === 'number'
+    && typeof record.timestamp === 'string'
+  );
 }
 
 /**
@@ -200,6 +236,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const [error, setError] = useState<string | null>(null);
   const [expandedRecursions, setExpandedRecursions] = useState<Record<string, boolean>>({});
   const [replyTaskId, setReplyTaskId] = useState<string | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -209,6 +246,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const previousMessageCountRef = useRef<number>(0);
 
   /**
    * Reload the session list for current agent.
@@ -256,7 +294,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               // Convert recursions to RecursionRecord format
               const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
                 // Parse events from recursion data for historical sessions
-                let events: ReactStreamEvent[] = [];
+                const events: ReactStreamEvent[] = [];
 
                 // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
                 if (r.action_type === 'CALL_TOOL') {
@@ -265,20 +303,17 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
                   // Parse tool_calls from action_output
                   if (r.action_output) {
-                    try {
-                      const actionData = JSON.parse(r.action_output);
-                      toolCalls = actionData.tool_calls || [];
-                    } catch {
-                      // If parsing fails, continue without tool_calls
+                    const actionData = asRecord(parseJson(r.action_output));
+                    if (actionData && Array.isArray(actionData.tool_calls)) {
+                      toolCalls = actionData.tool_calls;
                     }
                   }
 
                   // Parse tool_results from tool_call_results
                   if (r.tool_call_results) {
-                    try {
-                      toolResults = JSON.parse(r.tool_call_results);
-                    } catch {
-                      // If parsing fails, continue without tool_results
+                    const parsedResults = parseJson(r.tool_call_results);
+                    if (Array.isArray(parsedResults)) {
+                      toolResults = parsedResults;
                     }
                   }
 
@@ -300,8 +335,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
                 // For RE_PLAN: parse action_output for plan data
                 if (r.action_type === 'RE_PLAN' && r.action_output) {
-                  try {
-                    const planData = JSON.parse(r.action_output);
+                  const planData = parseJson(r.action_output);
+                  if (planData !== null) {
                     events.push({
                       type: 'plan_update',
                       task_id: task.task_id,
@@ -310,8 +345,6 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                       data: planData,
                       timestamp: r.updated_at,
                     });
-                  } catch {
-                    // If parsing fails, skip adding the event
                   }
                 }
 
@@ -448,7 +481,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         // Convert recursions to RecursionRecord format
         const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
           // Parse events from recursion data for historical sessions
-          let events: ReactStreamEvent[] = [];
+          const events: ReactStreamEvent[] = [];
 
           // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
           if (r.action_type === 'CALL_TOOL') {
@@ -457,20 +490,17 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
             // Parse tool_calls from action_output
             if (r.action_output) {
-              try {
-                const actionData = JSON.parse(r.action_output);
-                toolCalls = actionData.tool_calls || [];
-              } catch {
-                // If parsing fails, continue without tool_calls
+              const actionData = asRecord(parseJson(r.action_output));
+              if (actionData && Array.isArray(actionData.tool_calls)) {
+                toolCalls = actionData.tool_calls;
               }
             }
 
             // Parse tool_results from tool_call_results
             if (r.tool_call_results) {
-              try {
-                toolResults = JSON.parse(r.tool_call_results);
-              } catch {
-                // If parsing fails, continue without tool_results
+              const parsedResults = parseJson(r.tool_call_results);
+              if (Array.isArray(parsedResults)) {
+                toolResults = parsedResults;
               }
             }
 
@@ -492,8 +522,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
           // For RE_PLAN: parse action_output for plan data
           if (r.action_type === 'RE_PLAN' && r.action_output) {
-            try {
-              const planData = JSON.parse(r.action_output);
+            const planData = parseJson(r.action_output);
+            if (planData !== null) {
               events.push({
                 type: 'plan_update',
                 task_id: task.task_id,
@@ -502,8 +532,6 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 data: planData,
                 timestamp: r.updated_at,
               });
-            } catch {
-              // If parsing fails, skip adding the event
             }
           }
 
@@ -601,16 +629,28 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   /**
    * Scroll chat view to bottom.
    */
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    // Keep a small bottom gap so the newest bubble does not touch the edge.
+    const bottomGap = 20;
+    const targetTop = Math.max(
+      scrollContainer.scrollHeight - scrollContainer.clientHeight - bottomGap,
+      0
+    );
+    scrollContainer.scrollTo({ top: targetTop, behavior });
+  }, []);
 
   /**
    * Auto-scroll to bottom when messages update.
    */
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    const behavior: ScrollBehavior =
+      messages.length > previousMessageCountRef.current ? 'smooth' : 'auto';
+    scrollToBottom(behavior);
+    previousMessageCountRef.current = messages.length;
+  }, [messages, scrollToBottom]);
 
   /**
    * Handle form submission to send message.
@@ -770,7 +810,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           if (!data) continue;
 
           try {
-            const event = JSON.parse(data) as ReactStreamEvent;
+            const parsedEvent = parseJson(data);
+            if (!isReactStreamEvent(parsedEvent)) {
+              continue;
+            }
+            const event: ReactStreamEvent = parsedEvent;
 
             if (event.type === 'skill_resolution_start') {
               currentTaskId = event.task_id;
@@ -884,7 +928,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               );
             } else if (currentRecursion && currentTaskId) {
               // Create new events array to ensure React detects state changes
-              const existingRecursion = currentRecursion as RecursionRecord;
+              const existingRecursion: RecursionRecord = currentRecursion;
               const updatedEvents: ReactStreamEvent[] = [...existingRecursion.events, event];
 
               if (event.type === 'observe') {
@@ -1041,7 +1085,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               // let-variable may be mutated (or nulled) by a later SSE event before
               // React runs this callback, causing a null-dereference crash at runtime.
               if (currentRecursion) {
-                const frozenRecursion = currentRecursion;
+                const frozenRecursion: RecursionRecord = currentRecursion;
                 setMessages((prev) =>
                   prev.map((msg) => {
                     if (msg.id === assistantMessageId) {
@@ -1635,6 +1679,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     );
   };
 
+  const isConversationEmpty = messages.length === 0;
+
   return (
     <div className="flex h-full bg-background text-foreground overflow-hidden">
       {/* Sidebar - Session List */}
@@ -1646,7 +1692,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
         <div className={`p-3 border-b border-border flex items-center ${isSidebarCollapsed ? 'justify-center' : 'justify-between'}`}>
           {!isSidebarCollapsed && (
             <Button
-              onClick={handleNewSession}
+              onClick={() => void handleNewSession()}
               variant="outline"
               className="flex-1 justify-start gap-2"
               disabled={isLoadingSession || isStreaming}
@@ -1736,7 +1782,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               variant="ghost"
               size="icon"
               className="h-8 w-8"
-              onClick={handleNewSession}
+              onClick={() => void handleNewSession()}
               disabled={isLoadingSession || isStreaming}
               title="New Session"
             >
@@ -1748,11 +1794,11 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
       {/* Main Chat Area - single scrollable container for both messages and input */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
           {/* Centered content container */}
-          <div className="max-w-3xl mx-auto p-4 pb-4">
-            {messages.length === 0 ? (
-              <div className="text-center text-muted-foreground mt-12 animate-fade-in">
+          <div className="max-w-3xl mx-auto px-4 pt-4 pb-6">
+            {isConversationEmpty ? (
+              <div className="text-center text-muted-foreground mt-12 animate-fade-in min-h-[36vh] flex flex-col items-center justify-center">
                 <div className="mb-4">
                   <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center">
                     <MessageSquare className="w-8 h-8 text-muted-foreground" />
@@ -1910,85 +1956,88 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               ))
             )
             }
-            <div ref={messagesEndRef} />
-
-            {/* Input Area - sticky at bottom with negative margins to extend to container edges */}
-            <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pb-4 pt-6 mt-4 bg-gradient-to-t from-background via-background to-transparent">
-              {/* Error Banner */}
-              {error && (
-                <div className="px-4 py-2 mb-2 bg-danger/10 border border-danger/30 rounded-lg text-danger text-sm">
-                  {error}
-                </div>
-              )}
-
-              {replyTaskId && (
-                <div className="flex items-center justify-between text-xs mb-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50">
-                  <span className="text-foreground/70">↳ Replying to question</span>
-                  <button
-                    onClick={() => setReplyTaskId(null)}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                    title="Cancel reply"
-                  >
-                    <XCircle className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
-              <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
-                <Textarea
-                  value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
-                  className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
-                  disabled={isStreaming}
-                />
-                <div className="flex items-center px-4 pb-3 justify-between">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
-                        <Plus className="h-4 h-4" />
-                        <span className="sr-only">Attach</span>
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuItem>
-                        <Paperclip className="mr-2 h-4 w-4" />
-                        <span>Add images & files</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Brain className="mr-2 h-4 w-4" />
-                        <span>Thinking</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <div className="flex items-center gap-2">
-                    {isStreaming ? (
-                      <Button
-                        type="button"
-                        onClick={handleStop}
-                        size="icon"
-                        className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
-                        title="Stop execution"
-                      >
-                        <Square className="h-4 w-4" fill="currentColor" />
-                      </Button>
-                    ) : (
-                      <Button
-                        type="submit"
-                        disabled={!inputMessage.trim()}
-                        size="icon"
-                        className="h-8 w-8 rounded-full"
-                        title="Send message"
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                        <span className="sr-only">Send</span>
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </form>
-            </div>
+            <div ref={messagesEndRef} className="h-4" />
           </div>
+        </div>
+
+        {/* Input Area */}
+        <div
+          className={`w-full max-w-3xl mx-auto px-4 pb-4 pt-3 transition-transform duration-100 ease-out bg-gradient-to-t from-background via-background to-transparent ${isConversationEmpty ? '-translate-y-[12vh] sm:-translate-y-[18vh]' : 'translate-y-0'
+            }`}
+        >
+          {/* Error Banner */}
+          {error && (
+            <div className="px-4 py-2 mb-2 bg-danger/10 border border-danger/30 rounded-lg text-danger text-sm">
+              {error}
+            </div>
+          )}
+
+          {replyTaskId && (
+            <div className="flex items-center justify-between text-xs mb-2 px-3 py-1.5 rounded-lg bg-muted/50 border border-border/50">
+              <span className="text-foreground/70">↳ Replying to question</span>
+              <button
+                onClick={() => setReplyTaskId(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                title="Cancel reply"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+          <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
+            <Textarea
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
+              className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
+              disabled={isStreaming}
+            />
+            <div className="flex items-center px-4 pb-3 justify-between">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
+                    <Plus className="h-4 h-4" />
+                    <span className="sr-only">Attach</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem>
+                    <Paperclip className="mr-2 h-4 w-4" />
+                    <span>Add images & files</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <Brain className="mr-2 h-4 w-4" />
+                    <span>Thinking</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <div className="flex items-center gap-2">
+                {isStreaming ? (
+                  <Button
+                    type="button"
+                    onClick={handleStop}
+                    size="icon"
+                    className="h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive text-destructive-foreground"
+                    title="Stop execution"
+                  >
+                    <Square className="h-4 w-4" fill="currentColor" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={!inputMessage.trim()}
+                    size="icon"
+                    className="h-8 w-8 rounded-full"
+                    title="Send message"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                    <span className="sr-only">Send</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+          </form>
         </div>
       </div>
     </div >

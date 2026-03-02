@@ -5,6 +5,7 @@ This module provides endpoints for user authentication including login.
 
 import os
 from datetime import datetime, timezone
+from typing import Any
 
 import bcrypt
 from app.api.dependencies import get_db
@@ -52,7 +53,7 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
-def create_access_token(data: dict) -> str:
+def create_access_token(data: dict[str, Any]) -> str:
     """Create a JWT access token.
 
     Args:
@@ -130,7 +131,9 @@ def init_default_user(session: Session) -> None:
 
 
 @router.post("/auth/login", response_model=UserResponse)
-async def login(login_data: UserLogin, session: Session = Depends(get_db)) -> User:
+async def login(
+    login_data: UserLogin, session: Session = Depends(get_db)
+) -> UserResponse:
     """Authenticate a user and return an access token.
 
     Args:
@@ -151,6 +154,12 @@ async def login(login_data: UserLogin, session: Session = Depends(get_db)) -> Us
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
+        )
+
+    if user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User id is missing",
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})

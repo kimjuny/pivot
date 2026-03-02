@@ -6,7 +6,7 @@ import { getAgentById, AuthError } from '../utils/api';
 import type { Agent, Scene } from '../types';
 import { useSceneGraphStore } from '../store/sceneGraphStore';
 import { useAgentTabStore } from '../store/agentTabStore';
-import { isTokenValid } from '../contexts/AuthContext';
+import { isTokenValid } from '../contexts/auth-core';
 
 /**
  * Agent Detail Page component.

@@ -198,7 +198,7 @@ function SkillsPage() {
       setEditorSource(result.source);
       setEditorOpen(true);
     } catch {
-      toast.error(`Failed to load skill \"${row.skill.name}\"`);
+      toast.error(`Failed to load skill "${row.skill.name}"`);
     }
   }, []);
 
@@ -220,11 +220,11 @@ function SkillsPage() {
     setIsSaving(true);
     try {
       await upsertUserSkill(editingKind, targetName, source);
-      toast.success(`Skill \"${targetName}\" saved`);
+      toast.success(`Skill "${targetName}" saved`);
       setEditorOpen(false);
       await loadSkills();
     } catch {
-      toast.error(`Failed to save skill \"${targetName}\"`);
+      toast.error(`Failed to save skill "${targetName}"`);
     } finally {
       setIsSaving(false);
     }
@@ -239,10 +239,10 @@ function SkillsPage() {
     const kind = row.kind === 'private' ? 'private' : 'shared';
     try {
       await deleteUserSkill(kind, row.skill.name);
-      toast.success(`Skill \"${row.skill.name}\" deleted`);
+      toast.success(`Skill "${row.skill.name}" deleted`);
       await loadSkills();
     } catch {
-      toast.error(`Failed to delete skill \"${row.skill.name}\"`);
+      toast.error(`Failed to delete skill "${row.skill.name}"`);
     }
   }, [loadSkills]);
 

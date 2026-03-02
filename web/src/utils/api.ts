@@ -1,5 +1,5 @@
 import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM } from '../types';
-import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/AuthContext';
+import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 
 /**
  * API base URL from environment configuration.
@@ -957,12 +957,18 @@ export interface ToolParameters {
 }
 
 /**
+ * Execution category for a tool.
+ */
+export type ToolExecutionType = 'normal' | 'sandbox';
+
+/**
  * A shared (built-in) tool returned by the server.
  */
 export interface SharedTool {
   name: string;
   description: string;
   parameters: ToolParameters;
+  tool_type: ToolExecutionType;
 }
 
 /**
@@ -971,6 +977,7 @@ export interface SharedTool {
 export interface PrivateTool {
   name: string;
   filename: string;
+  tool_type: ToolExecutionType;
 }
 
 /**

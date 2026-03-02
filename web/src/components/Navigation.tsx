@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { getAgents } from '../utils/api';
 import type { Agent } from '../types';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth-core';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ModeToggle } from '@/components/ui/mode-toggle';

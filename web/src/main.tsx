@@ -8,7 +8,8 @@ import LLMList from './components/LLMList'
 import ToolsPage from './components/ToolsPage'
 import SkillsPage from './components/SkillsPage'
 import Navigation from './components/Navigation'
-import { AuthProvider, useAuth, isTokenValid } from './contexts/AuthContext'
+import { AuthProvider } from './contexts/AuthContext'
+import { isTokenValid, useAuth } from './contexts/auth-core'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './index.css'
@@ -17,7 +18,7 @@ import './index.css'
  * Protected route wrapper.
  * Redirects to login page if user is not authenticated.
  */
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
 
   // Show loading while checking auth state
@@ -43,7 +44,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 /**
  * Layout wrapper with Navigation for authenticated pages.
  */
-function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
+export function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-background text-foreground">
@@ -57,7 +58,7 @@ function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
 /**
  * Agent List Page with layout.
  */
-function AgentListPage() {
+export function AgentListPage() {
   return (
     <AuthenticatedLayout>
       <AgentList />
@@ -68,7 +69,7 @@ function AgentListPage() {
 /**
  * LLM List Page with layout.
  */
-function LLMListPage() {
+export function LLMListPage() {
   return (
     <AuthenticatedLayout>
       <LLMList />
@@ -79,7 +80,7 @@ function LLMListPage() {
 /**
  * Tools Page with layout.
  */
-function ToolsListPage() {
+export function ToolsListPage() {
   return (
     <AuthenticatedLayout>
       <ToolsPage />
@@ -90,7 +91,7 @@ function ToolsListPage() {
 /**
  * Skills Page with layout.
  */
-function SkillsListPage() {
+export function SkillsListPage() {
   return (
     <AuthenticatedLayout>
       <SkillsPage />
