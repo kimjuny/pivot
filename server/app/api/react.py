@@ -47,6 +47,39 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
+    """Parse optional JSON allowlist string into a normalized name set.
+
+    Args:
+        raw_json: JSON string from model field. ``None``/blank means unrestricted.
+
+    Returns:
+        ``None`` when unrestricted; otherwise a set of allowed names.
+    """
+    if raw_json is None:
+        return None
+
+    text = raw_json.strip()
+    if text == "":
+        return None
+
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        return set()
+
+    if not isinstance(parsed, list):
+        return set()
+
+    result: set[str] = set()
+    for item in parsed:
+        if isinstance(item, str):
+            normalized = item.strip()
+            if normalized:
+                result.add(normalized)
+    return result
+
+
 @router.post("/react/chat/stream")
 async def react_chat_stream(
     request: ReactChatRequest,
@@ -226,6 +259,29 @@ async def react_chat_stream(
             # Ensure task_id is set
             task_id = task.task_id
 
+            available_skills = list_all_skills(current_user.username)
+            total_skill_count = len(available_skills)
+            allowed_skills = _parse_name_allowlist(agent.skill_ids)
+            if allowed_skills is not None:
+                available_skills = [
+                    item
+                    for item in available_skills
+                    if item.get("name") in allowed_skills
+                ]
+            candidate_skill_count = len(available_skills)
+            allowed_skill_names: list[str] = []
+            seen_skill_names: set[str] = set()
+            for skill_item in available_skills:
+                skill_name = skill_item.get("name")
+                if (
+                    not isinstance(skill_name, str)
+                    or not skill_name
+                    or skill_name in seen_skill_names
+                ):
+                    continue
+                seen_skill_names.add(skill_name)
+                allowed_skill_names.append(skill_name)
+
             # Build a request-scoped ToolManager that merges shared (builtin) tools
             # with the current user's private workspace tools.
             # We copy the shared registry into a fresh instance so the global
@@ -262,16 +318,32 @@ async def react_chat_stream(
             # Filter the tool registry to only tools the agent is allowed to use.
             # agent.tool_ids is a JSON-encoded list of names, e.g. '["add","test_tool"]'.
             # None means no restriction; '[]' means the agent has no tools.
-            if agent.tool_ids is not None:
-                try:
-                    allowed: set[str] = set(json.loads(agent.tool_ids))
-                except (ValueError, TypeError):
-                    allowed = set()
+            allowed_tools = _parse_name_allowlist(agent.tool_ids)
+            if allowed_tools is not None:
                 filtered_manager = ToolManager()
                 for meta in request_tool_manager.list_tools():
-                    if meta.name in allowed:
+                    if meta.name in allowed_tools:
                         filtered_manager.add_entry(meta)
                 request_tool_manager = filtered_manager
+
+            # Warm up sandbox with the full allowed skill set so skill mounts are
+            # ready before the first sandbox tool call in this task.
+            try:
+                from app.services.sandbox_service import get_sandbox_service
+
+                get_sandbox_service().create(
+                    username=current_user.username,
+                    agent_id=agent.id or 0,
+                    skills=allowed_skill_names,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Sandbox pre-create failed task_id=%s username=%s agent_id=%d err=%s",
+                    task_id,
+                    current_user.username,
+                    agent.id or 0,
+                    exc,
+                )
 
             engine = ReactEngine(
                 llm=llm,
@@ -280,13 +352,12 @@ async def react_chat_stream(
                 tool_execution_context=ToolExecutionContext(
                     username=current_user.username,
                     agent_id=agent.id or 0,
+                    allowed_skills=tuple(allowed_skill_names),
                 ),
             )
 
             selected_skills: list[str] = []
             selected_skills_text = ""
-            total_skill_count = 0
-            candidate_skill_count = 0
             resolution_duration_ms = 0
             # Skill resolution is optional and only runs when a resolver LLM is configured.
             if agent.skill_resolution_llm_id:
@@ -304,21 +375,6 @@ async def react_chat_stream(
                     )
                     if resolver_llm_config:
                         resolver_llm = create_llm_from_config(resolver_llm_config)
-                        available_skills = list_all_skills(current_user.username)
-                        total_skill_count = len(available_skills)
-                        candidate_skill_count = total_skill_count
-                        if agent.skill_ids is not None:
-                            try:
-                                allowed_skills = set(json.loads(agent.skill_ids))
-                            except (ValueError, TypeError):
-                                allowed_skills = set()
-                            available_skills = [
-                                item
-                                for item in available_skills
-                                if item.get("name") in allowed_skills
-                            ]
-                            candidate_skill_count = len(available_skills)
-
                         session_memory = {}
                         if task.session_id:
                             session_memory = SessionMemoryService(

@@ -6,6 +6,8 @@ This service stores user-editable skills under:
 
 Built-in skills are loaded from:
 - ``server/app/orchestration/skills/builtin/{name}/{name}.md``
+- ``server/app/orchestration/skills/builtin/{name}/SKILL.md``
+- ``server/app/orchestration/skills/builtin/{name}/skill.md``
 
 For each user skill file, a structured metadata JSON is stored under:
 - ``.../skills/{kind}/.metadata/{name}.json``
@@ -28,6 +30,7 @@ logger = get_logger("skill_service")
 
 _SKILLS_DIRNAME = "skills"
 _ALLOWED_KINDS = {"private", "shared"}
+_SKILL_VARIANT_FILENAMES = ("SKILL.md", "skill.md", "Skill.md")
 
 
 def _builtin_skills_dir() -> Path:
@@ -58,9 +61,20 @@ def _legacy_skill_path(base_dir: Path, skill_name: str) -> Path:
 
 
 def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
-    canonical = _canonical_skill_path(base_dir, skill_name)
-    if canonical.exists():
-        return canonical
+    skill_dir = base_dir / skill_name
+    if skill_dir.is_dir():
+        canonical = _canonical_skill_path(base_dir, skill_name)
+        if canonical.exists():
+            return canonical
+        for filename in _SKILL_VARIANT_FILENAMES:
+            candidate = skill_dir / filename
+            if candidate.exists():
+                return candidate
+        # Last-resort compatibility for uncommon naming variants.
+        for candidate in sorted(skill_dir.glob("*.md")):
+            if candidate.name.startswith("_"):
+                continue
+            return candidate
     legacy = _legacy_skill_path(base_dir, skill_name)
     if legacy.exists():
         return legacy
@@ -68,26 +82,37 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
 
 
 def _list_skill_paths(base_dir: Path) -> list[Path]:
-    """List canonical skill markdown files plus legacy flat files."""
+    """List skill markdown files in directory and flat legacy layout."""
     paths: list[Path] = []
-    canonical_names: set[str] = set()
+    dir_skill_names: set[str] = set()
 
     for item in sorted(base_dir.iterdir()):
         if not item.is_dir() or item.name.startswith("_") or item.name == ".metadata":
             continue
-        canonical = item / f"{item.name}.md"
-        if canonical.exists():
-            paths.append(canonical)
-            canonical_names.add(item.name)
+        matched = _resolve_skill_path(base_dir, item.name)
+        if matched is not None:
+            paths.append(matched)
+            dir_skill_names.add(item.name)
 
     for md_file in sorted(base_dir.glob("*.md")):
         if md_file.name.startswith("_"):
             continue
-        if md_file.stem in canonical_names:
+        if md_file.stem in dir_skill_names:
             continue
         paths.append(md_file)
 
     return paths
+
+
+def _skill_name_for_path(base_dir: Path, skill_path: Path) -> str:
+    """Infer skill name from layout.
+
+    Directory layout uses the parent directory name as skill name.
+    Legacy flat layout uses the file stem.
+    """
+    if skill_path.parent == base_dir:
+        return skill_path.stem
+    return skill_path.parent.name
 
 
 def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
@@ -139,7 +164,11 @@ def _parse_front_matter(source: str) -> dict[str, str]:
 
 
 def _build_metadata(
-    path: Path, kind: str, source_type: str, created_at: str | None = None
+    path: Path,
+    kind: str,
+    source_type: str,
+    created_at: str | None = None,
+    fallback_name: str | None = None,
 ) -> dict[str, Any]:
     raw = path.read_text(encoding="utf-8")
     parsed = _parse_front_matter(raw)
@@ -155,7 +184,7 @@ def _build_metadata(
 
     updated_iso = datetime.fromtimestamp(from_stat_updated, tz=timezone.utc).isoformat()
 
-    name = parsed.get("name") or path.stem
+    name = parsed.get("name") or fallback_name or path.stem
     description = parsed.get("description") or ""
 
     return {
@@ -186,9 +215,15 @@ def list_builtin_skills() -> list[dict[str, Any]]:
 
     result: list[dict[str, Any]] = []
     for md_file in _list_skill_paths(root):
+        skill_name = _skill_name_for_path(root, md_file)
         try:
             result.append(
-                _build_metadata(md_file, kind="shared", source_type="builtin")
+                _build_metadata(
+                    md_file,
+                    kind="shared",
+                    source_type="builtin",
+                    fallback_name=skill_name,
+                )
             )
         except Exception as exc:
             logger.warning("Failed to parse builtin skill '%s': %s", md_file.name, exc)
@@ -201,7 +236,7 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
 
     for md_file in _list_skill_paths(base):
-        skill_name = md_file.stem
+        skill_name = _skill_name_for_path(base, md_file)
         md_file = _migrate_legacy_user_skill(base, skill_name)
         meta_file = _meta_path(base, skill_name)
         existing_created: str | None = None
@@ -213,7 +248,11 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
                 existing_created = None
 
         meta = _build_metadata(
-            md_file, kind=kind, source_type="user", created_at=existing_created
+            md_file,
+            kind=kind,
+            source_type="user",
+            created_at=existing_created,
+            fallback_name=skill_name,
         )
         meta_file.write_text(
             json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -259,7 +298,11 @@ def read_user_skill(username: str, kind: str, skill_name: str) -> dict[str, Any]
             existing_created = None
 
     meta = _build_metadata(
-        skill_path, kind=kind, source_type="user", created_at=existing_created
+        skill_path,
+        kind=kind,
+        source_type="user",
+        created_at=existing_created,
+        fallback_name=skill_name,
     )
     meta_file.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -289,7 +332,12 @@ def read_shared_skill(username: str, skill_name: str) -> dict[str, Any]:
     if builtin_path is None:
         raise FileNotFoundError(f"Shared skill '{skill_name}' not found.")
 
-    meta = _build_metadata(builtin_path, kind="shared", source_type="builtin")
+    meta = _build_metadata(
+        builtin_path,
+        kind="shared",
+        source_type="builtin",
+        fallback_name=skill_name,
+    )
     return {
         "name": skill_name,
         "source": builtin_path.read_text(encoding="utf-8"),
@@ -356,7 +404,11 @@ def upsert_user_skill(
     if legacy_path.exists():
         legacy_path.unlink()
     meta = _build_metadata(
-        skill_path, kind=kind, source_type="user", created_at=existing_created
+        skill_path,
+        kind=kind,
+        source_type="user",
+        created_at=existing_created,
+        fallback_name=skill_name,
     )
     meta_file.write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"

@@ -23,6 +23,7 @@ class ToolExecutionContext:
 
     username: str
     agent_id: int
+    allowed_skills: tuple[str, ...] = ()
 
 
 def get_current_tool_execution_context() -> ToolExecutionContext | None:

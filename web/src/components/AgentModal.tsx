@@ -127,7 +127,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md overflow-hidden">
         <DialogHeader>
           <DialogTitle>
             {mode === 'create' ? 'New Agent' : 'Edit Agent'}
@@ -140,7 +140,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           </div>
         )}
 
-        <div className="space-y-4 py-4">
+        <div className="min-w-0 space-y-4 py-4">
           <div className="space-y-2">
             <Label htmlFor="name">
               Agent Name <span className="text-destructive">*</span>

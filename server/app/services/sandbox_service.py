@@ -58,16 +58,33 @@ class SandboxService:
             raise RuntimeError("Sandbox manager response is not a JSON object.")
         return data
 
-    def exec(self, username: str, agent_id: int, cmd: list[str]) -> SandboxExecResult:
+    def exec(
+        self,
+        username: str,
+        agent_id: int,
+        cmd: list[str],
+        skills: list[str] | None = None,
+    ) -> SandboxExecResult:
         """Execute one non-interactive command inside an agent sandbox."""
+        if skills is None:
+            skills = []
         data = self._post(
             "/sandboxes/exec",
-            {"username": username, "agent_id": agent_id, "cmd": cmd},
+            {"username": username, "agent_id": agent_id, "cmd": cmd, "skills": skills},
         )
         return SandboxExecResult(
             exit_code=int(data.get("exit_code", -1)),
             stdout=str(data.get("stdout", "")),
             stderr=str(data.get("stderr", "")),
+        )
+
+    def create(self, username: str, agent_id: int, skills: list[str] | None = None) -> None:
+        """Ensure sandbox exists and is configured with current skill mounts."""
+        if skills is None:
+            skills = []
+        self._post(
+            "/sandboxes/create",
+            {"username": username, "agent_id": agent_id, "skills": skills},
         )
 
 

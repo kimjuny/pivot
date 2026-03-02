@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import suppress
@@ -249,6 +250,172 @@ def _ensure_agent_workspace_dir(username: str, agent_id: int) -> None:
         )
 
 
+def _resolve_host_path_from_backend_path(path_in_backend: str) -> str | None:
+    """Resolve host-side path for a backend-container path.
+
+    Args:
+        path_in_backend: Absolute path as seen from the backend container.
+
+    Returns:
+        Host-side absolute path if mount mapping exists; otherwise ``None``.
+    """
+    if not path_in_backend.startswith("/"):
+        return None
+
+    mount_sets: list[list[dict[str, Any]]] = []
+    with suppress(HTTPException):
+        mount_sets.append(_get_container_mounts(_backend_container()))
+
+    self_container = _self_container()
+    if self_container is not None:
+        with suppress(HTTPException):
+            mount_sets.append(_get_container_mounts(self_container))
+
+    best_match: tuple[int, str] | None = None
+    for mounts in mount_sets:
+        for mount in mounts:
+            destination = _mount_destination(mount)
+            source = _mount_source(mount)
+            if not destination or not source:
+                continue
+            normalized_destination = destination.rstrip("/") or "/"
+            if path_in_backend == normalized_destination or path_in_backend.startswith(f"{normalized_destination}/"):
+                score = len(normalized_destination)
+            else:
+                continue
+            if best_match is None or score > best_match[0]:
+                best_match = (score, source.rstrip("/"))
+
+    if best_match is None:
+        return None
+
+    matched_destination_len, matched_source = best_match
+    matched_destination = path_in_backend[:matched_destination_len]
+    suffix = path_in_backend[len(matched_destination) :].lstrip("/")
+    if suffix:
+        return f"{matched_source}/{suffix}"
+    return matched_source
+
+
+def _normalize_skill_names(raw_skill_names: list[str] | None) -> list[str]:
+    """Sanitize and deduplicate skill names for mount resolution.
+
+    Args:
+        raw_skill_names: Raw skills list from request payload.
+
+    Returns:
+        Stable-order deduplicated skill names.
+    """
+    if not raw_skill_names:
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in raw_skill_names:
+        if not isinstance(value, str):
+            continue
+        skill_name = value.strip()
+        if not skill_name or skill_name in seen:
+            continue
+        if re.fullmatch(r"[A-Za-z0-9_.-]+", skill_name) is None:
+            logger.warning("sandbox.skills skip invalid skill name: %s", value)
+            continue
+        seen.add(skill_name)
+        normalized.append(skill_name)
+    return normalized
+
+
+def _resolve_skill_source_dir(username: str, skill_name: str) -> str | None:
+    """Resolve host path for one allowed skill directory.
+
+    Search order mirrors prompt skill resolution precedence:
+    private -> shared -> builtin.
+    """
+    backend_candidates = (
+        f"/app/server/workspace/{username}/skills/private/{skill_name}",
+        f"/app/server/workspace/{username}/skills/shared/{skill_name}",
+        f"/app/server/app/orchestration/skills/builtin/{skill_name}",
+    )
+    backend = _backend_container()
+    for candidate in backend_candidates:
+        try:
+            exists_result = backend.exec_run(
+                ["test", "-d", candidate],
+                workdir="/",
+                tty=False,
+                stream=False,
+                socket=False,
+            )
+        except Exception:
+            continue
+
+        if isinstance(exists_result, tuple) and len(exists_result) == 2:
+            exists_exit_code = int(exists_result[0])
+        else:
+            exists_exit_code = int(getattr(exists_result, "exit_code", -1))
+        if exists_exit_code != 0:
+            continue
+
+        host_path = _resolve_host_path_from_backend_path(candidate)
+        if host_path is not None:
+            return host_path
+
+    return None
+
+
+def _build_skill_mounts(
+    username: str, skill_names: list[str]
+) -> tuple[dict[str, dict[str, str]], set[str]]:
+    """Build bind-mount map for allowed skills.
+
+    Args:
+        username: Current sandbox user.
+        skill_names: Sanitized skill names allowed for this agent.
+
+    Returns:
+        Tuple of ``(volumes_map, mounted_skill_name_set)``.
+    """
+    volumes: dict[str, dict[str, str]] = {}
+    mounted_skill_names: set[str] = set()
+    for skill_name in skill_names:
+        source_dir = _resolve_skill_source_dir(username, skill_name)
+        if source_dir is None:
+            logger.warning(
+                "sandbox.skills source not found; skip mount username=%s skill=%s",
+                username,
+                skill_name,
+            )
+            continue
+        volumes[source_dir] = {
+            "bind": f"/workspace/skills/{skill_name}",
+            "mode": "ro",
+        }
+        mounted_skill_names.add(skill_name)
+    return volumes, mounted_skill_names
+
+
+def _mounted_skill_names(container: Any) -> set[str]:
+    """Read currently mounted skill names from a sandbox container."""
+    try:
+        mounts = _get_container_mounts(container)
+    except HTTPException:
+        return set()
+
+    skill_names: set[str] = set()
+    for mount in mounts:
+        destination = _mount_destination(mount)
+        if not isinstance(destination, str):
+            continue
+        prefix = "/workspace/skills/"
+        if not destination.startswith(prefix):
+            continue
+        suffix = destination[len(prefix) :]
+        if "/" in suffix or not suffix:
+            continue
+        skill_names.add(suffix)
+    return skill_names
+
+
 def _decode_bytes(value: Any) -> str:
     """Decode Podman API output into a UTF-8 string."""
     if value is None:
@@ -305,13 +472,16 @@ def _container_working_dir(container: Any) -> str:
     return ""
 
 
-def _should_recreate_container(container: Any) -> tuple[bool, str]:
+def _should_recreate_container(
+    container: Any, expected_skill_names: set[str]
+) -> tuple[bool, str]:
     """Decide whether an existing sandbox container must be recreated.
 
-    Recreate when configuration is unsafe/legacy:
+    Recreate when configuration is unsafe/legacy or skill mounts drift:
     - working dir is not ``/workspace``
     - full project mounts (e.g. ``/app/server`` or ``/app/web``) are present
     - ``/workspace`` mount is missing
+    - mounted ``/workspace/skills/*`` set differs from expected
     """
     workdir = _container_working_dir(container)
     try:
@@ -330,19 +500,28 @@ def _should_recreate_container(container: Any) -> tuple[bool, str]:
         return True, "missing_workspace_mount"
     if "/app/server" in destinations or "/app/web" in destinations:
         return True, "unsafe_project_mount"
+    mounted_skills = _mounted_skill_names(container)
+    if mounted_skills != expected_skill_names:
+        return True, "skill_mount_mismatch"
     return False, "ok"
 
 
-def _ensure_sandbox(username: str, agent_id: int) -> Any:
+def _ensure_sandbox(username: str, agent_id: int, skills: list[str] | None = None) -> Any:
     """Create or start a reusable sidecar sandbox container."""
     op_started = time.perf_counter()
     settings = get_settings()
     name = _sandbox_name(username, agent_id)
     _ensure_agent_workspace_dir(username, agent_id)
+    normalized_skills = _normalize_skill_names(skills)
+    skill_volumes, expected_skill_names = _build_skill_mounts(
+        username, normalized_skills
+    )
 
     existing = _find_container(name)
     if existing is not None:
-        should_recreate, recreate_reason = _should_recreate_container(existing)
+        should_recreate, recreate_reason = _should_recreate_container(
+            existing, expected_skill_names
+        )
     else:
         should_recreate, recreate_reason = (False, "no_container")
 
@@ -383,7 +562,7 @@ def _ensure_sandbox(username: str, agent_id: int) -> Any:
                             f"start_error={exc}; remove_error={remove_exc}"
                         ),
                     ) from remove_exc
-                return _ensure_sandbox(username, agent_id)
+                return _ensure_sandbox(username, agent_id, normalized_skills)
             if "already running" not in message:
                 raise HTTPException(
                     status_code=500,
@@ -404,6 +583,8 @@ def _ensure_sandbox(username: str, agent_id: int) -> Any:
     workspace_host_dir = (
         f"{workspace_host_root.rstrip('/')}/{username}/agents/{agent_id}"
     )
+    volumes = {workspace_host_dir: {"bind": "/workspace", "mode": "rw"}}
+    volumes.update(skill_volumes)
     setup_cmd = "sleep infinity"
     create_started = time.perf_counter()
     try:
@@ -417,7 +598,7 @@ def _ensure_sandbox(username: str, agent_id: int) -> Any:
             stdin_open=False,
             working_dir="/workspace",
             # Mount only the current agent workspace; never mount full project tree.
-            volumes={workspace_host_dir: {"bind": "/workspace", "mode": "rw"}},
+            volumes=volumes,
             environment={"PYTHONUNBUFFERED": "1"},
         )
         create_ms = int((time.perf_counter() - create_started) * 1000)
@@ -447,6 +628,7 @@ class SandboxRequest(BaseModel):
 
     username: str = Field(min_length=1)
     agent_id: int
+    skills: list[str] = Field(default_factory=list)
 
 
 class SandboxExecRequest(SandboxRequest):
@@ -562,7 +744,7 @@ def healthz() -> dict[str, str]:
 @app.post("/sandboxes/create", dependencies=[Depends(_require_token)])
 def create_sandbox(payload: SandboxRequest) -> dict[str, str]:
     """Create sandbox container for one user+agent pair (idempotent)."""
-    container = _ensure_sandbox(payload.username, payload.agent_id)
+    container = _ensure_sandbox(payload.username, payload.agent_id, payload.skills)
     return {
         "container_name": _sandbox_name(payload.username, payload.agent_id),
         "container_id": container.id,
@@ -610,7 +792,7 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
     """Exec one command in sandbox and return stdout/stderr + exit code."""
     started = time.perf_counter()
     ensure_started = time.perf_counter()
-    container = _ensure_sandbox(payload.username, payload.agent_id)
+    container = _ensure_sandbox(payload.username, payload.agent_id, payload.skills)
     ensure_ms = int((time.perf_counter() - ensure_started) * 1000)
 
     exec_started = time.perf_counter()

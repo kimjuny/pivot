@@ -446,6 +446,34 @@ class ReactEngine:
             return [{"result": output if isinstance(output, dict) else {}}]
         return None
 
+    def _normalize_step_status_update_payload(self, raw_value: Any) -> list[Any]:
+        """Normalize raw step status updates into a list for validation.
+
+        Why: model outputs are not guaranteed to keep a stable shape. Some
+        responses emit a single object or a JSON string instead of a list. We
+        normalize these variants to avoid silently dropping valid plan updates.
+
+        Args:
+            raw_value: Raw payload from model output.
+
+        Returns:
+            A list of raw update items. Invalid input returns an empty list.
+        """
+        if isinstance(raw_value, list):
+            return raw_value
+        if isinstance(raw_value, dict):
+            return [raw_value]
+        if isinstance(raw_value, str):
+            try:
+                parsed_value = json.loads(raw_value)
+            except json.JSONDecodeError:
+                return []
+            if isinstance(parsed_value, list):
+                return parsed_value
+            if isinstance(parsed_value, dict):
+                return [parsed_value]
+        return []
+
     async def execute_recursion(
         self,
         task: ReactTask,
@@ -557,16 +585,17 @@ class ReactEngine:
             action_output = action.get("output", {})
             # LLMs may place step_status_update in different locations.
             # We accept all known variants and normalize later.
-            step_status_update = action.get("step_status_update")
-            if not isinstance(step_status_update, list):
-                step_status_update = react_output.get("step_status_update")
-            if (
-                not isinstance(step_status_update, list)
-                and isinstance(action_output, dict)
-            ):
-                step_status_update = action_output.get("step_status_update")
-            if not isinstance(step_status_update, list):
-                step_status_update = []
+            step_status_update = self._normalize_step_status_update_payload(
+                action.get("step_status_update")
+            )
+            if not step_status_update:
+                step_status_update = self._normalize_step_status_update_payload(
+                    react_output.get("step_status_update")
+                )
+            if not step_status_update and isinstance(action_output, dict):
+                step_status_update = self._normalize_step_status_update_payload(
+                    action_output.get("step_status_update")
+                )
 
             # Extract the plan step this recursion belongs to.
             # The LLM returns action.step_id when executing as part of a plan.
