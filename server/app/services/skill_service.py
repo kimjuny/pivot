@@ -244,9 +244,7 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
         if md_file == _legacy_skill_path(base, skill_name):
             md_file = _migrate_legacy_user_skill(base, skill_name)
         if not md_file.exists():
-            logger.warning(
-                "Skip missing user skill file after resolution: %s", md_file
-            )
+            logger.warning("Skip missing user skill file after resolution: %s", md_file)
             continue
         meta_file = _meta_path(base, skill_name)
         existing_created: str | None = None
@@ -270,7 +268,9 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
             )
             result.append(meta)
         except FileNotFoundError:
-            logger.warning("Skip user skill metadata build for missing file: %s", md_file)
+            logger.warning(
+                "Skip user skill metadata build for missing file: %s", md_file
+            )
         except Exception as exc:
             logger.warning("Failed to parse user skill '%s': %s", md_file.name, exc)
 

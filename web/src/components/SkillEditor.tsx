@@ -23,6 +23,8 @@ interface SkillEditorProps {
   onSave?: (value: string) => void;
   /** Whether save operation is in progress. */
   isSaving?: boolean;
+  /** Whether editor is read-only for built-in skills. */
+  readOnly?: boolean;
 }
 
 /**
@@ -31,7 +33,13 @@ interface SkillEditorProps {
  * Unlike ToolEditor, this editor does not run lint/type checks and focuses on
  * markdown authoring with lightweight save interaction.
  */
-function SkillEditor({ value, onChange, onSave, isSaving = false }: SkillEditorProps) {
+function SkillEditor({
+  value,
+  onChange,
+  onSave,
+  isSaving = false,
+  readOnly = false,
+}: SkillEditorProps) {
   const resolvedTheme = useResolvedTheme();
   const valueRef = useRef(value);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -44,11 +52,11 @@ function SkillEditor({ value, onChange, onSave, isSaving = false }: SkillEditorP
     const monacoApi = monaco as typeof Monaco;
     editorRef.current = editor;
     editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => {
-      if (onSave) {
+      if (onSave && !readOnly) {
         onSave(valueRef.current);
       }
     });
-  }, [onSave]);
+  }, [onSave, readOnly]);
 
   return (
     <div className="flex flex-col h-full">
@@ -70,19 +78,24 @@ function SkillEditor({ value, onChange, onSave, isSaving = false }: SkillEditorP
             automaticLayout: true,
             lineNumbers: 'on',
             renderWhitespace: 'boundary',
+            readOnly,
           }}
         />
       </div>
       <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30 text-xs flex-shrink-0">
-        <span className="text-muted-foreground">Markdown skill source</span>
+        <span className="text-muted-foreground">
+          {readOnly ? 'Built-in shared skill (read-only)' : 'Markdown skill source'}
+        </span>
         <Button
           size="sm"
           variant="ghost"
-          disabled={isSaving}
+          disabled={isSaving || readOnly}
           onClick={() => onSave && onSave(valueRef.current)}
           className="h-6 text-xs px-2 gap-1"
         >
-          {isSaving ? (
+          {readOnly ? (
+            'Read-only'
+          ) : isSaving ? (
             <>
               <Loader2 className="w-3 h-3 animate-spin" />
               Saving…

@@ -34,9 +34,21 @@ import AgentDetailSidebar from './AgentDetailSidebar';
 import ControlButtons from './ControlButtons';
 import SceneContextMenu, { ContextMenuContext } from './SceneContextMenu';
 import SubmitArea from './SubmitArea';
-import { updateAgentScenes } from '../utils/api';
+import ToolEditor from './ToolEditor';
+import SkillEditor from './SkillEditor';
+import {
+  updateAgentScenes,
+  getPrivateToolSource,
+  getSharedToolSource,
+  upsertPrivateTool,
+  getSharedSkillSource,
+  getUserSkillSource,
+  upsertUserSkill,
+} from '../utils/api';
 import { deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
+import { toast } from 'sonner';
 import type { Agent, Scene, SceneGraph, SceneNode } from '../types';
+import type { AgentTab } from '../store/agentTabStore';
 
 const nodeTypes = {
   subscene: SubsceneNode,
@@ -63,6 +75,83 @@ interface AgentDetailProps {
   onSceneSelect: (scene: Scene) => void;
   onRefreshScenes: () => Promise<void>;
   onAgentUpdate?: (agent: Agent) => void;
+}
+
+interface ToolTabDescriptor {
+  kind: 'private' | 'shared';
+  source: 'builtin' | 'user';
+  readOnly: boolean;
+  toolName: string;
+}
+
+interface SkillTabDescriptor {
+  kind: 'private' | 'shared';
+  source: 'builtin' | 'user';
+  readOnly: boolean;
+  skillName: string;
+}
+
+interface TabEditorState {
+  source: string;
+  isLoading: boolean;
+  isSaving: boolean;
+  isLoaded: boolean;
+  error: string | null;
+}
+
+/**
+ * Parse tool tab metadata/resourceId into a normalized descriptor.
+ * Falls back to private/user editable for legacy tabs that only carry a name.
+ */
+function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
+  const rawResourceId = String(tab.resourceId);
+  const separator = rawResourceId.indexOf(':');
+  const parsedKind =
+    separator > -1 ? rawResourceId.slice(0, separator) : undefined;
+  const normalizedKind: 'private' | 'shared' =
+    parsedKind === 'shared' ? 'shared' : 'private';
+  const readOnly = tab.meta?.readOnly ?? normalizedKind === 'shared';
+  const source = tab.meta?.source ?? (normalizedKind === 'shared' ? 'builtin' : 'user');
+
+  return {
+    kind: tab.meta?.kind ?? normalizedKind,
+    source,
+    readOnly,
+    toolName: tab.name,
+  };
+}
+
+/**
+ * Parse skill tab metadata/resourceId into a normalized descriptor.
+ * Falls back to shared/builtin read-only for legacy tabs without metadata.
+ */
+function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
+  const rawResourceId = String(tab.resourceId);
+  const firstSeparator = rawResourceId.indexOf(':');
+  const secondSeparator =
+    firstSeparator > -1 ? rawResourceId.indexOf(':', firstSeparator + 1) : -1;
+  const parsedKind =
+    firstSeparator > -1 ? rawResourceId.slice(0, firstSeparator) : undefined;
+  const parsedSource =
+    secondSeparator > -1
+      ? rawResourceId.slice(firstSeparator + 1, secondSeparator)
+      : undefined;
+  const normalizedKind: 'private' | 'shared' =
+    parsedKind === 'private' ? 'private' : 'shared';
+  const normalizedSource: 'builtin' | 'user' =
+    parsedSource === 'user'
+      ? 'user'
+      : normalizedKind === 'private'
+        ? 'user'
+        : 'builtin';
+  const readOnly = tab.meta?.readOnly ?? normalizedSource === 'builtin';
+
+  return {
+    kind: tab.meta?.kind ?? normalizedKind,
+    source: tab.meta?.source ?? normalizedSource,
+    readOnly,
+    skillName: tab.name,
+  };
 }
 
 function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes, onAgentUpdate }: AgentDetailProps) {
@@ -102,6 +191,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [contextMenuElement, setContextMenuElement] = useState<{ id: string; data?: Record<string, unknown> } | null>(null);
   const [pendingConnection, setPendingConnection] = useState<{ from: string; to: string } | null>(null);
   const [newSubscenePosition, setNewSubscenePosition] = useState<{ x: number; y: number } | null>(null);
+  const [toolEditors, setToolEditors] = useState<Record<string, TabEditorState>>({});
+  const [skillEditors, setSkillEditors] = useState<Record<string, TabEditorState>>({});
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
   // Derived state: workspaceAgent for edit mode, previewAgent for preview mode
@@ -137,6 +228,245 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       }
     }
   }, [activeTabId, tabs, currentSceneId, setCurrentSceneId]);
+
+  /**
+   * Keep only editor states for currently open tabs.
+   * Why: avoids stale memory when users close many tool/skill tabs.
+   */
+  useEffect(() => {
+    const openTabIds = new Set(tabs.map((tab) => tab.id));
+    setToolEditors((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([tabId]) => openTabIds.has(tabId))
+      );
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+    setSkillEditors((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([tabId]) => openTabIds.has(tabId))
+      );
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next;
+    });
+  }, [tabs]);
+
+  /**
+   * Load tool source for any newly opened tool tab.
+   */
+  useEffect(() => {
+    tabs
+      .filter((tab) => tab.type === 'tool' || tab.type === 'function')
+      .forEach((tab) => {
+        const existing = toolEditors[tab.id];
+        if (existing?.isLoaded || existing?.isLoading) {
+          return;
+        }
+
+        const descriptor = parseToolTabDescriptor(tab);
+        setToolEditors((prev) => ({
+          ...prev,
+          [tab.id]: {
+            source: prev[tab.id]?.source ?? '',
+            isLoading: true,
+            isSaving: false,
+            isLoaded: false,
+            error: null,
+          },
+        }));
+
+        void (async () => {
+          try {
+            const result =
+              descriptor.kind === 'shared'
+                ? await getSharedToolSource(descriptor.toolName)
+                : await getPrivateToolSource(descriptor.toolName);
+            setToolEditors((prev) => ({
+              ...prev,
+              [tab.id]: {
+                source: result.source,
+                isLoading: false,
+                isSaving: false,
+                isLoaded: true,
+                error: null,
+              },
+            }));
+          } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            setToolEditors((prev) => ({
+              ...prev,
+              [tab.id]: {
+                source: prev[tab.id]?.source ?? '',
+                isLoading: false,
+                isSaving: false,
+                isLoaded: true,
+                error: error.message || `Failed to load tool "${descriptor.toolName}"`,
+              },
+            }));
+          }
+        })();
+      });
+  }, [tabs, toolEditors]);
+
+  /**
+   * Load skill source for any newly opened skill tab.
+   */
+  useEffect(() => {
+    tabs
+      .filter((tab) => tab.type === 'skill')
+      .forEach((tab) => {
+        const existing = skillEditors[tab.id];
+        if (existing?.isLoaded || existing?.isLoading) {
+          return;
+        }
+
+        const descriptor = parseSkillTabDescriptor(tab);
+        setSkillEditors((prev) => ({
+          ...prev,
+          [tab.id]: {
+            source: prev[tab.id]?.source ?? '',
+            isLoading: true,
+            isSaving: false,
+            isLoaded: false,
+            error: null,
+          },
+        }));
+
+        void (async () => {
+          try {
+            const result =
+              descriptor.kind === 'private'
+                ? await getUserSkillSource('private', descriptor.skillName)
+                : descriptor.source === 'user'
+                  ? await getUserSkillSource('shared', descriptor.skillName)
+                  : await getSharedSkillSource(descriptor.skillName);
+            setSkillEditors((prev) => ({
+              ...prev,
+              [tab.id]: {
+                source: result.source,
+                isLoading: false,
+                isSaving: false,
+                isLoaded: true,
+                error: null,
+              },
+            }));
+          } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            setSkillEditors((prev) => ({
+              ...prev,
+              [tab.id]: {
+                source: prev[tab.id]?.source ?? '',
+                isLoading: false,
+                isSaving: false,
+                isLoaded: true,
+                error: error.message || `Failed to load skill "${descriptor.skillName}"`,
+              },
+            }));
+          }
+        })();
+      });
+  }, [tabs, skillEditors]);
+
+  /**
+   * Save handler for tool tabs.
+   * Only private tools can be updated; shared tools remain read-only.
+   */
+  const handleToolTabSave = useCallback(async (tab: AgentTab, source: string) => {
+    const descriptor = parseToolTabDescriptor(tab);
+    if (descriptor.readOnly || descriptor.kind !== 'private') {
+      toast.error('Built-in shared tools are read-only');
+      return;
+    }
+
+    setToolEditors((prev) => ({
+      ...prev,
+      [tab.id]: {
+        source,
+        isLoading: false,
+        isSaving: true,
+        isLoaded: true,
+        error: null,
+      },
+    }));
+
+    try {
+      await upsertPrivateTool(descriptor.toolName, source);
+      toast.success(`Tool "${descriptor.toolName}" saved`);
+      setToolEditors((prev) => ({
+        ...prev,
+        [tab.id]: {
+          source,
+          isLoading: false,
+          isSaving: false,
+          isLoaded: true,
+          error: null,
+        },
+      }));
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      toast.error(`Failed to save tool "${descriptor.toolName}"`);
+      setToolEditors((prev) => ({
+        ...prev,
+        [tab.id]: {
+          source,
+          isLoading: false,
+          isSaving: false,
+          isLoaded: true,
+          error: error.message || `Failed to save tool "${descriptor.toolName}"`,
+        },
+      }));
+    }
+  }, []);
+
+  /**
+   * Save handler for skill tabs.
+   * Editable scopes match Skills page: private + user shared only.
+   */
+  const handleSkillTabSave = useCallback(async (tab: AgentTab, source: string) => {
+    const descriptor = parseSkillTabDescriptor(tab);
+    if (descriptor.readOnly || (descriptor.kind === 'shared' && descriptor.source === 'builtin')) {
+      toast.error('Built-in shared skills are read-only');
+      return;
+    }
+
+    const saveKind = descriptor.kind === 'private' ? 'private' : 'shared';
+    setSkillEditors((prev) => ({
+      ...prev,
+      [tab.id]: {
+        source,
+        isLoading: false,
+        isSaving: true,
+        isLoaded: true,
+        error: null,
+      },
+    }));
+
+    try {
+      await upsertUserSkill(saveKind, descriptor.skillName, source);
+      toast.success(`Skill "${descriptor.skillName}" saved`);
+      setSkillEditors((prev) => ({
+        ...prev,
+        [tab.id]: {
+          source,
+          isLoading: false,
+          isSaving: false,
+          isLoaded: true,
+          error: null,
+        },
+      }));
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      toast.error(`Failed to save skill "${descriptor.skillName}"`);
+      setSkillEditors((prev) => ({
+        ...prev,
+        [tab.id]: {
+          source,
+          isLoading: false,
+          isSaving: false,
+          isLoaded: true,
+          error: error.message || `Failed to save skill "${descriptor.skillName}"`,
+        },
+      }));
+    }
+  }, []);
 
   // Monitor theme changes
   useEffect(() => {
@@ -757,7 +1087,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                   {tabs.map((tab) => {
                     // Get icon based on tab type (matching sidebar icons)
                     const TabIcon = tab.type === 'scene' ? Layers
-                      : tab.type === 'function' ? Wrench
+                      : tab.type === 'tool' || tab.type === 'function' ? Wrench
                         : Zap;
 
                     return (
@@ -870,32 +1200,110 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                         />
                       )}
                     </div>
-                  ) : tab.type === 'function' ? (
-                    // Function editor placeholder
+                  ) : tab.type === 'tool' || tab.type === 'function' ? (
+                    // Tool Monaco editor
                     <div className="relative h-full">
                       {/* Sidebar Trigger Button */}
                       <div className="absolute top-3 left-3 z-10">
                         <SidebarTrigger />
                       </div>
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        <div className="text-center space-y-2">
-                          <p className="text-lg font-medium">Function Editor</p>
-                          <p className="text-sm">Coming soon…</p>
-                        </div>
+                      <div className="h-full pt-12">
+                        {(() => {
+                          const state = toolEditors[tab.id];
+                          const descriptor = parseToolTabDescriptor(tab);
+                          if (!state || state.isLoading) {
+                            return (
+                              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                                Loading tool source…
+                              </div>
+                            );
+                          }
+                          if (state.error) {
+                            return (
+                              <div className="flex items-center justify-center h-full px-6">
+                                <div className="text-center space-y-2">
+                                  <p className="text-sm text-destructive">{state.error}</p>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <ToolEditor
+                              value={state.source}
+                              onChange={(nextSource) => {
+                                setToolEditors((prev) => ({
+                                  ...prev,
+                                  [tab.id]: {
+                                    ...(prev[tab.id] ?? {
+                                      source: '',
+                                      isLoading: false,
+                                      isSaving: false,
+                                      isLoaded: true,
+                                      error: null,
+                                    }),
+                                    source: nextSource,
+                                  },
+                                }));
+                              }}
+                              onSave={descriptor.readOnly ? undefined : (nextSource) => void handleToolTabSave(tab, nextSource)}
+                              isSaving={state.isSaving}
+                              readOnly={descriptor.readOnly}
+                            />
+                          );
+                        })()}
                       </div>
                     </div>
                   ) : tab.type === 'skill' ? (
-                    // Skill editor placeholder
+                    // Skill Monaco editor
                     <div className="relative h-full">
                       {/* Sidebar Trigger Button */}
                       <div className="absolute top-3 left-3 z-10">
                         <SidebarTrigger />
                       </div>
-                      <div className="flex items-center justify-center h-full text-muted-foreground">
-                        <div className="text-center space-y-2">
-                          <p className="text-lg font-medium">Skill Editor</p>
-                          <p className="text-sm">Coming soon…</p>
-                        </div>
+                      <div className="h-full pt-12">
+                        {(() => {
+                          const state = skillEditors[tab.id];
+                          const descriptor = parseSkillTabDescriptor(tab);
+                          if (!state || state.isLoading) {
+                            return (
+                              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                                Loading skill source…
+                              </div>
+                            );
+                          }
+                          if (state.error) {
+                            return (
+                              <div className="flex items-center justify-center h-full px-6">
+                                <div className="text-center space-y-2">
+                                  <p className="text-sm text-destructive">{state.error}</p>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <SkillEditor
+                              value={state.source}
+                              onChange={(nextSource) => {
+                                setSkillEditors((prev) => ({
+                                  ...prev,
+                                  [tab.id]: {
+                                    ...(prev[tab.id] ?? {
+                                      source: '',
+                                      isLoading: false,
+                                      isSaving: false,
+                                      isLoaded: true,
+                                      error: null,
+                                    }),
+                                    source: nextSource,
+                                  },
+                                }));
+                              }}
+                              onSave={descriptor.readOnly ? undefined : (nextSource) => void handleSkillTabSave(tab, nextSource)}
+                              isSaving={state.isSaving}
+                              readOnly={descriptor.readOnly}
+                            />
+                          );
+                        })()}
                       </div>
                     </div>
                   ) : null}
@@ -911,7 +1319,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               </div>
               <div className="text-center space-y-2">
                 <p className="text-lg font-medium">No Tab Open</p>
-                <p className="text-sm">Select a scene, function, or skill from the sidebar to get started</p>
+                <p className="text-sm">Select a scene, tool, or skill from the sidebar to get started</p>
               </div>
             </div>
           )}

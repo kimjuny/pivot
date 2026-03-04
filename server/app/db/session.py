@@ -90,4 +90,6 @@ def ensure_react_schema_compatibility() -> None:
     columns = {column["name"] for column in inspector.get_columns("reacttask")}
     with engine.begin() as conn:
         if "skill_selection_result" not in columns:
-            conn.execute(text("ALTER TABLE reacttask ADD COLUMN skill_selection_result VARCHAR"))
+            conn.execute(
+                text("ALTER TABLE reacttask ADD COLUMN skill_selection_result VARCHAR")
+            )

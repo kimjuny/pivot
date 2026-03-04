@@ -60,6 +60,8 @@ interface SidebarTool {
     name: string;
     description: string;
     kind: 'shared' | 'private';
+    source: 'builtin' | 'user';
+    readOnly: boolean;
 }
 
 /** Unified skill entry for sidebar display. */
@@ -67,6 +69,24 @@ interface SidebarSkill {
     name: string;
     description: string;
     kind: 'shared' | 'private';
+    source: 'builtin' | 'user';
+    readOnly: boolean;
+}
+
+/**
+ * Build a unique resource ID for tool tabs.
+ * Why: shared/private tools can have the same name, so name alone collides.
+ */
+function buildToolResourceId(tool: SidebarTool): string {
+    return `${tool.kind}:${tool.name}`;
+}
+
+/**
+ * Build a unique resource ID for skill tabs.
+ * Why: shared(user)/shared(builtin)/private may share names.
+ */
+function buildSkillResourceId(skill: SidebarSkill): string {
+    return `${skill.kind}:${skill.source}:${skill.name}`;
 }
 
 /**
@@ -170,7 +190,7 @@ function AgentDetailSidebar({
     const [localSkillIds, setLocalSkillIds] = useState<string | null | undefined>(agent?.skill_ids);
     const hasFetchedToolsRef = useRef(false);
     const hasFetchedSkillsRef = useRef(false);
-    const { openTab } = useAgentTabStore();
+    const { openTab, activeTabId } = useAgentTabStore();
 
     // Sync localToolIds when the agent prop changes
     useEffect(() => {
@@ -248,11 +268,15 @@ function AgentDetailSidebar({
                         name: t.name,
                         description: t.description,
                         kind: 'shared' as const,
+                        source: 'builtin' as const,
+                        readOnly: true,
                     })),
                     ...priv.map((t: PrivateTool) => ({
                         name: t.name,
                         description: '',
                         kind: 'private' as const,
+                        source: 'user' as const,
+                        readOnly: false,
                     })),
                 ];
                 setTools(merged);
@@ -287,23 +311,18 @@ function AgentDetailSidebar({
                         name: s.name,
                         description: s.description,
                         kind: 'shared' as const,
+                        source: s.source,
+                        readOnly: s.source === 'builtin',
                     })),
                     ...priv.map((s: UserSkill) => ({
                         name: s.name,
                         description: s.description,
                         kind: 'private' as const,
+                        source: 'user' as const,
+                        readOnly: false,
                     })),
                 ];
-
-                const deduped = Array.from(
-                    merged.reduce((map, item) => {
-                        if (!map.has(item.name)) {
-                            map.set(item.name, item);
-                        }
-                        return map;
-                    }, new Map<string, SidebarSkill>()).values()
-                );
-                setSkills(deduped);
+                setSkills(merged);
             } catch (err) {
                 const error = err instanceof Error ? err : new Error(String(err));
                 console.error('Failed to fetch skills:', error);
@@ -368,6 +387,40 @@ function AgentDetailSidebar({
 
         // Keep backward compatibility with existing logic
         onSceneSelect(scene);
+    };
+
+    /**
+     * Handle tool item click.
+     * Opens Monaco tool tab and carries permission metadata.
+     */
+    const handleToolClick = (tool: SidebarTool) => {
+        openTab({
+            type: 'tool',
+            name: tool.name,
+            resourceId: buildToolResourceId(tool),
+            meta: {
+                kind: tool.kind,
+                source: tool.source,
+                readOnly: tool.readOnly,
+            },
+        });
+    };
+
+    /**
+     * Handle skill item click.
+     * Opens Monaco skill tab and carries permission metadata.
+     */
+    const handleSkillClick = (skill: SidebarSkill) => {
+        openTab({
+            type: 'skill',
+            name: skill.name,
+            resourceId: buildSkillResourceId(skill),
+            meta: {
+                kind: skill.kind,
+                source: skill.source,
+                readOnly: skill.readOnly,
+            },
+        });
     };
 
     return (
@@ -524,7 +577,7 @@ function AgentDetailSidebar({
                         </SidebarGroup>
                     </Collapsible>
 
-                    {/* Tools Section (Not Implemented) */}
+                    {/* Tools Section */}
                     <Collapsible
                         open={isToolsOpen}
                         onOpenChange={setIsToolsOpen}
@@ -597,13 +650,18 @@ function AgentDetailSidebar({
                                         </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {displayedTools.map((t) => (
-                                                <SidebarMenuItem key={`${t.kind}-${t.name}`}>
+                                            {displayedTools.map((t) => {
+                                                const toolResourceId = buildToolResourceId(t);
+                                                const toolTabId = `tool-${toolResourceId}`;
+                                                return (
+                                                <SidebarMenuItem key={`${t.kind}-${t.source}-${t.name}`}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
                                                                 size="sm"
-                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                                onClick={() => handleToolClick(t)}
+                                                                isActive={activeTabId === toolTabId}
+                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
                                                             >
                                                                 {/* Reserved icon slot */}
                                                                 <span className="w-4 shrink-0" />
@@ -633,7 +691,8 @@ function AgentDetailSidebar({
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </SidebarMenuItem>
-                                            ))}
+                                                );
+                                            })}
                                         </SidebarMenu>
                                     )}
                                 </SidebarGroupContent>
@@ -712,13 +771,18 @@ function AgentDetailSidebar({
                                         </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {displayedSkills.map((s) => (
-                                                <SidebarMenuItem key={`${s.kind}-${s.name}`}>
+                                            {displayedSkills.map((s) => {
+                                                const skillResourceId = buildSkillResourceId(s);
+                                                const skillTabId = `skill-${skillResourceId}`;
+                                                return (
+                                                <SidebarMenuItem key={`${s.kind}-${s.source}-${s.name}`}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
                                                                 size="sm"
-                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                                onClick={() => handleSkillClick(s)}
+                                                                isActive={activeTabId === skillTabId}
+                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
                                                             >
                                                                 <span className="w-4 shrink-0" />
                                                                 <span className="truncate flex-1">{s.name}</span>
@@ -746,7 +810,8 @@ function AgentDetailSidebar({
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </SidebarMenuItem>
-                                            ))}
+                                                );
+                                            })}
                                         </SidebarMenu>
                                     )}
                                 </SidebarGroupContent>

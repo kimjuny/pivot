@@ -117,6 +117,7 @@ function SkillsPage() {
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editingKind, setEditingKind] = useState<'private' | 'shared'>('private');
   const [editorSource, setEditorSource] = useState('');
+  const [editorReadOnly, setEditorReadOnly] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
 
@@ -169,6 +170,7 @@ function SkillsPage() {
     setEditingName(null);
     setEditingKind(kind);
     setEditorSource(NEW_SKILL_TEMPLATE);
+    setEditorReadOnly(false);
     setEditorOpen(true);
   };
 
@@ -179,6 +181,7 @@ function SkillsPage() {
         setEditingKind('private');
         setEditingName(row.skill.name);
         setEditorSource(result.source);
+        setEditorReadOnly(false);
         setEditorOpen(true);
         return;
       }
@@ -188,6 +191,7 @@ function SkillsPage() {
         setEditingKind('shared');
         setEditingName(row.skill.name);
         setEditorSource(result.source);
+        setEditorReadOnly(false);
         setEditorOpen(true);
         return;
       }
@@ -196,6 +200,7 @@ function SkillsPage() {
       setEditingKind('shared');
       setEditingName(row.skill.name);
       setEditorSource(result.source);
+      setEditorReadOnly(true);
       setEditorOpen(true);
     } catch {
       toast.error(`Failed to load skill "${row.skill.name}"`);
@@ -203,13 +208,9 @@ function SkillsPage() {
   }, []);
 
   const handleSave = useCallback(async (source: string) => {
-    // Builtin shared skill is read-only.
-    if (editingName && editingKind === 'shared') {
-      const target = sharedSkills.find((s) => s.name === editingName);
-      if (target?.source === 'builtin') {
-        toast.error('Built-in shared skills are read-only');
-        return;
-      }
+    if (editorReadOnly) {
+      toast.error('Built-in shared skills are read-only');
+      return;
     }
 
     let targetName = editingName;
@@ -228,7 +229,7 @@ function SkillsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [editingKind, editingName, loadSkills, sharedSkills]);
+  }, [editingKind, editingName, editorReadOnly, loadSkills]);
 
   const handleDelete = useCallback(async (row: SkillRow) => {
     if (row.kind === 'shared' && row.source === 'builtin') {
@@ -405,27 +406,25 @@ function SkillsPage() {
                   <TableCell className="text-xs text-muted-foreground">{row.skill.updated_at}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        aria-label={`Edit skill ${row.skill.name}`}
+                        onClick={() => void openEditDialog(row)}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
                       {(row.kind === 'private' || row.source === 'user') && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label={`Edit skill ${row.skill.name}`}
-                            onClick={() => void openEditDialog(row)}
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive hover:text-destructive"
-                            aria-label={`Delete skill ${row.skill.name}`}
-                            onClick={() => void handleDelete(row)}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          aria-label={`Delete skill ${row.skill.name}`}
+                          onClick={() => void handleDelete(row)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
                       )}
                     </div>
                   </TableCell>
@@ -494,14 +493,19 @@ function SkillsPage() {
       <DraggableDialog
         open={editorOpen}
         onOpenChange={setEditorOpen}
-        title={editingName ? `Edit Skill: ${editingName}` : `New ${editingKind === 'shared' ? 'Shared' : 'Private'} Skill`}
+        title={
+          editingName
+            ? `${editorReadOnly ? 'View' : 'Edit'} Skill: ${editingName}`
+            : `New ${editingKind === 'shared' ? 'Shared' : 'Private'} Skill`
+        }
         size="large"
       >
         <SkillEditor
           value={editorSource}
           onChange={setEditorSource}
-          onSave={(src) => void handleSave(src)}
+          onSave={editorReadOnly ? undefined : (src) => void handleSave(src)}
           isSaving={isSaving}
+          readOnly={editorReadOnly}
         />
       </DraggableDialog>
     </div>

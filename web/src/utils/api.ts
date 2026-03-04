@@ -994,12 +994,17 @@ export interface PrivateTool {
 }
 
 /**
- * Source code payload for a private tool read response.
+ * Source code payload for a tool read response.
  */
-export interface PrivateToolSource {
+export interface ToolSourcePayload {
   name: string;
   source: string;
 }
+
+/**
+ * Backward-compatible alias for private tool source payload.
+ */
+export type PrivateToolSource = ToolSourcePayload;
 
 /**
  * A Monaco-compatible editor diagnostic marker.
@@ -1136,8 +1141,20 @@ export const getPrivateTools = async (): Promise<PrivateTool[]> => {
  * @param toolName - Tool name (file stem without .py)
  * @returns Promise resolving to tool source payload
  */
-export const getPrivateToolSource = async (toolName: string): Promise<PrivateToolSource> => {
-  return apiRequest(`/tools/private/${toolName}`) as Promise<PrivateToolSource>;
+export const getPrivateToolSource = async (toolName: string): Promise<ToolSourcePayload> => {
+  const encodedToolName = encodeURIComponent(toolName);
+  return apiRequest(`/tools/private/${encodedToolName}`) as Promise<ToolSourcePayload>;
+};
+
+/**
+ * Fetch source code of a shared (built-in) tool.
+ *
+ * @param toolName - Tool name from shared catalog
+ * @returns Promise resolving to tool source payload
+ */
+export const getSharedToolSource = async (toolName: string): Promise<ToolSourcePayload> => {
+  const encodedToolName = encodeURIComponent(toolName);
+  return apiRequest(`/tools/shared/${encodedToolName}`) as Promise<ToolSourcePayload>;
 };
 
 /**

@@ -30,6 +30,8 @@ interface ToolEditorProps {
   onSave?: (value: string) => void;
   /** Whether a save operation is currently in progress */
   isSaving?: boolean;
+  /** Whether editor is read-only for built-in tools. */
+  readOnly?: boolean;
 }
 
 /**
@@ -104,7 +106,13 @@ function countDiagnostics(diagnostics: ToolDiagnostic[]): DiagnosticSummary {
  * user sees inline squiggles. A status bar below the editor shows the
  * aggregated error / warning counts, and Save button.
  */
-function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorProps) {
+function ToolEditor({
+  value,
+  onChange,
+  onSave,
+  isSaving = false,
+  readOnly = false,
+}: ToolEditorProps) {
   const resolvedTheme = useResolvedTheme();
   const monacoRef = useRef<typeof Monaco | null>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -156,7 +164,7 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
       editor.addCommand(
         monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS,
         () => {
-          if (onSave) {
+          if (onSave && !readOnly) {
             const current = valueRef.current;
             setIsChecking(true);
             void checkToolPyright(current)
@@ -179,7 +187,7 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
         }
       );
     },
-    [onSave, flushMarkers]
+    [onSave, flushMarkers, readOnly]
   );
 
   /** Debounced change handler – schedules AST and ruff checks. */
@@ -303,6 +311,7 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
             lineNumbers: 'on',
             renderWhitespace: 'boundary',
             formatOnPaste: true,
+            readOnly,
           }}
         />
       </div>
@@ -343,11 +352,13 @@ function ToolEditor({ value, onChange, onSave, isSaving = false }: ToolEditorPro
         <Button
           size="sm"
           variant="ghost"
-          disabled={isSaving || isChecking}
+          disabled={isSaving || isChecking || readOnly}
           onClick={() => onSave && onSave(valueRef.current)}
           className="h-6 text-xs px-2 gap-1"
         >
-          {isSaving ? (
+          {readOnly ? (
+            'Read-only'
+          ) : isSaving ? (
             <>
               <Loader2 className="w-3 h-3 animate-spin" />
               Saving…

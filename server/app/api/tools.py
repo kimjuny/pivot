@@ -8,6 +8,8 @@ Provides two categories of tools:
 All endpoints require authentication.
 """
 
+import inspect
+from pathlib import Path
 from typing import Any
 
 from app.api.auth import get_current_user
@@ -56,6 +58,61 @@ async def get_shared_tools(
         }
         for t in tool_manager.list_tools()
     ]
+
+
+def _read_shared_tool_source(tool_name: str) -> str:
+    """Read source code for a shared tool by name.
+
+    Args:
+        tool_name: Tool name in the shared tool catalog.
+
+    Returns:
+        Full Python source code for the module that defines the tool.
+
+    Raises:
+        FileNotFoundError: If the tool does not exist or source cannot be read.
+    """
+    tool_manager = get_tool_manager()
+    tool_metadata = tool_manager.get_tool(tool_name)
+    if tool_metadata is None:
+        raise FileNotFoundError(f"Shared tool '{tool_name}' not found.")
+
+    source_file = inspect.getsourcefile(tool_metadata.func)
+    if source_file is not None:
+        source_path = Path(source_file)
+        if source_path.exists():
+            return source_path.read_text(encoding="utf-8")
+
+    try:
+        return inspect.getsource(tool_metadata.func)
+    except (OSError, TypeError) as exc:
+        raise FileNotFoundError(
+            f"Shared tool '{tool_name}' source is unavailable."
+        ) from exc
+
+
+@router.get("/tools/shared/{tool_name}")
+async def get_shared_tool_source(
+    tool_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Get source code for a shared (built-in) tool.
+
+    Args:
+        tool_name: Stem of the shared tool.
+
+    Returns:
+        Dict with ``name`` and ``source`` keys.
+
+    Raises:
+        404: If the shared tool does not exist.
+    """
+    try:
+        source = _read_shared_tool_source(tool_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"name": tool_name, "source": source}
 
 
 # ---------------------------------------------------------------------------

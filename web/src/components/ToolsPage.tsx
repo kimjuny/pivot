@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import {
   getSharedTools,
   getPrivateTools,
+  getSharedToolSource,
   getPrivateToolSource,
   upsertPrivateTool,
   deletePrivateTool,
@@ -135,6 +136,7 @@ function ToolsPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingName, setEditingName] = useState<string | null>(null);
   const [editorSource, setEditorSource] = useState('');
+  const [editorReadOnly, setEditorReadOnly] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
 
@@ -206,14 +208,26 @@ function ToolsPage() {
   const openCreateDialog = () => {
     setEditingName(null);
     setEditorSource(NEW_TOOL_TEMPLATE);
+    setEditorReadOnly(false);
     setEditorOpen(true);
   };
 
-  const openEditDialog = useCallback(async (toolName: string) => {
+  const openEditDialog = useCallback(async (row: ToolRow) => {
+    const toolName = row.tool.name;
     try {
+      if (row.kind === 'shared') {
+        const result = await getSharedToolSource(toolName);
+        setEditingName(toolName);
+        setEditorSource(result.source);
+        setEditorReadOnly(true);
+        setEditorOpen(true);
+        return;
+      }
+
       const result = await getPrivateToolSource(toolName);
       setEditingName(toolName);
       setEditorSource(result.source);
+      setEditorReadOnly(false);
       setEditorOpen(true);
     } catch {
       toast.error(`Failed to load source for "${toolName}"`);
@@ -226,6 +240,11 @@ function ToolsPage() {
    */
   const handleSave = useCallback(
     async (source: string) => {
+      if (editorReadOnly) {
+        toast.error('Built-in shared tools are read-only');
+        return;
+      }
+
       let toolName = editingName;
       if (!toolName) {
         const match = /^def\s+(\w+)\s*\(/m.exec(source);
@@ -248,7 +267,7 @@ function ToolsPage() {
         setIsSaving(false);
       }
     },
-    [editingName, loadTools]
+    [editingName, editorReadOnly, loadTools]
   );
 
   const handleDelete = useCallback(async (toolName: string) => {
@@ -273,7 +292,7 @@ function ToolsPage() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Tools</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Shared tools are built-in and available to all users. Private tools are yours only.
+            Built-in shared tools are read-only. Private tools are yours only.
           </p>
         </div>
         <div
@@ -477,14 +496,15 @@ function ToolsPage() {
         <DraggableDialog
           open={editorOpen}
           onOpenChange={setEditorOpen}
-          title={editingName ? `Edit Tool: ${editingName}` : 'New Tool'}
+          title={editingName ? `${editorReadOnly ? 'View' : 'Edit'} Tool: ${editingName}` : 'New Tool'}
           size="large"
         >
           <ToolEditor
             value={editorSource}
             onChange={setEditorSource}
-            onSave={(src) => void handleSave(src)}
+            onSave={editorReadOnly ? undefined : (src) => void handleSave(src)}
             isSaving={isSaving}
+            readOnly={editorReadOnly}
           />
         </DraggableDialog>
       </div>
@@ -498,13 +518,13 @@ function ToolsPage() {
 
 interface ToolTableRowProps {
   row: ToolRow;
-  onEdit: (name: string) => Promise<void>;
+  onEdit: (row: ToolRow) => Promise<void>;
   onDelete: (name: string) => Promise<void>;
 }
 
 /**
  * Single row in the tools table.
- * Shared tools are read-only and show a lock badge with no action buttons.
+ * Shared tools are read-only and only allow opening the source in view mode.
  */
 function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
   const isShared = row.kind === 'shared';
@@ -558,17 +578,17 @@ function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
       </TableCell>
 
       <TableCell className="text-right">
-        {!isShared && (
-          <div className="flex items-center justify-end gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7"
-              aria-label={`Edit tool ${name}`}
-              onClick={() => void onEdit(name)}
-            >
-              <Pencil className="w-3.5 h-3.5" />
-            </Button>
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            aria-label={`Edit tool ${name}`}
+            onClick={() => void onEdit(row)}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </Button>
+          {!isShared && (
             <Button
               variant="ghost"
               size="icon"
@@ -578,8 +598,8 @@ function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
             >
               <Trash2 className="w-3.5 h-3.5" />
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );

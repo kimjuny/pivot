@@ -2,14 +2,28 @@ import { create } from 'zustand';
 
 /**
  * Represents a tab in the agent detail page.
- * Each tab can display different content types: scenes, functions, or skills.
+ * Each tab can display different content types: scenes, tools, or skills.
  */
+export type AgentTabType = 'scene' | 'tool' | 'skill' | 'function';
+
+/**
+ * Optional metadata attached to tool/skill tabs.
+ * Used by AgentDetail to resolve source loading and edit permissions.
+ */
+export interface AgentTabMeta {
+    kind?: 'private' | 'shared';
+    source?: 'builtin' | 'user';
+    readOnly?: boolean;
+}
+
 export interface AgentTab {
     id: string;
-    type: 'scene' | 'function' | 'skill';
+    type: AgentTabType;
     name: string;
     /** ID of the resource being displayed (scene ID, function ID, etc.) */
     resourceId: number | string;
+    /** Optional per-resource metadata for editor rendering. */
+    meta?: AgentTabMeta;
 }
 
 interface AgentTabStore {
@@ -27,7 +41,7 @@ interface AgentTabStore {
     /** Close all tabs */
     closeAllTabs: () => void;
     /** Replace a tab's resource ID (e.g. after a new scene is saved and gets a real ID) */
-    replaceTabResource: (oldResourceId: number | string, newResourceId: number | string, type: 'scene' | 'function' | 'skill') => void;
+    replaceTabResource: (oldResourceId: number | string, newResourceId: number | string, type: AgentTabType) => void;
 }
 
 /**
@@ -48,8 +62,9 @@ export const useAgentTabStore = create<AgentTabStore>((set, get) => ({
         const existingTab = tabs.find(tab => tab.id === tabId);
 
         if (existingTab) {
-            // Tab exists, just activate it
-            set({ activeTabId: tabId });
+            // Tab exists: refresh metadata/name in case source changed, then activate.
+            const updatedTabs = tabs.map((tab) => (tab.id === tabId ? { ...tab, ...tabData } : tab));
+            set({ tabs: updatedTabs, activeTabId: tabId });
         } else {
             // Create new tab
             const newTab: AgentTab = {
