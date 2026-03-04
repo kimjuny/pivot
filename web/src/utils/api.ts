@@ -1059,14 +1059,16 @@ export const getUserSkillSource = async (
   kind: 'private' | 'shared',
   skillName: string
 ): Promise<SkillSourcePayload> => {
-  return apiRequest(`/skills/${kind}/${skillName}`) as Promise<SkillSourcePayload>;
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/${kind}/${encodedSkillName}`) as Promise<SkillSourcePayload>;
 };
 
 /**
  * Fetch shared skill source (user-shared preferred over builtin).
  */
 export const getSharedSkillSource = async (skillName: string): Promise<SkillSourcePayload> => {
-  return apiRequest(`/skills/shared/${skillName}`) as Promise<SkillSourcePayload>;
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/shared/${encodedSkillName}`) as Promise<SkillSourcePayload>;
 };
 
 /**
@@ -1077,7 +1079,8 @@ export const upsertUserSkill = async (
   skillName: string,
   source: string
 ): Promise<void> => {
-  await apiRequest(`/skills/${kind}/${skillName}`, {
+  const encodedSkillName = encodeURIComponent(skillName);
+  await apiRequest(`/skills/${kind}/${encodedSkillName}`, {
     method: 'PUT',
     body: JSON.stringify({ source }),
   });
@@ -1090,7 +1093,8 @@ export const deleteUserSkill = async (
   kind: 'private' | 'shared',
   skillName: string
 ): Promise<void> => {
-  await apiRequest(`/skills/${kind}/${skillName}`, {
+  const encodedSkillName = encodeURIComponent(skillName);
+  await apiRequest(`/skills/${kind}/${encodedSkillName}`, {
     method: 'DELETE',
   });
 };

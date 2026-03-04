@@ -41,14 +41,14 @@
 }
 ```
 ### 3.2. action_type = CALL_TOOL
-- 仅当你需要借助外部能力
-- 只能使用可用工具列表
+- 仅当你需要借助外部能力，只能使用可用工具列表
+- **切记要发动工具调用时，action_type是CALL_TOOL而不是要调用的tool名**
 - programmatic_tool_call函数可以帮助你大大减少recursion次数
 ```json
 {
   // ...
   "action": {
-    "action_type": "CALL_TOOL",
+    "action_type": "CALL_TOOL", // 切记这里不要把CALL_TOOL写成具体要调用的tool名
     "output": {
       "tool_calls": [
         {

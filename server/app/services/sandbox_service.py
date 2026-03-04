@@ -78,7 +78,9 @@ class SandboxService:
             stderr=str(data.get("stderr", "")),
         )
 
-    def create(self, username: str, agent_id: int, skills: list[str] | None = None) -> None:
+    def create(
+        self, username: str, agent_id: int, skills: list[str] | None = None
+    ) -> None:
         """Ensure sandbox exists and is configured with current skill mounts."""
         if skills is None:
             skills = []

@@ -279,7 +279,9 @@ def _resolve_host_path_from_backend_path(path_in_backend: str) -> str | None:
             if not destination or not source:
                 continue
             normalized_destination = destination.rstrip("/") or "/"
-            if path_in_backend == normalized_destination or path_in_backend.startswith(f"{normalized_destination}/"):
+            if path_in_backend == normalized_destination or path_in_backend.startswith(
+                f"{normalized_destination}/"
+            ):
                 score = len(normalized_destination)
             else:
                 continue
@@ -506,7 +508,9 @@ def _should_recreate_container(
     return False, "ok"
 
 
-def _ensure_sandbox(username: str, agent_id: int, skills: list[str] | None = None) -> Any:
+def _ensure_sandbox(
+    username: str, agent_id: int, skills: list[str] | None = None
+) -> Any:
     """Create or start a reusable sidecar sandbox container."""
     op_started = time.perf_counter()
     settings = get_settings()

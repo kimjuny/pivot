@@ -463,6 +463,29 @@ function AgentDetailSidebar({
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
                                         {scenes.length}
                                     </span>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <div
+                                                role="button"
+                                                tabIndex={0}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onCreateScene();
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.stopPropagation();
+                                                        onCreateScene();
+                                                    }
+                                                }}
+                                                className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                aria-label="Add scene"
+                                            >
+                                                <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                            </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right">Add scene</TooltipContent>
+                                    </Tooltip>
                                     <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
@@ -495,19 +518,6 @@ function AgentDetailSidebar({
                                                 </SidebarMenuAction>
                                             </SidebarMenuItem>
                                         ))}
-                                        <SidebarMenuItem>
-                                            <SidebarMenuButton
-                                                onClick={onCreateScene}
-                                                className="pl-3 text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-                                                size="sm"
-                                            >
-                                                {/* Icon slot with Plus */}
-                                                <span className="w-4 shrink-0 flex items-center justify-center">
-                                                    <Plus className="size-3.5" />
-                                                </span>
-                                                <span>Add Scene</span>
-                                            </SidebarMenuButton>
-                                        </SidebarMenuItem>
                                     </SidebarMenu>
                                 </SidebarGroupContent>
                             </CollapsibleContent>

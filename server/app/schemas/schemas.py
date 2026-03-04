@@ -403,7 +403,8 @@ class LLMCreate(BaseModel):
 
     @validator("extra_config")
     def validate_extra_config(
-        cls, extra_config: str | None  # noqa: N805
+        cls,  # noqa: N805
+        extra_config: str | None,
     ) -> str | None:
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
@@ -428,7 +429,8 @@ class LLMUpdate(BaseModel):
 
     @validator("extra_config")
     def validate_extra_config(
-        cls, extra_config: str | None  # noqa: N805
+        cls,  # noqa: N805
+        extra_config: str | None,
     ) -> str | None:
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
