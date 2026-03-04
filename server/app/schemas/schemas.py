@@ -33,6 +33,18 @@ def _normalize_extra_config(extra_config: str | None) -> str | None:
     return json.dumps(parsed, separators=(",", ":"))
 
 
+def _normalize_thinking_mode(thinking: str | None) -> str | None:
+    """Normalize and validate LLM thinking mode."""
+    if thinking is None:
+        return None
+    normalized = thinking.strip().lower()
+    if not normalized:
+        return "auto"
+    if normalized not in {"auto", "enabled", "disabled"}:
+        raise ValueError("thinking must be one of: auto, enabled, disabled")
+    return normalized
+
+
 class AgentCreate(BaseModel):
     name: str = Field(..., description="Agent name")
     description: str | None = Field(None, description="Agent description")
@@ -394,6 +406,10 @@ class LLMCreate(BaseModel):
         default="strong",
         description="JSON output reliability: 'strong', 'weak', or 'none'",
     )
+    thinking: str = Field(
+        default="auto",
+        description="Thinking mode: 'auto', 'enabled', or 'disabled'",
+    )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     max_context: int = Field(default=128000, description="Maximum context token limit")
     extra_config: str | None = Field(
@@ -409,6 +425,15 @@ class LLMCreate(BaseModel):
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
+    @validator("thinking")
+    def validate_thinking(
+        cls,  # noqa: N805
+        thinking: str,
+    ) -> str:
+        """Validate and normalize thinking mode."""
+        normalized = _normalize_thinking_mode(thinking)
+        return normalized if normalized is not None else "auto"
+
 
 class LLMUpdate(BaseModel):
     """Schema for updating an existing LLM."""
@@ -423,6 +448,7 @@ class LLMUpdate(BaseModel):
     system_role: bool | None = None
     tool_calling: str | None = None
     json_schema: str | None = None
+    thinking: str | None = None
     streaming: bool | None = None
     max_context: int | None = None
     extra_config: str | None = None
@@ -434,6 +460,14 @@ class LLMUpdate(BaseModel):
     ) -> str | None:
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
+
+    @validator("thinking")
+    def validate_thinking(
+        cls,  # noqa: N805
+        thinking: str | None,
+    ) -> str | None:
+        """Validate and normalize thinking mode when provided."""
+        return _normalize_thinking_mode(thinking)
 
 
 class LLMResponse(BaseModel):
@@ -450,6 +484,7 @@ class LLMResponse(BaseModel):
     system_role: bool
     tool_calling: str
     json_schema: str
+    thinking: str
     streaming: bool
     max_context: int
     extra_config: str | None

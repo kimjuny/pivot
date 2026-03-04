@@ -4,6 +4,7 @@ This module provides streaming chat endpoints for the ReAct agent system.
 All endpoints require authentication.
 """
 
+import asyncio
 import json
 import logging
 import traceback
@@ -19,7 +20,7 @@ from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
 from app.orchestration.react import ReactEngine
-from app.orchestration.skills import select_skills
+from app.orchestration.skills import select_skills_with_usage
 from app.orchestration.tool import get_tool_manager
 from app.orchestration.tool.builtin.programmatic_tool_call import (
     make_programmatic_tool_call,
@@ -36,6 +37,7 @@ from app.services.workspace_service import (
     load_all_user_tool_metadata,
 )
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc
@@ -259,7 +261,20 @@ async def react_chat_stream(
             # Ensure task_id is set
             task_id = task.task_id
 
-            available_skills = list_all_skills(current_user.username)
+            if agent.skill_resolution_llm_id:
+                skill_start_event = {
+                    "type": "skill_resolution_start",
+                    "task_id": task_id,
+                    "iteration": task.iteration,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                yield f"data: {json.dumps(skill_start_event, ensure_ascii=False)}\n\n"
+                # Yield control so the start event is flushed before any blocking work.
+                await asyncio.sleep(0)
+
+            available_skills = await run_in_threadpool(
+                list_all_skills, current_user.username
+            )
             total_skill_count = len(available_skills)
             allowed_skills = _parse_name_allowlist(agent.skill_ids)
             if allowed_skills is not None:
@@ -357,17 +372,11 @@ async def react_chat_stream(
             )
 
             selected_skills: list[str] = []
+            skill_resolution_tokens: dict[str, int] | None = None
             selected_skills_text = ""
             resolution_duration_ms = 0
             # Skill resolution is optional and only runs when a resolver LLM is configured.
             if agent.skill_resolution_llm_id:
-                skill_start_event = {
-                    "type": "skill_resolution_start",
-                    "task_id": task_id,
-                    "iteration": task.iteration,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-                yield f"data: {json.dumps(skill_start_event, ensure_ascii=False)}\n\n"
                 resolution_started_at = perf_counter()
                 try:
                     resolver_llm_config = llm_crud.get(
@@ -381,12 +390,25 @@ async def react_chat_stream(
                                 db
                             ).get_full_session_memory_dict(task.session_id)
 
-                        selected_skills = select_skills(
-                            llm=resolver_llm,
-                            user_intent=request.message,
-                            skill_metadata=available_skills,
-                            session_memory=session_memory,
+                        selection_result = await run_in_threadpool(
+                            select_skills_with_usage,
+                            resolver_llm,
+                            request.message,
+                            available_skills,
+                            session_memory,
                         )
+                        raw_selected_skills = selection_result.get(
+                            "selected_skills", []
+                        )
+                        if isinstance(raw_selected_skills, list):
+                            selected_skills = [
+                                item
+                                for item in raw_selected_skills
+                                if isinstance(item, str)
+                            ]
+                        else:
+                            selected_skills = []
+                        skill_resolution_tokens = selection_result.get("tokens")
                         selected_skills_text = build_selected_skills_prompt_block(
                             username=current_user.username,
                             selected_skills=selected_skills,
@@ -431,8 +453,16 @@ async def react_chat_stream(
                         "total_skill_count": total_skill_count,
                         "candidate_skill_count": candidate_skill_count,
                         "duration_ms": resolution_duration_ms,
+                        "tokens": skill_resolution_tokens,
                     },
                 }
+                task.skill_selection_result = json.dumps(
+                    skill_result_event["data"],
+                    ensure_ascii=False,
+                )
+                task.updated_at = datetime.now(timezone.utc)
+                db.add(task)
+                db.commit()
                 yield f"data: {json.dumps(skill_result_event, ensure_ascii=False)}\n\n"
 
             # Execute task and stream events

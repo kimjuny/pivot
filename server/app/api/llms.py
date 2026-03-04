@@ -54,6 +54,7 @@ async def get_llms(
             "system_role": llm.system_role,
             "tool_calling": llm.tool_calling,
             "json_schema": llm.json_schema,
+            "thinking": llm.thinking,
             "streaming": llm.streaming,
             "max_context": llm.max_context,
             "extra_config": llm.extra_config,
@@ -106,6 +107,7 @@ async def create_llm(
         system_role=llm_data.system_role,
         tool_calling=llm_data.tool_calling,
         json_schema=llm_data.json_schema,
+        thinking=llm_data.thinking,
         streaming=llm_data.streaming,
         max_context=llm_data.max_context,
         extra_config=llm_data.extra_config,
@@ -122,6 +124,7 @@ async def create_llm(
         "system_role": llm.system_role,
         "tool_calling": llm.tool_calling,
         "json_schema": llm.json_schema,
+        "thinking": llm.thinking,
         "streaming": llm.streaming,
         "max_context": llm.max_context,
         "extra_config": llm.extra_config,
@@ -164,6 +167,7 @@ async def get_llm(
         "system_role": llm.system_role,
         "tool_calling": llm.tool_calling,
         "json_schema": llm.json_schema,
+        "thinking": llm.thinking,
         "streaming": llm.streaming,
         "max_context": llm.max_context,
         "extra_config": llm.extra_config,
@@ -237,6 +241,8 @@ async def update_llm(
         update_data["tool_calling"] = llm_data.tool_calling
     if llm_data.json_schema is not None:
         update_data["json_schema"] = llm_data.json_schema
+    if llm_data.thinking is not None:
+        update_data["thinking"] = llm_data.thinking
     if llm_data.streaming is not None:
         update_data["streaming"] = llm_data.streaming
     if llm_data.max_context is not None:
@@ -260,6 +266,7 @@ async def update_llm(
         "system_role": updated_llm.system_role,
         "tool_calling": updated_llm.tool_calling,
         "json_schema": updated_llm.json_schema,
+        "thinking": updated_llm.thinking,
         "streaming": updated_llm.streaming,
         "max_context": updated_llm.max_context,
         "extra_config": updated_llm.extra_config,

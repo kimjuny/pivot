@@ -198,6 +198,7 @@ function LLMList() {
         system_role: llm.system_role,
         tool_calling: llm.tool_calling,
         json_schema: llm.json_schema,
+        thinking: llm.thinking,
         streaming: llm.streaming,
         max_context: llm.max_context,
         extra_config: llm.extra_config,
@@ -295,6 +296,7 @@ function LLMList() {
           system_role: (item.system_role as boolean) ?? false,
           tool_calling: (item.tool_calling as string) ?? 'none',
           json_schema: (item.json_schema as string) ?? 'none',
+          thinking: (item.thinking as string) ?? 'auto',
           streaming: (item.streaming as boolean) ?? false,
           max_context: (item.max_context as number) ?? 8192,
           extra_config: (item.extra_config as string) ?? '{}',
@@ -329,6 +331,7 @@ function LLMList() {
     system_role: boolean;
     tool_calling: string;
     json_schema: string;
+    thinking: string;
     streaming: boolean;
     max_context: number;
     extra_config: string;
@@ -602,6 +605,7 @@ function LLMList() {
                 system_role: editingLLM.system_role,
                 tool_calling: editingLLM.tool_calling,
                 json_schema: editingLLM.json_schema,
+                thinking: editingLLM.thinking,
                 streaming: editingLLM.streaming,
                 max_context: editingLLM.max_context,
                 extra_config: editingLLM.extra_config,

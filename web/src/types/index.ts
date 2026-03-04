@@ -389,6 +389,8 @@ export interface LLM {
   tool_calling: string;
   /** JSON output reliability ('strong', 'weak', 'none') */
   json_schema: string;
+  /** Thinking mode control ('auto', 'enabled', 'disabled') */
+  thinking: string;
   /** Whether the model supports streaming responses */
   streaming: boolean;
   /** Maximum context token limit */

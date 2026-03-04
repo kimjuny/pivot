@@ -31,6 +31,7 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
             model=llm_config.model,
             api_key=llm_config.api_key,
             cache_policy=llm_config.cache_policy,
+            thinking=llm_config.thinking,
             extra_config=extra_config,
         )
     elif protocol == "openai_response_llm":
@@ -39,6 +40,7 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
             model=llm_config.model,
             api_key=llm_config.api_key,
             cache_policy=llm_config.cache_policy,
+            thinking=llm_config.thinking,
             extra_config=extra_config,
         )
     elif protocol == "anthropic_compatible":
@@ -50,6 +52,7 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
             model=llm_config.model,
             api_key=llm_config.api_key,
             cache_policy=llm_config.cache_policy,
+            thinking=llm_config.thinking,
             extra_config=extra_config,
         )
     else:

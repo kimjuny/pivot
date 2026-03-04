@@ -19,6 +19,7 @@ class LLM(SQLModel, table=True):
         system_role: Whether the model truly distinguishes system role with higher priority.
         tool_calling: Tool calling support level ('native', 'prompt', 'none').
         json_schema: JSON output reliability ('strong', 'weak', 'none').
+        thinking: Thinking mode control ('auto', 'enabled', 'disabled').
         streaming: Whether the model supports streaming responses.
         max_context: Maximum context token limit.
         extra_config: Additional kwargs to pass to LLM API calls (JSON format).
@@ -56,6 +57,10 @@ class LLM(SQLModel, table=True):
     json_schema: str = Field(
         default="strong",
         description="JSON output reliability: 'strong', 'weak', or 'none'",
+    )
+    thinking: str = Field(
+        default="auto",
+        description="Thinking mode: 'auto', 'enabled', or 'disabled'",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     max_context: int = Field(default=128000, description="Maximum context token limit")

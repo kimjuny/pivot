@@ -36,6 +36,7 @@ export interface LLMFormData {
   system_role: boolean;
   tool_calling: string;
   json_schema: string;
+  thinking: string;
   streaming: boolean;
   max_context: number;
   extra_config: string;
@@ -185,6 +186,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     system_role: true,
     tool_calling: 'native',
     json_schema: 'strong',
+    thinking: 'auto',
     streaming: true,
     max_context: 128000,
     extra_config: '',
@@ -211,6 +213,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           system_role: initialData.system_role !== undefined ? initialData.system_role : true,
           tool_calling: initialData.tool_calling || 'native',
           json_schema: initialData.json_schema || 'strong',
+          thinking: initialData.thinking || 'auto',
           streaming: initialData.streaming !== undefined ? initialData.streaming : true,
           max_context: initialData.max_context || 128000,
           extra_config: initialData.extra_config || '',
@@ -228,6 +231,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           system_role: true,
           tool_calling: 'native',
           json_schema: 'strong',
+          thinking: 'auto',
           streaming: true,
           max_context: 128000,
           extra_config: '',
@@ -590,6 +594,34 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                       <SelectItem value="strong">Strong</SelectItem>
                       <SelectItem value="weak">Weak</SelectItem>
                       <SelectItem value="none">None</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="thinking">Thinking</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p>Controls protocol-level thinking/reasoning flags. Auto passes no explicit parameter; Enabled/Disabled sets explicit provider flags.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Select
+                    value={formData.thinking}
+                    onValueChange={(value) => setFormData({ ...formData, thinking: value })}
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger id="thinking">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">Auto</SelectItem>
+                      <SelectItem value="enabled">Enabled</SelectItem>
+                      <SelectItem value="disabled">Disabled</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

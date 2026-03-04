@@ -103,6 +103,7 @@ class TaskMessage(BaseModel):
     agent_answer: str | None = None
     status: str
     total_tokens: int = 0
+    skill_selection_result: dict[str, Any] | None = None
     recursions: list[RecursionDetail] = Field(default_factory=list)
     created_at: str
     updated_at: str

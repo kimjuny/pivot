@@ -31,6 +31,7 @@ class ReactTask(SQLModel, table=True):
         llm_messages: Serialized OpenAI-style message list used during recursion.
         pending_action_result: Serialized action result to inject into next user message.
         llm_cache_state: Serialized runtime cache state for protocol-specific caching.
+        skill_selection_result: Serialized skill resolution summary payload.
         status: Current status (pending, running, completed, failed).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
@@ -70,6 +71,13 @@ class ReactTask(SQLModel, table=True):
         description=(
             "Serialized protocol-specific cache state used by LLM transport "
             "(e.g., response previous_response_id chaining)."
+        ),
+    )
+    skill_selection_result: str | None = Field(
+        default=None,
+        description=(
+            "Serialized skill resolution result payload for UI/history, "
+            "e.g. {'count':2,'selected_skills':['coding'],'duration_ms':1200,'tokens':...}."
         ),
     )
     status: str = Field(

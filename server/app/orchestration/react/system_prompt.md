@@ -21,7 +21,7 @@
 ### 3.1. 统一外层结构
 ```json
 {
-  "trace_id": "本轮recursion的id",
+  "trace_id": "本轮recursion的id，user这一轮如何传给你的你就要如何返回",
   "observe": "...",
   "thought": "...",
   "iteration": 3, // 基于之前的历史判断当前我们到底处于第几轮iteration

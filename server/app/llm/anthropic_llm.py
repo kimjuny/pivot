@@ -20,6 +20,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
+from .thinking_mode import normalize_thinking_mode
 
 
 class AnthropicLLM(AbstractLLM):
@@ -39,6 +40,7 @@ class AnthropicLLM(AbstractLLM):
         model: str,
         api_key: str,
         cache_policy: str = DEFAULT_CACHE_POLICY,
+        thinking: str = "auto",
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -66,6 +68,7 @@ class AnthropicLLM(AbstractLLM):
         self.model = model
         self.api_key = api_key
         self.cache_policy = validate_cache_policy("anthropic_compatible", cache_policy)
+        self.thinking = normalize_thinking_mode(thinking)
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 
@@ -76,6 +79,22 @@ class AnthropicLLM(AbstractLLM):
             timeout=self.timeout,
             max_retries=self.MAX_RETRIES,
         )
+
+    def _apply_thinking_mode(self, payload_kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Apply protocol-level thinking params from LLM entity config."""
+        updated_kwargs = dict(payload_kwargs)
+        if self.thinking == "auto":
+            return updated_kwargs
+
+        if "thinking" not in updated_kwargs:
+            if self.thinking == "enabled":
+                updated_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": 1024,
+                }
+            else:
+                updated_kwargs["thinking"] = {"type": "disabled"}
+        return updated_kwargs
 
     def _convert_messages(
         self, messages: list[dict[str, str]]
@@ -323,6 +342,7 @@ class AnthropicLLM(AbstractLLM):
 
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
+            merged_kwargs = self._apply_thinking_mode(merged_kwargs)
 
             # Convert tools from OpenAI format to Anthropic format if present
             tools = merged_kwargs.pop("tools", None)
@@ -398,6 +418,7 @@ class AnthropicLLM(AbstractLLM):
 
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
+            merged_kwargs = self._apply_thinking_mode(merged_kwargs)
 
             # Convert tools from OpenAI format to Anthropic format if present
             tools = merged_kwargs.pop("tools", None)

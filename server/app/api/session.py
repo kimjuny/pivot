@@ -311,6 +311,7 @@ async def get_full_session_history(
                 agent_answer=task_data["agent_answer"],
                 status=task_data["status"],
                 total_tokens=task_data["total_tokens"],
+                skill_selection_result=task_data.get("skill_selection_result"),
                 recursions=recursions,
                 created_at=task_data["created_at"]
                 .replace(tzinfo=timezone.utc)

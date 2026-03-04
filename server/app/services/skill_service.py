@@ -119,8 +119,12 @@ def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
     """Move legacy ``{name}.md`` to canonical ``{name}/{name}.md`` layout."""
     canonical = _canonical_skill_path(base_dir, skill_name)
     legacy = _legacy_skill_path(base_dir, skill_name)
-    if canonical.exists() or not legacy.exists():
+    if canonical.exists():
         return canonical
+    if not legacy.exists():
+        # Do not force a non-existent canonical path. Callers may have already
+        # resolved a valid variant (e.g. SKILL.md / skill.md) under skill dir.
+        return legacy
 
     canonical.parent.mkdir(parents=True, exist_ok=True)
     legacy.replace(canonical)
@@ -237,7 +241,13 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
 
     for md_file in _list_skill_paths(base):
         skill_name = _skill_name_for_path(base, md_file)
-        md_file = _migrate_legacy_user_skill(base, skill_name)
+        if md_file == _legacy_skill_path(base, skill_name):
+            md_file = _migrate_legacy_user_skill(base, skill_name)
+        if not md_file.exists():
+            logger.warning(
+                "Skip missing user skill file after resolution: %s", md_file
+            )
+            continue
         meta_file = _meta_path(base, skill_name)
         existing_created: str | None = None
         if meta_file.exists():
@@ -247,17 +257,22 @@ def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 existing_created = None
 
-        meta = _build_metadata(
-            md_file,
-            kind=kind,
-            source_type="user",
-            created_at=existing_created,
-            fallback_name=skill_name,
-        )
-        meta_file.write_text(
-            json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        result.append(meta)
+        try:
+            meta = _build_metadata(
+                md_file,
+                kind=kind,
+                source_type="user",
+                created_at=existing_created,
+                fallback_name=skill_name,
+            )
+            meta_file.write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            result.append(meta)
+        except FileNotFoundError:
+            logger.warning("Skip user skill metadata build for missing file: %s", md_file)
+        except Exception as exc:
+            logger.warning("Failed to parse user skill '%s': %s", md_file.name, exc)
 
     return result
 

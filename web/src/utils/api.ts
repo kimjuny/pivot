@@ -689,6 +689,7 @@ export const createLLM = async (llmData: {
   system_role?: boolean;
   tool_calling?: string;
   json_schema?: string;
+  thinking?: string;
   streaming?: boolean;
   max_context?: number;
   extra_config?: string;
@@ -729,6 +730,7 @@ export const updateLLM = async (
     system_role?: boolean;
     tool_calling?: string;
     json_schema?: string;
+    thinking?: string;
     streaming?: boolean;
     max_context?: number;
     extra_config?: string;
@@ -911,6 +913,17 @@ export interface TaskMessage {
   agent_answer: string | null;
   status: string;
   total_tokens: number;
+  skill_selection_result?: {
+    count?: number;
+    selected_skills?: string[];
+    duration_ms?: number;
+    tokens?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+      cached_input_tokens?: number;
+    };
+  } | null;
   recursions: RecursionDetail[];
   created_at: string;
   updated_at: string;

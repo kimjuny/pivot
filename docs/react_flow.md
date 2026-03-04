@@ -1,4 +1,4 @@
-## 重构
+## ReAct机制
 
 以下为一种兼容目前所有主流LLM厂商缓存机制的messages结构。在task开始时构建，在task结束时清空。
 
@@ -17,6 +17,7 @@ content = `system_prompt.md`中的内容（其中`{{tools_description}}`、`{{se
 【role = user】向LLM输入message
 ```json
 content = {
+    "trace_id": "uuid",
     "iteration": 1,
     "user_intent": "", // 用户在本一轮task启动时的原话
     "current_plan": [], // plan（如果有）
@@ -63,6 +64,7 @@ content = {
 【role = user】
 ```json
 content = {
+    "trace_id": "uuid",
     "iteration": 2,
     "user_intent": "",
     "current_plan": [
@@ -110,6 +112,7 @@ content = {
 【role = user】
 ```json
 content = {
+    "trace_id": "uuid",
     "iteration": 3,
     "user_intent": "",
     "current_plan": [

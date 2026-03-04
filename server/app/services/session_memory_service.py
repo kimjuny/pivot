@@ -639,6 +639,15 @@ class SessionMemoryService:
 
         result = []
         for task in tasks:
+            skill_selection_result: dict[str, Any] | None = None
+            if task.skill_selection_result:
+                try:
+                    parsed_skill_selection = json.loads(task.skill_selection_result)
+                    if isinstance(parsed_skill_selection, dict):
+                        skill_selection_result = parsed_skill_selection
+                except json.JSONDecodeError:
+                    skill_selection_result = None
+
             # Get recursions for this task
             recursion_stmt = (
                 select(ReactRecursion)
@@ -690,6 +699,7 @@ class SessionMemoryService:
                     "agent_answer": agent_answer,
                     "status": task.status,
                     "total_tokens": task.total_tokens,
+                    "skill_selection_result": skill_selection_result,
                     "recursions": recursion_list,
                     "created_at": task.created_at,
                     "updated_at": task.updated_at,

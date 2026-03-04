@@ -26,7 +26,12 @@ from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
-from app.db.session import get_engine, get_session  # noqa: E402
+from app.db.session import (  # noqa: E402
+    ensure_llm_schema_compatibility,
+    ensure_react_schema_compatibility,
+    get_engine,
+    get_session,
+)
 from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.utils.logging_config import get_logger, setup_logging  # noqa: E402
 
@@ -126,6 +131,8 @@ async def startup_event():
 
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
+    ensure_llm_schema_compatibility()
+    ensure_react_schema_compatibility()
 
     logger.info("Database initialized successfully")
 

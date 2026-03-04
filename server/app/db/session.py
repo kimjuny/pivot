@@ -2,7 +2,7 @@ import os
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlmodel import Session, SQLModel
 
 
@@ -54,4 +54,40 @@ def init_db():
     """
     engine = get_engine()
     SQLModel.metadata.create_all(engine)
+    ensure_llm_schema_compatibility()
+    ensure_react_schema_compatibility()
     print("Database initialized successfully")
+
+
+def ensure_llm_schema_compatibility() -> None:
+    """Apply additive schema updates for legacy LLM tables.
+
+    Why: SQLModel's ``create_all`` does not add newly introduced columns
+    to existing tables. We backfill additive LLM columns in-place so
+    upgrades remain non-breaking for existing deployments.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("llm"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("llm")}
+    with engine.begin() as conn:
+        if "thinking" not in columns:
+            conn.execute(text("ALTER TABLE llm ADD COLUMN thinking VARCHAR"))
+            conn.execute(
+                text("UPDATE llm SET thinking = 'auto' WHERE thinking IS NULL")
+            )
+
+
+def ensure_react_schema_compatibility() -> None:
+    """Apply additive schema updates for legacy ReAct tables."""
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("reacttask"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("reacttask")}
+    with engine.begin() as conn:
+        if "skill_selection_result" not in columns:
+            conn.execute(text("ALTER TABLE reacttask ADD COLUMN skill_selection_result VARCHAR"))

@@ -21,6 +21,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
+from .thinking_mode import normalize_thinking_mode
 
 
 class OpenAICompletionLLM(AbstractLLM):
@@ -47,6 +48,7 @@ class OpenAICompletionLLM(AbstractLLM):
         model: str,
         api_key: str,
         cache_policy: str = DEFAULT_CACHE_POLICY,
+        thinking: str = "auto",
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -77,8 +79,19 @@ class OpenAICompletionLLM(AbstractLLM):
             "openai_completion_llm",
             cache_policy,
         )
+        self.thinking = normalize_thinking_mode(thinking)
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
+
+    def _apply_thinking_mode(self, payload_kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Apply protocol-level thinking params from LLM entity config."""
+        updated_kwargs = dict(payload_kwargs)
+        if self.thinking == "auto":
+            return updated_kwargs
+
+        if "reasoning" not in updated_kwargs:
+            updated_kwargs["reasoning"] = {"enabled": self.thinking == "enabled"}
+        return updated_kwargs
 
     def _messages_with_cached_last_block(
         self, messages: list[dict[str, str]]
@@ -229,6 +242,7 @@ class OpenAICompletionLLM(AbstractLLM):
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
+            normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {
@@ -294,6 +308,7 @@ class OpenAICompletionLLM(AbstractLLM):
             # Merge extra_config with kwargs (kwargs takes precedence)
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
+            normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {

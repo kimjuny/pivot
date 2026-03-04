@@ -56,7 +56,7 @@ interface TokenUsage {
 interface ReactStreamEvent {
   type: ReactStreamEventType;
   task_id: string;
-  trace_id: string | null;
+  trace_id?: string | null;
   iteration: number;
   delta?: string | null;
   data?: unknown;
@@ -94,10 +94,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function isReactStreamEvent(value: unknown): value is ReactStreamEvent {
   const record = asRecord(value);
   if (!record) return false;
+  const traceId = record.trace_id;
   return (
     typeof record.type === 'string'
     && typeof record.task_id === 'string'
-    && (typeof record.trace_id === 'string' || record.trace_id === null)
+    && (traceId === undefined || typeof traceId === 'string' || traceId === null)
     && typeof record.iteration === 'number'
     && typeof record.timestamp === 'string'
   );
@@ -140,9 +141,8 @@ interface SkillSelectionState {
   status: 'loading' | 'done';
   count: number;
   selectedSkills: string[];
-  totalSkills?: number;
-  candidateSkills?: number;
   durationMs?: number;
+  tokens?: TokenUsage;
 }
 
 /**
@@ -247,6 +247,45 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const previousMessageCountRef = useRef<number>(0);
+
+  /**
+   * Build persisted skill selection state from historical task payload.
+   */
+  const buildSkillSelectionFromTask = (task: TaskMessage): SkillSelectionState | undefined => {
+    const raw = task.skill_selection_result;
+    if (!raw || typeof raw !== 'object') {
+      return undefined;
+    }
+
+    const selectedSkills = Array.isArray(raw.selected_skills)
+      ? raw.selected_skills.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      : [];
+    const count = typeof raw.count === 'number' ? raw.count : selectedSkills.length;
+    const durationMs = typeof raw.duration_ms === 'number' ? raw.duration_ms : undefined;
+
+    const rawTokens = raw.tokens;
+    const tokens: TokenUsage | undefined = rawTokens && typeof rawTokens === 'object'
+      && typeof rawTokens.prompt_tokens === 'number'
+      && typeof rawTokens.completion_tokens === 'number'
+      && typeof rawTokens.total_tokens === 'number'
+      ? {
+        prompt_tokens: rawTokens.prompt_tokens,
+        completion_tokens: rawTokens.completion_tokens,
+        total_tokens: rawTokens.total_tokens,
+        cached_input_tokens: typeof rawTokens.cached_input_tokens === 'number'
+          ? rawTokens.cached_input_tokens
+          : 0,
+      }
+      : undefined;
+
+    return {
+      status: 'done',
+      count,
+      selectedSkills,
+      durationMs,
+      tokens,
+    };
+  };
 
   /**
    * Reload the session list for current agent.
@@ -395,6 +434,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 timestamp: task.updated_at,
                 task_id: task.task_id,
                 recursions: recursions,
+                skillSelection: buildSkillSelectionFromTask(task),
                 status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
                 totalTokens: {
                   prompt_tokens: aggregatedTaskTokens.prompt_tokens,
@@ -582,6 +622,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           timestamp: task.updated_at,
           task_id: task.task_id,
           recursions: recursions,
+          skillSelection: buildSkillSelectionFromTask(task),
           status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
           totalTokens: {
             prompt_tokens: aggregatedTaskTokens.prompt_tokens,
@@ -838,9 +879,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               const skillData = event.data as {
                 count?: number;
                 selected_skills?: string[];
-                total_skill_count?: number;
-                candidate_skill_count?: number;
                 duration_ms?: number;
+                tokens?: TokenUsage;
               } | undefined;
               const selectedSkills = skillData?.selected_skills ?? [];
               const selectedCount = typeof skillData?.count === 'number'
@@ -857,9 +897,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                         status: 'done',
                         count: selectedCount,
                         selectedSkills,
-                        totalSkills: skillData?.total_skill_count,
-                        candidateSkills: skillData?.candidate_skill_count,
                         durationMs: skillData?.duration_ms,
+                        tokens: skillData?.tokens,
                       },
                     }
                     : msg
@@ -894,17 +933,17 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
               // Start new recursion
               currentTaskId = event.task_id;
-              currentRecursion = {
+              const newRecursionSnapshot: RecursionRecord = {
                 uid: `live-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
                 iteration: event.iteration,
-                trace_id: event.trace_id,
+                trace_id: event.trace_id ?? null,
                 events: [event],
                 status: 'running',
                 startTime: event.timestamp,
               };
+              currentRecursion = newRecursionSnapshot;
 
               // Capture snapshot here for the same stale-closure reason
-                const newRecursionSnapshot = currentRecursion;
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
@@ -1832,42 +1871,53 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     <div className="space-y-2">
                       {/* Skill resolution */}
                       {message.skillSelection && (
-                        <div className="bg-background/50 border border-border rounded-md p-2.5">
-                          <div className="flex items-center gap-2">
+                        <div className="border border-border rounded-md overflow-hidden bg-muted/20">
+                          <div className="w-full flex items-center justify-between px-3 py-2">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
                             {message.skillSelection.status === 'loading' ? (
                               <>
-                                <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                                <span className="text-xs text-muted-foreground">Loading Skills...</span>
-                              </>
-                            ) : message.skillSelection.count > 0 ? (
-                              <>
-                                <CheckCircle2 className="w-3.5 h-3.5 text-success" />
-                                <span className="text-xs text-muted-foreground">
-                                  Selected {message.skillSelection.count} skill{message.skillSelection.count > 1 ? 's' : ''}:
-                                  {' '}
-                                  {message.skillSelection.selectedSkills.join(', ')}
+                                <Loader2 className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" />
+                                <span
+                                  className="text-xs font-semibold truncate animate-thinking-wave"
+                                  style={{
+                                    background: 'linear-gradient(90deg, #9ca3af 0%, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%, #9ca3af 100%)',
+                                    backgroundSize: '400% 100%',
+                                    WebkitBackgroundClip: 'text',
+                                    backgroundClip: 'text',
+                                    WebkitTextFillColor: 'transparent',
+                                  }}
+                                >
+                                  Matching Skills...
                                 </span>
                               </>
                             ) : (
                               <>
-                                <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground" />
-                                <span className="text-xs text-muted-foreground">No skills selected</span>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-success flex-shrink-0" />
+                                <span className="text-xs text-muted-foreground">
+                                  Matched skills:{' '}
+                                  {message.skillSelection.count > 0
+                                    ? message.skillSelection.selectedSkills.join(', ')
+                                    : 'None'}
+                                </span>
                               </>
                             )}
                           </div>
-                          {message.skillSelection.status === 'done' && (
-                            <div className="mt-1.5 pl-[1.125rem] text-[11px] text-muted-foreground space-y-0.5">
-                              {typeof message.skillSelection.totalSkills === 'number' && (
-                                <div>Total skills: {formatTokenCount(message.skillSelection.totalSkills)}</div>
-                              )}
-                              {typeof message.skillSelection.candidateSkills === 'number' && (
-                                <div>Candidates after allowlist: {formatTokenCount(message.skillSelection.candidateSkills)}</div>
-                              )}
-                              {typeof message.skillSelection.durationMs === 'number' && (
-                                <div>Resolution time: {(message.skillSelection.durationMs / 1000).toFixed(2)}s</div>
-                              )}
-                            </div>
-                          )}
+                            {message.skillSelection.status === 'done' && (
+                              <div className="flex items-center gap-2.5 flex-shrink-0">
+                                {typeof message.skillSelection.durationMs === 'number' && (
+                                  <span className="text-xs text-muted-foreground tabular-nums">
+                                    {(message.skillSelection.durationMs / 1000).toFixed(1)}s
+                                  </span>
+                                )}
+                                {message.skillSelection.tokens && (
+                                  renderTokenUsage(
+                                    message.skillSelection.tokens,
+                                    `${formatTokenCount(message.skillSelection.tokens.total_tokens)} tokens`
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -1915,7 +1965,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
                       {/* Status */}
                       <div className="flex items-center gap-2 px-3">
-                        {message.status === 'running' && (
+                        {message.status === 'running' && (message.recursions?.length ?? 0) > 0 && (
                           <>
                             <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
                             <span className="text-xs text-muted-foreground">Processing...</span>
@@ -1924,7 +1974,18 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                         {message.status === 'skill_resolving' && (
                           <>
                             <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
-                            <span className="text-xs text-muted-foreground">Loading Skills...</span>
+                            <span
+                              className="text-xs font-semibold truncate animate-thinking-wave"
+                              style={{
+                                background: 'linear-gradient(90deg, #9ca3af 0%, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%, #9ca3af 100%)',
+                                backgroundSize: '400% 100%',
+                                WebkitBackgroundClip: 'text',
+                                backgroundClip: 'text',
+                                WebkitTextFillColor: 'transparent',
+                              }}
+                            >
+                              Matching Skills...
+                            </span>
                           </>
                         )}
                         {message.status === 'completed' && (
