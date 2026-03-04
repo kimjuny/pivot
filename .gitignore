@@ -33,7 +33,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -85,3 +84,6 @@ web/build/
 
 # Podman / Container
 server/data/
+
+# Workspace
+server/workspace
