@@ -6,6 +6,7 @@ handling recursion cycles, tool calling, and state management.
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
@@ -30,6 +31,22 @@ from .prompt_template import build_runtime_system_prompt
 logger = logging.getLogger(__name__)
 
 ALLOWED_ACTION_TYPES = {"CALL_TOOL", "RE_PLAN", "REFLECT", "CLARIFY", "ANSWER"}
+PAYLOAD_SENTINEL_SUFFIX = "6F2D9C1A"
+PAYLOAD_NAME_PATTERN = r"[A-Za-z_][A-Za-z0-9_]{0,63}"
+PAYLOAD_BEGIN_RE = re.compile(
+    rf"(?m)^<<<PIVOT_PAYLOAD:({PAYLOAD_NAME_PATTERN}):BEGIN_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
+)
+PAYLOAD_REF_KEY = "$payload_ref"
+PARSE_RETRY_LIMIT = 1
+PARSE_RETRY_INSTRUCTION = (
+    "Your previous response could not be parsed.\n"
+    "Output the same decision again using the required format only.\n"
+    "Rules:\n"
+    "1) The first block must be a valid JSON object.\n"
+    '2) For CALL_TOOL, every argument value must be {"$payload_ref":"<name>"}.\n'
+    "3) Append payload blocks after the JSON when action_type is CALL_TOOL.\n"
+    "4) Do not include markdown fences or any extra commentary."
+)
 
 
 class ReactEngine:
@@ -103,6 +120,314 @@ class ReactEngine:
                 f"Failed to parse JSON {e.msg} at position {e.pos}: {json_str}"
             ) from e
 
+    def _new_token_counter(self) -> dict[str, int]:
+        """Create a token counter used across parse retries.
+
+        Returns:
+            A mutable token counter dictionary.
+        """
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_input_tokens": 0,
+        }
+
+    def _accumulate_usage(
+        self, token_counter: dict[str, int], usage: Any | None
+    ) -> None:
+        """Accumulate usage fields into ``token_counter``.
+
+        Args:
+            token_counter: Mutable token tally shared by one recursion.
+            usage: Usage object returned by LLM response (may be None).
+        """
+        if usage is None:
+            return
+
+        token_counter["prompt_tokens"] += int(getattr(usage, "prompt_tokens", 0) or 0)
+        token_counter["completion_tokens"] += int(
+            getattr(usage, "completion_tokens", 0) or 0
+        )
+        token_counter["total_tokens"] += int(getattr(usage, "total_tokens", 0) or 0)
+        token_counter["cached_input_tokens"] += int(
+            getattr(usage, "cached_input_tokens", 0) or 0
+        )
+
+    def _persist_accumulated_usage(
+        self, task: ReactTask, recursion: ReactRecursion, token_counter: dict[str, int]
+    ) -> dict[str, int] | None:
+        """Persist accumulated token usage to recursion/task rows.
+
+        Args:
+            task: Task receiving aggregate token increments.
+            recursion: Recursion row receiving per-recursion totals.
+            token_counter: Aggregated usage across parse attempts.
+
+        Returns:
+            Persisted token payload for event output, or None if empty.
+        """
+        if token_counter["total_tokens"] <= 0:
+            return None
+
+        recursion.prompt_tokens = token_counter["prompt_tokens"]
+        recursion.completion_tokens = token_counter["completion_tokens"]
+        recursion.total_tokens = token_counter["total_tokens"]
+        recursion.cached_input_tokens = token_counter["cached_input_tokens"]
+
+        task.total_prompt_tokens += token_counter["prompt_tokens"]
+        task.total_completion_tokens += token_counter["completion_tokens"]
+        task.total_tokens += token_counter["total_tokens"]
+        task.total_cached_input_tokens += token_counter["cached_input_tokens"]
+        return dict(token_counter)
+
+    def _split_json_and_payload_sections(self, content: str) -> tuple[str, str | None]:
+        """Split model output into JSON section and optional payload section.
+
+        Args:
+            content: Raw LLM assistant content.
+
+        Returns:
+            A tuple of (json_section, payload_section_or_none).
+
+        Raises:
+            ValueError: If payload markers appear without a JSON section.
+        """
+        normalized = content.strip()
+        begin_match = PAYLOAD_BEGIN_RE.search(normalized)
+        if begin_match is None:
+            return normalized, None
+
+        json_section = normalized[: begin_match.start()].strip()
+        if not json_section:
+            raise ValueError("Missing JSON section before payload blocks.")
+        payload_section = normalized[begin_match.start() :]
+        return json_section, payload_section
+
+    def _parse_payload_blocks(self, payload_section: str) -> dict[str, str]:
+        """Parse payload blocks declared after the main JSON section.
+
+        Args:
+            payload_section: Raw text starting from first payload begin marker.
+
+        Returns:
+            Mapping from payload name to raw payload content.
+
+        Raises:
+            ValueError: If payload markers are malformed, duplicated, or truncated.
+        """
+        payloads: dict[str, str] = {}
+        text = payload_section.strip()
+        cursor = 0
+
+        while cursor < len(text):
+            while cursor < len(text) and text[cursor].isspace():
+                cursor += 1
+            if cursor >= len(text):
+                break
+
+            begin_match = PAYLOAD_BEGIN_RE.match(text, cursor)
+            if begin_match is None:
+                snippet = text[cursor : cursor + 120]
+                raise ValueError(f"Invalid payload block marker near: {snippet}")
+
+            payload_name = begin_match.group(1)
+            if payload_name in payloads:
+                raise ValueError(f"Duplicate payload name: {payload_name}")
+
+            content_start = begin_match.end()
+            if content_start < len(text) and text[content_start] == "\n":
+                content_start += 1
+
+            end_re = re.compile(
+                rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
+            )
+            end_match = end_re.search(text, content_start)
+            if end_match is None:
+                raise ValueError(f"Missing END marker for payload: {payload_name}")
+
+            payloads[payload_name] = text[content_start : end_match.start()]
+            cursor = end_match.end()
+
+        return payloads
+
+    def _extract_payload_ref_name(self, value: Any, path: str) -> str:
+        """Extract payload reference name from one argument value.
+
+        Args:
+            value: Argument value under ``tool_call.arguments.<arg_name>``.
+            path: Human-readable path used in error messages.
+
+        Returns:
+            Referenced payload name.
+
+        Raises:
+            ValueError: If value is not a valid payload reference object.
+        """
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"Invalid argument at {path}: every CALL_TOOL argument must be a "
+                f"payload reference object with {PAYLOAD_REF_KEY}."
+            )
+        if len(value) != 1 or PAYLOAD_REF_KEY not in value:
+            raise ValueError(
+                f"Invalid payload reference object at {path}: "
+                f"{PAYLOAD_REF_KEY} must be the only key."
+            )
+
+        raw_ref_name = value.get(PAYLOAD_REF_KEY)
+        if not isinstance(raw_ref_name, str):
+            raise ValueError(
+                f"Invalid payload reference at {path}: "
+                f"{PAYLOAD_REF_KEY} must be a string."
+            )
+        if not re.fullmatch(PAYLOAD_NAME_PATTERN, raw_ref_name):
+            raise ValueError(f"Invalid payload name '{raw_ref_name}' at {path}.")
+        return raw_ref_name
+
+    def _decode_payload_value(self, payload_text: str) -> Any:
+        """Decode payload text into tool argument value.
+
+        Behavior:
+        - If payload is valid JSON literal/object/array, return parsed JSON value.
+        - Otherwise return payload as raw string.
+
+        Args:
+            payload_text: Raw payload content between BEGIN/END markers.
+
+        Returns:
+            Decoded argument value.
+        """
+        candidate = payload_text.strip()
+        if not candidate:
+            return payload_text
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            return payload_text
+
+    def _resolve_tool_payload_references(
+        self, react_output: dict[str, Any], payloads: dict[str, str]
+    ) -> dict[str, Any]:
+        """Resolve CALL_TOOL payload references and validate payload integrity.
+
+        Validation rules:
+        - payload names are unique (enforced while parsing blocks)
+        - every CALL_TOOL argument value must be a ``$payload_ref`` object
+        - every ``$payload_ref`` points to an existing payload
+        - every payload block is used at least once
+
+        Args:
+            react_output: Parsed top-level recursion JSON.
+            payloads: Parsed payload block mapping.
+
+        Returns:
+            ``react_output`` with resolved tool arguments.
+
+        Raises:
+            ValueError: If payload section is inconsistent with JSON references.
+        """
+        action = react_output.get("action", {})
+        action_type = ""
+        action_output: Any = {}
+        if isinstance(action, dict):
+            raw_action_type = action.get("action_type", "")
+            if isinstance(raw_action_type, str):
+                action_type = raw_action_type.strip()
+            action_output = action.get("output", {})
+
+        if payloads and action_type != "CALL_TOOL":
+            raise ValueError(
+                "Payload blocks are only allowed when action_type=CALL_TOOL."
+            )
+
+        if action_type != "CALL_TOOL":
+            return react_output
+
+        if not payloads:
+            raise ValueError(
+                "CALL_TOOL requires payload blocks after the JSON section."
+            )
+        if not isinstance(action_output, dict):
+            raise ValueError("CALL_TOOL action.output must be an object.")
+
+        used_payloads: set[str] = set()
+        tool_calls = action_output.get("tool_calls", [])
+        if not isinstance(tool_calls, list):
+            raise ValueError("CALL_TOOL action.output.tool_calls must be a list.")
+
+        for index, tool_call in enumerate(tool_calls):
+            if not isinstance(tool_call, dict):
+                raise ValueError(
+                    f"CALL_TOOL action.output.tool_calls[{index}] must be an object."
+                )
+            raw_arguments = tool_call.get("arguments", {})
+            if not isinstance(raw_arguments, dict):
+                raise ValueError(
+                    f"CALL_TOOL action.output.tool_calls[{index}].arguments must be an object."
+                )
+
+            resolved_arguments: dict[str, Any] = {}
+            for arg_name, raw_arg_value in raw_arguments.items():
+                ref_name = self._extract_payload_ref_name(
+                    raw_arg_value,
+                    path=f"action.output.tool_calls[{index}].arguments.{arg_name}",
+                )
+                if ref_name not in payloads:
+                    raise ValueError(
+                        f"Payload reference '{ref_name}' in tool_calls[{index}]."
+                        f"arguments.{arg_name} is not defined."
+                    )
+                used_payloads.add(ref_name)
+                resolved_arguments[arg_name] = self._decode_payload_value(
+                    payloads[ref_name]
+                )
+            tool_call["arguments"] = resolved_arguments
+
+        unused_payloads = sorted(set(payloads) - used_payloads)
+        if unused_payloads:
+            raise ValueError(
+                "Unused payload blocks detected: " + ", ".join(unused_payloads)
+            )
+
+        return react_output
+
+    def _safe_load_react_output(self, content: str) -> dict[str, Any]:
+        """Parse assistant output with strict JSON + optional payload blocks.
+
+        Args:
+            content: Raw assistant response.
+
+        Returns:
+            Parsed recursion output dictionary with resolved payload references.
+
+        Raises:
+            ValueError: If JSON parsing or payload validation fails.
+        """
+        json_section, payload_section = self._split_json_and_payload_sections(content)
+        react_output = self._safe_load_json(json_section)
+        payloads = (
+            self._parse_payload_blocks(payload_section)
+            if payload_section is not None
+            else {}
+        )
+        return self._resolve_tool_payload_references(react_output, payloads)
+
+    def _build_parse_retry_messages(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Append a one-shot parse repair instruction for lightweight retries.
+
+        Args:
+            messages: Original request messages sent to the model.
+
+        Returns:
+            A new message list with one extra user instruction appended.
+        """
+        retry_messages: list[dict[str, Any]] = list(messages)
+        retry_messages.append({"role": "user", "content": PARSE_RETRY_INSTRUCTION})
+        return retry_messages
+
     def _is_timeout_error(self, exc: Exception) -> bool:
         """Whether an exception chain represents an LLM request timeout.
 
@@ -135,7 +460,7 @@ class ReactEngine:
             Canonical JSON string if valid; otherwise None.
         """
         try:
-            parsed = self._safe_load_json(content)
+            parsed = self._safe_load_react_output(content)
         except ValueError:
             return None
         return json.dumps(parsed, ensure_ascii=False)
@@ -150,7 +475,7 @@ class ReactEngine:
             Pretty-printed string for log output.
         """
         try:
-            parsed = self._safe_load_json(content)
+            parsed = self._safe_load_react_output(content)
         except ValueError:
             return content
         return json.dumps(parsed, ensure_ascii=False, indent=2)
@@ -517,69 +842,79 @@ class ReactEngine:
         # Tools are described in the system prompt, and LLM returns tool calls
         # in action.output.
         try:
-            response = await run_in_threadpool(
-                self.llm.chat,
-                messages=messages,
-                **(llm_chat_kwargs or {}),
-            )  # type: ignore[arg-type]
-            choice = response.first()
-            message = choice.message
+            token_counter = self._new_token_counter()
+            response = None
+            assistant_message_raw: str | None = None
+            react_output: dict[str, Any] | None = None
+            parse_error: ValueError | None = None
+            request_messages = messages
 
-            # Parse JSON from content to get observe, thought, abstract, action_type
-            content = message.content or "{}"
-            assistant_message_json = self._normalize_assistant_message_json(content)
+            for parse_attempt in range(PARSE_RETRY_LIMIT + 1):
+                response = await run_in_threadpool(
+                    self.llm.chat,
+                    messages=request_messages,
+                    **(llm_chat_kwargs or {}),
+                )  # type: ignore[arg-type]
+                self._accumulate_usage(token_counter, response.usage)
 
-            # Use safe JSON parser to handle all common LLM formatting issues
-            try:
-                react_output = self._safe_load_json(content)
-                logger.debug(f"Successfully parsed JSON (trace_id={trace_id})")
-            except ValueError as e:
-                # All parsing attempts failed, log and return error
-                logger.error(
-                    f"Failed to parse LLM response\n"
-                    f"Trace ID: {trace_id}\n"
-                    f"Task ID: {task.task_id}\n"
-                    f"Iteration: {task.iteration}\n"
-                    f"Error: {e}"
+                choice = response.first()
+                message = choice.message
+
+                # Parse JSON from content to get observe, thought, abstract, action_type
+                content = message.content or "{}"
+                assistant_message_raw = content
+
+                try:
+                    react_output = self._safe_load_react_output(content)
+                    logger.debug(
+                        "Successfully parsed LLM output (trace_id=%s, attempt=%s)",
+                        trace_id,
+                        parse_attempt + 1,
+                    )
+                    break
+                except ValueError as e:
+                    parse_error = e
+                    if parse_attempt < PARSE_RETRY_LIMIT:
+                        logger.warning(
+                            "Failed to parse LLM output (trace_id=%s, attempt=%s): %s. "
+                            "Retrying once with strict format repair instruction.",
+                            trace_id,
+                            parse_attempt + 1,
+                            e,
+                        )
+                        request_messages = self._build_parse_retry_messages(messages)
+                        continue
+
+                    logger.error(
+                        f"Failed to parse LLM response\n"
+                        f"Trace ID: {trace_id}\n"
+                        f"Task ID: {task.task_id}\n"
+                        f"Iteration: {task.iteration}\n"
+                        f"Error: {e}"
+                    )
+
+            if response is None or react_output is None:
+                tokens_data = self._persist_accumulated_usage(
+                    task, recursion, token_counter
                 )
-
-                # Save token usage even on error (tokens were still consumed)
-                tokens_data = None
-                if response.usage:
-                    recursion.prompt_tokens = response.usage.prompt_tokens
-                    recursion.completion_tokens = response.usage.completion_tokens
-                    recursion.total_tokens = response.usage.total_tokens
-                    recursion.cached_input_tokens = response.usage.cached_input_tokens
-                    task.total_prompt_tokens += response.usage.prompt_tokens
-                    task.total_completion_tokens += response.usage.completion_tokens
-                    task.total_tokens += response.usage.total_tokens
-                    task.total_cached_input_tokens += response.usage.cached_input_tokens
-                    tokens_data = {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens,
-                        "cached_input_tokens": response.usage.cached_input_tokens,
-                    }
-
                 recursion.status = "error"
-                recursion.error_log = str(e)
+                recursion.error_log = str(parse_error or "Failed to parse LLM output")
                 recursion.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
 
                 return recursion, {
                     "trace_id": trace_id,
                     "action_type": "ERROR",
-                    "error": str(e),
+                    "error": str(parse_error or "Failed to parse LLM output"),
                     "tokens": tokens_data,
                     "assistant_message": None,
                     "rollback_messages": True,
-                    "llm_response_id": response.id,
+                    "llm_response_id": response.id if response is not None else None,
                 }
 
             # Authoritative trace_id is generated by backend and injected in the
             # user payload. Ignore model-supplied trace_id to avoid drift/random IDs.
             react_output["trace_id"] = trace_id
-            assistant_message_json = json.dumps(react_output, ensure_ascii=False)
 
             observe = react_output.get("observe", "")
             thought = react_output.get("thought", "")
@@ -618,23 +953,9 @@ class ReactEngine:
 
             # Skip empty/invalid responses
             if not action_type:
-                # Save token usage even on error (tokens were still consumed)
-                tokens_data = None
-                if response.usage:
-                    recursion.prompt_tokens = response.usage.prompt_tokens
-                    recursion.completion_tokens = response.usage.completion_tokens
-                    recursion.total_tokens = response.usage.total_tokens
-                    recursion.cached_input_tokens = response.usage.cached_input_tokens
-                    task.total_prompt_tokens += response.usage.prompt_tokens
-                    task.total_completion_tokens += response.usage.completion_tokens
-                    task.total_tokens += response.usage.total_tokens
-                    task.total_cached_input_tokens += response.usage.cached_input_tokens
-                    tokens_data = {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens,
-                        "cached_input_tokens": response.usage.cached_input_tokens,
-                    }
+                tokens_data = self._persist_accumulated_usage(
+                    task, recursion, token_counter
+                )
 
                 # Mark recursion as error
                 recursion.status = "error"
@@ -647,26 +968,13 @@ class ReactEngine:
                     "action_type": "ERROR",
                     "error": "Empty action_type from LLM",
                     "tokens": tokens_data,
-                    "assistant_message": assistant_message_json,
+                    "assistant_message": assistant_message_raw,
                 }
 
             if action_type not in ALLOWED_ACTION_TYPES:
-                tokens_data = None
-                if response.usage:
-                    recursion.prompt_tokens = response.usage.prompt_tokens
-                    recursion.completion_tokens = response.usage.completion_tokens
-                    recursion.total_tokens = response.usage.total_tokens
-                    recursion.cached_input_tokens = response.usage.cached_input_tokens
-                    task.total_prompt_tokens += response.usage.prompt_tokens
-                    task.total_completion_tokens += response.usage.completion_tokens
-                    task.total_tokens += response.usage.total_tokens
-                    task.total_cached_input_tokens += response.usage.cached_input_tokens
-                    tokens_data = {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens,
-                        "cached_input_tokens": response.usage.cached_input_tokens,
-                    }
+                tokens_data = self._persist_accumulated_usage(
+                    task, recursion, token_counter
+                )
 
                 recursion.status = "error"
                 recursion.error_log = (
@@ -687,7 +995,7 @@ class ReactEngine:
                         f"Allowed values: {sorted(ALLOWED_ACTION_TYPES)}"
                     ),
                     "tokens": tokens_data,
-                    "assistant_message": assistant_message_json,
+                    "assistant_message": assistant_message_raw,
                 }
 
             # Handle CALL_TOOL with native function calling
@@ -700,27 +1008,9 @@ class ReactEngine:
 
                 # Validate that tool_calls exist when action_type is CALL_TOOL
                 if not tool_calls_from_output:
-                    # Save token usage even on error (tokens were still consumed)
-                    tokens_data = None
-                    if response.usage:
-                        recursion.prompt_tokens = response.usage.prompt_tokens
-                        recursion.completion_tokens = response.usage.completion_tokens
-                        recursion.total_tokens = response.usage.total_tokens
-                        recursion.cached_input_tokens = (
-                            response.usage.cached_input_tokens
-                        )
-                        task.total_prompt_tokens += response.usage.prompt_tokens
-                        task.total_completion_tokens += response.usage.completion_tokens
-                        task.total_tokens += response.usage.total_tokens
-                        task.total_cached_input_tokens += (
-                            response.usage.cached_input_tokens
-                        )
-                        tokens_data = {
-                            "prompt_tokens": response.usage.prompt_tokens,
-                            "completion_tokens": response.usage.completion_tokens,
-                            "total_tokens": response.usage.total_tokens,
-                            "cached_input_tokens": response.usage.cached_input_tokens,
-                        }
+                    tokens_data = self._persist_accumulated_usage(
+                        task, recursion, token_counter
+                    )
 
                     recursion.status = "error"
                     recursion.error_log = (
@@ -738,7 +1028,7 @@ class ReactEngine:
                         "action_type": "ERROR",
                         "error": "CALL_TOOL requires tool_calls in action.output",
                         "tokens": tokens_data,
-                        "assistant_message": assistant_message_json,
+                        "assistant_message": assistant_message_raw,
                     }
 
                 # Process tool_calls from action.output
@@ -913,18 +1203,10 @@ class ReactEngine:
                 tool_results_json = json.dumps(tool_results, ensure_ascii=False)
                 recursion.tool_call_results = tool_results_json
 
-            # Save token usage from LLM response
-            if response.usage:
-                recursion.prompt_tokens = response.usage.prompt_tokens
-                recursion.completion_tokens = response.usage.completion_tokens
-                recursion.total_tokens = response.usage.total_tokens
-                recursion.cached_input_tokens = response.usage.cached_input_tokens
-
-                # Update task-level token accumulation
-                task.total_prompt_tokens += response.usage.prompt_tokens
-                task.total_completion_tokens += response.usage.completion_tokens
-                task.total_tokens += response.usage.total_tokens
-                task.total_cached_input_tokens += response.usage.cached_input_tokens
+            # Persist usage totals (including any parse-retry attempt).
+            tokens_data = self._persist_accumulated_usage(
+                task, recursion, token_counter
+            )
 
             recursion.status = "done"
             recursion.updated_at = datetime.now(timezone.utc)
@@ -1104,7 +1386,7 @@ class ReactEngine:
                 "thought": thought,
                 "abstract": abstract,
                 "output": action_output,
-                "assistant_message": assistant_message_json,
+                "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
                 # Session memory related fields (for ANSWER action)
@@ -1116,13 +1398,8 @@ class ReactEngine:
             }
 
             # Add token usage if available
-            if response.usage:
-                event_data["tokens"] = {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                    "cached_input_tokens": response.usage.cached_input_tokens,
-                }
+            if tokens_data is not None:
+                event_data["tokens"] = tokens_data
 
             return recursion, event_data
 
