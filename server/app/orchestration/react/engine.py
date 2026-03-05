@@ -29,7 +29,8 @@ from .prompt_template import build_runtime_system_prompt
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
-ALLOWED_ACTION_TYPES = {"CALL_TOOL", "RE_PLAN", "REFLECT", "CLARIFY", "ANSWER"}
+TOOL_CALL_ACTION_TYPE = "TOOL_CALL"
+ALLOWED_ACTION_TYPES = {"RE_PLAN", "REFLECT", "CLARIFY", "ANSWER"}
 
 
 class ReactEngine:
@@ -423,7 +424,7 @@ class ReactEngine:
             action_result payload list for next recursion, or None when not needed.
         """
         action_type = event_data.get("action_type")
-        if action_type == "CALL_TOOL":
+        if action_type == TOOL_CALL_ACTION_TYPE:
             tool_results = event_data.get("tool_results", [])
             if not isinstance(tool_results, list):
                 return [{"error": "Invalid tool_results payload"}]
@@ -476,6 +477,155 @@ class ReactEngine:
                 return [parsed_value]
         return []
 
+    def _apply_usage_to_recursion_and_task(
+        self,
+        response: Any,
+        recursion: ReactRecursion,
+        task: ReactTask,
+    ) -> dict[str, int] | None:
+        """Persist token usage and return a serializable token payload."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+
+        recursion.prompt_tokens = usage.prompt_tokens
+        recursion.completion_tokens = usage.completion_tokens
+        recursion.total_tokens = usage.total_tokens
+        recursion.cached_input_tokens = usage.cached_input_tokens
+
+        task.total_prompt_tokens += usage.prompt_tokens
+        task.total_completion_tokens += usage.completion_tokens
+        task.total_tokens += usage.total_tokens
+        task.total_cached_input_tokens += usage.cached_input_tokens
+
+        return {
+            "prompt_tokens": usage.prompt_tokens,
+            "completion_tokens": usage.completion_tokens,
+            "total_tokens": usage.total_tokens,
+            "cached_input_tokens": usage.cached_input_tokens,
+        }
+
+    def _normalize_native_tool_calls(
+        self,
+        raw_tool_calls: Any,
+        trace_id: str,
+    ) -> list[dict[str, Any]]:
+        """Normalize provider-specific tool call payload into Pivot format."""
+        if not isinstance(raw_tool_calls, list):
+            return []
+
+        normalized_calls: list[dict[str, Any]] = []
+        for index, raw_call in enumerate(raw_tool_calls):
+            if not isinstance(raw_call, dict):
+                continue
+
+            function_payload = raw_call.get("function")
+            function_name = ""
+            raw_arguments: Any = {}
+            if isinstance(function_payload, dict):
+                name_candidate = function_payload.get("name")
+                if isinstance(name_candidate, str):
+                    function_name = name_candidate.strip()
+                raw_arguments = function_payload.get("arguments", {})
+            else:
+                name_candidate = raw_call.get("name")
+                if isinstance(name_candidate, str):
+                    function_name = name_candidate.strip()
+                raw_arguments = raw_call.get("arguments", {})
+
+            if not function_name:
+                continue
+
+            parsed_arguments: dict[str, Any] = {}
+            if isinstance(raw_arguments, dict):
+                parsed_arguments = raw_arguments
+            elif isinstance(raw_arguments, str):
+                try:
+                    parsed_json = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    parsed_json = {}
+                if isinstance(parsed_json, dict):
+                    parsed_arguments = parsed_json
+
+            raw_call_id = raw_call.get("id")
+            call_id = (
+                raw_call_id
+                if isinstance(raw_call_id, str) and raw_call_id
+                else f"call_{trace_id}_{index + 1}"
+            )
+            normalized_calls.append(
+                {
+                    "id": call_id,
+                    "name": function_name,
+                    "arguments": parsed_arguments,
+                }
+            )
+        return normalized_calls
+
+    async def _execute_tool_calls(
+        self,
+        tool_calls: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Execute normalized tool calls and return (calls, results)."""
+        reconstructed_tool_calls: list[dict[str, Any]] = []
+        tool_results: list[dict[str, Any]] = []
+
+        for tool_call in tool_calls:
+            tool_call_id = tool_call.get("id", "")
+            func_name = tool_call.get("name", "")
+            func_args = tool_call.get("arguments", {})
+            if not isinstance(func_name, str) or not func_name.strip():
+                continue
+            if not isinstance(func_args, dict):
+                func_args = {}
+
+            reconstructed_tool_calls.append(
+                {
+                    "id": tool_call_id,
+                    "name": func_name,
+                    "arguments": func_args,
+                }
+            )
+            try:
+                result = await run_in_threadpool(
+                    self.tool_manager.execute,
+                    func_name,
+                    context=self.tool_execution_context,
+                    **func_args,
+                )
+                tool_results.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "name": func_name,
+                        "arguments": func_args,
+                        "result": result,
+                        "success": True,
+                    }
+                )
+            except Exception as exc:
+                logger.error(f"Tool {func_name} execution failed: {exc}")
+                if "not found in registry" in str(exc):
+                    available_tools = self.tool_manager.list_tools()
+                    tool_names = [tool.name for tool in available_tools]
+                    error_msg = (
+                        f"Tool '{func_name}' not found. "
+                        f"Available tools: {', '.join(tool_names)}"
+                    )
+                else:
+                    error_msg = f"Tool execution failed: {exc!s}"
+
+                tool_results.append(
+                    {
+                        "tool_call_id": tool_call_id,
+                        "name": func_name,
+                        "arguments": func_args,
+                        "error": error_msg,
+                        "success": False,
+                    }
+                )
+
+        return reconstructed_tool_calls, tool_results
+
     async def execute_recursion(
         self,
         task: ReactTask,
@@ -513,83 +663,86 @@ class ReactEngine:
         self.db.commit()
         self.db.refresh(recursion)
 
-        # Call LLM WITHOUT tools parameter (using prompt-based approach).
-        # Tools are described in the system prompt, and LLM returns tool calls
-        # in action.output.
+        # Call LLM with native function-calling tools.
         try:
+            chat_kwargs: dict[str, Any] = dict(llm_chat_kwargs or {})
+            openai_tools = self.tool_manager.to_openai_tools()
+            if openai_tools:
+                chat_kwargs["tools"] = openai_tools
             response = await run_in_threadpool(
                 self.llm.chat,
                 messages=messages,
-                **(llm_chat_kwargs or {}),
+                **chat_kwargs,
             )  # type: ignore[arg-type]
             choice = response.first()
             message = choice.message
 
-            # Parse JSON from content to get observe, thought, abstract, action_type
-            content = message.content or "{}"
-            assistant_message_json = self._normalize_assistant_message_json(content)
+            content = message.content if isinstance(message.content, str) else ""
+            react_output: dict[str, Any] = {}
+            content_parse_error: ValueError | None = None
+            if content.strip():
+                try:
+                    react_output = self._safe_load_json(content)
+                    logger.debug(f"Successfully parsed JSON (trace_id={trace_id})")
+                except ValueError as exc:
+                    content_parse_error = exc
 
-            # Use safe JSON parser to handle all common LLM formatting issues
-            try:
-                react_output = self._safe_load_json(content)
-                logger.debug(f"Successfully parsed JSON (trace_id={trace_id})")
-            except ValueError as e:
-                # All parsing attempts failed, log and return error
+            normalized_tool_calls = self._normalize_native_tool_calls(
+                message.tool_calls,
+                trace_id,
+            )
+            has_tool_calls = len(normalized_tool_calls) > 0
+
+            if content_parse_error is not None and not has_tool_calls:
                 logger.error(
                     f"Failed to parse LLM response\n"
                     f"Trace ID: {trace_id}\n"
                     f"Task ID: {task.task_id}\n"
                     f"Iteration: {task.iteration}\n"
-                    f"Error: {e}"
+                    f"Error: {content_parse_error}"
                 )
-
-                # Save token usage even on error (tokens were still consumed)
-                tokens_data = None
-                if response.usage:
-                    recursion.prompt_tokens = response.usage.prompt_tokens
-                    recursion.completion_tokens = response.usage.completion_tokens
-                    recursion.total_tokens = response.usage.total_tokens
-                    recursion.cached_input_tokens = response.usage.cached_input_tokens
-                    task.total_prompt_tokens += response.usage.prompt_tokens
-                    task.total_completion_tokens += response.usage.completion_tokens
-                    task.total_tokens += response.usage.total_tokens
-                    task.total_cached_input_tokens += response.usage.cached_input_tokens
-                    tokens_data = {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens,
-                        "cached_input_tokens": response.usage.cached_input_tokens,
-                    }
-
+                tokens_data = self._apply_usage_to_recursion_and_task(
+                    response, recursion, task
+                )
                 recursion.status = "error"
-                recursion.error_log = str(e)
+                recursion.error_log = str(content_parse_error)
                 recursion.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
-
                 return recursion, {
                     "trace_id": trace_id,
                     "action_type": "ERROR",
-                    "error": str(e),
+                    "error": str(content_parse_error),
                     "tokens": tokens_data,
                     "assistant_message": None,
                     "rollback_messages": True,
                     "llm_response_id": response.id,
                 }
 
-            # Authoritative trace_id is generated by backend and injected in the
-            # user payload. Ignore model-supplied trace_id to avoid drift/random IDs.
-            react_output["trace_id"] = trace_id
-            assistant_message_json = json.dumps(react_output, ensure_ascii=False)
+            if react_output:
+                react_output["trace_id"] = trace_id
 
-            observe = react_output.get("observe", "")
-            thought = react_output.get("thought", "")
-            abstract = react_output.get("abstract", "")
-            short_term_memory_append = react_output.get("short_term_memory_append", "")
-            action = react_output.get("action", {})
-            action_type = action.get("action_type", "")
-            if isinstance(action_type, str):
-                action_type = action_type.strip()
+            observe_value = react_output.get("observe", "") if react_output else ""
+            observe = observe_value if isinstance(observe_value, str) else ""
+            thought_value = react_output.get("thought", "") if react_output else ""
+            thought = thought_value if isinstance(thought_value, str) else ""
+            abstract_value = react_output.get("abstract", "") if react_output else ""
+            abstract = abstract_value if isinstance(abstract_value, str) else ""
+            short_term_memory_value = (
+                react_output.get("short_term_memory_append", "") if react_output else ""
+            )
+            short_term_memory_append = (
+                short_term_memory_value
+                if isinstance(short_term_memory_value, str)
+                else ""
+            )
+
+            action = react_output.get("action", {}) if react_output else {}
+            if not isinstance(action, dict):
+                action = {}
             action_output = action.get("output", {})
+            if not isinstance(action_output, dict):
+                action_output = {}
+
             # LLMs may place step_status_update in different locations.
             # We accept all known variants and normalize later.
             step_status_update = self._normalize_step_status_update_payload(
@@ -597,228 +750,89 @@ class ReactEngine:
             )
             if not step_status_update:
                 step_status_update = self._normalize_step_status_update_payload(
-                    react_output.get("step_status_update")
+                    react_output.get("step_status_update") if react_output else None
                 )
-            if not step_status_update and isinstance(action_output, dict):
+            if not step_status_update:
                 step_status_update = self._normalize_step_status_update_payload(
                     action_output.get("step_status_update")
                 )
 
-            # Extract the plan step this recursion belongs to.
-            # The LLM returns action.step_id when executing as part of a plan.
-            # We must validate its presence when a plan exists, but never abort — a
-            # missing step_id should only surface as a warning so the task can continue.
-            action_step_id: str | None = action.get("step_id") or None
+            action_step_id_raw = action.get("step_id")
+            action_step_id: str | None = (
+                action_step_id_raw if isinstance(action_step_id_raw, str) else None
+            )
 
-            # Extract session memory related fields (only used when action_type == ANSWER)
-            session_memory_delta = react_output.get("session_memory_delta", {})
-            session_subject = react_output.get("session_subject", {})
-            session_goal = react_output.get("session_goal", {})
-            task_summary = react_output.get("task_summary", {})
+            session_memory_delta = (
+                react_output.get("session_memory_delta", {}) if react_output else {}
+            )
+            session_subject = (
+                react_output.get("session_subject", {}) if react_output else {}
+            )
+            session_goal = react_output.get("session_goal", {}) if react_output else {}
+            task_summary = react_output.get("task_summary", {}) if react_output else {}
 
-            # Skip empty/invalid responses
-            if not action_type:
-                # Save token usage even on error (tokens were still consumed)
-                tokens_data = None
-                if response.usage:
-                    recursion.prompt_tokens = response.usage.prompt_tokens
-                    recursion.completion_tokens = response.usage.completion_tokens
-                    recursion.total_tokens = response.usage.total_tokens
-                    recursion.cached_input_tokens = response.usage.cached_input_tokens
-                    task.total_prompt_tokens += response.usage.prompt_tokens
-                    task.total_completion_tokens += response.usage.completion_tokens
-                    task.total_tokens += response.usage.total_tokens
-                    task.total_cached_input_tokens += response.usage.cached_input_tokens
-                    tokens_data = {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens,
-                        "cached_input_tokens": response.usage.cached_input_tokens,
+            reconstructed_tool_calls: list[dict[str, Any]] = []
+            tool_results: list[dict[str, Any]] = []
+            action_type = ""
+
+            if has_tool_calls:
+                action_type = TOOL_CALL_ACTION_TYPE
+                action_output = {"tool_calls": normalized_tool_calls}
+                (
+                    reconstructed_tool_calls,
+                    tool_results,
+                ) = await self._execute_tool_calls(normalized_tool_calls)
+            else:
+                action_type = action.get("action_type", "")
+                if isinstance(action_type, str):
+                    action_type = action_type.strip()
+                else:
+                    action_type = ""
+
+                if not action_type:
+                    tokens_data = self._apply_usage_to_recursion_and_task(
+                        response, recursion, task
+                    )
+                    recursion.status = "error"
+                    recursion.error_log = "LLM returned empty action_type"
+                    recursion.updated_at = datetime.now(timezone.utc)
+                    self.db.commit()
+                    return recursion, {
+                        "trace_id": trace_id,
+                        "action_type": "ERROR",
+                        "error": "Empty action_type from LLM",
+                        "tokens": tokens_data,
+                        "assistant_message": content if isinstance(content, str) else None,
                     }
 
-                # Mark recursion as error
-                recursion.status = "error"
-                recursion.error_log = "LLM returned empty action_type"
-                recursion.updated_at = datetime.now(timezone.utc)
-                self.db.commit()
-
-                return recursion, {
-                    "trace_id": trace_id,
-                    "action_type": "ERROR",
-                    "error": "Empty action_type from LLM",
-                    "tokens": tokens_data,
-                    "assistant_message": assistant_message_json,
-                }
-
-            if action_type not in ALLOWED_ACTION_TYPES:
-                tokens_data = None
-                if response.usage:
-                    recursion.prompt_tokens = response.usage.prompt_tokens
-                    recursion.completion_tokens = response.usage.completion_tokens
-                    recursion.total_tokens = response.usage.total_tokens
-                    recursion.cached_input_tokens = response.usage.cached_input_tokens
-                    task.total_prompt_tokens += response.usage.prompt_tokens
-                    task.total_completion_tokens += response.usage.completion_tokens
-                    task.total_tokens += response.usage.total_tokens
-                    task.total_cached_input_tokens += response.usage.cached_input_tokens
-                    tokens_data = {
-                        "prompt_tokens": response.usage.prompt_tokens,
-                        "completion_tokens": response.usage.completion_tokens,
-                        "total_tokens": response.usage.total_tokens,
-                        "cached_input_tokens": response.usage.cached_input_tokens,
-                    }
-
-                recursion.status = "error"
-                recursion.error_log = (
-                    "LLM returned unsupported action_type: "
-                    f"{action_type}. Allowed: {sorted(ALLOWED_ACTION_TYPES)}"
-                )
-                recursion.observe = observe
-                recursion.thought = thought
-                recursion.abstract = abstract
-                recursion.updated_at = datetime.now(timezone.utc)
-                self.db.commit()
-
-                return recursion, {
-                    "trace_id": trace_id,
-                    "action_type": "ERROR",
-                    "error": (
-                        f"Unsupported action_type: {action_type}. "
-                        f"Allowed values: {sorted(ALLOWED_ACTION_TYPES)}"
-                    ),
-                    "tokens": tokens_data,
-                    "assistant_message": assistant_message_json,
-                }
-
-            # Handle CALL_TOOL with native function calling
-            tool_results = []
-            reconstructed_tool_calls = []
-
-            if action_type == "CALL_TOOL":
-                # Extract tool_calls from action.output (prompt-based approach)
-                tool_calls_from_output = action_output.get("tool_calls", [])
-
-                # Validate that tool_calls exist when action_type is CALL_TOOL
-                if not tool_calls_from_output:
-                    # Save token usage even on error (tokens were still consumed)
-                    tokens_data = None
-                    if response.usage:
-                        recursion.prompt_tokens = response.usage.prompt_tokens
-                        recursion.completion_tokens = response.usage.completion_tokens
-                        recursion.total_tokens = response.usage.total_tokens
-                        recursion.cached_input_tokens = (
-                            response.usage.cached_input_tokens
-                        )
-                        task.total_prompt_tokens += response.usage.prompt_tokens
-                        task.total_completion_tokens += response.usage.completion_tokens
-                        task.total_tokens += response.usage.total_tokens
-                        task.total_cached_input_tokens += (
-                            response.usage.cached_input_tokens
-                        )
-                        tokens_data = {
-                            "prompt_tokens": response.usage.prompt_tokens,
-                            "completion_tokens": response.usage.completion_tokens,
-                            "total_tokens": response.usage.total_tokens,
-                            "cached_input_tokens": response.usage.cached_input_tokens,
-                        }
-
+                if action_type not in ALLOWED_ACTION_TYPES:
+                    tokens_data = self._apply_usage_to_recursion_and_task(
+                        response, recursion, task
+                    )
                     recursion.status = "error"
                     recursion.error_log = (
-                        "action_type is CALL_TOOL but no tool_calls in action.output"
+                        "LLM returned unsupported action_type: "
+                        f"{action_type}. Allowed: {sorted(ALLOWED_ACTION_TYPES)}"
                     )
                     recursion.observe = observe
                     recursion.thought = thought
                     recursion.abstract = abstract
-                    recursion.action_type = action_type
                     recursion.updated_at = datetime.now(timezone.utc)
                     self.db.commit()
-
                     return recursion, {
                         "trace_id": trace_id,
                         "action_type": "ERROR",
-                        "error": "CALL_TOOL requires tool_calls in action.output",
+                        "error": (
+                            f"Unsupported action_type: {action_type}. "
+                            f"Allowed values: {sorted(ALLOWED_ACTION_TYPES)}"
+                        ),
                         "tokens": tokens_data,
-                        "assistant_message": assistant_message_json,
+                        "assistant_message": content if isinstance(content, str) else None,
                     }
 
-                # Process tool_calls from action.output
-                for tool_call in tool_calls_from_output:
-                    # tool_call format from LLM: {id, name, arguments}
-                    # arguments is already a dict, not a JSON string
-                    tool_call_id = tool_call.get("id", "")
-                    func_name = tool_call.get("name", "")
-                    func_args = tool_call.get("arguments", {})
-
-                    # Validate arguments is dict
-                    if not isinstance(func_args, dict):
-                        # Try to parse if it's a string
-                        try:
-                            func_args = json.loads(func_args)
-                        except (json.JSONDecodeError, TypeError):
-                            func_args = {}
-                            logger.warning(
-                                f"Failed to parse tool arguments: {func_args}"
-                            )
-
-                    try:
-                        # Execute tool asynchronously via thread pool
-                        result = await run_in_threadpool(
-                            self.tool_manager.execute,
-                            func_name,
-                            context=self.tool_execution_context,
-                            **func_args,
-                        )
-
-                        tool_results.append(
-                            {
-                                "tool_call_id": tool_call_id,
-                                "name": func_name,
-                                "arguments": func_args,
-                                "result": result,
-                                "success": True,
-                            }
-                        )
-
-                        # Keep tool_call in reconstructed format for event data
-                        reconstructed_tool_calls.append(
-                            {
-                                "id": tool_call_id,
-                                "name": func_name,
-                                "arguments": func_args,
-                            }
-                        )
-
-                    except Exception as e:
-                        logger.error(f"Tool {func_name} execution failed: {e}")
-                        # Provide helpful error message with available tools
-                        if "not found in registry" in str(e):
-                            available_tools = self.tool_manager.list_tools()
-                            tool_names = [tool.name for tool in available_tools]
-                            error_msg = (
-                                f"Tool '{func_name}' not found. "
-                                f"Available tools: {', '.join(tool_names)}"
-                            )
-                        else:
-                            error_msg = f"Tool execution failed: {e!s}"
-                        tool_results.append(
-                            {
-                                "tool_call_id": tool_call_id,
-                                "name": func_name,
-                                "arguments": func_args,
-                                "error": error_msg,
-                                "success": False,
-                            }
-                        )
-                        # Always record the call attempt so the frontend knows
-                        # which function was invoked and with what arguments,
-                        # regardless of whether execution succeeded or failed.
-                        reconstructed_tool_calls.append(
-                            {
-                                "id": tool_call_id,
-                                "name": func_name,
-                                "arguments": func_args,
-                            }
-                        )
+            # Persist exact assistant content returned by LLM for cache stability.
+            # Never synthesize TOOL_CALL into assistant history content.
+            assistant_message_json = content
 
             # Save recursion
             recursion.observe = observe
@@ -838,7 +852,12 @@ class ReactEngine:
                 # The LLM forgot to declare which step it's executing — log the
                 # anomaly but do NOT abort; the recursion result will simply be
                 # unassociated with any step (plan_step_id stays None).
-                logger.error(
+                log_method = (
+                    logger.warning
+                    if action_type == TOOL_CALL_ACTION_TYPE
+                    else logger.error
+                )
+                log_method(
                     f"Action returned without step_id while a plan is active. "
                     f"The recursion result will NOT be attributed to any plan step. "
                     f"trace_id={trace_id}, task_id={task.task_id}, "
@@ -1292,7 +1311,7 @@ class ReactEngine:
                         llm_cache_state.pop("previous_response_id", None)
                 else:
                     assistant_message = event_data.get("assistant_message")
-                    if isinstance(assistant_message, str) and assistant_message:
+                    if isinstance(assistant_message, str):
                         runtime_messages.append(
                             {"role": "assistant", "content": assistant_message}
                         )
@@ -1379,7 +1398,7 @@ class ReactEngine:
                 }
 
                 # Yield recursion events
-                if action_type == "CALL_TOOL":
+                if action_type == TOOL_CALL_ACTION_TYPE:
                     # Get tool_calls and results from event_data (from native function calling)
                     tool_calls_data = event_data.get("tool_calls", [])
                     tool_results_data = event_data.get("tool_results", [])

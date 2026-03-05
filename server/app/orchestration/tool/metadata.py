@@ -18,6 +18,8 @@ class ToolMetadata:
         name: The unique identifier for the tool.
         description: A brief description of what the tool does.
         parameters: JSON Schema describing the expected parameters (OpenAI format).
+        parameter_descriptions: Human-readable descriptions for each parameter.
+        return_description: Human-readable explanation of the tool return payload.
         tool_type: Execution category for this tool.
         func: The actual callable function.
     """
@@ -25,6 +27,8 @@ class ToolMetadata:
     name: str
     description: str
     parameters: dict[str, Any]
+    parameter_descriptions: dict[str, str]
+    return_description: str
     func: Callable[..., Any]
     tool_type: ToolType = "normal"
 
@@ -40,7 +44,9 @@ class ToolMetadata:
         return f"""Tool: {self.name}
 Type: {self.tool_type}
 Description: {self.description}
-Parameters: {json.dumps(self.parameters, ensure_ascii=False)}"""
+Parameters: {json.dumps(self.parameters, ensure_ascii=False)}
+Parameter Descriptions: {json.dumps(self.parameter_descriptions, ensure_ascii=False)}
+Return Description: {self.return_description}"""
 
     def to_dict(self) -> dict[str, Any]:
         """
@@ -53,6 +59,8 @@ Parameters: {json.dumps(self.parameters, ensure_ascii=False)}"""
             "name": self.name,
             "description": self.description,
             "parameters": self.parameters,
+            "parameter_descriptions": self.parameter_descriptions,
+            "return_description": self.return_description,
             "tool_type": self.tool_type,
         }
 
@@ -63,11 +71,14 @@ Parameters: {json.dumps(self.parameters, ensure_ascii=False)}"""
         Returns:
             Dictionary in OpenAI tools format with type and function fields.
         """
+        function_description = self.description
+        if self.return_description:
+            function_description = f"{self.description}\n\nReturn value description: {self.return_description}"
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
+                "description": function_description,
                 "parameters": self.parameters,
                 "strict": True,  # Enable structured outputs
             },

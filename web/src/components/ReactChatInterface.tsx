@@ -89,6 +89,33 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * Parse tool call and tool result payloads from recursion history records.
+ */
+function parseRecursionToolExecution(
+  actionOutput: string | null,
+  toolCallResults: string | null
+): { toolCalls: unknown[]; toolResults: unknown[] } {
+  let toolCalls: unknown[] = [];
+  let toolResults: unknown[] = [];
+
+  if (actionOutput) {
+    const actionData = asRecord(parseJson(actionOutput));
+    if (actionData && Array.isArray(actionData.tool_calls)) {
+      toolCalls = actionData.tool_calls;
+    }
+  }
+
+  if (toolCallResults) {
+    const parsedResults = parseJson(toolCallResults);
+    if (Array.isArray(parsedResults)) {
+      toolResults = parsedResults;
+    }
+  }
+
+  return { toolCalls, toolResults };
+}
+
+/**
  * Runtime guard for backend stream event payloads.
  */
 function isReactStreamEvent(value: unknown): value is ReactStreamEvent {
@@ -335,41 +362,23 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 // Parse events from recursion data for historical sessions
                 const events: ReactStreamEvent[] = [];
 
-                // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
-                if (r.action_type === 'CALL_TOOL') {
-                  let toolCalls: unknown[] = [];
-                  let toolResults: unknown[] = [];
+                const { toolCalls, toolResults } = parseRecursionToolExecution(
+                  r.action_output,
+                  r.tool_call_results
+                );
 
-                  // Parse tool_calls from action_output
-                  if (r.action_output) {
-                    const actionData = asRecord(parseJson(r.action_output));
-                    if (actionData && Array.isArray(actionData.tool_calls)) {
-                      toolCalls = actionData.tool_calls;
-                    }
-                  }
-
-                  // Parse tool_results from tool_call_results
-                  if (r.tool_call_results) {
-                    const parsedResults = parseJson(r.tool_call_results);
-                    if (Array.isArray(parsedResults)) {
-                      toolResults = parsedResults;
-                    }
-                  }
-
-                  // Add tool_call event if we have any data
-                  if (toolCalls.length > 0 || toolResults.length > 0) {
-                    events.push({
-                      type: 'tool_call',
-                      task_id: task.task_id,
-                      trace_id: r.trace_id,
-                      iteration: r.iteration,
-                      data: {
-                        tool_calls: toolCalls,
-                        tool_results: toolResults,
-                      },
-                      timestamp: r.updated_at,
-                    });
-                  }
+                if (toolCalls.length > 0 || toolResults.length > 0) {
+                  events.push({
+                    type: 'tool_call',
+                    task_id: task.task_id,
+                    trace_id: r.trace_id,
+                    iteration: r.iteration,
+                    data: {
+                      tool_calls: toolCalls,
+                      tool_results: toolResults,
+                    },
+                    timestamp: r.updated_at,
+                  });
                 }
 
                 // For RE_PLAN: parse action_output for plan data
@@ -394,9 +403,9 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                   observe: r.observe || undefined,
                   thought: r.thought || undefined,
                   abstract: r.abstract || undefined,
-                  // Only show action_type, not the full action_output
-                  // Tool calls are rendered separately in TOOL EXECUTION section
-                  action: r.action_type || undefined,
+                  // Only show action_type, not the full action_output.
+                  // If backend stored no action_type for native tool calls, infer TOOL_CALL.
+                  action: r.action_type || (toolCalls.length > 0 || toolResults.length > 0 ? 'TOOL_CALL' : undefined),
                   events: events,
                   status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
                   errorLog: r.error_log || undefined,
@@ -523,41 +532,23 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
           // Parse events from recursion data for historical sessions
           const events: ReactStreamEvent[] = [];
 
-          // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
-          if (r.action_type === 'CALL_TOOL') {
-            let toolCalls: unknown[] = [];
-            let toolResults: unknown[] = [];
+          const { toolCalls, toolResults } = parseRecursionToolExecution(
+            r.action_output,
+            r.tool_call_results
+          );
 
-            // Parse tool_calls from action_output
-            if (r.action_output) {
-              const actionData = asRecord(parseJson(r.action_output));
-              if (actionData && Array.isArray(actionData.tool_calls)) {
-                toolCalls = actionData.tool_calls;
-              }
-            }
-
-            // Parse tool_results from tool_call_results
-            if (r.tool_call_results) {
-              const parsedResults = parseJson(r.tool_call_results);
-              if (Array.isArray(parsedResults)) {
-                toolResults = parsedResults;
-              }
-            }
-
-            // Add tool_call event if we have any data
-            if (toolCalls.length > 0 || toolResults.length > 0) {
-              events.push({
-                type: 'tool_call',
-                task_id: task.task_id,
-                trace_id: r.trace_id,
-                iteration: r.iteration,
-                data: {
-                  tool_calls: toolCalls,
-                  tool_results: toolResults,
-                },
-                timestamp: r.updated_at,
-              });
-            }
+          if (toolCalls.length > 0 || toolResults.length > 0) {
+            events.push({
+              type: 'tool_call',
+              task_id: task.task_id,
+              trace_id: r.trace_id,
+              iteration: r.iteration,
+              data: {
+                tool_calls: toolCalls,
+                tool_results: toolResults,
+              },
+              timestamp: r.updated_at,
+            });
           }
 
           // For RE_PLAN: parse action_output for plan data
@@ -582,9 +573,9 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             observe: r.observe || undefined,
             thought: r.thought || undefined,
             abstract: r.abstract || undefined,
-            // Only show action_type, not the full action_output
-            // Tool calls are rendered separately in TOOL EXECUTION section
-            action: r.action_type || undefined,
+            // Only show action_type, not the full action_output.
+            // If backend stored no action_type for native tool calls, infer TOOL_CALL.
+            action: r.action_type || (toolCalls.length > 0 || toolResults.length > 0 ? 'TOOL_CALL' : undefined),
             events: events,
             status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
             errorLog: r.error_log || undefined,
@@ -1405,6 +1396,28 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   };
 
   /**
+   * Build a compact summary label from tool_call events.
+   */
+  const getToolExecutionSummary = (recursion: RecursionRecord): string | null => {
+    const toolNames = new Set<string>();
+
+    recursion.events.forEach((event) => {
+      if (event.type !== 'tool_call') return;
+      const toolData = event.data as {
+        tool_calls?: Array<{ name?: string }>
+      } | undefined;
+      toolData?.tool_calls?.forEach((toolCall) => {
+        if (typeof toolCall.name === 'string' && toolCall.name.trim().length > 0) {
+          toolNames.add(toolCall.name.trim());
+        }
+      });
+    });
+
+    if (toolNames.size === 0) return null;
+    return `Tool: ${Array.from(toolNames).join(', ')}`;
+  };
+
+  /**
    * Check if recursion has any failed tool calls.
    */
   const hasFailedTools = (recursion: RecursionRecord): boolean => {
@@ -1447,6 +1460,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
     const effectiveStatus = getRecursionStatus(recursion);
 
     const toolCallEvents = recursion.events.filter((e) => e.type === 'tool_call');
+    const toolSummary = getToolExecutionSummary(recursion);
+    const displaySummary = recursion.abstract || toolSummary || `Iteration ${recursion.iteration + 1}`;
 
     return (
       <div key={key} className="border border-border rounded-md mb-3 overflow-hidden bg-muted/20">
@@ -1480,7 +1495,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 className="w-3.5 h-3.5 text-danger flex-shrink-0 status-icon-enter"
               />
             )}
-            {effectiveStatus === 'running' && !recursion.abstract ? (
+            {effectiveStatus === 'running' && !recursion.abstract && !toolSummary ? (
               <span
                 className="text-xs font-semibold truncate animate-thinking-wave"
                 style={{
@@ -1496,9 +1511,9 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
             ) : (
               <span
                 className="text-xs font-semibold text-foreground truncate"
-                title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+                title={displaySummary}
               >
-                {recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+                {displaySummary}
               </span>
             )}
             {toolCallEvents.length > 0 && (

@@ -135,6 +135,41 @@ class OpenAIResponseLLM(AbstractLLM):
 
         return text, tool_calls or None
 
+    def _convert_tools_to_responses_format(
+        self, tools: Any
+    ) -> list[dict[str, Any]] | None:
+        """Convert OpenAI chat-completions style tools into Responses API format."""
+        if not isinstance(tools, list):
+            return None
+
+        converted: list[dict[str, Any]] = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+
+            if tool.get("type") != "function":
+                continue
+
+            function_payload = tool.get("function")
+            if not isinstance(function_payload, dict):
+                continue
+
+            name = function_payload.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+
+            converted_tool: dict[str, Any] = {
+                "type": "function",
+                "name": name,
+                "description": function_payload.get("description", ""),
+                "parameters": function_payload.get("parameters", {}),
+            }
+            if isinstance(function_payload.get("strict"), bool):
+                converted_tool["strict"] = function_payload["strict"]
+            converted.append(converted_tool)
+
+        return converted or None
+
     @staticmethod
     def _merge_extra_body_kwargs(merged_kwargs: dict[str, Any]) -> dict[str, Any]:
         """Flatten SDK-style ``extra_body`` into raw Responses API payload."""
@@ -197,6 +232,8 @@ class OpenAIResponseLLM(AbstractLLM):
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
+            raw_tools = normalized_kwargs.pop("tools", None)
+            responses_tools = self._convert_tools_to_responses_format(raw_tools)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -207,6 +244,8 @@ class OpenAIResponseLLM(AbstractLLM):
                 "input": self._build_input_messages(messages),
                 **normalized_kwargs,
             }
+            if responses_tools:
+                payload["tools"] = responses_tools
             if (
                 self.cache_policy == "openai-response-prompt-cache-key"
                 and isinstance(pivot_task_id, str)
@@ -245,6 +284,8 @@ class OpenAIResponseLLM(AbstractLLM):
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
+            raw_tools = normalized_kwargs.pop("tools", None)
+            responses_tools = self._convert_tools_to_responses_format(raw_tools)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -256,6 +297,8 @@ class OpenAIResponseLLM(AbstractLLM):
                 "stream": True,
                 **normalized_kwargs,
             }
+            if responses_tools:
+                payload["tools"] = responses_tools
             if (
                 self.cache_policy == "openai-response-prompt-cache-key"
                 and isinstance(pivot_task_id, str)

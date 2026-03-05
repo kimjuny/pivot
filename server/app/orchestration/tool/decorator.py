@@ -24,14 +24,26 @@ Python type annotations are mapped to JSON Schema types:
     dict                   → "object"
     anything else          → "string"   (safe fallback)
 
-No per-parameter descriptions are extracted from the docstring — the full
-docstring is already the description and the LLM is expected to read it.
+Parameter descriptions and return descriptions are extracted from Google-style
+docstrings (``Args``/``Returns``) and can be overridden via decorator kwargs.
 """
 
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any, Protocol, cast, get_type_hints
+import re
+from types import UnionType
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    Protocol,
+    Union,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -65,22 +77,115 @@ _PYTHON_TYPE_TO_JSON: dict[type, str] = {
 }
 
 
-def _py_type_to_json_schema_type(annotation: Any) -> str:
-    """Map a Python type annotation to a JSON Schema type string.
-
-    Handles plain types and simple generics (e.g. ``list[str]``).
-    Falls back to ``"string"`` for unknown annotations.
+def _parse_docstring_sections(docstring: str) -> tuple[dict[str, str], str]:
+    """Extract Args/Returns descriptions from a Google-style docstring.
 
     Args:
-        annotation: A Python type annotation object.
+        docstring: Raw function docstring.
 
     Returns:
-        JSON Schema type string.
+        A tuple of ``(parameter_descriptions, return_description)``.
     """
-    origin = getattr(annotation, "__origin__", None)
-    if origin is not None:
-        return _PYTHON_TYPE_TO_JSON.get(origin, "string")
-    return _PYTHON_TYPE_TO_JSON.get(annotation, "string")
+    parameter_descriptions: dict[str, str] = {}
+    return_lines: list[str] = []
+    mode: Literal["none", "args", "returns"] = "none"
+    current_arg_name: str | None = None
+
+    for raw_line in docstring.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            continue
+
+        if stripped in {"Args:", "Arguments:", "Parameters:"}:
+            mode = "args"
+            current_arg_name = None
+            continue
+        if stripped == "Returns:":
+            mode = "returns"
+            current_arg_name = None
+            continue
+        if re.match(r"^[A-Za-z_][A-Za-z0-9_ ]*:\s*$", stripped):
+            mode = "none"
+            current_arg_name = None
+            continue
+
+        if mode == "args":
+            arg_match = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$", line)
+            if arg_match:
+                arg_name = arg_match.group(1)
+                arg_desc = arg_match.group(2).strip()
+                parameter_descriptions[arg_name] = arg_desc
+                current_arg_name = arg_name
+                continue
+
+            if current_arg_name and line.startswith(" "):
+                continuation = stripped
+                if continuation:
+                    previous = parameter_descriptions[current_arg_name]
+                    parameter_descriptions[current_arg_name] = (
+                        f"{previous} {continuation}"
+                    ).strip()
+            continue
+
+        if mode == "returns":
+            return_lines.append(stripped)
+
+    return parameter_descriptions, " ".join(return_lines).strip()
+
+
+def _annotation_to_json_schema(annotation: Any) -> dict[str, Any]:
+    """Map Python type annotations to JSON Schema snippets.
+
+    Args:
+        annotation: A Python annotation object.
+
+    Returns:
+        JSON Schema snippet for one parameter.
+    """
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+
+    if origin in {UnionType, Union}:
+        non_none_args = [arg for arg in args if arg is not type(None)]
+        if len(non_none_args) == 1:
+            return _annotation_to_json_schema(non_none_args[0])
+        return {"type": "string"}
+
+    if origin in {list, tuple, set}:
+        if args:
+            return {
+                "type": "array",
+                "items": _annotation_to_json_schema(args[0]),
+            }
+        return {"type": "array"}
+
+    if origin is dict:
+        return {"type": "object"}
+
+    if origin is Literal:
+        literal_values = [
+            value for value in args if isinstance(value, str | int | float | bool)
+        ]
+        if literal_values:
+            first_literal = literal_values[0]
+            base_type = _PYTHON_TYPE_TO_JSON.get(type(first_literal), "string")
+            return {"type": base_type, "enum": literal_values}
+        return {"type": "string"}
+
+    if annotation is Any:
+        return {"type": "string"}
+
+    return {"type": _PYTHON_TYPE_TO_JSON.get(annotation, "string")}
+
+
+def _is_annotation_optional(annotation: Any) -> bool:
+    """Whether an annotation allows None."""
+    origin = get_origin(annotation)
+    if origin not in {UnionType, Union}:
+        return False
+    return type(None) in get_args(annotation)
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +193,10 @@ def _py_type_to_json_schema_type(annotation: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
+def _build_parameters_schema(
+    func: Callable[..., Any],
+    parameter_descriptions: dict[str, str],
+) -> dict[str, Any]:
     """Build an OpenAI-compatible JSON Schema from a function's signature.
 
     Only derives type and required-ness from the signature.
@@ -109,6 +217,7 @@ def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
 
     sig = inspect.signature(func)
     properties: dict[str, Any] = {}
+    required: list[str] = []
 
     for param_name, param in sig.parameters.items():
         if param.kind in (
@@ -118,9 +227,23 @@ def _build_parameters_schema(func: Callable[..., Any]) -> dict[str, Any]:
             continue
 
         annotation = hints.get(param_name, Any)
-        properties[param_name] = {"type": _py_type_to_json_schema_type(annotation)}
+        parameter_schema = _annotation_to_json_schema(annotation)
+        parameter_description = parameter_descriptions.get(param_name, "").strip()
+        if parameter_description:
+            parameter_schema["description"] = parameter_description
+        properties[param_name] = parameter_schema
 
-    return {"properties": properties}
+        if param.default is inspect.Parameter.empty and not _is_annotation_optional(
+            annotation
+        ):
+            required.append(param_name)
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +255,8 @@ def tool(
     func: Callable[..., Any] | None = None,
     *,
     tool_type: ToolType = "normal",
+    parameter_descriptions: dict[str, str] | None = None,
+    return_description: str | None = None,
 ) -> ToolFunction | Callable[[Callable[..., Any]], ToolFunction]:
     """Register a typed function as a callable tool.
 
@@ -154,10 +279,24 @@ def tool(
     """
 
     def _decorate(target: Callable[..., Any]) -> ToolFunction:
+        docstring = inspect.getdoc(target) or ""
+        doc_param_descriptions, doc_return_description = _parse_docstring_sections(
+            docstring
+        )
+        merged_parameter_descriptions = dict(doc_param_descriptions)
+        if parameter_descriptions:
+            merged_parameter_descriptions.update(parameter_descriptions)
+
+        effective_return_description = (return_description or "").strip()
+        if not effective_return_description:
+            effective_return_description = doc_return_description
+
         metadata = ToolMetadata(
             name=target.__name__,
-            description=inspect.getdoc(target) or "",
-            parameters=_build_parameters_schema(target),
+            description=docstring,
+            parameters=_build_parameters_schema(target, merged_parameter_descriptions),
+            parameter_descriptions=merged_parameter_descriptions,
+            return_description=effective_return_description,
             func=target,
             tool_type=tool_type,
         )

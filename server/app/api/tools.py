@@ -54,6 +54,8 @@ async def get_shared_tools(
             "name": t.name,
             "description": t.description,
             "parameters": t.parameters,
+            "parameter_descriptions": t.parameter_descriptions,
+            "return_description": t.return_description,
             "tool_type": t.tool_type,
         }
         for t in tool_manager.list_tools()
@@ -228,6 +230,8 @@ async def get_tools(
             "name": t.name,
             "description": t.description,
             "parameters": t.parameters,
+            "parameter_descriptions": t.parameter_descriptions,
+            "return_description": t.return_description,
             "tool_type": t.tool_type,
         }
         for t in tool_manager.list_tools()

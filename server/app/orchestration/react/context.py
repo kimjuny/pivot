@@ -178,9 +178,9 @@ class ReactContext:
                     },
                 }
 
-                # For CALL_TOOL recursions, merge execution results (result, success)
+                # For TOOL_CALL recursions, merge execution results (result, success)
                 # directly into each tool_calls[n] entry.
-                if rec.action_type == "CALL_TOOL" and rec.tool_call_results:
+                if rec.action_type == "TOOL_CALL" and rec.tool_call_results:
                     try:
                         tool_results: list[dict[str, Any]] = json.loads(
                             rec.tool_call_results

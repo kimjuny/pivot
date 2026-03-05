@@ -981,6 +981,8 @@ export interface SharedTool {
   name: string;
   description: string;
   parameters: ToolParameters;
+  parameter_descriptions?: Record<string, string>;
+  return_description?: string;
   tool_type: ToolExecutionType;
 }
 
