@@ -46,6 +46,7 @@ class ReactStreamEventType(str, Enum):
     TOOL_CALL = "tool_call"
     SKILL_RESOLUTION_START = "skill_resolution_start"
     SKILL_RESOLUTION_RESULT = "skill_resolution_result"
+    TOKEN_RATE = "token_rate"
     TOOL_RESULT = "tool_result"
     PLAN_UPDATE = "plan_update"
     REFLECT = "reflect"

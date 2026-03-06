@@ -17,7 +17,10 @@
 - Action：选择一个action_type，严格遵从Schema
 
 ## 3. 你的返回格式
-**IMPORTANT:** 你要根据情况选择本轮recursion要采取哪个action，且你最终只能以以下JSON格式返回一种。
+**IMPORTANT:** 你要根据情况选择本轮recursion要采取哪个action，输出格式遵守：
+- 第一段必须是一个完整且可解析的JSON对象（就是下方Schema）
+- 当`action_type = CALL_TOOL`时，必须在JSON后追加payload区块
+- 除上述payload区块外，禁止输出任何额外文本
 ### 3.1. 统一外层结构
 ```json
 {
@@ -44,6 +47,13 @@
 - 仅当你需要借助外部能力，只能使用可用工具列表
 - **切记要发动工具调用时，action_type是CALL_TOOL而不是要调用的tool名**
 - programmatic_tool_call函数可以帮助你大大减少recursion次数
+- **强制规则**：CALL_TOOL中`arguments`的每一个参数值都必须是payload引用对象：`{"$payload_ref":"payload1"}`
+- payload名称规则：`[A-Za-z_][A-Za-z0-9_]{0,63}`
+- payload哨兵必须严格使用以下格式（注意后缀`6F2D9C1A`）：
+  - begin: `<<<PIVOT_PAYLOAD:{payload_name}:BEGIN_6F2D9C1A>>>`
+  - end: `<<<PIVOT_PAYLOAD:{payload_name}:END_6F2D9C1A>>>`
+- 每个`$payload_ref`都必须能在payload区块找到同名payload；每个payload都必须至少被引用一次
+- 如果工具参数不是字符串（如number/boolean/object/array/null），对应payload内容必须写成合法JSON字面量，以便系统按JSON反序列化
 ```json
 {
   // ...
@@ -55,8 +65,12 @@
           "id": "call_xxx",
           "name": "tool_name",
           "arguments": {
-            "arg1": "value1",
-            "arg2": "value2"
+            "arg1": {
+              "$payload_ref": "payload1"
+            },
+            "content": {
+              "$payload_ref": "payload2"
+            }
           }
         }
       ]
@@ -64,6 +78,14 @@
   },
   // ...
 }
+```
+```text
+<<<PIVOT_PAYLOAD:payload1:BEGIN_6F2D9C1A>>>
+42
+<<<PIVOT_PAYLOAD:payload1:END_6F2D9C1A>>>
+<<<PIVOT_PAYLOAD:payload2:BEGIN_6F2D9C1A>>>
+这里是payload2真实内容（可为多行长文本）
+<<<PIVOT_PAYLOAD:payload2:END_6F2D9C1A>>>
 ```
 ### 3.3. action_type = RE_PLAN
 - **重新制定规划是代价昂贵的action，请斟酌必要性再重新规划**
