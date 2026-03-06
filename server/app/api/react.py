@@ -27,6 +27,7 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
+from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_memory_service import SessionMemoryService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
@@ -121,6 +122,7 @@ async def react_chat_stream(
         task = None
 
         try:
+            runtime_service = ReactRuntimeService(db)
             # Get agent
             agent = db.get(Agent, request.agent_id)
             if not agent:
@@ -211,13 +213,10 @@ async def react_chat_stream(
                             )
                             last_rec.updated_at = datetime.now(timezone.utc)
                             db.add(last_rec)
-                            # Persist reply as the next recursion's action_result
-                            # input so the model can continue from CLARIFY context.
-                            existing_task.pending_action_result = json.dumps(
+                            runtime_service.set_next_action_result(
+                                existing_task,
                                 [{"result": output}],
-                                ensure_ascii=False,
                             )
-                            db.add(existing_task)
 
                             # Resume task
                             task = existing_task
