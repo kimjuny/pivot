@@ -95,6 +95,7 @@ async def react_chat_stream(
     This endpoint creates a new ReAct task and executes it with streaming updates.
     The stream returns Server-Sent Events (SSE) with the following event types:
     - recursion_start: New recursion cycle started
+    - token_rate: Realtime estimated output token rate during streaming
     - observe: LLM observation
     - thought: LLM reasoning
     - abstract: Brief summary of the recursion cycle
@@ -369,6 +370,7 @@ async def react_chat_stream(
                     agent_id=agent.id or 0,
                     allowed_skills=tuple(allowed_skill_names),
                 ),
+                stream_llm_responses=bool(llm_config.streaming),
             )
 
             selected_skills: list[str] = []

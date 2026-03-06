@@ -4,15 +4,18 @@ This module implements the main execution loop for the ReAct agent,
 handling recursion cycles, tool calling, and state management.
 """
 
+import asyncio
 import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Any
 
-from app.llm.abstract_llm import AbstractLLM
+from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
+from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
 from app.models.react import (
     ReactPlanStep,
     ReactRecursion,
@@ -65,6 +68,7 @@ class ReactEngine:
         tool_manager: ToolManager,
         db: Session,
         tool_execution_context: ToolExecutionContext | None = None,
+        stream_llm_responses: bool = True,
     ) -> None:
         """
         Initialize ReAct engine.
@@ -78,6 +82,7 @@ class ReactEngine:
         self.tool_manager = tool_manager
         self.db = db
         self.tool_execution_context = tool_execution_context
+        self.stream_llm_responses = stream_llm_responses
         self.cancelled = False  # Flag to signal cancellation
 
     def _safe_load_json(self, json_str: str) -> dict[str, Any]:
@@ -152,6 +157,171 @@ class ReactEngine:
         token_counter["total_tokens"] += int(getattr(usage, "total_tokens", 0) or 0)
         token_counter["cached_input_tokens"] += int(
             getattr(usage, "cached_input_tokens", 0) or 0
+        )
+
+    def _ensure_total_tokens(self, token_counter: dict[str, int]) -> None:
+        """Backfill ``total_tokens`` when providers omit it in usage payloads."""
+        if token_counter["total_tokens"] > 0:
+            return
+
+        inferred_total = (
+            token_counter["prompt_tokens"] + token_counter["completion_tokens"]
+        )
+        if inferred_total > 0:
+            token_counter["total_tokens"] = inferred_total
+
+    @staticmethod
+    def _next_stream_chunk_or_none(
+        stream_iterator: Iterator[Response],
+    ) -> Response | None:
+        """Return the next streaming chunk, or ``None`` when stream is exhausted."""
+        try:
+            return next(stream_iterator)
+        except StopIteration:
+            return None
+
+    async def _stream_chat_response(
+        self,
+        messages: list[dict[str, Any]],
+        llm_chat_kwargs: dict[str, Any],
+        token_counter: dict[str, int],
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
+    ) -> Response:
+        """Collect full model output via ``chat_stream`` while emitting token-rate snapshots."""
+        attempt_start_prompt = token_counter["prompt_tokens"]
+        attempt_start_completion = token_counter["completion_tokens"]
+        attempt_start_total = token_counter["total_tokens"]
+
+        stream_iterator = self.llm.chat_stream(
+            messages=messages,
+            **llm_chat_kwargs,
+        )  # type: ignore[arg-type]
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        # Keep empty until provider emits a real response id.
+        # Random fallback IDs would poison ``previous_response_id`` chaining.
+        response_id = ""
+        response_model = getattr(self.llm, "model", "")
+
+        stream_started_at = perf_counter()
+        last_report_at = stream_started_at
+        last_report_tokens = 0
+        estimated_completion_tokens = 0
+
+        while True:
+            stream_chunk = await run_in_threadpool(
+                self._next_stream_chunk_or_none,
+                stream_iterator,
+            )
+            if stream_chunk is None:
+                break
+
+            if isinstance(stream_chunk.id, str) and stream_chunk.id:
+                response_id = stream_chunk.id
+            if isinstance(stream_chunk.model, str) and stream_chunk.model:
+                response_model = stream_chunk.model
+
+            self._accumulate_usage(token_counter, stream_chunk.usage)
+
+            for chunk_choice in stream_chunk.choices:
+                chunk_message = chunk_choice.message
+                reasoning_delta = chunk_message.reasoning_content
+                if isinstance(reasoning_delta, str) and reasoning_delta:
+                    reasoning_parts.append(reasoning_delta)
+                    estimated_completion_tokens += estimate_text_tokens(reasoning_delta)
+
+                content_delta = chunk_message.content
+                if isinstance(content_delta, str) and content_delta:
+                    content_parts.append(content_delta)
+                    estimated_completion_tokens += estimate_text_tokens(content_delta)
+
+            if token_meter_queue is not None:
+                now = perf_counter()
+                if now - last_report_at >= 1.0:
+                    window_seconds = max(now - last_report_at, 1e-6)
+                    window_tokens = max(
+                        estimated_completion_tokens - last_report_tokens,
+                        0,
+                    )
+                    await token_meter_queue.put(
+                        {
+                            "tokens_per_second": round(
+                                window_tokens / window_seconds,
+                                2,
+                            ),
+                            "estimated_completion_tokens": estimated_completion_tokens,
+                        }
+                    )
+                    last_report_at = now
+                    last_report_tokens = estimated_completion_tokens
+
+        # Final flush so UI gets the latest completion estimate before action arrives.
+        if token_meter_queue is not None:
+            now = perf_counter()
+            window_seconds = max(now - last_report_at, 1e-6)
+            window_tokens = max(estimated_completion_tokens - last_report_tokens, 0)
+            await token_meter_queue.put(
+                {
+                    "tokens_per_second": round(window_tokens / window_seconds, 2),
+                    "estimated_completion_tokens": estimated_completion_tokens,
+                }
+            )
+
+        # Usage fallback: estimate prompt/completion when provider does not return usage.
+        attempt_prompt_delta = token_counter["prompt_tokens"] - attempt_start_prompt
+        attempt_completion_delta = (
+            token_counter["completion_tokens"] - attempt_start_completion
+        )
+        attempt_total_delta = token_counter["total_tokens"] - attempt_start_total
+
+        if (
+            attempt_prompt_delta == 0
+            and attempt_completion_delta == 0
+            and attempt_total_delta == 0
+        ):
+            estimated_prompt_tokens = estimate_messages_tokens(messages)
+            token_counter["prompt_tokens"] += estimated_prompt_tokens
+            token_counter["completion_tokens"] += estimated_completion_tokens
+            token_counter["total_tokens"] += (
+                estimated_prompt_tokens + estimated_completion_tokens
+            )
+        elif attempt_total_delta <= 0 and (
+            attempt_prompt_delta > 0 or attempt_completion_delta > 0
+        ):
+            token_counter["total_tokens"] += (
+                attempt_prompt_delta + attempt_completion_delta
+            )
+
+        self._ensure_total_tokens(token_counter)
+
+        full_content = "".join(content_parts)
+        full_reasoning = "".join(reasoning_parts) or None
+        usage_info = (
+            UsageInfo(
+                prompt_tokens=token_counter["prompt_tokens"],
+                completion_tokens=token_counter["completion_tokens"],
+                total_tokens=token_counter["total_tokens"],
+                cached_input_tokens=token_counter["cached_input_tokens"],
+            )
+            if token_counter["total_tokens"] > 0
+            else None
+        )
+        return Response(
+            id=response_id,
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatMessage(
+                        role="assistant",
+                        content=full_content,
+                        reasoning_content=full_reasoning,
+                    ),
+                )
+            ],
+            created=int(datetime.now(timezone.utc).timestamp()),
+            model=response_model,
+            usage=usage_info,
         )
 
     def _persist_accumulated_usage(
@@ -446,6 +616,32 @@ class ReactEngine:
                 return True
             if any(keyword in message for keyword in timeout_keywords):
                 return True
+
+            current = current.__cause__ or current.__context__
+        return False
+
+    def _is_non_retryable_llm_error(self, exc: Exception) -> bool:
+        """Whether an exception is a deterministic LLM request/configuration error.
+
+        Why: transport/configuration 4xx errors should fail fast instead of
+        consuming the whole iteration budget with identical retries.
+        """
+        current: BaseException | None = exc
+        while current is not None:
+            status_code = getattr(getattr(current, "response", None), "status_code", None)
+            if (
+                isinstance(status_code, int)
+                and 400 <= status_code < 500
+                and status_code not in {408, 409, 429}
+            ):
+                return True
+
+            message = str(current)
+            http_match = re.search(r"\bHTTP\s+(\d{3})\b", message)
+            if http_match:
+                parsed_status = int(http_match.group(1))
+                if 400 <= parsed_status < 500 and parsed_status not in {408, 409, 429}:
+                    return True
 
             current = current.__cause__ or current.__context__
         return False
@@ -808,6 +1004,7 @@ class ReactEngine:
         trace_id: str,
         messages: list[dict[str, Any]],
         llm_chat_kwargs: dict[str, Any] | None = None,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """
         Execute a single recursion cycle.
@@ -817,10 +1014,14 @@ class ReactEngine:
             context: Current context state
             messages: Message history for LLM
             llm_chat_kwargs: Extra runtime kwargs passed to LLM chat call.
+            token_meter_queue: Optional queue for realtime token-rate snapshots.
 
         Returns:
             Tuple of (ReactRecursion record, event data for streaming)
         """
+        task_id_value = task.task_id
+        task_iteration_value = task.iteration
+
         # Use server-generated trace_id from this recursion cycle.
         context.update_for_new_recursion(trace_id)
 
@@ -850,12 +1051,21 @@ class ReactEngine:
             request_messages = messages
 
             for parse_attempt in range(PARSE_RETRY_LIMIT + 1):
-                response = await run_in_threadpool(
-                    self.llm.chat,
-                    messages=request_messages,
-                    **(llm_chat_kwargs or {}),
-                )  # type: ignore[arg-type]
-                self._accumulate_usage(token_counter, response.usage)
+                if self.stream_llm_responses:
+                    response = await self._stream_chat_response(
+                        messages=request_messages,
+                        llm_chat_kwargs=llm_chat_kwargs or {},
+                        token_counter=token_counter,
+                        token_meter_queue=token_meter_queue,
+                    )
+                else:
+                    response = await run_in_threadpool(
+                        self.llm.chat,
+                        messages=request_messages,
+                        **(llm_chat_kwargs or {}),
+                    )  # type: ignore[arg-type]
+                    self._accumulate_usage(token_counter, response.usage)
+                    self._ensure_total_tokens(token_counter)
 
                 choice = response.first()
                 message = choice.message
@@ -1407,12 +1617,13 @@ class ReactEngine:
             # Handle errors with detailed logging
             error_msg = str(e)
             is_timeout_error = self._is_timeout_error(e)
+            non_retryable_error = self._is_non_retryable_llm_error(e)
             logger.error(
                 f"Recursion execution failed for trace_id={trace_id}\n"
                 f"Error type: {type(e).__name__}\n"
                 f"Error message: {error_msg}\n"
-                f"Task ID: {task.task_id}\n"
-                f"Iteration: {task.iteration}"
+                f"Task ID: {task_id_value}\n"
+                f"Iteration: {task_iteration_value}"
             )
 
             recursion.status = "error"
@@ -1432,6 +1643,7 @@ class ReactEngine:
                 ),
                 "assistant_message": None,
                 "rollback_messages": rollback_messages,
+                "non_retryable_error": non_retryable_error,
             }
 
     async def run_task(
@@ -1548,13 +1760,83 @@ class ReactEngine:
                         messages_for_llm = runtime_messages[-1:]
 
                 # Execute recursion against the fully accumulated message history.
-                recursion, event_data = await self.execute_recursion(
-                    task=task,
-                    context=context,
-                    trace_id=trace_id,
-                    messages=messages_for_llm,
-                    llm_chat_kwargs=llm_chat_kwargs,
+                token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None
+                if self.stream_llm_responses:
+                    token_meter_queue = asyncio.Queue()
+
+                recursion_task = asyncio.create_task(
+                    self.execute_recursion(
+                        task=task,
+                        context=context,
+                        trace_id=trace_id,
+                        messages=messages_for_llm,
+                        llm_chat_kwargs=llm_chat_kwargs,
+                        token_meter_queue=token_meter_queue,
+                    )
                 )
+
+                if token_meter_queue is not None:
+                    last_meter_emit_at = perf_counter()
+                    last_estimated_completion_tokens = 0
+                    while not recursion_task.done() or not token_meter_queue.empty():
+                        try:
+                            meter_data = await asyncio.wait_for(
+                                token_meter_queue.get(),
+                                timeout=0.2,
+                            )
+                        except asyncio.TimeoutError:
+                            now = perf_counter()
+                            if now - last_meter_emit_at >= 1.0:
+                                # Keep UI cadence stable: when provider stream stalls,
+                                # emit a heartbeat with zero instantaneous rate.
+                                yield {
+                                    "type": "token_rate",
+                                    "task_id": task.task_id,
+                                    "trace_id": trace_id,
+                                    "iteration": task.iteration,
+                                    "data": {
+                                        "tokens_per_second": 0.0,
+                                        "estimated_completion_tokens": (
+                                            last_estimated_completion_tokens
+                                        ),
+                                    },
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                                last_meter_emit_at = now
+                            continue
+
+                        raw_rate = meter_data.get("tokens_per_second")
+                        raw_estimated = meter_data.get("estimated_completion_tokens")
+                        tokens_per_second = (
+                            float(raw_rate)
+                            if isinstance(raw_rate, int | float)
+                            else 0.0
+                        )
+                        estimated_completion_tokens = (
+                            int(raw_estimated)
+                            if isinstance(raw_estimated, int | float)
+                            else last_estimated_completion_tokens
+                        )
+                        if tokens_per_second < 0:
+                            tokens_per_second = 0.0
+                        if estimated_completion_tokens < 0:
+                            estimated_completion_tokens = 0
+
+                        last_estimated_completion_tokens = estimated_completion_tokens
+                        last_meter_emit_at = perf_counter()
+                        yield {
+                            "type": "token_rate",
+                            "task_id": task.task_id,
+                            "trace_id": trace_id,
+                            "iteration": task.iteration,
+                            "data": {
+                                "tokens_per_second": round(tokens_per_second, 2),
+                                "estimated_completion_tokens": estimated_completion_tokens,
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+
+                recursion, event_data = await recursion_task
                 rollback_messages = bool(event_data.get("rollback_messages", False))
                 if rollback_messages:
                     # Parse errors should be visible to users, but must not pollute
@@ -1765,10 +2047,21 @@ class ReactEngine:
                 elif action_type == "ERROR":
                     # Log the error but don't fail the task - retry with next iteration
                     error_msg = event_data.get("error", "Unknown error")
-                    logger.warning(
-                        f"Recursion error at iteration {task.iteration}, retrying... "
-                        f"Error: {error_msg}"
+                    non_retryable_error = bool(
+                        event_data.get("non_retryable_error", False)
                     )
+                    if non_retryable_error:
+                        logger.error(
+                            "Recursion error at iteration %s (non-retryable). Error: %s",
+                            task.iteration,
+                            error_msg,
+                        )
+                    else:
+                        logger.warning(
+                            "Recursion error at iteration %s, retrying... Error: %s",
+                            task.iteration,
+                            error_msg,
+                        )
 
                     yield {
                         "type": "error",
@@ -1778,6 +2071,20 @@ class ReactEngine:
                         "data": {"error": error_msg},
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+
+                    if non_retryable_error:
+                        logger.error(
+                            "Non-retryable LLM error. Failing task immediately. "
+                            "task_id=%s iteration=%s error=%s",
+                            task.task_id,
+                            task.iteration,
+                            error_msg,
+                        )
+                        task.status = "failed"
+                        task.updated_at = datetime.now(timezone.utc)
+                        self.db.commit()
+                        self._clear_task_runtime_messages(task)
+                        break
 
                     # For malformed JSON we roll back this recursion from the LLM
                     # conversation and retry without consuming iteration budget.
@@ -1808,15 +2115,21 @@ class ReactEngine:
                 }
 
         except Exception as e:
+            logger.exception(
+                "run_task failed unexpectedly task_id=%s iteration=%s",
+                task.task_id,
+                task.iteration,
+            )
             task.status = "failed"
             task.updated_at = datetime.now(timezone.utc)
             self.db.commit()
             self._clear_task_runtime_messages(task)
+            error_message = str(e) or repr(e)
 
             yield {
                 "type": "error",
                 "task_id": task.task_id,
                 "iteration": task.iteration,
-                "data": {"error": str(e)},
+                "data": {"error": error_message},
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }

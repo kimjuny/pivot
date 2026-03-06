@@ -19,6 +19,8 @@ import { createSession, listSessions, deleteSession, getFullSessionHistory, Sess
 interface ReactChatInterfaceProps {
   /** Unique identifier of the agent */
   agentId: number;
+  /** Display name of the current agent shown in chat UI title copy */
+  agentName?: string;
 }
 
 /**
@@ -27,6 +29,7 @@ interface ReactChatInterfaceProps {
 type ReactStreamEventType =
   | 'skill_resolution_start'
   | 'skill_resolution_result'
+  | 'token_rate'
   | 'recursion_start'
   | 'observe'
   | 'thought'
@@ -105,6 +108,28 @@ function isReactStreamEvent(value: unknown): value is ReactStreamEvent {
 }
 
 /**
+ * Parse token-rate payload from streaming events.
+ */
+function parseTokenRateData(data: unknown): {
+  tokensPerSecond: number;
+  estimatedCompletionTokens: number;
+} | null {
+  const record = asRecord(data);
+  if (!record) return null;
+
+  const rawRate = record.tokens_per_second;
+  const rawEstimated = record.estimated_completion_tokens;
+  if (typeof rawRate !== 'number' || typeof rawEstimated !== 'number') {
+    return null;
+  }
+
+  return {
+    tokensPerSecond: Math.max(rawRate, 0),
+    estimatedCompletionTokens: Math.max(Math.round(rawEstimated), 0),
+  };
+}
+
+/**
  * Plan step payload shape from RE_PLAN output.
  */
 interface PlanStepData {
@@ -132,7 +157,13 @@ interface RecursionRecord {
   startTime: string;
   endTime?: string;
   tokens?: TokenUsage;
+  liveTokensPerSecond?: number;
+  estimatedCompletionTokens?: number;
+  hasSeenPositiveRate?: boolean;
+  zeroRateStreak?: number;
 }
+
+const ZERO_RATE_STREAK_TO_RENDER = 2;
 
 /**
  * Skill selection status shown before recursion starts.
@@ -159,6 +190,8 @@ interface ChatMessage {
   totalTokens?: TokenUsage;
   skillSelection?: SkillSelectionState;
 }
+
+const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
 
 /**
  * Component to fetch and display recursion state in a tooltip.
@@ -229,7 +262,7 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
  * ReAct Chat interface component for agent interaction.
  * Displays streaming conversation with ReAct agent and shows execution details.
  */
-function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
+function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -247,6 +280,9 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const previousMessageCountRef = useRef<number>(0);
+  const autoScrollEnabledRef = useRef<boolean>(true);
+  const lastScrollTopRef = useRef<number>(0);
+  const forceAutoScrollNextRef = useRef<boolean>(false);
 
   /**
    * Build persisted skill selection state from historical task payload.
@@ -473,6 +509,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   const handleNewSession = async () => {
     setIsLoadingSession(true);
     try {
+      autoScrollEnabledRef.current = true;
+      forceAutoScrollNextRef.current = true;
       const session = await createSession(agentId);
       setCurrentSessionId(session.session_id);
       setMessages([]); // Clear messages for new session
@@ -501,6 +539,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
     setCurrentSessionId(sessionId);
     setIsLoadingSession(true);
+    autoScrollEnabledRef.current = true;
+    forceAutoScrollNextRef.current = true;
 
     try {
       // Load full session history with recursion details
@@ -680,16 +720,71 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       scrollContainer.scrollHeight - scrollContainer.clientHeight - bottomGap,
       0
     );
+    lastScrollTopRef.current = targetTop;
     scrollContainer.scrollTo({ top: targetTop, behavior });
   }, []);
+
+  /**
+   * Whether scroll position is currently near the bottom.
+   */
+  const isNearBottom = useCallback((): boolean => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return true;
+    const distanceToBottom =
+      scrollContainer.scrollHeight
+      - scrollContainer.scrollTop
+      - scrollContainer.clientHeight;
+    return distanceToBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
+  }, []);
+
+  /**
+   * Track manual scroll so we don't force-scroll while user reads history.
+   */
+  const handleScroll = useCallback(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const currentTop = scrollContainer.scrollTop;
+    const userScrolledUp = currentTop + 2 < lastScrollTopRef.current;
+    const nearBottom = isNearBottom();
+
+    if (userScrolledUp) {
+      autoScrollEnabledRef.current = false;
+      forceAutoScrollNextRef.current = false;
+    } else if (nearBottom) {
+      autoScrollEnabledRef.current = true;
+    }
+
+    lastScrollTopRef.current = currentTop;
+  }, [isNearBottom]);
 
   /**
    * Auto-scroll to bottom when messages update.
    */
   useEffect(() => {
+    const forceAutoScroll = forceAutoScrollNextRef.current;
+    const scrollContainer = scrollContainerRef.current;
+    if (scrollContainer && !forceAutoScroll) {
+      // Guard against missed scroll events: if viewport is far from bottom,
+      // treat it as manual history browsing and stop force-follow.
+      const distanceToBottom =
+        scrollContainer.scrollHeight
+        - scrollContainer.scrollTop
+        - scrollContainer.clientHeight;
+      if (distanceToBottom > AUTO_SCROLL_BOTTOM_THRESHOLD_PX) {
+        autoScrollEnabledRef.current = false;
+      }
+    }
+
+    if (!autoScrollEnabledRef.current && !forceAutoScroll) {
+      previousMessageCountRef.current = messages.length;
+      return;
+    }
+
     const behavior: ScrollBehavior =
       messages.length > previousMessageCountRef.current ? 'smooth' : 'auto';
     scrollToBottom(behavior);
+    forceAutoScrollNextRef.current = false;
     previousMessageCountRef.current = messages.length;
   }, [messages, scrollToBottom]);
 
@@ -738,6 +833,8 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
       setReplyTaskId(null);
     }
 
+    autoScrollEnabledRef.current = true;
+    forceAutoScrollNextRef.current = true;
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -940,6 +1037,10 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 events: [event],
                 status: 'running',
                 startTime: event.timestamp,
+                liveTokensPerSecond: undefined,
+                estimatedCompletionTokens: 0,
+                hasSeenPositiveRate: false,
+                zeroRateStreak: 0,
               };
               currentRecursion = newRecursionSnapshot;
 
@@ -970,7 +1071,50 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
               const existingRecursion: RecursionRecord = currentRecursion;
               const updatedEvents: ReactStreamEvent[] = [...existingRecursion.events, event];
 
-              if (event.type === 'observe') {
+              if (event.type === 'token_rate') {
+                const tokenRate = parseTokenRateData(event.data);
+                if (tokenRate) {
+                  const previousRate = existingRecursion.liveTokensPerSecond;
+                  const previousHasSeenPositiveRate = existingRecursion.hasSeenPositiveRate === true;
+                  const previousZeroRateStreak = existingRecursion.zeroRateStreak ?? 0;
+
+                  let nextRate: number | undefined = previousRate;
+                  let nextHasSeenPositiveRate = previousHasSeenPositiveRate;
+                  let nextZeroRateStreak = previousZeroRateStreak;
+
+                  if (tokenRate.tokensPerSecond > 0) {
+                    nextRate = tokenRate.tokensPerSecond;
+                    nextHasSeenPositiveRate = true;
+                    nextZeroRateStreak = 0;
+                  } else if (!previousHasSeenPositiveRate) {
+                    // Before we observe a positive throughput, suppress leading
+                    // zero-rate flashes that make the meter feel jittery.
+                    nextRate = undefined;
+                    nextZeroRateStreak = 0;
+                  } else {
+                    nextZeroRateStreak = previousZeroRateStreak + 1;
+                    if (nextZeroRateStreak >= ZERO_RATE_STREAK_TO_RENDER) {
+                      nextRate = 0;
+                    }
+                  }
+
+                  currentRecursion = {
+                    ...existingRecursion,
+                    trace_id: event.trace_id || existingRecursion.trace_id,
+                    events: updatedEvents,
+                    liveTokensPerSecond: nextRate,
+                    estimatedCompletionTokens: tokenRate.estimatedCompletionTokens,
+                    hasSeenPositiveRate: nextHasSeenPositiveRate,
+                    zeroRateStreak: nextZeroRateStreak,
+                  };
+                } else {
+                  currentRecursion = {
+                    ...existingRecursion,
+                    trace_id: event.trace_id || existingRecursion.trace_id,
+                    events: updatedEvents,
+                  };
+                }
+              } else if (event.type === 'observe') {
                 currentRecursion = {
                   ...existingRecursion,
                   trace_id: event.trace_id || existingRecursion.trace_id,
@@ -1513,7 +1657,18 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                 {calculateDuration(recursion.startTime, recursion.endTime)}s
               </span>
             )}
-            {recursion.tokens && (
+            {recursion.status === 'running' && typeof recursion.liveTokensPerSecond === 'number' ? (
+              <span
+                className="text-xs text-muted-foreground tabular-nums whitespace-nowrap"
+                title={
+                  typeof recursion.estimatedCompletionTokens === 'number'
+                    ? `Estimated output: ${formatTokenCount(recursion.estimatedCompletionTokens)} tokens`
+                    : undefined
+                }
+              >
+                {recursion.liveTokensPerSecond.toFixed(1)} tokens/s
+              </span>
+            ) : recursion.tokens && (
               renderTokenUsage(
                 recursion.tokens,
                 `${formatTokenCount(recursion.tokens.total_tokens)} tokens`
@@ -1719,6 +1874,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
   };
 
   const isConversationEmpty = messages.length === 0;
+  const normalizedAgentName = agentName?.trim() || 'ReAct Agent';
 
   return (
     <div className="flex h-full bg-background text-foreground overflow-hidden">
@@ -1833,7 +1989,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
 
       {/* Main Chat Area - single scrollable container for both messages and input */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto" onScroll={handleScroll}>
           {/* Centered content container */}
           <div className="max-w-3xl mx-auto px-4 pt-4 pb-6">
             {isConversationEmpty ? (
@@ -1843,7 +1999,7 @@ function ReactChatInterface({ agentId }: ReactChatInterfaceProps) {
                     <MessageSquare className="w-8 h-8 text-muted-foreground" />
                   </div>
                   <p className="text-base font-medium text-foreground mb-2">
-                    Chat with ReAct Agent
+                    Chat with {normalizedAgentName}
                   </p>
                   <p className="text-sm opacity-70">
                     Ask questions or give tasks. I'll show you my reasoning process.

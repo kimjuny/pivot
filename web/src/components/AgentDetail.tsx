@@ -1366,10 +1366,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       <DraggableDialog
         open={isReactChatOpen}
         onOpenChange={setIsReactChatOpen}
-        title="ReAct Agent Chat"
+        title={agent?.name?.trim() || 'ReAct Agent Chat'}
         size="large"
       >
-        <ReactChatInterface agentId={agentId} />
+        <ReactChatInterface
+          agentId={agentId}
+          agentName={agent?.name}
+        />
       </DraggableDialog>
 
       {/* Scene Modal */}

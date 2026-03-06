@@ -247,7 +247,9 @@ async def update_llm(
         update_data["streaming"] = llm_data.streaming
     if llm_data.max_context is not None:
         update_data["max_context"] = llm_data.max_context
-    if llm_data.extra_config is not None:
+    if "extra_config" in llm_data.__fields_set__:
+        # Allow explicit clearing: payload ``extra_config: ""`` is normalized to
+        # None by schema validation and must still persist as NULL in DB.
         update_data["extra_config"] = llm_data.extra_config
 
     updated_llm = llm_crud.update(llm_id, db, **update_data)

@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import requests
+from app.utils.logging_config import get_logger
 
 from .abstract_llm import (
     AbstractLLM,
@@ -22,6 +23,8 @@ from .abstract_llm import (
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .thinking_mode import normalize_thinking_mode
+
+logger = get_logger("llm.openai_response")
 
 
 class OpenAIResponseLLM(AbstractLLM):
@@ -78,15 +81,37 @@ class OpenAIResponseLLM(AbstractLLM):
         return self.cache_policy == "doubao-response-previous-id"
 
     def _build_input_messages(
-        self, messages: list[dict[str, str]]
-    ) -> list[dict[str, str]]:
-        """Convert chat message history to Responses API input message format."""
-        input_messages: list[dict[str, str]] = []
+        self,
+        messages: list[dict[str, str]],
+    ) -> list[dict[str, Any]]:
+        """Convert chat history to Responses API ``input`` message format."""
+        input_messages: list[dict[str, Any]] = []
+
         for message in messages:
             role = message.get("role", "")
             content = message.get("content", "")
-            if role in {"system", "user", "assistant"} and isinstance(content, str):
-                input_messages.append({"role": role, "content": content})
+            if not isinstance(content, str):
+                continue
+
+            if role == "system":
+                if content:
+                    input_messages.append(
+                        {
+                            "role": "system",
+                            "content": content,
+                        }
+                    )
+                continue
+
+            if role in {"user", "assistant"}:
+                content_type = "input_text" if role == "user" else "output_text"
+                input_messages.append(
+                    {
+                        "role": role,
+                        "content": [{"type": content_type, "text": content}],
+                    }
+                )
+
         return input_messages
 
     def _extract_text_and_tools(
@@ -145,6 +170,46 @@ class OpenAIResponseLLM(AbstractLLM):
                 normalized_kwargs.setdefault(key, value)
         return normalized_kwargs
 
+    @staticmethod
+    def _http_error_detail(response: requests.Response | None) -> str:
+        """Build a concise diagnostic string for failed HTTP responses."""
+        if response is None:
+            return "<no response>"
+
+        text = ""
+        with contextlib.suppress(Exception):
+            text = (response.text or "").strip()
+        if not text:
+            text = "<empty response body>"
+
+        request_id = (
+            response.headers.get("x-request-id")
+            or response.headers.get("x-tt-logid")
+            or response.headers.get("x-amzn-requestid")
+            or ""
+        )
+        if request_id:
+            return f"{text} (request_id={request_id})"
+        return text
+
+    @staticmethod
+    def _extract_stream_response_id(event: dict[str, Any]) -> str | None:
+        """Extract provider response ID from a streaming event payload."""
+        response_id = event.get("response_id")
+        if isinstance(response_id, str) and response_id:
+            return response_id
+
+        response_obj = event.get("response")
+        if isinstance(response_obj, dict):
+            nested_id = response_obj.get("id")
+            if isinstance(nested_id, str) and nested_id:
+                return nested_id
+
+        event_id = event.get("id")
+        if isinstance(event_id, str) and event_id.startswith("resp_"):
+            return event_id
+        return None
+
     def _parse_dict_response(self, raw_dict: dict[str, Any], model: str) -> Response:
         """Parse raw Responses API JSON dict into structured Response object."""
         response_id = raw_dict.get("id", str(uuid.uuid4()))
@@ -197,6 +262,7 @@ class OpenAIResponseLLM(AbstractLLM):
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
+            input_messages = self._build_input_messages(messages)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -204,7 +270,7 @@ class OpenAIResponseLLM(AbstractLLM):
             }
             payload = {
                 "model": self.model,
-                "input": self._build_input_messages(messages),
+                "input": input_messages,
                 **normalized_kwargs,
             }
             if (
@@ -224,11 +290,19 @@ class OpenAIResponseLLM(AbstractLLM):
             response.raise_for_status()
             return self._parse_dict_response(response.json(), self.model)
         except requests.exceptions.HTTPError as e:
-            text = (
-                e.response.text if getattr(e, "response", None) is not None else str(e)
+            response = getattr(e, "response", None)
+            text = self._http_error_detail(response)
+            logger.error(
+                "Responses API request failed endpoint=%s model=%s status=%s detail=%s",
+                self.endpoint,
+                self.model,
+                response.status_code if response is not None else "unknown",
+                text,
             )
             raise RuntimeError(
-                f"OpenAI response API request failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
+                "OpenAI response API request failed for "
+                f"{self.endpoint}: HTTP "
+                f"{response.status_code if response is not None else 'Unknown'} - {text}"
             ) from e
         except Exception as e:
             raise RuntimeError(
@@ -245,6 +319,7 @@ class OpenAIResponseLLM(AbstractLLM):
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
+            input_messages = self._build_input_messages(messages)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
@@ -252,7 +327,7 @@ class OpenAIResponseLLM(AbstractLLM):
             }
             payload = {
                 "model": self.model,
-                "input": self._build_input_messages(messages),
+                "input": input_messages,
                 "stream": True,
                 **normalized_kwargs,
             }
@@ -271,6 +346,7 @@ class OpenAIResponseLLM(AbstractLLM):
                 url, headers=headers, json=payload, timeout=self.timeout, stream=True
             ) as response:
                 response.raise_for_status()
+                stream_response_id: str | None = None
                 for line in response.iter_lines():
                     if not line:
                         continue
@@ -284,11 +360,14 @@ class OpenAIResponseLLM(AbstractLLM):
                     with contextlib.suppress(json.JSONDecodeError):
                         event = json.loads(data_str)
                         event_type = event.get("type", "")
+                        extracted_response_id = self._extract_stream_response_id(event)
+                        if extracted_response_id:
+                            stream_response_id = extracted_response_id
                         if event_type == "response.output_text.delta":
                             delta = event.get("delta", "")
                             if isinstance(delta, str) and delta:
                                 yield Response(
-                                    id=event.get("response_id", str(uuid.uuid4())),
+                                    id=stream_response_id or "",
                                     choices=[
                                         Choice(
                                             index=0,
@@ -301,17 +380,89 @@ class OpenAIResponseLLM(AbstractLLM):
                                     created=int(time.time()),
                                     model=self.model,
                                 )
+                        elif event_type in {
+                            "response.reasoning_summary_text.delta",
+                            "response.reasoning_text.delta",
+                        }:
+                            reasoning_delta = event.get("delta", "")
+                            if isinstance(reasoning_delta, str) and reasoning_delta:
+                                yield Response(
+                                    id=stream_response_id or "",
+                                    choices=[
+                                        Choice(
+                                            index=0,
+                                            message=ChatMessage(
+                                                role="assistant",
+                                                content="",
+                                                reasoning_content=reasoning_delta,
+                                            ),
+                                        )
+                                    ],
+                                    created=int(time.time()),
+                                    model=self.model,
+                                )
                         elif event_type == "response.completed":
-                            # Delta text has already been emitted via
-                            # response.output_text.delta events.
-                            # Do not emit final full text again to avoid duplicates.
-                            continue
+                            usage = None
+                            response_payload = event.get("response")
+                            if isinstance(response_payload, dict):
+                                raw_usage = response_payload.get("usage")
+                                if isinstance(raw_usage, dict):
+                                    prompt_tokens = raw_usage.get("input_tokens", 0)
+                                    completion_tokens = raw_usage.get("output_tokens", 0)
+                                    total_tokens = raw_usage.get("total_tokens", 0)
+                                    usage = UsageInfo(
+                                        prompt_tokens=(
+                                            prompt_tokens
+                                            if isinstance(prompt_tokens, int)
+                                            else 0
+                                        ),
+                                        completion_tokens=(
+                                            completion_tokens
+                                            if isinstance(completion_tokens, int)
+                                            else 0
+                                        ),
+                                        total_tokens=(
+                                            total_tokens
+                                            if isinstance(total_tokens, int)
+                                            else 0
+                                        ),
+                                        cached_input_tokens=self._extract_cached_input_tokens(
+                                            raw_usage
+                                        ),
+                                    )
+
+                            # Delta text has already been emitted via streaming events.
+                            # Emit usage-only terminal chunk so upper layers can persist
+                            # provider-reported token counts and cache chaining ID.
+                            yield Response(
+                                id=stream_response_id or "",
+                                choices=[
+                                    Choice(
+                                        index=0,
+                                        message=ChatMessage(
+                                            role="assistant",
+                                            content="",
+                                        ),
+                                    )
+                                ],
+                                created=int(time.time()),
+                                model=self.model,
+                                usage=usage,
+                            )
         except requests.exceptions.HTTPError as e:
-            text = (
-                e.response.text if getattr(e, "response", None) is not None else str(e)
+            response = getattr(e, "response", None)
+            text = self._http_error_detail(response)
+            logger.error(
+                "Responses API streaming request failed endpoint=%s model=%s status=%s detail=%s",
+                self.endpoint,
+                self.model,
+                response.status_code if response is not None else "unknown",
+                text,
             )
             raise RuntimeError(
-                f"OpenAI response streaming failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
+                "OpenAI response streaming failed for "
+                f"{self.endpoint}: HTTP "
+                f"{response.status_code if response is not None else 'Unknown'} - {text}"
             ) from e
         except Exception as e:
             raise RuntimeError(

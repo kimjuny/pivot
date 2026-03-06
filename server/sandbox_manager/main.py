@@ -508,6 +508,16 @@ def _should_recreate_container(
     return False, "ok"
 
 
+def _is_broken_exec_environment_error(message: str) -> bool:
+    """Whether sandbox exec error indicates a broken container runtime state."""
+    lowered = message.lower()
+    return (
+        "getcwd: operation not permitted" in lowered
+        or "oci permission denied" in lowered
+        or "connection reset by peer" in lowered
+    )
+
+
 def _ensure_sandbox(
     username: str, agent_id: int, skills: list[str] | None = None
 ) -> Any:
@@ -799,9 +809,8 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
     container = _ensure_sandbox(payload.username, payload.agent_id, payload.skills)
     ensure_ms = int((time.perf_counter() - ensure_started) * 1000)
 
-    exec_started = time.perf_counter()
-    try:
-        exec_result = container.exec_run(
+    def _exec_once(target_container: Any) -> Any:
+        return target_container.exec_run(
             payload.cmd,
             workdir="/workspace",
             demux=True,
@@ -809,11 +818,39 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
             stream=False,
             socket=False,
         )
+
+    exec_started = time.perf_counter()
+    try:
+        exec_result = _exec_once(container)
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Sandbox exec failed: {exc}",
-        ) from exc
+        message = str(exc)
+        if _is_broken_exec_environment_error(message):
+            logger.warning(
+                "sandbox.exec detected broken runtime state; recreating container "
+                "username=%s agent_id=%d err=%s",
+                payload.username,
+                payload.agent_id,
+                message,
+            )
+            with suppress(Exception):
+                _remove_container_fast(container, reason="recreate:exec_runtime_error")
+            container = _ensure_sandbox(
+                payload.username,
+                payload.agent_id,
+                payload.skills,
+            )
+            try:
+                exec_result = _exec_once(container)
+            except Exception as retry_exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Sandbox exec failed after recreate: {retry_exc}",
+                ) from retry_exc
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Sandbox exec failed: {exc}",
+            ) from exc
     exec_ms = int((time.perf_counter() - exec_started) * 1000)
 
     # podman-py may return either:

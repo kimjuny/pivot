@@ -320,6 +320,42 @@ class AnthropicLLM(AbstractLLM):
             usage=usage,
         )
 
+    def _extract_stream_usage(self, raw_event: Any) -> UsageInfo | None:
+        """Extract usage tokens from Anthropic streaming events."""
+
+        def _read(source: Any, key: str) -> Any:
+            if source is None:
+                return None
+            if isinstance(source, dict):
+                return source.get(key)
+            return getattr(source, key, None)
+
+        event_type = getattr(raw_event, "type", "")
+        if event_type == "message_start":
+            message_obj = getattr(raw_event, "message", None)
+            raw_usage = _read(message_obj, "usage")
+        elif event_type == "message_delta":
+            raw_usage = _read(raw_event, "usage")
+        else:
+            return None
+
+        if raw_usage is None:
+            return None
+
+        prompt_tokens = _read(raw_usage, "input_tokens")
+        completion_tokens = _read(raw_usage, "output_tokens")
+        if not isinstance(prompt_tokens, int):
+            prompt_tokens = 0
+        if not isinstance(completion_tokens, int):
+            completion_tokens = 0
+
+        return UsageInfo(
+            prompt_tokens=max(prompt_tokens, 0),
+            completion_tokens=max(completion_tokens, 0),
+            total_tokens=max(prompt_tokens, 0) + max(completion_tokens, 0),
+            cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
+        )
+
     def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
         """Process a conversation with the LLM.
 
@@ -459,11 +495,42 @@ class AnthropicLLM(AbstractLLM):
                         formatted_messages
                     )
 
-            # Call Anthropic API with streaming
-            with self.client.messages.stream(**api_params) as stream:
+            # Use low-level stream=True path. For some Anthropic-compatible
+            # providers this avoids SDK-level message snapshot accumulation
+            # errors in ``messages.stream(...)``.
+            stream = self.client.messages.create(**api_params, stream=True)
+            stream_response_id = ""
+            try:
                 for event in stream:
-                    # Convert each event to our Response format
-                    yield self._convert_anthropic_response(event, is_stream_chunk=True)
+                    event_type = getattr(event, "type", "")
+                    if event_type == "message_start":
+                        message_obj = getattr(event, "message", None)
+                        message_id = getattr(message_obj, "id", "")
+                        if isinstance(message_id, str) and message_id:
+                            stream_response_id = message_id
+
+                    usage = self._extract_stream_usage(event)
+                    if usage is not None:
+                        yield Response(
+                            id=stream_response_id or str(uuid.uuid4()),
+                            choices=[],
+                            created=int(time.time()),
+                            model=self.model,
+                            usage=usage,
+                        )
+
+                    converted = self._convert_anthropic_response(
+                        event,
+                        is_stream_chunk=True,
+                    )
+                    if stream_response_id:
+                        converted.id = stream_response_id
+                    if converted.choices:
+                        yield converted
+            finally:
+                close_stream = getattr(stream, "close", None)
+                if callable(close_stream):
+                    close_stream()
 
         except Exception as e:
             raise RuntimeError(
