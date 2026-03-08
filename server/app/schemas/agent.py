@@ -1,9 +1,11 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.schemas.base import AppBaseModel
 
 
-class AgentCreate(BaseModel):
+class AgentCreate(AppBaseModel):
     """Schema for creating a new agent.
 
     Attributes:
@@ -15,7 +17,7 @@ class AgentCreate(BaseModel):
     api_key: str = Field(..., description="API key for LLM")
 
 
-class AgentUpdate(BaseModel):
+class AgentUpdate(AppBaseModel):
     """Schema for updating an existing agent.
 
     All fields are optional to allow partial updates.
@@ -29,7 +31,7 @@ class AgentUpdate(BaseModel):
     api_key: str | None = None
 
 
-class AgentResponse(BaseModel):
+class AgentResponse(AppBaseModel):
     """Schema for agent response.
 
     Attributes:
@@ -46,11 +48,7 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class SceneCreate(BaseModel):
+class SceneCreate(AppBaseModel):
     """Schema for creating a new scene.
 
     Attributes:
@@ -64,7 +62,7 @@ class SceneCreate(BaseModel):
     agent_id: int | None = Field(None, description="Agent ID")
 
 
-class SceneUpdate(BaseModel):
+class SceneUpdate(AppBaseModel):
     """Schema for updating an existing scene.
 
     All fields are optional to allow partial updates.
@@ -80,7 +78,7 @@ class SceneUpdate(BaseModel):
     agent_id: int | None = None
 
 
-class SceneResponse(BaseModel):
+class SceneResponse(AppBaseModel):
     """Schema for scene response.
 
     Attributes:
@@ -101,11 +99,7 @@ class SceneResponse(BaseModel):
     updated_at: datetime
     subscenes: list["SubsceneResponse"]
 
-    class Config:
-        orm_mode = True
-
-
-class SubsceneCreate(BaseModel):
+class SubsceneCreate(AppBaseModel):
     """Schema for creating a new subscene.
 
     Attributes:
@@ -129,7 +123,7 @@ class SubsceneCreate(BaseModel):
     scene_id: int = Field(..., description="Scene ID")
 
 
-class SubsceneUpdate(BaseModel):
+class SubsceneUpdate(AppBaseModel):
     """Schema for updating an existing subscene.
 
     All fields are optional to allow partial updates.
@@ -151,7 +145,7 @@ class SubsceneUpdate(BaseModel):
     objective: str | None = None
 
 
-class SubsceneResponse(BaseModel):
+class SubsceneResponse(AppBaseModel):
     """Schema for subscene response.
 
     Attributes:
@@ -180,11 +174,7 @@ class SubsceneResponse(BaseModel):
     updated_at: datetime
     connections: list["ConnectionResponse"]
 
-    class Config:
-        orm_mode = True
-
-
-class ConnectionCreate(BaseModel):
+class ConnectionCreate(AppBaseModel):
     """Schema for creating a new connection.
 
     Attributes:
@@ -202,7 +192,7 @@ class ConnectionCreate(BaseModel):
     subscene_id: int = Field(..., description="Subscene ID")
 
 
-class ConnectionUpdate(BaseModel):
+class ConnectionUpdate(AppBaseModel):
     """Schema for updating an existing connection.
 
     All fields are optional to allow partial updates.
@@ -216,7 +206,7 @@ class ConnectionUpdate(BaseModel):
     condition: str | None = None
 
 
-class ConnectionResponse(BaseModel):
+class ConnectionResponse(AppBaseModel):
     """Schema for connection response.
 
     Attributes:
@@ -238,6 +228,3 @@ class ConnectionResponse(BaseModel):
     subscene_id: int
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        orm_mode = True

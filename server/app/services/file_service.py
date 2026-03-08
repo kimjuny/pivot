@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +22,38 @@ from sqlmodel import Session as DBSession, col, select
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_FORMATS: dict[str, tuple[str, str]] = {
+_ALLOWED_IMAGE_FORMATS: dict[str, tuple[str, str]] = {
     "JPEG": ("jpg", "image/jpeg"),
     "PNG": ("png", "image/png"),
     "WEBP": ("webp", "image/webp"),
 }
+
+_ALLOWED_DOCUMENT_TYPES: dict[str, tuple[str, str]] = {
+    "pdf": ("PDF", "application/pdf"),
+    "docx": (
+        "DOCX",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+    "pptx": (
+        "PPTX",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ),
+    "xlsx": (
+        "XLSX",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ),
+    "md": ("MARKDOWN", "text/markdown"),
+    "markdown": ("MARKDOWN", "text/markdown"),
+}
+
+_LEGACY_OFFICE_REPLACEMENTS: dict[str, str] = {
+    "doc": "docx",
+    "ppt": "pptx",
+    "xls": "xlsx",
+}
+
+_TEXT_LIKE_DOCUMENT_EXTENSIONS = {"md", "markdown"}
+_TEXT_ENCODINGS = ("utf-8", "utf-8-sig", "utf-16", "gb18030")
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,10 +70,27 @@ class VerifiedImageUpload:
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedImageAttachment:
-    """Prepared multimodal payload and metadata for one stored image."""
+class VerifiedDocumentUpload:
+    """Validated document metadata derived from Docling inspection."""
+
+    file_bytes: bytes
+    format: str
+    extension: str
+    mime_type: str
+    size_bytes: int
+    page_count: int | None
+    can_extract_text: bool
+    suspected_scanned: bool
+    text_encoding: str | None
+    markdown_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedFileAttachment:
+    """Prepared multimodal payload and metadata for one stored file."""
 
     file_id: str
+    kind: str
     original_name: str
     mime_type: str
     width: int
@@ -88,10 +134,10 @@ class FileService:
         if size_bytes == 0:
             raise ValueError("Uploaded image is empty.")
 
-        max_filesize = int(self.settings.MAX_FILESIZE)
-        if size_bytes > max_filesize:
+        max_image_size = int(self.settings.MAX_IMAGE_SIZE)
+        if size_bytes > max_image_size:
             raise ValueError(
-                f"Image exceeds the {max_filesize // (1024 * 1024)}MB upload limit."
+                f"Image exceeds the {max_image_size // (1024 * 1024)}MB upload limit."
             )
 
         try:
@@ -103,7 +149,7 @@ class FileService:
         except (OSError, UnidentifiedImageError) as err:
             raise ValueError("Uploaded file is not a valid image.") from err
 
-        format_config = _ALLOWED_FORMATS.get(image_format)
+        format_config = _ALLOWED_IMAGE_FORMATS.get(image_format)
         if format_config is None:
             allowed = ", ".join(ext.lower() for ext in ["JPG", "JPEG", "PNG", "WEBP"])
             raise ValueError(f"Unsupported image format. Allowed formats: {allowed}.")
@@ -123,6 +169,170 @@ class FileService:
             height=height,
         )
 
+    def verify_document_upload(
+        self,
+        filename: str,
+        file_bytes: bytes,
+    ) -> VerifiedDocumentUpload:
+        """Validate a document upload and precompute its markdown form.
+
+        Args:
+            filename: Original filename received from client.
+            file_bytes: Raw uploaded bytes.
+
+        Returns:
+            Verified document metadata and cached markdown content.
+
+        Raises:
+            ValueError: If the upload is empty, too large, unsupported, or unreadable.
+        """
+        size_bytes = len(file_bytes)
+        if size_bytes == 0:
+            raise ValueError("Uploaded file is empty.")
+
+        max_file_size = int(self.settings.MAX_FILE_SIZE)
+        if size_bytes > max_file_size:
+            raise ValueError(
+                f"File exceeds the {max_file_size // (1024 * 1024)}MB upload limit."
+            )
+
+        extension = self._extract_extension(filename)
+        replacement = _LEGACY_OFFICE_REPLACEMENTS.get(extension)
+        if replacement is not None:
+            raise ValueError(
+                "Legacy Office formats are not supported. "
+                f"Please upload '.{replacement}' instead."
+            )
+
+        format_config = _ALLOWED_DOCUMENT_TYPES.get(extension)
+        if format_config is None:
+            allowed = ", ".join(
+                f".{ext}" for ext in sorted(_ALLOWED_DOCUMENT_TYPES.keys())
+            )
+            raise ValueError(f"Unsupported file format. Allowed formats: {allowed}.")
+
+        format_name, mime_type = format_config
+        text_encoding = self._detect_text_encoding(file_bytes, extension)
+
+        with tempfile.NamedTemporaryFile(suffix=f".{extension}", delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(file_bytes)
+
+        try:
+            markdown_text, page_count = self._convert_document_with_docling(temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+        normalized_markdown = markdown_text.strip()
+        can_extract_text = bool(normalized_markdown)
+        suspected_scanned = extension == "pdf" and not can_extract_text
+
+        return VerifiedDocumentUpload(
+            file_bytes=file_bytes,
+            format=format_name,
+            extension=extension,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            page_count=page_count,
+            can_extract_text=can_extract_text,
+            suspected_scanned=suspected_scanned,
+            text_encoding=text_encoding,
+            markdown_text=markdown_text,
+        )
+
+    def store_uploaded_file(
+        self,
+        username: str,
+        filename: str,
+        source: str,
+        file_bytes: bytes,
+    ) -> FileAsset:
+        """Verify and persist an uploaded file on disk and in database."""
+        normalized_name = self._normalize_original_name(filename)
+        upload_kind = self._infer_upload_kind(normalized_name)
+        now = datetime.now(timezone.utc)
+        file_id = str(uuid.uuid4())
+
+        if upload_kind == "document":
+            verified_document = self.verify_document_upload(normalized_name, file_bytes)
+            stored_name = f"{file_id}.{verified_document.extension}"
+            storage_path = self.user_files_dir(username) / stored_name
+            markdown_path = storage_path.with_suffix(".extracted.md")
+            try:
+                storage_path.write_bytes(verified_document.file_bytes)
+                markdown_path.write_text(
+                    verified_document.markdown_text,
+                    encoding="utf-8",
+                )
+            except OSError as err:
+                self._safe_unlink(storage_path)
+                self._safe_unlink(markdown_path)
+                raise ValueError("Failed to persist uploaded file.") from err
+
+            file_asset = FileAsset(
+                file_id=file_id,
+                user=username,
+                source=source,
+                original_name=normalized_name,
+                stored_name=stored_name,
+                storage_path=str(storage_path),
+                kind="document",
+                mime_type=verified_document.mime_type,
+                format=verified_document.format,
+                extension=verified_document.extension,
+                size_bytes=verified_document.size_bytes,
+                width=0,
+                height=0,
+                page_count=verified_document.page_count,
+                markdown_path=str(markdown_path),
+                can_extract_text=verified_document.can_extract_text,
+                suspected_scanned=verified_document.suspected_scanned,
+                text_encoding=verified_document.text_encoding,
+                expires_at=now
+                + timedelta(minutes=int(self.settings.FILE_EXPIRE_MINUTES)),
+                created_at=now,
+                updated_at=now,
+            )
+        else:
+            verified_image = self.verify_image_upload(normalized_name, file_bytes)
+            stored_name = f"{file_id}.{verified_image.extension}"
+            storage_path = self.user_files_dir(username) / stored_name
+            try:
+                storage_path.write_bytes(verified_image.file_bytes)
+            except OSError as err:
+                self._safe_unlink(storage_path)
+                raise ValueError("Failed to persist uploaded image.") from err
+
+            file_asset = FileAsset(
+                file_id=file_id,
+                user=username,
+                source=source,
+                original_name=normalized_name,
+                stored_name=stored_name,
+                storage_path=str(storage_path),
+                kind="image",
+                mime_type=verified_image.mime_type,
+                format=verified_image.format,
+                extension=verified_image.extension,
+                size_bytes=verified_image.size_bytes,
+                width=verified_image.width,
+                height=verified_image.height,
+                page_count=None,
+                markdown_path=None,
+                can_extract_text=False,
+                suspected_scanned=False,
+                text_encoding=None,
+                expires_at=now
+                + timedelta(minutes=int(self.settings.FILE_EXPIRE_MINUTES)),
+                created_at=now,
+                updated_at=now,
+            )
+
+        self.db.add(file_asset)
+        self.db.commit()
+        self.db.refresh(file_asset)
+        return file_asset
+
     def store_uploaded_image(
         self,
         username: str,
@@ -130,35 +340,16 @@ class FileService:
         source: str,
         file_bytes: bytes,
     ) -> FileAsset:
-        """Verify and persist an uploaded image on disk and in database."""
-        verified = self.verify_image_upload(filename, file_bytes)
-        now = datetime.now(timezone.utc)
-        file_id = str(uuid.uuid4())
-        stored_name = f"{file_id}.{verified.extension}"
-        storage_path = self.user_files_dir(username) / stored_name
-        storage_path.write_bytes(verified.file_bytes)
-
-        file_asset = FileAsset(
-            file_id=file_id,
-            user=username,
+        """Compatibility wrapper for image-only upload endpoints."""
+        stored_file = self.store_uploaded_file(
+            username=username,
+            filename=filename,
             source=source,
-            original_name=filename or stored_name,
-            stored_name=stored_name,
-            storage_path=str(storage_path),
-            mime_type=verified.mime_type,
-            format=verified.format,
-            extension=verified.extension,
-            size_bytes=verified.size_bytes,
-            width=verified.width,
-            height=verified.height,
-            expires_at=now + timedelta(minutes=int(self.settings.FILE_EXPIRE_MINUTES)),
-            created_at=now,
-            updated_at=now,
+            file_bytes=file_bytes,
         )
-        self.db.add(file_asset)
-        self.db.commit()
-        self.db.refresh(file_asset)
-        return file_asset
+        if stored_file.kind != "image":
+            raise ValueError("Uploaded file is not a supported image.")
+        return stored_file
 
     def get_file_for_user(self, file_id: str, username: str) -> FileAsset | None:
         """Return a file only when it belongs to the current user."""
@@ -209,12 +400,10 @@ class FileService:
 
             file_asset = self.get_file_for_user(normalized_id, username)
             if file_asset is None:
-                raise ValueError(f"Image file '{normalized_id}' does not exist.")
+                raise ValueError(f"File '{normalized_id}' does not exist.")
 
             if file_asset.task_id is not None and file_asset.task_id != task_id:
-                raise ValueError(
-                    f"Image file '{normalized_id}' is already attached elsewhere."
-                )
+                raise ValueError(f"File '{normalized_id}' is already attached elsewhere.")
 
             file_asset.session_id = session_id
             file_asset.task_id = task_id
@@ -231,15 +420,37 @@ class FileService:
     def preprocess_files(
         self,
         files: list[FileAsset],
-    ) -> list[PreparedImageAttachment]:
+    ) -> list[PreparedFileAttachment]:
         """Convert stored files into neutral multimodal blocks for LLM calls."""
-        prepared: list[PreparedImageAttachment] = []
+        prepared: list[PreparedFileAttachment] = []
         for file_asset in files:
+            if file_asset.kind == "document":
+                markdown_text = self._load_document_markdown(file_asset)
+                prepared.append(
+                    PreparedFileAttachment(
+                        file_id=file_asset.file_id,
+                        kind=file_asset.kind,
+                        original_name=file_asset.original_name,
+                        mime_type=file_asset.mime_type,
+                        width=file_asset.width,
+                        height=file_asset.height,
+                        content_block={
+                            "type": "text",
+                            "text": self._build_document_prompt_block(
+                                file_asset,
+                                markdown_text,
+                            ),
+                        },
+                    )
+                )
+                continue
+
             file_bytes = Path(file_asset.storage_path).read_bytes()
             encoded_data = base64.b64encode(file_bytes).decode("ascii")
             prepared.append(
-                PreparedImageAttachment(
+                PreparedFileAttachment(
                     file_id=file_asset.file_id,
+                    kind=file_asset.kind,
                     original_name=file_asset.original_name,
                     mime_type=file_asset.mime_type,
                     width=file_asset.width,
@@ -275,6 +486,7 @@ class FileService:
             grouped.setdefault(file_asset.task_id, []).append(
                 FileAssetListItem(
                     file_id=file_asset.file_id,
+                    kind=file_asset.kind,
                     original_name=file_asset.original_name,
                     mime_type=file_asset.mime_type,
                     format=file_asset.format,
@@ -282,6 +494,10 @@ class FileService:
                     size_bytes=file_asset.size_bytes,
                     width=file_asset.width,
                     height=file_asset.height,
+                    page_count=file_asset.page_count,
+                    can_extract_text=file_asset.can_extract_text,
+                    suspected_scanned=file_asset.suspected_scanned,
+                    text_encoding=file_asset.text_encoding,
                     source=file_asset.source,
                     created_at=file_asset.created_at.replace(
                         tzinfo=timezone.utc
@@ -312,9 +528,161 @@ class FileService:
         self.db.commit()
         return len(expired_files)
 
+    def _load_document_markdown(self, file_asset: FileAsset) -> str:
+        """Load cached markdown, regenerating it when the cache is missing."""
+        if file_asset.markdown_path:
+            markdown_path = Path(file_asset.markdown_path)
+            if markdown_path.exists():
+                return markdown_path.read_text(encoding="utf-8")
+
+        markdown_text, page_count = self._convert_document_with_docling(
+            Path(file_asset.storage_path)
+        )
+        markdown_path = Path(file_asset.storage_path).with_suffix(".extracted.md")
+        markdown_path.write_text(markdown_text, encoding="utf-8")
+        file_asset.markdown_path = str(markdown_path)
+        file_asset.page_count = page_count
+        file_asset.can_extract_text = bool(markdown_text.strip())
+        file_asset.suspected_scanned = (
+            file_asset.extension == "pdf" and not file_asset.can_extract_text
+        )
+        file_asset.updated_at = datetime.now(timezone.utc)
+        self.db.add(file_asset)
+        self.db.commit()
+        self.db.refresh(file_asset)
+        return markdown_text
+
+    def _convert_document_with_docling(
+        self,
+        file_path: Path,
+    ) -> tuple[str, int | None]:
+        """Convert a supported document to markdown via Docling."""
+        try:
+            document_converter_module = import_module(
+                "docling.document_converter"
+            )
+        except ModuleNotFoundError as err:
+            raise ValueError(
+                "Docling is not available in the current backend environment. "
+                "This project still runs on Python 3.10 and Pydantic v1, while "
+                "Docling requires Python 3.11 and Pydantic v2."
+            ) from err
+
+        document_converter_cls = getattr(
+            document_converter_module,
+            "DocumentConverter",
+            None,
+        )
+        if document_converter_cls is None:
+            raise ValueError("Docling is installed but DocumentConverter is missing.")
+
+        converter = document_converter_cls()
+        try:
+            conversion_result = converter.convert(file_path)
+        except Exception as err:
+            raise ValueError(
+                "Uploaded file could not be understood by Docling."
+            ) from err
+
+        document = getattr(conversion_result, "document", None)
+        if document is None:
+            raise ValueError("Docling conversion returned no document output.")
+
+        export_to_markdown = getattr(document, "export_to_markdown", None)
+        if not callable(export_to_markdown):
+            raise ValueError("Docling document output does not support markdown export.")
+
+        markdown_text = export_to_markdown()
+        if not isinstance(markdown_text, str):
+            markdown_text = str(markdown_text)
+        return markdown_text, self._extract_page_count(conversion_result, document)
+
+    @staticmethod
+    def _extract_page_count(
+        conversion_result: Any,
+        document: Any,
+    ) -> int | None:
+        """Extract page count from Docling objects without assuming one schema."""
+        for attr_name in ("page_count", "num_pages"):
+            candidate = getattr(conversion_result, attr_name, None)
+            if isinstance(candidate, int):
+                return candidate
+
+        result_pages = getattr(conversion_result, "pages", None)
+        if isinstance(result_pages, list | tuple | dict):
+            return len(result_pages)
+
+        for attr_name in ("page_count", "num_pages"):
+            candidate = getattr(document, attr_name, None)
+            if isinstance(candidate, int):
+                return candidate
+
+        document_pages = getattr(document, "pages", None)
+        if isinstance(document_pages, list | tuple | dict):
+            return len(document_pages)
+        return None
+
+    @staticmethod
+    def _extract_extension(filename: str) -> str:
+        """Return normalized extension without dot."""
+        return Path(filename.strip()).suffix.lower().lstrip(".")
+
+    @staticmethod
+    def _normalize_original_name(filename: str) -> str:
+        """Return a non-empty original filename for persistence."""
+        normalized = filename.strip()
+        return normalized or "upload.bin"
+
+    @staticmethod
+    def _infer_upload_kind(filename: str) -> str:
+        """Infer whether the upload should be processed as image or document."""
+        extension = FileService._extract_extension(filename)
+        if extension in _ALLOWED_DOCUMENT_TYPES or extension in _LEGACY_OFFICE_REPLACEMENTS:
+            return "document"
+        return "image"
+
+    @staticmethod
+    def _detect_text_encoding(file_bytes: bytes, extension: str) -> str | None:
+        """Best-effort encoding detection for text-like document formats."""
+        if extension not in _TEXT_LIKE_DOCUMENT_EXTENSIONS:
+            return None
+
+        for encoding in _TEXT_ENCODINGS:
+            try:
+                file_bytes.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+            return encoding
+        return None
+
+    @staticmethod
+    def _build_document_prompt_block(file_asset: FileAsset, markdown_text: str) -> str:
+        """Compose the text block injected into the LLM request for a document."""
+        metadata_lines = [
+            f'Attached document: "{file_asset.original_name}"',
+            f"Format: {file_asset.format}",
+        ]
+        if file_asset.page_count is not None:
+            metadata_lines.append(f"Pages: {file_asset.page_count}")
+        if file_asset.text_encoding:
+            metadata_lines.append(f"Encoding: {file_asset.text_encoding}")
+        if file_asset.suspected_scanned:
+            metadata_lines.append("Scan-heavy: yes")
+
+        content = markdown_text.strip()
+        if not content:
+            content = "No extractable text was found in this document."
+
+        metadata_lines.append("")
+        metadata_lines.append("Document content:")
+        metadata_lines.append(content)
+        return "\n".join(metadata_lines)
+
     def _delete_asset(self, file_asset: FileAsset, commit: bool = False) -> None:
         """Delete both structured metadata and raw file safely."""
         self._safe_unlink(Path(file_asset.storage_path))
+        if file_asset.markdown_path:
+            self._safe_unlink(Path(file_asset.markdown_path))
         self.db.delete(file_asset)
         if commit:
             self.db.commit()

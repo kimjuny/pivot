@@ -45,6 +45,23 @@ class MultimodalHelpersTestCase(unittest.TestCase):
         self.assertEqual(converted[1]["type"], "image")
         self.assertEqual(converted[1]["source"]["type"], "base64")
 
+    def test_document_text_blocks_stay_as_text(self) -> None:
+        """Document attachments should remain plain text across providers."""
+        document_blocks = [
+            {"type": "text", "text": 'Attached document: "spec.pdf"\nHello world'},
+        ]
+
+        completion_content = multimodal.to_openai_completion_content(document_blocks)
+        response_content = multimodal.to_openai_response_content(
+            document_blocks,
+            "user",
+        )
+        anthropic_content = multimodal.to_anthropic_content(document_blocks)
+
+        self.assertEqual(completion_content[0]["type"], "text")
+        self.assertEqual(response_content[0]["type"], "input_text")
+        self.assertEqual(anthropic_content[0]["type"], "text")
+
 
 if __name__ == "__main__":
     unittest.main()

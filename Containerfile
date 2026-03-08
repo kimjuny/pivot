@@ -19,7 +19,7 @@ RUN npm run build
 
 
 # ---- Stage 2: Production runtime --------------------------------------------
-FROM docker.io/library/python:3.10-slim AS runtime
+FROM docker.io/library/python:3.11-slim AS runtime
 
 # System deps needed by some Python packages (bcrypt, cryptography)
 RUN apt-get update && \

@@ -1,4 +1,4 @@
-"""Unit tests for uploaded image lifecycle helpers."""
+"""Unit tests for uploaded file lifecycle helpers."""
 
 import base64
 import io
@@ -21,7 +21,7 @@ workspace_service = import_module("app.services.workspace_service")
 
 
 class FileServiceTestCase(unittest.TestCase):
-    """Validate image verification, attachment, and pruning behavior."""
+    """Validate file verification, attachment, and pruning behavior."""
 
     def setUp(self) -> None:
         """Create isolated database and workspace fixtures."""
@@ -57,6 +57,7 @@ class FileServiceTestCase(unittest.TestCase):
             file_bytes=self._build_png_bytes(),
         )
 
+        self.assertEqual(asset.kind, "image")
         self.assertEqual(asset.format, "PNG")
         self.assertEqual(asset.mime_type, "image/png")
         self.assertTrue(Path(asset.storage_path).exists())
@@ -74,6 +75,48 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertEqual(prepared[0].content_block["type"], "image")
         decoded = base64.b64decode(prepared[0].content_block["data"])
         self.assertEqual(decoded, Path(asset.storage_path).read_bytes())
+
+    def test_store_and_preprocess_document(self) -> None:
+        """Document uploads should persist extracted markdown for prompting."""
+        original_converter = self.service._convert_document_with_docling
+
+        def fake_convert_document(_path: Path) -> tuple[str, int | None]:
+            return "# Spec\n\nHello from docling.", 3
+
+        self.service._convert_document_with_docling = fake_convert_document
+        self.addCleanup(
+            setattr,
+            self.service,
+            "_convert_document_with_docling",
+            original_converter,
+        )
+
+        asset = self.service.store_uploaded_file(
+            username="alice",
+            filename="spec.pdf",
+            source="local",
+            file_bytes=b"%PDF-1.7 fake document bytes",
+        )
+
+        self.assertEqual(asset.kind, "document")
+        self.assertEqual(asset.format, "PDF")
+        self.assertEqual(asset.page_count, 3)
+        self.assertTrue(asset.can_extract_text)
+        self.assertTrue(Path(asset.storage_path).exists())
+        self.assertIsNotNone(asset.markdown_path)
+        self.assertTrue(Path(asset.markdown_path or "").exists())
+
+        attached = self.service.attach_files_to_task(
+            [asset.file_id],
+            username="alice",
+            session_id="session-2",
+            task_id="task-2",
+        )
+        prepared = self.service.preprocess_files(attached)
+
+        self.assertEqual(prepared[0].content_block["type"], "text")
+        self.assertIn("Attached document", prepared[0].content_block["text"])
+        self.assertIn("Hello from docling.", prepared[0].content_block["text"])
 
     def test_prune_expired_unused_files_only(self) -> None:
         """Pruning should remove only expired files that were never attached."""

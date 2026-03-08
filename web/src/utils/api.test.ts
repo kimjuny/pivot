@@ -6,9 +6,16 @@ vi.mock('../contexts/auth-core', () => ({
   AUTH_EXPIRED_EVENT: 'auth-expired',
 }));
 
-import { deleteChatImage, fetchChatImageBlob, uploadChatImage } from './api';
+import {
+  deleteChatFile,
+  deleteChatImage,
+  fetchChatFileBlob,
+  fetchChatImageBlob,
+  uploadChatFile,
+  uploadChatImage,
+} from './api';
 
-describe('chat image api helpers', () => {
+describe('chat file api helpers', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
   });
@@ -18,9 +25,56 @@ describe('chat image api helpers', () => {
     vi.restoreAllMocks();
   });
 
-  it('uploads chat images with auth and form data', async () => {
+  it('uploads chat files with auth and form data', async () => {
     const payload = {
       file_id: 'file-1',
+      kind: 'document',
+      source: 'local',
+      original_name: 'brief.pdf',
+      mime_type: 'application/pdf',
+      format: 'PDF',
+      extension: 'pdf',
+      size_bytes: 12,
+      width: 0,
+      height: 0,
+      page_count: 2,
+      can_extract_text: true,
+      suspected_scanned: false,
+      text_encoding: null,
+      session_id: null,
+      task_id: null,
+      created_at: '2026-03-08T00:00:00Z',
+      expires_at: '2026-03-08T02:00:00Z',
+    };
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const file = new File(['hello'], 'brief.pdf', { type: 'application/pdf' });
+    const result = await uploadChatFile(file, 'local');
+
+    expect(result.file_id).toBe('file-1');
+    const uploadCall = vi.mocked(fetch).mock.calls[0];
+    expect(uploadCall?.[0]).toEqual(expect.stringContaining('/files/uploads'));
+    const requestInit = uploadCall?.[1];
+    expect(requestInit).toBeDefined();
+    if (!requestInit) {
+      throw new Error('Missing upload request options');
+    }
+    expect(requestInit.method).toBe('POST');
+    expect(requestInit.headers).toEqual(expect.objectContaining({
+      Authorization: 'Bearer token-123',
+    }));
+    expect(requestInit.body).toBeInstanceOf(FormData);
+  });
+
+  it('keeps legacy image upload helper wired to the generic endpoint', async () => {
+    const payload = {
+      file_id: 'file-2',
+      kind: 'image',
       source: 'local',
       original_name: 'diagram.png',
       mime_type: 'image/png',
@@ -29,6 +83,10 @@ describe('chat image api helpers', () => {
       size_bytes: 12,
       width: 3,
       height: 4,
+      page_count: null,
+      can_extract_text: false,
+      suspected_scanned: false,
+      text_encoding: null,
       session_id: null,
       task_id: null,
       created_at: '2026-03-08T00:00:00Z',
@@ -44,27 +102,31 @@ describe('chat image api helpers', () => {
     const file = new File(['hello'], 'diagram.png', { type: 'image/png' });
     const result = await uploadChatImage(file, 'local');
 
-    expect(result.file_id).toBe('file-1');
-    const uploadCall = vi.mocked(fetch).mock.calls[0];
-    expect(uploadCall?.[0]).toEqual(expect.stringContaining('/files/images'));
-    const requestInit = uploadCall?.[1];
-    expect(requestInit).toBeDefined();
-    if (!requestInit) {
-      throw new Error('Missing upload request options');
-    }
-    expect(requestInit.method).toBe('POST');
-    expect(requestInit.headers).toEqual(expect.objectContaining({
-      Authorization: 'Bearer token-123',
-    }));
-    expect(requestInit.body).toBeInstanceOf(FormData);
+    expect(result.kind).toBe('image');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/files/uploads'),
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 
-  it('deletes pending chat images', async () => {
+  it('deletes pending chat files', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
 
-    await expect(deleteChatImage('file-1')).resolves.toBeUndefined();
+    await expect(deleteChatFile('file-1')).resolves.toBeUndefined();
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/files/file-1'),
+      expect.objectContaining({
+        method: 'DELETE',
+      })
+    );
+  });
+
+  it('keeps legacy image deletion helper working', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+    await expect(deleteChatImage('file-2')).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/files/file-2'),
       expect.objectContaining({
         method: 'DELETE',
       })
@@ -80,6 +142,21 @@ describe('chat image api helpers', () => {
     expect(result.type).toBe('image/png');
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/files/file-1/content'),
+      expect.objectContaining({
+        method: 'GET',
+      })
+    );
+  });
+
+  it('fetches generic file blobs for attachments', async () => {
+    const blob = new Blob(['document-bytes'], { type: 'application/pdf' });
+    vi.mocked(fetch).mockResolvedValue(new Response(blob, { status: 200 }));
+
+    const result = await fetchChatFileBlob('file-3');
+
+    expect(result.type).toBe('application/pdf');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/files/file-3/content'),
       expect.objectContaining({
         method: 'GET',
       })

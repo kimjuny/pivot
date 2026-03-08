@@ -1,16 +1,16 @@
 from typing import Any
 
-from pydantic import BaseModel
+from app.schemas.base import AppBaseModel
 
 
-class BuildChatRequest(BaseModel):
+class BuildChatRequest(AppBaseModel):
     session_id: str | None = None
     agent_id: str | None = None  # If provided, load this agent as base
     llm_id: int | None = None  # Required if agent_id is not provided
     content: str  # User requirement
 
 
-class BuildChatResponse(BaseModel):
+class BuildChatResponse(AppBaseModel):
     session_id: str
     response: str
     reason: str

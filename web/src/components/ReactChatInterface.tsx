@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react';
-import { ArrowUp, Plus, Loader2, CheckCircle2, XCircle, AlertCircle, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft, ImagePlus, Wrench } from 'lucide-react';
+import { ArrowUp, Plus, Loader2, CheckCircle2, XCircle, AlertCircle, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft, ImagePlus, Paperclip, FileText, FileSpreadsheet, Presentation, Wrench } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -16,10 +16,10 @@ import {
   listSessions,
   deleteSession,
   getFullSessionHistory,
-  deleteChatImage,
-  fetchChatImageBlob,
-  uploadChatImage,
-  type ChatImageFile,
+  deleteChatFile,
+  fetchChatFileBlob,
+  uploadChatFile,
+  type ChatFileAsset,
   type FileUploadSource,
   SessionListItem,
   TaskMessage,
@@ -195,11 +195,18 @@ interface SkillSelectionState {
  */
 interface ChatAttachment {
   fileId: string;
+  kind: 'image' | 'document';
   originalName: string;
   mimeType: string;
+  format: string;
+  extension: string;
   width: number;
   height: number;
   sizeBytes: number;
+  pageCount?: number | null;
+  canExtractText?: boolean;
+  suspectedScanned?: boolean;
+  textEncoding?: string | null;
   previewUrl?: string;
 }
 
@@ -230,20 +237,70 @@ interface ChatMessage {
 }
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
+const CLIPBOARD_FILE_EXTENSION_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "text/markdown": "md",
+  "text/x-markdown": "md",
+  "text/plain": "md",
+};
 
 /**
  * Build stable chat attachment metadata from API payloads.
  */
-function toChatAttachment(file: ChatImageFile, previewUrl?: string): ChatAttachment {
+function toChatAttachment(file: ChatFileAsset, previewUrl?: string): ChatAttachment {
   return {
     fileId: file.file_id,
+    kind: file.kind,
     originalName: file.original_name,
     mimeType: file.mime_type,
+    format: file.format,
+    extension: file.extension,
     width: file.width,
     height: file.height,
     sizeBytes: file.size_bytes,
+    pageCount: file.page_count,
+    canExtractText: file.can_extract_text,
+    suspectedScanned: file.suspected_scanned,
+    textEncoding: file.text_encoding,
     previewUrl,
   };
+}
+
+/**
+ * Clipboard file objects occasionally lose their original filename across apps,
+ * so infer a stable extension from MIME type before uploading.
+ */
+function normalizeClipboardFile(file: File, index: number): File {
+  if (file.name) {
+    return file;
+  }
+
+  const inferredExtension = CLIPBOARD_FILE_EXTENSION_BY_MIME[file.type]
+    || file.type.split("/")[1]
+    || "bin";
+  return new File([file], `clipboard-${Date.now()}-${index}.${inferredExtension}`, {
+    type: file.type || "application/octet-stream",
+  });
+}
+
+/**
+ * Render a deterministic icon for document attachments.
+ */
+function AttachmentFileIcon({ attachment }: { attachment: ChatAttachment }) {
+  const extension = attachment.extension.toLowerCase();
+  if (extension === 'pptx') {
+    return <Presentation className="h-5 w-5 text-muted-foreground" />;
+  }
+  if (extension === 'xlsx') {
+    return <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />;
+  }
+  return <FileText className="h-5 w-5 text-muted-foreground" />;
 }
 
 /**
@@ -259,8 +316,14 @@ function AttachmentThumbnail({
   className?: string;
 }) {
   const [src, setSrc] = useState<string | null>(attachment.previewUrl ?? null);
+  const shouldRenderImage = attachment.kind === 'image' || attachment.mimeType.startsWith('image/');
 
   useEffect(() => {
+    if (!shouldRenderImage) {
+      setSrc(null);
+      return;
+    }
+
     if (attachment.previewUrl) {
       setSrc(attachment.previewUrl);
       return;
@@ -271,7 +334,7 @@ function AttachmentThumbnail({
 
     const loadImage = async () => {
       try {
-        const blob = await fetchChatImageBlob(attachment.fileId, controller.signal);
+        const blob = await fetchChatFileBlob(attachment.fileId, controller.signal);
         objectUrl = URL.createObjectURL(blob);
         setSrc(objectUrl);
       } catch (err) {
@@ -290,7 +353,15 @@ function AttachmentThumbnail({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [attachment.fileId, attachment.previewUrl]);
+  }, [attachment.fileId, attachment.previewUrl, shouldRenderImage]);
+
+  if (!shouldRenderImage) {
+    return (
+      <div className={`flex h-full w-full items-start justify-center bg-muted pt-1.5 ${className ?? ''}`}>
+        <AttachmentFileIcon attachment={attachment} />
+      </div>
+    );
+  }
 
   if (src) {
     return (
@@ -388,7 +459,8 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
   const pendingFilesRef = useRef<PendingUploadItem[]>([]);
   const [pendingFiles, setPendingFiles] = useState<PendingUploadItem[]>([]);
@@ -588,9 +660,9 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
 
     if (target.status === 'ready') {
       try {
-        await deleteChatImage(target.fileId);
+        await deleteChatFile(target.fileId);
       } catch (err) {
-        console.error('Failed to delete pending chat image:', err);
+        console.error('Failed to delete pending chat file:', err);
       }
     }
   }, [pendingFiles]);
@@ -601,12 +673,16 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   const enqueueFiles = useCallback((files: File[], source: FileUploadSource) => {
     files.forEach((file) => {
       const clientId = `${source}-${crypto.randomUUID()}`;
-      const previewUrl = URL.createObjectURL(file);
+      const isPreviewableImage = file.type.startsWith('image/');
+      const previewUrl = isPreviewableImage ? URL.createObjectURL(file) : undefined;
       const initialItem: PendingUploadItem = {
         clientId,
         fileId: '',
+        kind: isPreviewableImage ? 'image' : 'document',
         originalName: file.name,
-        mimeType: file.type || 'image/*',
+        mimeType: file.type || 'application/octet-stream',
+        format: '',
+        extension: file.name.split('.').pop()?.toLowerCase() || '',
         width: 0,
         height: 0,
         sizeBytes: file.size,
@@ -622,7 +698,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
 
       const uploadFile = async () => {
         try {
-          const uploadedFile = await uploadChatImage(file, source, controller.signal);
+          const uploadedFile = await uploadChatFile(file, source, controller.signal);
           setPendingFiles((prev) => prev.map((item) => (
             item.clientId === clientId
               ? {
@@ -637,7 +713,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
             return;
           }
 
-          const errorMessage = err instanceof Error ? err.message : 'Failed to upload image';
+          const errorMessage = err instanceof Error ? err.message : 'Failed to upload file';
           setPendingFiles((prev) => prev.map((item) => (
             item.clientId === clientId
               ? {
@@ -668,33 +744,57 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   }, [enqueueFiles]);
 
   /**
-   * Accept pasted images from Clipboard API into the upload queue.
+   * Handle document picker changes from the composer menu.
+   */
+  const handleDocumentInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    if (selectedFiles.length > 0) {
+      enqueueFiles(selectedFiles, 'local');
+    }
+    event.target.value = '';
+  }, [enqueueFiles]);
+
+  /**
+   * Accept pasted images and files from Clipboard API into the upload queue.
    */
   const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const imageFiles: File[] = [];
+    const clipboardFiles = new Map<string, File>();
+    let clipboardIndex = 0;
+
+    const addClipboardFile = (file: File | null) => {
+      if (!file) {
+        return;
+      }
+
+      const normalizedFile = normalizeClipboardFile(file, clipboardIndex);
+      clipboardIndex += 1;
+      const dedupeKey = [
+        normalizedFile.name,
+        normalizedFile.size,
+        normalizedFile.type,
+        normalizedFile.lastModified,
+      ].join(':');
+      clipboardFiles.set(dedupeKey, normalizedFile);
+    };
 
     for (const item of Array.from(event.clipboardData.items)) {
-      if (!item.type.startsWith('image/')) {
+      if (item.kind !== 'file') {
         continue;
       }
-      const file = item.getAsFile();
-      if (!file) {
-        continue;
-      }
-      const extension = file.type.split('/')[1] || 'png';
-      imageFiles.push(
-        new File([file], file.name || `clipboard-${Date.now()}.${extension}`, {
-          type: file.type || 'image/png',
-        })
-      );
+      addClipboardFile(item.getAsFile());
     }
 
-    if (imageFiles.length === 0) {
+    for (const file of Array.from(event.clipboardData.files)) {
+      addClipboardFile(file);
+    }
+
+    const filesToUpload = Array.from(clipboardFiles.values());
+    if (filesToUpload.length === 0) {
       return;
     }
 
     event.preventDefault();
-    enqueueFiles(imageFiles, 'clipboard');
+    enqueueFiles(filesToUpload, 'clipboard');
   }, [enqueueFiles]);
 
   /**
@@ -976,11 +1076,18 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
     const filesToSend = readyPendingFiles;
     const sentAttachments = filesToSend.map((file) => ({
       fileId: file.fileId,
+      kind: file.kind,
       originalName: file.originalName,
       mimeType: file.mimeType,
+      format: file.format,
+      extension: file.extension,
       width: file.width,
       height: file.height,
       sizeBytes: file.sizeBytes,
+      pageCount: file.pageCount,
+      canExtractText: file.canExtractText,
+      suspectedScanned: file.suspectedScanned,
+      textEncoding: file.textEncoding,
       previewUrl: file.previewUrl,
     }));
 
@@ -2045,48 +2152,71 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
         <div className="flex flex-wrap gap-2 px-3 pt-3">
           {attachments.map((attachment) => {
             const queueItem = attachment as PendingUploadItem;
+            const baseControlClassName = 'absolute -top-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-transparent transition-colors';
+            const statusIcon = queueItem.status === 'uploading'
+              ? (
+                  <span
+                    className={`${baseControlClassName} -left-1.5 text-muted-foreground`}
+                    aria-label="Attachment is processing"
+                  >
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  </span>
+                )
+              : queueItem.status === 'error'
+                ? (
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={`${baseControlClassName} -left-1.5 cursor-help text-destructive`}
+                            aria-label="Attachment failed"
+                            tabIndex={0}
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="top"
+                          className="max-w-64 whitespace-pre-wrap break-words text-xs leading-relaxed"
+                        >
+                          {queueItem.errorMessage || 'Upload failed'}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )
+                : null;
+
             return (
               <div
                 key={queueItem.clientId}
-                className={`relative flex h-[72px] w-[72px] overflow-hidden rounded-xl border bg-muted ${queueItem.status === 'error'
-                  ? 'border-destructive/50'
-                  : 'border-border'
-                  }`}
+                className="group relative h-12 w-12"
               >
-                <AttachmentThumbnail
-                  attachment={queueItem}
-                  alt={queueItem.originalName}
-                />
+                <div
+                  className={`relative flex h-full w-full overflow-hidden rounded-lg border bg-muted ${queueItem.status === 'error'
+                    ? 'border-destructive/60 bg-destructive/[0.035] shadow-[0_0_0_1px_oklch(var(--destructive)/0.18)]'
+                    : 'border-border/80'
+                    }`}
+                >
+                  <AttachmentThumbnail
+                    attachment={queueItem}
+                    alt={queueItem.originalName}
+                  />
+                  <div className="absolute inset-x-0 bottom-0 bg-background/88 px-1.5 py-1 text-[9px] leading-tight">
+                    <div className="truncate text-foreground">{queueItem.originalName}</div>
+                  </div>
+                </div>
+                {statusIcon}
                 <button
                   type="button"
                   onClick={() => {
                     void removePendingFile(queueItem.clientId);
                   }}
-                  className="absolute right-1 top-1 rounded-full bg-background/90 p-1 text-muted-foreground shadow-sm transition-colors hover:text-foreground"
-                  title="Remove image"
+                  className={`${baseControlClassName} -right-1.5 text-destructive/80 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 hover:text-destructive`}
+                  title="Remove attachment"
+                  aria-label={`Remove ${queueItem.originalName}`}
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
-                <div className="absolute inset-x-0 bottom-0 bg-background/85 px-1.5 py-1 text-[10px] leading-tight">
-                  <div className="truncate text-foreground">{queueItem.originalName}</div>
-                  {queueItem.status === 'uploading' && (
-                    <div className="flex items-center gap-1 text-muted-foreground">
-                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                      <span>Processing...</span>
-                    </div>
-                  )}
-                  {queueItem.status === 'ready' && (
-                    <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                      <CheckCircle2 className="h-2.5 w-2.5" />
-                      <span>Ready</span>
-                    </div>
-                  )}
-                  {queueItem.status === 'error' && (
-                    <div className="truncate text-destructive">
-                      {queueItem.errorMessage || 'Upload failed'}
-                    </div>
-                  )}
-                </div>
               </div>
             );
           })}
@@ -2107,8 +2237,14 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
                 alt={attachment.originalName}
               />
             </div>
-            <div className="max-w-28 truncate border-t border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
-              {attachment.originalName}
+            <div className="max-w-28 border-t border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
+              <div className="truncate">{attachment.originalName}</div>
+              {attachment.kind === 'document' && (
+                <div className="truncate uppercase">
+                  {attachment.extension}
+                  {attachment.pageCount ? ` · ${attachment.pageCount}p` : ''}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -2453,12 +2589,20 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
           )}
           <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
             <input
-              ref={fileInputRef}
+              ref={imageInputRef}
               type="file"
               accept="image/jpeg,image/jpg,image/png,image/webp"
               multiple
               className="hidden"
               onChange={handleFileInputChange}
+            />
+            <input
+              ref={documentInputRef}
+              type="file"
+              accept=".pdf,.docx,.pptx,.xlsx,.md,.markdown"
+              multiple
+              className="hidden"
+              onChange={handleDocumentInputChange}
             />
             {renderAttachments(pendingFiles, 'composer')}
             <Textarea
@@ -2479,9 +2623,13 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="z-[60]">
-                  <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+                  <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
                     <ImagePlus className="mr-2 h-4 w-4" />
                     <span>Upload image</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
+                    <Paperclip className="mr-2 h-4 w-4" />
+                    <span>Upload file</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -2489,7 +2637,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
                 {hasUploadingFiles && (
                   <div className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    <span>Processing images...</span>
+                    <span>Processing attachments...</span>
                   </div>
                 )}
                 {isStreaming ? (

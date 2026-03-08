@@ -3,17 +3,19 @@
 from typing import Any
 
 from app.schemas.file import FileAssetListItem
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.schemas.base import AppBaseModel
 
 
-class SessionCreate(BaseModel):
+class SessionCreate(AppBaseModel):
     """Request schema for creating a new session."""
 
     agent_id: int = Field(..., description="Agent ID for this session")
     user: str = Field(default="default_user", description="Username")
 
 
-class SessionResponse(BaseModel):
+class SessionResponse(AppBaseModel):
     """Response schema for session information."""
 
     id: int
@@ -27,7 +29,7 @@ class SessionResponse(BaseModel):
     updated_at: str
 
 
-class SessionMemoryResponse(BaseModel):
+class SessionMemoryResponse(AppBaseModel):
     """Response schema for full session memory."""
 
     session_id: str
@@ -41,7 +43,7 @@ class SessionMemoryResponse(BaseModel):
     updated_at: str
 
 
-class SessionListItem(BaseModel):
+class SessionListItem(AppBaseModel):
     """Schema for session list item (brief info for sidebar)."""
 
     session_id: str
@@ -53,14 +55,14 @@ class SessionListItem(BaseModel):
     message_count: int = 0
 
 
-class SessionListResponse(BaseModel):
+class SessionListResponse(AppBaseModel):
     """Response schema for session list."""
 
     sessions: list[SessionListItem]
     total: int
 
 
-class ChatHistoryMessage(BaseModel):
+class ChatHistoryMessage(AppBaseModel):
     """Schema for a single chat history message."""
 
     type: str
@@ -69,14 +71,14 @@ class ChatHistoryMessage(BaseModel):
     files: list[FileAssetListItem] = Field(default_factory=list)
 
 
-class ChatHistoryResponse(BaseModel):
+class ChatHistoryResponse(AppBaseModel):
     """Response schema for chat history."""
 
     version: int
     messages: list[ChatHistoryMessage]
 
 
-class RecursionDetail(BaseModel):
+class RecursionDetail(AppBaseModel):
     """Schema for recursion details in full session history."""
 
     iteration: int
@@ -97,7 +99,7 @@ class RecursionDetail(BaseModel):
     updated_at: str
 
 
-class TaskMessage(BaseModel):
+class TaskMessage(AppBaseModel):
     """Schema for a task message with full recursion details."""
 
     task_id: str
@@ -112,7 +114,7 @@ class TaskMessage(BaseModel):
     updated_at: str
 
 
-class FullSessionHistoryResponse(BaseModel):
+class FullSessionHistoryResponse(AppBaseModel):
     """Response schema for full session history with recursion details."""
 
     session_id: str

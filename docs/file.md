@@ -16,3 +16,7 @@
 ## 框架
 
 图片处理使用了pillow，文件处理使用了docling。
+
+## Todo
+
+- 多轮对话的情况下，base64图片的message占用问题。

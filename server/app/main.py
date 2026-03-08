@@ -30,6 +30,7 @@ from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
+    ensure_file_schema_compatibility,
     ensure_llm_schema_compatibility,
     ensure_react_schema_compatibility,
     get_engine,
@@ -153,6 +154,7 @@ async def startup_event():
     SQLModel.metadata.create_all(engine)
     ensure_llm_schema_compatibility()
     ensure_react_schema_compatibility()
+    ensure_file_schema_compatibility()
 
     logger.info("Database initialized successfully")
 

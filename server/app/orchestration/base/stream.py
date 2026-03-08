@@ -1,7 +1,9 @@
 from enum import Enum
 
 from app.models.agent import Connection, Scene
-from pydantic import BaseModel
+from pydantic import ConfigDict
+
+from app.schemas.base import AppBaseModel
 
 
 class AgentResponseChunkType(str, Enum):
@@ -16,7 +18,7 @@ class AgentResponseChunkType(str, Enum):
     PARSING = "parsing"  # Internal state, not usually yielded but good to have
 
 
-class AgentResponseChunk(BaseModel):
+class AgentResponseChunk(AppBaseModel):
     """
     Chunk of response from the agent in streaming mode.
     """
@@ -26,5 +28,7 @@ class AgentResponseChunk(BaseModel):
     updated_scenes: list[Scene] | None = None
     matched_connection: Connection | None = None
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(
+        from_attributes=True,
+        arbitrary_types_allowed=True,
+    )

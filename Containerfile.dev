@@ -26,7 +26,7 @@ EXPOSE 3000
 
 
 # ---- Backend dev target -----------------------------------------------------
-FROM docker.io/library/python:3.10-slim AS backend-dev
+FROM docker.io/library/python:3.11-slim AS backend-dev
 
 # System deps for compiled Python packages
 RUN apt-get update && \

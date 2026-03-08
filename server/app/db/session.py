@@ -56,6 +56,7 @@ def init_db():
     SQLModel.metadata.create_all(engine)
     ensure_llm_schema_compatibility()
     ensure_react_schema_compatibility()
+    ensure_file_schema_compatibility()
     print("Database initialized successfully")
 
 
@@ -93,3 +94,45 @@ def ensure_react_schema_compatibility() -> None:
             conn.execute(
                 text("ALTER TABLE reacttask ADD COLUMN skill_selection_result VARCHAR")
             )
+
+
+def ensure_file_schema_compatibility() -> None:
+    """Apply additive schema updates for legacy uploaded-file tables."""
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("fileasset"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("fileasset")}
+    with engine.begin() as conn:
+        if "kind" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN kind VARCHAR"))
+            conn.execute(
+                text("UPDATE fileasset SET kind = 'image' WHERE kind IS NULL")
+            )
+        if "page_count" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN page_count INTEGER"))
+        if "markdown_path" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN markdown_path VARCHAR"))
+        if "can_extract_text" not in columns:
+            conn.execute(
+                text("ALTER TABLE fileasset ADD COLUMN can_extract_text BOOLEAN")
+            )
+            conn.execute(
+                text(
+                    "UPDATE fileasset SET can_extract_text = 0 "
+                    "WHERE can_extract_text IS NULL"
+                )
+            )
+        if "suspected_scanned" not in columns:
+            conn.execute(
+                text("ALTER TABLE fileasset ADD COLUMN suspected_scanned BOOLEAN")
+            )
+            conn.execute(
+                text(
+                    "UPDATE fileasset SET suspected_scanned = 0 "
+                    "WHERE suspected_scanned IS NULL"
+                )
+            )
+        if "text_encoding" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN text_encoding VARCHAR"))

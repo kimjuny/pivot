@@ -4,10 +4,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from app.schemas.base import AppBaseModel
 
 
-class TokenUsage(BaseModel):
+class TokenUsage(AppBaseModel):
     """Token usage information for LLM calls."""
 
     prompt_tokens: int = Field(..., description="Number of tokens in the prompt")
@@ -21,7 +23,7 @@ class TokenUsage(BaseModel):
     )
 
 
-class ReactChatRequest(BaseModel):
+class ReactChatRequest(AppBaseModel):
     """Request schema for ReAct chat stream endpoint."""
 
     agent_id: int = Field(..., description="Agent ID to use for the task")
@@ -35,7 +37,7 @@ class ReactChatRequest(BaseModel):
     )
     file_ids: list[str] = Field(
         default_factory=list,
-        description="Uploaded image IDs to attach to this user turn",
+        description="Uploaded file IDs to attach to this user turn",
     )
 
 
@@ -60,7 +62,7 @@ class ReactStreamEventType(str, Enum):
     TASK_COMPLETE = "task_complete"
 
 
-class ReactStreamEvent(BaseModel):
+class ReactStreamEvent(AppBaseModel):
     """Stream event schema for ReAct execution updates."""
 
     type: ReactStreamEventType = Field(..., description="Event type")
@@ -86,7 +88,7 @@ class ReactStreamEvent(BaseModel):
     )
 
 
-class ReactTaskResponse(BaseModel):
+class ReactTaskResponse(AppBaseModel):
     """Response schema for ReAct task information."""
 
     id: int
@@ -101,11 +103,7 @@ class ReactTaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class ReactRecursionResponse(BaseModel):
+class ReactRecursionResponse(AppBaseModel):
     """Response schema for ReAct recursion information."""
 
     id: int
@@ -124,11 +122,7 @@ class ReactRecursionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class ReactPlanStepResponse(BaseModel):
+class ReactPlanStepResponse(AppBaseModel):
     """Response schema for ReAct plan step information."""
 
     id: int
@@ -140,6 +134,3 @@ class ReactPlanStepResponse(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        orm_mode = True
