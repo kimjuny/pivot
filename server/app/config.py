@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
     SANDBOX_MANAGER_TIMEOUT_SECONDS: int = 30
 
+    # File uploads
+    MAX_FILESIZE: int = 2 * 1024 * 1024
+    FILE_EXPIRE_MINUTES: int = 120
+    FILE_PRUNE_INTERVAL_MINUTES: int = 5
+
     class Config:  # type: ignore
         env_file = ".env"
 

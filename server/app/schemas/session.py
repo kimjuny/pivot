@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from app.schemas.file import FileAssetListItem
 from pydantic import BaseModel, Field
 
 
@@ -65,6 +66,7 @@ class ChatHistoryMessage(BaseModel):
     type: str
     content: str
     timestamp: str
+    files: list[FileAssetListItem] = Field(default_factory=list)
 
 
 class ChatHistoryResponse(BaseModel):
@@ -100,6 +102,7 @@ class TaskMessage(BaseModel):
 
     task_id: str
     user_message: str
+    files: list[FileAssetListItem] = Field(default_factory=list)
     agent_answer: str | None = None
     status: str
     total_tokens: int = 0

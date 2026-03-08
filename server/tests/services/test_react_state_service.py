@@ -180,7 +180,9 @@ class ReactStateServiceTestCase(unittest.TestCase):
             snapshot_payload["context"]["memory"]["short_term"][0]["memory"],
             "remember this",
         )
-        self.assertEqual(rec_entry["action"]["output"]["tool_calls"][0]["result"], "hello")
+        self.assertEqual(
+            rec_entry["action"]["output"]["tool_calls"][0]["result"], "hello"
+        )
         self.assertTrue(rec_entry["action"]["output"]["tool_calls"][0]["success"])
 
     def test_finalize_error_and_task_lifecycle_helpers(self) -> None:

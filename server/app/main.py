@@ -1,6 +1,7 @@
 import sys
 import time
 import traceback
+from asyncio import Task, create_task, sleep
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,7 @@ from app.api.agents import router as agents_router  # noqa: E402
 from app.api.auth import init_default_user, router as auth_router  # noqa: E402
 from app.api.build import router as build_router  # noqa: E402
 from app.api.chat import router as chat_router  # noqa: E402
+from app.api.files import router as files_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
@@ -26,6 +28,7 @@ from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
+from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
     ensure_llm_schema_compatibility,
     ensure_react_schema_compatibility,
@@ -33,7 +36,9 @@ from app.db.session import (  # noqa: E402
     get_session,
 )
 from app.orchestration.tool import get_tool_manager  # noqa: E402
+from app.services.file_service import FileService  # noqa: E402
 from app.utils.logging_config import get_logger, setup_logging  # noqa: E402
+from sqlmodel import Session as DBSession  # noqa: E402
 
 # Set up logging at startup
 setup_logging()
@@ -85,6 +90,7 @@ app.include_router(agents_router, prefix="/api")
 app.include_router(scenes_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(build_router, prefix="/api")
+app.include_router(files_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
@@ -113,6 +119,20 @@ if _static_dir.is_dir() and (_static_dir / "index.html").exists():
         if file_path.is_file():
             return FileResponse(str(file_path))
         return FileResponse(str(_static_dir / "index.html"))
+
+
+async def _prune_unused_files_loop() -> None:
+    """Periodically delete uploaded files that were never used in chat."""
+    interval_seconds = int(get_settings().FILE_PRUNE_INTERVAL_MINUTES) * 60
+    while True:
+        try:
+            with DBSession(get_engine()) as session:
+                deleted_count = FileService(session).prune_expired_unused_files()
+            if deleted_count > 0:
+                logger.info("Pruned %d expired unused files", deleted_count)
+        except Exception as exc:
+            logger.error("Failed to prune expired files: %s", exc)
+        await sleep(interval_seconds)
 
 
 # Startup event to initialize database
@@ -155,6 +175,8 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize tool system: {e}")
 
+    app.state.file_prune_task = create_task(_prune_unused_files_loop())
+
     logger.info("=" * 50)
     logger.info("Application startup complete")
     logger.info("=" * 50)
@@ -170,6 +192,9 @@ async def shutdown_event():
     logger.info("=" * 50)
     logger.info("Shutting down application...")
     logger.info("=" * 50)
+    prune_task: Task[None] | None = getattr(app.state, "file_prune_task", None)
+    if prune_task is not None:
+        prune_task.cancel()
 
 
 # Global exception handler for better error logging

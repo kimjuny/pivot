@@ -24,6 +24,7 @@ python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 bcrypt = "^4.0.0"
 aiofiles = "^23.2.1"
 podman = "^5.4.0"
+pillow = "^11.2.1"
 
 [tool.poetry.group.dev.dependencies]
 # Development tools kept separate from production environment

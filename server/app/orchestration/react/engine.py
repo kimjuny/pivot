@@ -21,6 +21,7 @@ from app.models.react import (
     ReactTask,
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
+from app.schemas.file import FileAssetListItem
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_state_service import ReactStateService
 from app.services.session_memory_service import SessionMemoryService
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
+
 
 class ReactEngine:
     """ReAct state machine execution engine.
@@ -316,7 +318,9 @@ class ReactEngine:
         """
         current: BaseException | None = exc
         while current is not None:
-            status_code = getattr(getattr(current, "response", None), "status_code", None)
+            status_code = getattr(
+                getattr(current, "response", None), "status_code", None
+            )
             if (
                 isinstance(status_code, int)
                 and 400 <= status_code < 500
@@ -766,6 +770,8 @@ class ReactEngine:
         task: ReactTask,
         selected_skills_text: str = "",
         turn_user_message: str | None = None,
+        turn_files: list[FileAssetListItem] | None = None,
+        turn_file_blocks: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
@@ -774,6 +780,8 @@ class ReactEngine:
             task: The ReactTask to execute.
             selected_skills_text: Selected skill markdown block injected in system prompt.
             turn_user_message: User input of the current turn (used for chat history).
+            turn_files: Uploaded file summaries for chat history and prompting.
+            turn_file_blocks: Neutral multimodal content blocks for this turn.
 
         Yields:
             Stream events for each recursion cycle
@@ -793,6 +801,7 @@ class ReactEngine:
                 task.session_id,
                 "user",
                 turn_user_message or task.user_message,
+                files=turn_files,
             )
 
         self.state_service.mark_running(task)
@@ -806,6 +815,7 @@ class ReactEngine:
             ),
         )
         logged_message_count = len(runtime_state.messages)
+        pending_turn_file_blocks = turn_file_blocks
 
         try:
             while task.iteration < task.max_iteration:
@@ -836,7 +846,13 @@ class ReactEngine:
                     trace_id,
                     runtime_state.pending_action_result,
                 )
-                runtime_state = self.runtime_service.append_user_payload(task, user_payload)
+                attachments = pending_turn_file_blocks
+                runtime_state = self.runtime_service.append_user_payload(
+                    task,
+                    user_payload,
+                    attachments=attachments,
+                )
+                pending_turn_file_blocks = None
                 self._log_messages_pretty(
                     messages=runtime_state.messages,
                     task_id=task.task_id,
@@ -941,7 +957,9 @@ class ReactEngine:
                 if rollback_messages:
                     # Parse errors should be visible to users, but must not pollute
                     # persisted LLM messages. Roll back the just-appended user payload.
-                    runtime_state = self.runtime_service.rollback_last_user_message(task)
+                    runtime_state = self.runtime_service.rollback_last_user_message(
+                        task
+                    )
                     logged_message_count = len(runtime_state.messages)
                     if self._uses_incremental_request_messages():
                         # Drop chained cache linkage so malformed outputs do not keep
@@ -970,9 +988,11 @@ class ReactEngine:
                     if self._uses_incremental_request_messages():
                         response_id = event_data.get("llm_response_id")
                         if isinstance(response_id, str) and response_id:
-                            runtime_state = self.runtime_service.set_previous_response_id(
-                                task,
-                                response_id,
+                            runtime_state = (
+                                self.runtime_service.set_previous_response_id(
+                                    task,
+                                    response_id,
+                                )
                             )
 
                 action_type = event_data.get("action_type", "")

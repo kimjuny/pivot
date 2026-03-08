@@ -148,7 +148,9 @@ def parse_react_output(content: str) -> ParsedReactDecision:
     """
     json_section, payload_section = split_json_and_payload_sections(content)
     raw_payload = safe_load_json(json_section)
-    payloads = parse_payload_blocks(payload_section) if payload_section is not None else {}
+    payloads = (
+        parse_payload_blocks(payload_section) if payload_section is not None else {}
+    )
     resolved_payload = _resolve_tool_payload_references(raw_payload, payloads)
     action = _parse_action(resolved_payload)
 
@@ -228,12 +230,16 @@ def _parse_action(payload: dict[str, Any]) -> ParsedAction:
         raise ValueError("step_status_update is only allowed under action.")
 
     step_id = _parse_step_id(action_raw.get("step_id"))
-    step_status_update = _parse_step_status_updates(action_raw.get("step_status_update"))
+    step_status_update = _parse_step_status_updates(
+        action_raw.get("step_status_update")
+    )
     tool_calls = _parse_tool_calls(normalized_action_type, action_output)
 
     action_output_payload = dict(action_output)
     if tool_calls:
-        action_output_payload["tool_calls"] = [tool_call.to_dict() for tool_call in tool_calls]
+        action_output_payload["tool_calls"] = [
+            tool_call.to_dict() for tool_call in tool_calls
+        ]
 
     return ParsedAction(
         action_type=normalized_action_type,
@@ -285,9 +291,7 @@ def _parse_step_status_updates(raw_value: Any) -> list[StepStatusUpdate]:
     updates: list[StepStatusUpdate] = []
     for index, item in enumerate(raw_value):
         if not isinstance(item, dict):
-            raise ValueError(
-                f"action.step_status_update[{index}] must be an object."
-            )
+            raise ValueError(f"action.step_status_update[{index}] must be an object.")
 
         step_id = item.get("step_id")
         if not isinstance(step_id, str) or not step_id.strip():
@@ -296,7 +300,10 @@ def _parse_step_status_updates(raw_value: Any) -> list[StepStatusUpdate]:
             )
 
         status = item.get("status")
-        if not isinstance(status, str) or status.strip().lower() not in ALLOWED_STEP_STATUSES:
+        if (
+            not isinstance(status, str)
+            or status.strip().lower() not in ALLOWED_STEP_STATUSES
+        ):
             raise ValueError(
                 f"action.step_status_update[{index}].status must be one of "
                 f"{sorted(ALLOWED_STEP_STATUSES)}."
@@ -333,7 +340,9 @@ def _parse_tool_calls(
 
     tool_calls = action_output.get("tool_calls")
     if not isinstance(tool_calls, list) or not tool_calls:
-        raise ValueError("CALL_TOOL requires action.output.tool_calls to be a non-empty list.")
+        raise ValueError(
+            "CALL_TOOL requires action.output.tool_calls to be a non-empty list."
+        )
 
     normalized_tool_calls: list[ToolCallRequest] = []
     for index, item in enumerate(tool_calls):

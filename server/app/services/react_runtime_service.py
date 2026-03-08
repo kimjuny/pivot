@@ -22,7 +22,7 @@ class TaskRuntimeState:
         previous_response_id: Provider-specific previous response chain ID.
     """
 
-    messages: list[dict[str, str]]
+    messages: list[dict[str, Any]]
     pending_action_result: list[dict[str, Any]] | None
     previous_response_id: str | None
 
@@ -84,23 +84,29 @@ class ReactRuntimeService:
         self,
         task: ReactTask,
         payload: dict[str, Any],
+        attachments: list[dict[str, Any]] | None = None,
     ) -> TaskRuntimeState:
         """Append the per-recursion user payload and persist it.
 
         Args:
             task: Task whose runtime state should be updated.
             payload: Serializable user payload for the next recursion.
+            attachments: Neutral multimodal content blocks to append after text.
 
         Returns:
             The updated runtime state.
         """
         state = self.load(task)
-        state.messages.append(
-            {
-                "role": "user",
-                "content": json.dumps(payload, ensure_ascii=False),
-            }
+        message_content: str | list[dict[str, Any]] = json.dumps(
+            payload, ensure_ascii=False
         )
+        if attachments:
+            message_content = [
+                {"type": "text", "text": message_content},
+                *attachments,
+            ]
+
+        state.messages.append({"role": "user", "content": message_content})
         self._persist_state(task, state)
         return state
 
@@ -214,7 +220,7 @@ class ReactRuntimeService:
         self.db.add(task)
         self.db.commit()
 
-    def _load_messages(self, task: ReactTask) -> list[dict[str, str]]:
+    def _load_messages(self, task: ReactTask) -> list[dict[str, Any]]:
         """Load persisted runtime messages from the task row.
 
         Args:
@@ -242,7 +248,7 @@ class ReactRuntimeService:
             )
             return []
 
-        normalized: list[dict[str, str]] = []
+        normalized: list[dict[str, Any]] = []
         for item in raw_messages:
             if not isinstance(item, dict):
                 continue
@@ -251,7 +257,13 @@ class ReactRuntimeService:
             if (
                 isinstance(role, str)
                 and role in {"system", "user", "assistant"}
-                and isinstance(content, str)
+                and (
+                    isinstance(content, str)
+                    or (
+                        isinstance(content, list)
+                        and all(isinstance(block, dict) for block in content)
+                    )
+                )
             ):
                 normalized.append({"role": role, "content": content})
         return normalized

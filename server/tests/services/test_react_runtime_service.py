@@ -62,7 +62,9 @@ class ReactRuntimeServiceTestCase(unittest.TestCase):
         )
 
         self.service.append_user_payload(self.task, {"iteration": 1, "foo": "bar"})
-        self.service.append_assistant_message(self.task, '{"action":{"action_type":"REFLECT","output":{}}}')
+        self.service.append_assistant_message(
+            self.task, '{"action":{"action_type":"REFLECT","output":{}}}'
+        )
         self.service.set_next_action_result(
             self.task,
             [{"id": "call-1", "result": {"ok": True}}],

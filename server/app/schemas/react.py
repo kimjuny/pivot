@@ -33,6 +33,10 @@ class ReactChatRequest(BaseModel):
     session_id: str | None = Field(
         default=None, description="Session ID for session memory persistence"
     )
+    file_ids: list[str] = Field(
+        default_factory=list,
+        description="Uploaded image IDs to attach to this user turn",
+    )
 
 
 class ReactStreamEventType(str, Enum):

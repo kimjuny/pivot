@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback, FormEvent, KeyboardEvent } from 'react';
-import { ArrowUp, Plus, Paperclip, Loader2, CheckCircle2, XCircle, AlertCircle, Wrench, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback, ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react';
+import { ArrowUp, Plus, Loader2, CheckCircle2, XCircle, AlertCircle, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft, ImagePlus, Wrench } from 'lucide-react';
 import { formatTimestamp } from '../utils/timestamp';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -11,7 +11,21 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { createSession, listSessions, deleteSession, getFullSessionHistory, SessionListItem, TaskMessage, RecursionDetail, API_BASE_URL } from '../utils/api';
+import {
+  createSession,
+  listSessions,
+  deleteSession,
+  getFullSessionHistory,
+  deleteChatImage,
+  fetchChatImageBlob,
+  uploadChatImage,
+  type ChatImageFile,
+  type FileUploadSource,
+  SessionListItem,
+  TaskMessage,
+  RecursionDetail,
+  API_BASE_URL,
+} from '../utils/api';
 
 /**
  * Props for ReactChatInterface component.
@@ -177,12 +191,36 @@ interface SkillSelectionState {
 }
 
 /**
+ * Image attachment metadata used by the chat UI.
+ */
+interface ChatAttachment {
+  fileId: string;
+  originalName: string;
+  mimeType: string;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  previewUrl?: string;
+}
+
+/**
+ * Local upload queue item shown in the composer.
+ */
+interface PendingUploadItem extends ChatAttachment {
+  clientId: string;
+  source: FileUploadSource;
+  status: 'uploading' | 'ready' | 'error';
+  errorMessage?: string;
+}
+
+/**
  * Message in chat history.
  */
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  attachments?: ChatAttachment[];
   timestamp: string;
   task_id?: string;
   recursions?: RecursionRecord[];
@@ -192,6 +230,84 @@ interface ChatMessage {
 }
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
+
+/**
+ * Build stable chat attachment metadata from API payloads.
+ */
+function toChatAttachment(file: ChatImageFile, previewUrl?: string): ChatAttachment {
+  return {
+    fileId: file.file_id,
+    originalName: file.original_name,
+    mimeType: file.mime_type,
+    width: file.width,
+    height: file.height,
+    sizeBytes: file.size_bytes,
+    previewUrl,
+  };
+}
+
+/**
+ * Fetch and render an authenticated image thumbnail.
+ */
+function AttachmentThumbnail({
+  attachment,
+  alt,
+  className,
+}: {
+  attachment: ChatAttachment;
+  alt: string;
+  className?: string;
+}) {
+  const [src, setSrc] = useState<string | null>(attachment.previewUrl ?? null);
+
+  useEffect(() => {
+    if (attachment.previewUrl) {
+      setSrc(attachment.previewUrl);
+      return;
+    }
+
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    const loadImage = async () => {
+      try {
+        const blob = await fetchChatImageBlob(attachment.fileId, controller.signal);
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error('Failed to load image attachment:', err);
+      }
+    };
+
+    void loadImage();
+
+    return () => {
+      controller.abort();
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [attachment.fileId, attachment.previewUrl]);
+
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className={className ?? 'h-full w-full object-cover'}
+      />
+    );
+  }
+
+  return (
+    <div className={`flex h-full w-full items-center justify-center bg-muted ${className ?? ''}`}>
+      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 /**
  * Component to fetch and display recursion state in a tooltip.
@@ -272,6 +388,10 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const pendingFilesRef = useRef<PendingUploadItem[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<PendingUploadItem[]>([]);
 
   // Session state
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
@@ -287,7 +407,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   /**
    * Build persisted skill selection state from historical task payload.
    */
-  const buildSkillSelectionFromTask = (task: TaskMessage): SkillSelectionState | undefined => {
+  const buildSkillSelectionFromTask = useCallback((task: TaskMessage): SkillSelectionState | undefined => {
     const raw = task.skill_selection_result;
     if (!raw || typeof raw !== 'object') {
       return undefined;
@@ -321,7 +441,261 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
       durationMs,
       tokens,
     };
-  };
+  }, []);
+
+  /**
+   * Convert persisted task history into renderable chat messages.
+   */
+  const buildMessagesFromHistory = useCallback((tasks: TaskMessage[]): ChatMessage[] => {
+    const loadedMessages: ChatMessage[] = [];
+
+    for (const task of tasks) {
+      loadedMessages.push({
+        id: `user-${task.task_id}`,
+        role: 'user',
+        content: task.user_message,
+        attachments: (task.files ?? []).map((file) => toChatAttachment(file)),
+        timestamp: task.created_at,
+      });
+
+      const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
+        const events: ReactStreamEvent[] = [];
+
+        if (r.action_type === 'CALL_TOOL') {
+          let toolCalls: unknown[] = [];
+          let toolResults: unknown[] = [];
+
+          if (r.action_output) {
+            const actionData = asRecord(parseJson(r.action_output));
+            if (actionData && Array.isArray(actionData.tool_calls)) {
+              toolCalls = actionData.tool_calls;
+            }
+          }
+
+          if (r.tool_call_results) {
+            const parsedResults = parseJson(r.tool_call_results);
+            if (Array.isArray(parsedResults)) {
+              toolResults = parsedResults;
+            }
+          }
+
+          if (toolCalls.length > 0 || toolResults.length > 0) {
+            events.push({
+              type: 'tool_call',
+              task_id: task.task_id,
+              trace_id: r.trace_id,
+              iteration: r.iteration,
+              data: {
+                tool_calls: toolCalls,
+                tool_results: toolResults,
+              },
+              timestamp: r.updated_at,
+            });
+          }
+        }
+
+        if (r.action_type === 'RE_PLAN' && r.action_output) {
+          const planData = parseJson(r.action_output);
+          if (planData !== null) {
+            events.push({
+              type: 'plan_update',
+              task_id: task.task_id,
+              trace_id: r.trace_id,
+              iteration: r.iteration,
+              data: planData,
+              timestamp: r.updated_at,
+            });
+          }
+        }
+
+        return {
+          uid: `history-${task.task_id}-${r.trace_id || `iter-${r.iteration}`}`,
+          iteration: r.iteration,
+          trace_id: r.trace_id,
+          observe: r.observe || undefined,
+          thought: r.thought || undefined,
+          abstract: r.abstract || undefined,
+          action: r.action_type || undefined,
+          events,
+          status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
+          errorLog: r.error_log || undefined,
+          startTime: r.created_at,
+          endTime: r.updated_at,
+          tokens: {
+            prompt_tokens: r.prompt_tokens,
+            completion_tokens: r.completion_tokens,
+            total_tokens: r.total_tokens,
+            cached_input_tokens: r.cached_input_tokens ?? 0,
+          },
+        };
+      });
+
+      const aggregatedTaskTokens = recursions.reduce<TokenUsage>(
+        (acc, recursion) => ({
+          prompt_tokens: acc.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
+          completion_tokens: acc.completion_tokens + (recursion.tokens?.completion_tokens ?? 0),
+          total_tokens: acc.total_tokens + (recursion.tokens?.total_tokens ?? 0),
+          cached_input_tokens: (acc.cached_input_tokens ?? 0) + (recursion.tokens?.cached_input_tokens ?? 0),
+        }),
+        {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+          cached_input_tokens: 0,
+        }
+      );
+
+      loadedMessages.push({
+        id: `assistant-${task.task_id}`,
+        role: 'assistant',
+        content: task.agent_answer || '',
+        timestamp: task.updated_at,
+        task_id: task.task_id,
+        recursions,
+        skillSelection: buildSkillSelectionFromTask(task),
+        status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
+        totalTokens: {
+          prompt_tokens: aggregatedTaskTokens.prompt_tokens,
+          completion_tokens: aggregatedTaskTokens.completion_tokens,
+          total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
+          cached_input_tokens: aggregatedTaskTokens.cached_input_tokens ?? 0,
+        },
+      });
+    }
+
+    return loadedMessages;
+  }, [buildSkillSelectionFromTask]);
+
+  /**
+   * Keep composer queue isolated from message history and clean up uploads safely.
+   */
+  const removePendingFile = useCallback(async (clientId: string) => {
+    const target = pendingFiles.find((item) => item.clientId === clientId);
+    if (!target) {
+      return;
+    }
+
+    const controller = uploadControllersRef.current.get(clientId);
+    if (controller) {
+      controller.abort();
+      uploadControllersRef.current.delete(clientId);
+    }
+
+    setPendingFiles((prev) => prev.filter((item) => item.clientId !== clientId));
+    if (target.previewUrl) {
+      URL.revokeObjectURL(target.previewUrl);
+    }
+
+    if (target.status === 'ready') {
+      try {
+        await deleteChatImage(target.fileId);
+      } catch (err) {
+        console.error('Failed to delete pending chat image:', err);
+      }
+    }
+  }, [pendingFiles]);
+
+  /**
+   * Start upload verification for newly added files.
+   */
+  const enqueueFiles = useCallback((files: File[], source: FileUploadSource) => {
+    files.forEach((file) => {
+      const clientId = `${source}-${crypto.randomUUID()}`;
+      const previewUrl = URL.createObjectURL(file);
+      const initialItem: PendingUploadItem = {
+        clientId,
+        fileId: '',
+        originalName: file.name,
+        mimeType: file.type || 'image/*',
+        width: 0,
+        height: 0,
+        sizeBytes: file.size,
+        previewUrl,
+        source,
+        status: 'uploading',
+      };
+
+      setPendingFiles((prev) => [...prev, initialItem]);
+
+      const controller = new AbortController();
+      uploadControllersRef.current.set(clientId, controller);
+
+      const uploadFile = async () => {
+        try {
+          const uploadedFile = await uploadChatImage(file, source, controller.signal);
+          setPendingFiles((prev) => prev.map((item) => (
+            item.clientId === clientId
+              ? {
+                ...item,
+                ...toChatAttachment(uploadedFile, previewUrl),
+                status: 'ready',
+              }
+              : item
+          )));
+        } catch (err) {
+          if (controller.signal.aborted) {
+            return;
+          }
+
+          const errorMessage = err instanceof Error ? err.message : 'Failed to upload image';
+          setPendingFiles((prev) => prev.map((item) => (
+            item.clientId === clientId
+              ? {
+                ...item,
+                status: 'error',
+                errorMessage,
+              }
+              : item
+          )));
+        } finally {
+          uploadControllersRef.current.delete(clientId);
+        }
+      };
+
+      void uploadFile();
+    });
+  }, []);
+
+  /**
+   * Handle file picker changes from the composer menu.
+   */
+  const handleFileInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    if (selectedFiles.length > 0) {
+      enqueueFiles(selectedFiles, 'local');
+    }
+    event.target.value = '';
+  }, [enqueueFiles]);
+
+  /**
+   * Accept pasted images from Clipboard API into the upload queue.
+   */
+  const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const imageFiles: File[] = [];
+
+    for (const item of Array.from(event.clipboardData.items)) {
+      if (!item.type.startsWith('image/')) {
+        continue;
+      }
+      const file = item.getAsFile();
+      if (!file) {
+        continue;
+      }
+      const extension = file.type.split('/')[1] || 'png';
+      imageFiles.push(
+        new File([file], file.name || `clipboard-${Date.now()}.${extension}`, {
+          type: file.type || 'image/png',
+        })
+      );
+    }
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    enqueueFiles(imageFiles, 'clipboard');
+  }, [enqueueFiles]);
 
   /**
    * Reload the session list for current agent.
@@ -355,133 +729,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
           // Load history for the first session
           try {
             const history = await getFullSessionHistory(firstSessionId);
-            const loadedMessages: ChatMessage[] = [];
-
-            for (const task of history.tasks) {
-              // Add user message
-              loadedMessages.push({
-                id: `user-${task.task_id}`,
-                role: 'user',
-                content: task.user_message,
-                timestamp: task.created_at,
-              });
-
-              // Convert recursions to RecursionRecord format
-              const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
-                // Parse events from recursion data for historical sessions
-                const events: ReactStreamEvent[] = [];
-
-                // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
-                if (r.action_type === 'CALL_TOOL') {
-                  let toolCalls: unknown[] = [];
-                  let toolResults: unknown[] = [];
-
-                  // Parse tool_calls from action_output
-                  if (r.action_output) {
-                    const actionData = asRecord(parseJson(r.action_output));
-                    if (actionData && Array.isArray(actionData.tool_calls)) {
-                      toolCalls = actionData.tool_calls;
-                    }
-                  }
-
-                  // Parse tool_results from tool_call_results
-                  if (r.tool_call_results) {
-                    const parsedResults = parseJson(r.tool_call_results);
-                    if (Array.isArray(parsedResults)) {
-                      toolResults = parsedResults;
-                    }
-                  }
-
-                  // Add tool_call event if we have any data
-                  if (toolCalls.length > 0 || toolResults.length > 0) {
-                    events.push({
-                      type: 'tool_call',
-                      task_id: task.task_id,
-                      trace_id: r.trace_id,
-                      iteration: r.iteration,
-                      data: {
-                        tool_calls: toolCalls,
-                        tool_results: toolResults,
-                      },
-                      timestamp: r.updated_at,
-                    });
-                  }
-                }
-
-                // For RE_PLAN: parse action_output for plan data
-                if (r.action_type === 'RE_PLAN' && r.action_output) {
-                  const planData = parseJson(r.action_output);
-                  if (planData !== null) {
-                    events.push({
-                      type: 'plan_update',
-                      task_id: task.task_id,
-                      trace_id: r.trace_id,
-                      iteration: r.iteration,
-                      data: planData,
-                      timestamp: r.updated_at,
-                    });
-                  }
-                }
-
-                return {
-                  uid: `history-${task.task_id}-${r.trace_id || `iter-${r.iteration}`}`,
-                  iteration: r.iteration,
-                  trace_id: r.trace_id,
-                  observe: r.observe || undefined,
-                  thought: r.thought || undefined,
-                  abstract: r.abstract || undefined,
-                  // Only show action_type, not the full action_output
-                  // Tool calls are rendered separately in TOOL EXECUTION section
-                  action: r.action_type || undefined,
-                  events: events,
-                  status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
-                  errorLog: r.error_log || undefined,
-                  startTime: r.created_at,
-                  endTime: r.updated_at,
-                  tokens: {
-                    prompt_tokens: r.prompt_tokens,
-                    completion_tokens: r.completion_tokens,
-                    total_tokens: r.total_tokens,
-                    cached_input_tokens: r.cached_input_tokens ?? 0,
-                  },
-                };
-              });
-
-              const aggregatedTaskTokens = recursions.reduce<TokenUsage>(
-                (acc, recursion) => ({
-                  prompt_tokens: acc.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
-                  completion_tokens: acc.completion_tokens + (recursion.tokens?.completion_tokens ?? 0),
-                  total_tokens: acc.total_tokens + (recursion.tokens?.total_tokens ?? 0),
-                  cached_input_tokens: (acc.cached_input_tokens ?? 0) + (recursion.tokens?.cached_input_tokens ?? 0),
-                }),
-                {
-                  prompt_tokens: 0,
-                  completion_tokens: 0,
-                  total_tokens: 0,
-                  cached_input_tokens: 0,
-                }
-              );
-
-              // Add assistant message with recursions
-              loadedMessages.push({
-                id: `assistant-${task.task_id}`,
-                role: 'assistant',
-                content: task.agent_answer || '',
-                timestamp: task.updated_at,
-                task_id: task.task_id,
-                recursions: recursions,
-                skillSelection: buildSkillSelectionFromTask(task),
-                status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
-                totalTokens: {
-                  prompt_tokens: aggregatedTaskTokens.prompt_tokens,
-                  completion_tokens: aggregatedTaskTokens.completion_tokens,
-                  total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
-                  cached_input_tokens: aggregatedTaskTokens.cached_input_tokens ?? 0,
-                },
-              });
-            }
-
-            setMessages(loadedMessages);
+            setMessages(buildMessagesFromHistory(history.tasks));
           } catch (historyErr) {
             console.error('Failed to load initial session history:', historyErr);
           }
@@ -501,7 +749,24 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
       }
     };
     void initSessions();
-  }, [agentId, isInitialized, isLoadingSession, refreshSessionList]);
+  }, [agentId, buildMessagesFromHistory, isInitialized, isLoadingSession, refreshSessionList]);
+
+  /**
+   * Abort in-flight uploads when the chat UI unmounts.
+   */
+  useEffect(() => () => {
+    uploadControllersRef.current.forEach((controller) => controller.abort());
+    uploadControllersRef.current.clear();
+    pendingFilesRef.current.forEach((item) => {
+      if (item.previewUrl) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    pendingFilesRef.current = pendingFiles;
+  }, [pendingFiles]);
 
   /**
    * Create a new session and switch to it.
@@ -514,6 +779,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
       const session = await createSession(agentId);
       setCurrentSessionId(session.session_id);
       setMessages([]); // Clear messages for new session
+      setPendingFiles([]);
       setSessions((prev) => [{
         session_id: session.session_id,
         agent_id: session.agent_id,
@@ -539,6 +805,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
 
     setCurrentSessionId(sessionId);
     setIsLoadingSession(true);
+    setPendingFiles([]);
     autoScrollEnabledRef.current = true;
     forceAutoScrollNextRef.current = true;
 
@@ -546,134 +813,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
       // Load full session history with recursion details
       const history = await getFullSessionHistory(sessionId);
 
-      // Convert tasks to ChatMessage format with recursion details
-      const loadedMessages: ChatMessage[] = [];
-
-      for (const task of history.tasks) {
-        // Add user message
-        loadedMessages.push({
-          id: `user-${task.task_id}`,
-          role: 'user',
-          content: task.user_message,
-          timestamp: task.created_at,
-        });
-
-        // Convert recursions to RecursionRecord format
-        const recursions: RecursionRecord[] = task.recursions.map((r: RecursionDetail) => {
-          // Parse events from recursion data for historical sessions
-          const events: ReactStreamEvent[] = [];
-
-          // For CALL_TOOL: parse action_output for tool_calls and tool_call_results for tool_results
-          if (r.action_type === 'CALL_TOOL') {
-            let toolCalls: unknown[] = [];
-            let toolResults: unknown[] = [];
-
-            // Parse tool_calls from action_output
-            if (r.action_output) {
-              const actionData = asRecord(parseJson(r.action_output));
-              if (actionData && Array.isArray(actionData.tool_calls)) {
-                toolCalls = actionData.tool_calls;
-              }
-            }
-
-            // Parse tool_results from tool_call_results
-            if (r.tool_call_results) {
-              const parsedResults = parseJson(r.tool_call_results);
-              if (Array.isArray(parsedResults)) {
-                toolResults = parsedResults;
-              }
-            }
-
-            // Add tool_call event if we have any data
-            if (toolCalls.length > 0 || toolResults.length > 0) {
-              events.push({
-                type: 'tool_call',
-                task_id: task.task_id,
-                trace_id: r.trace_id,
-                iteration: r.iteration,
-                data: {
-                  tool_calls: toolCalls,
-                  tool_results: toolResults,
-                },
-                timestamp: r.updated_at,
-              });
-            }
-          }
-
-          // For RE_PLAN: parse action_output for plan data
-          if (r.action_type === 'RE_PLAN' && r.action_output) {
-            const planData = parseJson(r.action_output);
-            if (planData !== null) {
-              events.push({
-                type: 'plan_update',
-                task_id: task.task_id,
-                trace_id: r.trace_id,
-                iteration: r.iteration,
-                data: planData,
-                timestamp: r.updated_at,
-              });
-            }
-          }
-
-          return {
-            uid: `history-${task.task_id}-${r.trace_id || `iter-${r.iteration}`}`,
-            iteration: r.iteration,
-            trace_id: r.trace_id,
-            observe: r.observe || undefined,
-            thought: r.thought || undefined,
-            abstract: r.abstract || undefined,
-            // Only show action_type, not the full action_output
-            // Tool calls are rendered separately in TOOL EXECUTION section
-            action: r.action_type || undefined,
-            events: events,
-            status: r.status === 'done' ? 'completed' : r.status === 'error' ? 'error' : 'completed',
-            errorLog: r.error_log || undefined,
-            startTime: r.created_at,
-            endTime: r.updated_at,
-            tokens: {
-              prompt_tokens: r.prompt_tokens,
-              completion_tokens: r.completion_tokens,
-              total_tokens: r.total_tokens,
-              cached_input_tokens: r.cached_input_tokens ?? 0,
-            },
-          };
-        });
-
-        const aggregatedTaskTokens = recursions.reduce<TokenUsage>(
-          (acc, recursion) => ({
-            prompt_tokens: acc.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
-            completion_tokens: acc.completion_tokens + (recursion.tokens?.completion_tokens ?? 0),
-            total_tokens: acc.total_tokens + (recursion.tokens?.total_tokens ?? 0),
-            cached_input_tokens: (acc.cached_input_tokens ?? 0) + (recursion.tokens?.cached_input_tokens ?? 0),
-          }),
-          {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-            cached_input_tokens: 0,
-          }
-        );
-
-        // Add assistant message with recursions
-        loadedMessages.push({
-          id: `assistant-${task.task_id}`,
-          role: 'assistant',
-          content: task.agent_answer || '',
-          timestamp: task.updated_at,
-          task_id: task.task_id,
-          recursions: recursions,
-          skillSelection: buildSkillSelectionFromTask(task),
-          status: task.status === 'completed' ? 'completed' : task.status === 'failed' ? 'error' : 'completed',
-          totalTokens: {
-            prompt_tokens: aggregatedTaskTokens.prompt_tokens,
-            completion_tokens: aggregatedTaskTokens.completion_tokens,
-            total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
-            cached_input_tokens: aggregatedTaskTokens.cached_input_tokens ?? 0,
-          },
-        });
-      }
-
-      setMessages(loadedMessages);
+      setMessages(buildMessagesFromHistory(history.tasks));
     } catch (err) {
       console.error('Failed to load session history:', err);
       setMessages([]); // Clear messages on error
@@ -788,13 +928,19 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
     previousMessageCountRef.current = messages.length;
   }, [messages, scrollToBottom]);
 
+  const readyPendingFiles = pendingFiles.filter((item) => item.status === 'ready' && item.fileId);
+  const hasUploadingFiles = pendingFiles.some((item) => item.status === 'uploading');
+  const canSendMessage = !isStreaming && !hasUploadingFiles && (
+    inputMessage.trim().length > 0 || readyPendingFiles.length > 0
+  );
+
   /**
    * Handle form submission to send message.
    */
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (inputMessage.trim() && !isStreaming) {
+      if (canSendMessage) {
         void sendMessage();
       }
     }
@@ -805,7 +951,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
    */
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!inputMessage.trim() || isStreaming) return;
+    if (!canSendMessage) return;
 
     void sendMessage();
   };
@@ -827,6 +973,16 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   const sendMessage = async () => {
     // If replying, use the replyTaskId. Otherwise undefined.
     const currentReplyTaskId = replyTaskId;
+    const filesToSend = readyPendingFiles;
+    const sentAttachments = filesToSend.map((file) => ({
+      fileId: file.fileId,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+      width: file.width,
+      height: file.height,
+      sizeBytes: file.sizeBytes,
+      previewUrl: file.previewUrl,
+    }));
 
     // Reset reply state if we are sending
     if (currentReplyTaskId) {
@@ -839,11 +995,13 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
       id: `user-${Date.now()}`,
       role: 'user',
       content: inputMessage,
+      attachments: sentAttachments,
       timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInputMessage('');
+    setPendingFiles((prev) => prev.filter((item) => item.status !== 'ready'));
     setError(null);
     setIsStreaming(true);
 
@@ -909,6 +1067,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
           user: 'web-user',
           task_id: currentReplyTaskId,
           session_id: activeSessionId,
+          file_ids: filesToSend.map((file) => file.fileId),
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -1873,6 +2032,90 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
     );
   };
 
+  const renderAttachments = (
+    attachments: ChatAttachment[] | undefined,
+    variant: 'message' | 'composer' = 'message'
+  ) => {
+    if (!attachments || attachments.length === 0) {
+      return null;
+    }
+
+    if (variant === 'composer') {
+      return (
+        <div className="flex flex-wrap gap-2 px-3 pt-3">
+          {attachments.map((attachment) => {
+            const queueItem = attachment as PendingUploadItem;
+            return (
+              <div
+                key={queueItem.clientId}
+                className={`relative flex h-[72px] w-[72px] overflow-hidden rounded-xl border bg-muted ${queueItem.status === 'error'
+                  ? 'border-destructive/50'
+                  : 'border-border'
+                  }`}
+              >
+                <AttachmentThumbnail
+                  attachment={queueItem}
+                  alt={queueItem.originalName}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void removePendingFile(queueItem.clientId);
+                  }}
+                  className="absolute right-1 top-1 rounded-full bg-background/90 p-1 text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+                  title="Remove image"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+                <div className="absolute inset-x-0 bottom-0 bg-background/85 px-1.5 py-1 text-[10px] leading-tight">
+                  <div className="truncate text-foreground">{queueItem.originalName}</div>
+                  {queueItem.status === 'uploading' && (
+                    <div className="flex items-center gap-1 text-muted-foreground">
+                      <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                      <span>Processing...</span>
+                    </div>
+                  )}
+                  {queueItem.status === 'ready' && (
+                    <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="h-2.5 w-2.5" />
+                      <span>Ready</span>
+                    </div>
+                  )}
+                  {queueItem.status === 'error' && (
+                    <div className="truncate text-destructive">
+                      {queueItem.errorMessage || 'Upload failed'}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return (
+      <div className="mb-3 flex flex-wrap gap-2">
+        {attachments.map((attachment) => (
+          <div
+            key={attachment.fileId}
+            className="overflow-hidden rounded-xl border border-border bg-background/70"
+          >
+            <div className="h-28 w-28">
+              <AttachmentThumbnail
+                attachment={attachment}
+                alt={attachment.originalName}
+              />
+            </div>
+            <div className="max-w-28 truncate border-t border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
+              {attachment.originalName}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const isConversationEmpty = messages.length === 0;
   const normalizedAgentName = agentName?.trim() || 'ReAct Agent';
 
@@ -2018,9 +2261,16 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
                         <div className="text-[10px] mb-1 opacity-70 font-mono">
                           {formatTimestamp(message.timestamp)}
                         </div>
-                        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
-                          {message.content}
-                        </div>
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="rounded-xl bg-primary-foreground/10 p-2">
+                            {renderAttachments(message.attachments)}
+                          </div>
+                        )}
+                        {message.content && (
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap break-words">
+                            {message.content}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -2202,34 +2452,46 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
             </div>
           )}
           <form onSubmit={handleSubmit} className="relative overflow-hidden rounded-2xl border bg-background shadow-lg focus-within:border-ring transition-all">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/jpg,image/png,image/webp"
+              multiple
+              className="hidden"
+              onChange={handleFileInputChange}
+            />
+            {renderAttachments(pendingFiles, 'composer')}
             <Textarea
               value={inputMessage}
               onChange={(e) => setInputMessage(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
               className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus-visible:ring-0 focus-visible:shadow-none focus:shadow-none focus:outline-none"
               disabled={isStreaming}
             />
             <div className="flex items-center px-4 pb-3 justify-between">
-              <DropdownMenu>
+              <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
                     <Plus className="h-4 h-4" />
                     <span className="sr-only">Attach</span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem>
-                    <Paperclip className="mr-2 h-4 w-4" />
-                    <span>Add images & files</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <Brain className="mr-2 h-4 w-4" />
-                    <span>Thinking</span>
+                <DropdownMenuContent align="start" className="z-[60]">
+                  <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+                    <ImagePlus className="mr-2 h-4 w-4" />
+                    <span>Upload image</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               <div className="flex items-center gap-2">
+                {hasUploadingFiles && (
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Processing images...</span>
+                  </div>
+                )}
                 {isStreaming ? (
                   <Button
                     type="button"
@@ -2243,7 +2505,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
                 ) : (
                   <Button
                     type="submit"
-                    disabled={!inputMessage.trim()}
+                    disabled={!canSendMessage}
                     size="icon"
                     className="h-8 w-8 rounded-full"
                     title="Send message"

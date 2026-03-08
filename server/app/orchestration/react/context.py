@@ -115,9 +115,7 @@ class ReactContext:
 
         raw_recursion_history = parsed_snapshot.get("recursion_history")
         recursion_history = (
-            raw_recursion_history
-            if isinstance(raw_recursion_history, list)
-            else []
+            raw_recursion_history if isinstance(raw_recursion_history, list) else []
         )
 
         return cls(

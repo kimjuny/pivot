@@ -378,7 +378,9 @@ class ReactStateService:
         if action_type == "RE_PLAN":
             self._replace_plan(task, context, action_output.get("plan", []))
 
-        self._apply_step_status_updates(task, context, recursion.trace_id, step_status_updates)
+        self._apply_step_status_updates(
+            task, context, recursion.trace_id, step_status_updates
+        )
         self._link_recursion_to_context(
             context=context,
             task=task,
