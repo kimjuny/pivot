@@ -8,14 +8,14 @@ readme = "README.md"
 packages = [{include = "server"}]
 
 [tool.poetry.dependencies]
-# Target Python 3.10 to ensure maximum compatibility for open-source users.
-python = "^3.10"
-fastapi = "0.68.0"
-uvicorn = "0.15.0"
-python-multipart = "0.0.5"
-sqlmodel = "0.0.8"
-sqlalchemy = "1.4.41"
-alembic = "1.8.1"
+# Target Python 3.11 so the backend can use Docling and the Pydantic v2 stack.
+python = "^3.11"
+fastapi = "^0.115.12"
+uvicorn = "^0.34.0"
+python-multipart = "^0.0.20"
+sqlmodel = "^0.0.24"
+sqlalchemy = "^2.0.41"
+alembic = "^1.16.5"
 requests = "^2.31.0"
 python-dotenv = "^1.0.0"
 openai = "^1.0.0"
@@ -24,6 +24,10 @@ python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 bcrypt = "^4.0.0"
 aiofiles = "^23.2.1"
 podman = "^5.4.0"
+pillow = "^11.2.1"
+pydantic = "^2.12.5"
+pydantic-settings = "^2.13.1"
+docling = "^2.77.0"
 
 [tool.poetry.group.dev.dependencies]
 # Development tools kept separate from production environment
@@ -36,8 +40,8 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.ruff]
-# Target Python 3.10 to ensure maximum compatibility for open-source users.
-target-version = "py310"
+# Target Python 3.11 to match the backend runtime and dependency graph.
+target-version = "py311"
 line-length = 88
 
 [tool.ruff.lint]
@@ -61,10 +65,10 @@ known-first-party = ["server"]
 include = ["."]
 extraPaths = ["./server"]
 
-# Standard mode is recommended for open-source to avoid overly aggressive errors 
+# Standard mode is recommended for open-source to avoid overly aggressive errors
 # while maintaining high type safety.
 typeCheckingMode = "standard"
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 pythonPlatform = "All"
 
 # Rules to keep AI-generated code clean and prevent common runtime crashes.

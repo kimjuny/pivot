@@ -2,7 +2,9 @@ import json
 from datetime import datetime, timezone
 from enum import Enum
 
-from pydantic import BaseModel, Field, validator
+from pydantic import ConfigDict, Field, field_validator
+
+from app.schemas.base import AppBaseModel
 
 
 def _normalize_extra_config(extra_config: str | None) -> str | None:
@@ -45,7 +47,7 @@ def _normalize_thinking_mode(thinking: str | None) -> str | None:
     return normalized
 
 
-class AgentCreate(BaseModel):
+class AgentCreate(AppBaseModel):
     name: str = Field(..., description="Agent name")
     description: str | None = Field(None, description="Agent description")
     llm_id: int = Field(..., description="LLM configuration ID")
@@ -58,7 +60,7 @@ class AgentCreate(BaseModel):
     )
 
 
-class AgentUpdate(BaseModel):
+class AgentUpdate(AppBaseModel):
     name: str | None = None
     description: str | None = None
     llm_id: int | None = None
@@ -71,7 +73,7 @@ class AgentUpdate(BaseModel):
     skill_ids: str | None = None
 
 
-class AgentResponse(BaseModel):
+class AgentResponse(AppBaseModel):
     id: int
     name: str
     description: str | None
@@ -85,23 +87,19 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class SceneCreate(BaseModel):
+class SceneCreate(AppBaseModel):
     name: str = Field(..., description="Scene name")
     description: str | None = Field(None, description="Scene description")
     agent_id: int | None = Field(None, description="Agent ID")
 
 
-class SceneUpdate(BaseModel):
+class SceneUpdate(AppBaseModel):
     name: str | None = None
     description: str | None = None
     agent_id: int | None = None
 
 
-class SceneResponse(BaseModel):
+class SceneResponse(AppBaseModel):
     id: int
     name: str
     description: str | None
@@ -109,11 +107,7 @@ class SceneResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class SubsceneCreate(BaseModel):
+class SubsceneCreate(AppBaseModel):
     name: str = Field(..., description="Subscene name")
     type: str = Field(default="normal", description="Subscene type: start, normal, end")
     state: str = Field(
@@ -124,7 +118,7 @@ class SubsceneCreate(BaseModel):
     objective: str | None = Field(None, description="Subscene objective")
 
 
-class SubsceneUpdate(BaseModel):
+class SubsceneUpdate(AppBaseModel):
     name: str | None = None
     type: str | None = None
     state: str | None = None
@@ -133,7 +127,7 @@ class SubsceneUpdate(BaseModel):
     objective: str | None = None
 
 
-class SubsceneResponse(BaseModel):
+class SubsceneResponse(AppBaseModel):
     id: int
     name: str
     type: str
@@ -145,11 +139,7 @@ class SubsceneResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class ConnectionCreate(BaseModel):
+class ConnectionCreate(AppBaseModel):
     name: str = Field(..., description="Connection name")
     condition: str | None = Field(None, description="Connection condition")
     from_subscene: str = Field(..., description="Source subscene name")
@@ -159,7 +149,7 @@ class ConnectionCreate(BaseModel):
     scene_id: int | None = Field(None, description="Scene ID")
 
 
-class ConnectionUpdate(BaseModel):
+class ConnectionUpdate(AppBaseModel):
     name: str | None = None
     condition: str | None = None
     from_subscene: str | None = None
@@ -169,7 +159,7 @@ class ConnectionUpdate(BaseModel):
     scene_id: int | None = None
 
 
-class ConnectionResponse(BaseModel):
+class ConnectionResponse(AppBaseModel):
     id: int | str
     name: str
     condition: str | None
@@ -181,11 +171,7 @@ class ConnectionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class SubsceneWithConnectionsResponse(BaseModel):
+class SubsceneWithConnectionsResponse(AppBaseModel):
     id: int | str | None
     name: str
     type: str
@@ -198,11 +184,7 @@ class SubsceneWithConnectionsResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class SceneGraphResponse(BaseModel):
+class SceneGraphResponse(AppBaseModel):
     id: int | str
     name: str
     description: str | None
@@ -212,18 +194,19 @@ class SceneGraphResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
-        allow_population_by_field_name = True
+    model_config = ConfigDict(
+        from_attributes=True,
+        populate_by_name=True,
+    )
 
 
 class AgentDetailResponse(AgentResponse):
     """Agent response with full details including scenes and their graphs."""
 
-    scenes: list[SceneGraphResponse] = []
+    scenes: list[SceneGraphResponse] = Field(default_factory=list)
 
 
-class ChatHistoryCreate(BaseModel):
+class ChatHistoryCreate(AppBaseModel):
     agent_id: int = Field(..., description="Agent ID")
     user: str = Field(..., description="Username of the user")
     role: str = Field(..., description="Role: 'user' or 'agent'")
@@ -234,7 +217,7 @@ class ChatHistoryCreate(BaseModel):
     )
 
 
-class PreviewChatRequest(BaseModel):
+class PreviewChatRequest(AppBaseModel):
     """Schema for preview chat request."""
 
     message: str = Field(..., description="User message")
@@ -249,7 +232,7 @@ class PreviewChatRequest(BaseModel):
     )
 
 
-class PreviewChatResponse(BaseModel):
+class PreviewChatResponse(AppBaseModel):
     """Schema for preview chat response."""
 
     response: str
@@ -275,7 +258,7 @@ class StreamEventType(str, Enum):
     ERROR = "error"
 
 
-class StreamEvent(BaseModel):
+class StreamEvent(AppBaseModel):
     """Schema for SSE stream event data."""
 
     type: StreamEventType = Field(
@@ -296,7 +279,7 @@ class StreamEvent(BaseModel):
     )
 
 
-class ChatHistoryResponse(BaseModel):
+class ChatHistoryResponse(AppBaseModel):
     id: int
     agent_id: int
     user: str
@@ -306,11 +289,7 @@ class ChatHistoryResponse(BaseModel):
     update_scene: str | None
     create_time: datetime
 
-    class Config:
-        orm_mode = True
-
-
-class ChatHistoryWithGraphResponse(BaseModel):
+class ChatHistoryWithGraphResponse(AppBaseModel):
     id: int
     agent_id: int
     user: str
@@ -321,11 +300,7 @@ class ChatHistoryWithGraphResponse(BaseModel):
     create_time: datetime
     graph: dict | None = Field(None, description="Current scene graph")
 
-    class Config:
-        orm_mode = True
-
-
-class SceneGraphUpdate(BaseModel):
+class SceneGraphUpdate(AppBaseModel):
     """Schema for bulk updating scene graph data."""
 
     subscenes: list[dict] = Field(
@@ -334,7 +309,7 @@ class SceneGraphUpdate(BaseModel):
     agent_id: int | None = Field(None, description="Agent ID")
 
 
-class ConnectionGraphItem(BaseModel):
+class ConnectionGraphItem(AppBaseModel):
     """Schema for a connection within a subscene update."""
 
     name: str = Field(default="", description="Connection name")
@@ -342,7 +317,7 @@ class ConnectionGraphItem(BaseModel):
     to_subscene: str = Field(..., description="Target subscene name")
 
 
-class SubsceneGraphItem(BaseModel):
+class SubsceneGraphItem(AppBaseModel):
     """Schema for a subscene within a graph update."""
 
     name: str = Field(..., description="Subscene name")
@@ -352,11 +327,12 @@ class SubsceneGraphItem(BaseModel):
     mandatory: bool = Field(default=False, description="Is completion mandatory")
     objective: str | None = Field(None, description="Objective of the subscene")
     connections: list[ConnectionGraphItem] = Field(
-        default=[], description="Outbound connections"
+        default_factory=list,
+        description="Outbound connections",
     )
 
 
-class SceneWithGraphUpdate(BaseModel):
+class SceneWithGraphUpdate(AppBaseModel):
     """Schema for scene update including nested graph."""
 
     name: str = Field(..., description="Scene name")
@@ -366,7 +342,7 @@ class SceneWithGraphUpdate(BaseModel):
     )
 
 
-class AgentSceneListUpdate(BaseModel):
+class AgentSceneListUpdate(AppBaseModel):
     """Schema for bulk updating agent scenes list with optional graph content."""
 
     scenes: list[SceneWithGraphUpdate] = Field(
@@ -374,7 +350,7 @@ class AgentSceneListUpdate(BaseModel):
     )
 
 
-class LLMCreate(BaseModel):
+class LLMCreate(AppBaseModel):
     """Schema for creating a new LLM."""
 
     name: str = Field(..., description="Unique logical name for the LLM")
@@ -417,17 +393,19 @@ class LLMCreate(BaseModel):
         description="Additional kwargs for API calls (JSON format). E.g.: {'extra_body': {'reasoning_split': true}}",
     )
 
-    @validator("extra_config")
+    @field_validator("extra_config")
+    @classmethod
     def validate_extra_config(
-        cls,  # noqa: N805
+        cls,
         extra_config: str | None,
     ) -> str | None:
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
-    @validator("thinking")
+    @field_validator("thinking")
+    @classmethod
     def validate_thinking(
-        cls,  # noqa: N805
+        cls,
         thinking: str,
     ) -> str:
         """Validate and normalize thinking mode."""
@@ -435,7 +413,7 @@ class LLMCreate(BaseModel):
         return normalized if normalized is not None else "auto"
 
 
-class LLMUpdate(BaseModel):
+class LLMUpdate(AppBaseModel):
     """Schema for updating an existing LLM."""
 
     name: str | None = None
@@ -453,24 +431,26 @@ class LLMUpdate(BaseModel):
     max_context: int | None = None
     extra_config: str | None = None
 
-    @validator("extra_config")
+    @field_validator("extra_config")
+    @classmethod
     def validate_extra_config(
-        cls,  # noqa: N805
+        cls,
         extra_config: str | None,
     ) -> str | None:
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
-    @validator("thinking")
+    @field_validator("thinking")
+    @classmethod
     def validate_thinking(
-        cls,  # noqa: N805
+        cls,
         thinking: str | None,
     ) -> str | None:
         """Validate and normalize thinking mode when provided."""
         return _normalize_thinking_mode(thinking)
 
 
-class LLMResponse(BaseModel):
+class LLMResponse(AppBaseModel):
     """Schema for LLM response."""
 
     id: int
@@ -490,6 +470,3 @@ class LLMResponse(BaseModel):
     extra_config: str | None
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        orm_mode = True

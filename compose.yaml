@@ -53,7 +53,7 @@ services:
     environment:
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
       - SANDBOX_PODMAN_BASE_URL=unix:///run/podman/podman.sock
-      - SANDBOX_BASE_IMAGE=docker.io/library/python:3.10-slim
+      - SANDBOX_BASE_IMAGE=docker.io/library/python:3.11-slim
       - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
       - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
       - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30

@@ -1,15 +1,16 @@
-"""ReAct Context management for maintaining state machine state.
+"""ReAct context loading utilities built around persisted snapshots."""
 
-This module provides the ReactContext class which represents the dynamic state
-machine as described in context_template.md.
-"""
+from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
-from app.models.react import ReactPlanStep, ReactRecursion, ReactTask
-from sqlmodel import Session, select
+from app.models.react import ReactPlanStep, ReactRecursionState, ReactTask
+from sqlmodel import Session, desc, select
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -46,7 +47,7 @@ class ReactContext:
         }
 
     @classmethod
-    def from_task(cls, task: ReactTask, db: Session) -> "ReactContext":
+    def from_task(cls, task: ReactTask, db: Session) -> ReactContext:
         """
         Create ReactContext from a database task.
 
@@ -57,15 +58,84 @@ class ReactContext:
         Returns:
             ReactContext instance initialized with task data
         """
-        # Load all recursions for this task
-        recursions_stmt = (
-            select(ReactRecursion)
-            .where(ReactRecursion.task_id == task.task_id)
-            .order_by(ReactRecursion.iteration_index)
+        latest_state_stmt = (
+            select(ReactRecursionState)
+            .where(ReactRecursionState.task_id == task.task_id)
+            .order_by(desc(ReactRecursionState.iteration_index))
         )
-        recursions = db.exec(recursions_stmt).all()
+        latest_state = db.exec(latest_state_stmt).first()
 
-        # Load plan steps
+        if latest_state and latest_state.current_state:
+            snapshot_context = cls._from_snapshot_payload(
+                task=task,
+                snapshot_payload=latest_state.current_state,
+            )
+            if snapshot_context is not None:
+                return snapshot_context
+
+        return cls._build_fallback_context(task, db)
+
+    @classmethod
+    def _from_snapshot_payload(
+        cls,
+        task: ReactTask,
+        snapshot_payload: str,
+    ) -> ReactContext | None:
+        """Build context from the latest persisted snapshot.
+
+        Args:
+            task: Live task row whose metadata should override snapshot globals.
+            snapshot_payload: Serialized snapshot JSON.
+
+        Returns:
+            A reconstructed context when the snapshot is valid, otherwise `None`.
+        """
+        try:
+            parsed_snapshot = json.loads(snapshot_payload)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Invalid recursion snapshot JSON detected; falling back to minimal context. task_id=%s",
+                task.task_id,
+            )
+            return None
+
+        if not isinstance(parsed_snapshot, dict):
+            logger.warning(
+                "Invalid recursion snapshot payload type; falling back to minimal context. task_id=%s",
+                task.task_id,
+            )
+            return None
+
+        raw_context = parsed_snapshot.get("context")
+        context_dict = (
+            cls._normalize_context_dict(task, raw_context)
+            if isinstance(raw_context, dict)
+            else cls._default_context_dict(task)
+        )
+
+        raw_recursion_history = parsed_snapshot.get("recursion_history")
+        recursion_history = (
+            raw_recursion_history if isinstance(raw_recursion_history, list) else []
+        )
+
+        return cls(
+            global_state=cls._build_global_state(task),
+            current_recursion=cls._build_current_recursion(task),
+            context=context_dict,
+            recursion_history=recursion_history,
+        )
+
+    @classmethod
+    def _build_fallback_context(cls, task: ReactTask, db: Session) -> ReactContext:
+        """Build a minimal context when no valid snapshot exists.
+
+        Args:
+            task: Task whose fallback context should be built.
+            db: Database session used to load plan steps.
+
+        Returns:
+            A minimal but valid ReAct context.
+        """
         plan_steps_stmt = (
             select(ReactPlanStep)
             .where(ReactPlanStep.task_id == task.task_id)
@@ -73,8 +143,37 @@ class ReactContext:
         )
         plan_steps = db.exec(plan_steps_stmt).all()
 
-        # Build global state
-        global_state = {
+        context_dict = cls._default_context_dict(task)
+        for step in plan_steps:
+            context_dict["plan"].append(
+                {
+                    "step_id": step.step_id,
+                    "general_goal": step.general_goal,
+                    "specific_description": step.specific_description,
+                    "completion_criteria": step.completion_criteria,
+                    "status": step.status,
+                    "recursion_history": [],
+                }
+            )
+
+        return cls(
+            global_state=cls._build_global_state(task),
+            current_recursion=cls._build_current_recursion(task),
+            context=context_dict,
+            recursion_history=[],
+        )
+
+    @staticmethod
+    def _build_global_state(task: ReactTask) -> dict[str, Any]:
+        """Build the live global-state section from the task row.
+
+        Args:
+            task: Task whose current metadata should be serialized.
+
+        Returns:
+            The global-state dictionary.
+        """
+        return {
             "task_id": task.task_id,
             "iteration": task.iteration,
             "max_iteration": task.max_iteration,
@@ -83,142 +182,75 @@ class ReactContext:
             "updated_at": task.updated_at.isoformat(),
         }
 
-        # Build current recursion state (will be updated when starting new recursion)
-        current_recursion = {
+    @staticmethod
+    def _build_current_recursion(task: ReactTask) -> dict[str, Any]:
+        """Build the pending current-recursion section for the next loop.
+
+        Args:
+            task: Task whose current iteration should seed the recursion state.
+
+        Returns:
+            The current-recursion dictionary.
+        """
+        return {
             "trace_id": "",
             "iteration_index": task.iteration,
             "status": "pending",
         }
 
-        # Build context
-        context_dict: dict[str, Any] = {
+    @staticmethod
+    def _default_context_dict(task: ReactTask) -> dict[str, Any]:
+        """Build the minimal default context section.
+
+        Args:
+            task: Task whose intent seeds the context.
+
+        Returns:
+            A default context dictionary with empty plan and memory.
+        """
+        return {
             "user_intent": task.user_intent,
-            "constraints": [],  # Can be extended
+            "constraints": [],
             "plan": [],
             "memory": {"short_term": []},
         }
 
-        # Build short_term memory from recursions
-        for rec in recursions:
-            if rec.short_term_memory:
-                context_dict["memory"]["short_term"].append(
-                    {
-                        "trace_id": rec.trace_id,
-                        "memory": rec.short_term_memory,
-                    }
-                )
+    @classmethod
+    def _normalize_context_dict(
+        cls,
+        task: ReactTask,
+        raw_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize snapshot context to a stable minimum shape.
 
-        # Initialize plan steps
-        latest_replan_by_step_id: dict[str, dict[str, Any]] = {}
-        for rec in reversed(recursions):
-            if rec.action_type != "RE_PLAN" or not rec.action_output:
-                continue
-            try:
-                output_data = json.loads(rec.action_output)
-            except json.JSONDecodeError:
-                continue
+        Args:
+            task: Task whose live user_intent should be authoritative.
+            raw_context: Raw context object from the persisted snapshot.
 
-            plan_items = output_data.get("plan", [])
-            if not isinstance(plan_items, list):
-                continue
+        Returns:
+            A normalized context dictionary.
+        """
+        normalized = cls._default_context_dict(task)
+        user_intent = raw_context.get("user_intent")
+        if isinstance(user_intent, str) and user_intent:
+            normalized["user_intent"] = user_intent
 
-            for item in plan_items:
-                if not isinstance(item, dict):
-                    continue
-                step_id = item.get("step_id")
-                if (
-                    isinstance(step_id, str)
-                    and step_id
-                    and step_id not in latest_replan_by_step_id
-                ):
-                    latest_replan_by_step_id[step_id] = item
-            break
+        constraints = raw_context.get("constraints")
+        if isinstance(constraints, list):
+            normalized["constraints"] = constraints
 
-        for step in plan_steps:
-            latest_step_data = latest_replan_by_step_id.get(step.step_id, {})
-            general_goal = latest_step_data.get("general_goal", step.general_goal)
-            specific_description = latest_step_data.get(
-                "specific_description", step.specific_description
-            )
-            completion_criteria = latest_step_data.get(
-                "completion_criteria", step.completion_criteria
-            )
-            plan_step = {
-                "step_id": step.step_id,
-                "general_goal": general_goal,
-                "specific_description": specific_description,
-                "completion_criteria": completion_criteria,
-                "status": step.status,
-                "recursion_history": [],
+        plan = raw_context.get("plan")
+        if isinstance(plan, list):
+            normalized["plan"] = plan
+
+        memory = raw_context.get("memory")
+        if isinstance(memory, dict):
+            short_term = memory.get("short_term")
+            normalized["memory"] = {
+                "short_term": short_term if isinstance(short_term, list) else []
             }
-            context_dict["plan"].append(plan_step)
 
-        # Build recursion history and assign to either plan steps or global list
-        recursions_list: list[dict[str, Any]] = []
-        for rec in recursions:
-            if rec.status in ["done", "error"] or (
-                rec.status == "running" and rec.action_type == "CLARIFY"
-            ):
-                # Careful with JSON decoding errors if data is corrupted
-                try:
-                    action_output = (
-                        json.loads(rec.action_output) if rec.action_output else {}
-                    )
-                except json.JSONDecodeError:
-                    action_output = {}
-
-                rec_dict = {
-                    "iteration": rec.iteration_index,
-                    "trace_id": rec.trace_id,
-                    "observe": rec.observe or "",
-                    "thought": rec.thought or "",
-                    "action": {
-                        "action_type": rec.action_type or "",
-                        "output": action_output,
-                    },
-                }
-
-                # For CALL_TOOL recursions, merge execution results (result, success)
-                # directly into each tool_calls[n] entry.
-                if rec.action_type == "CALL_TOOL" and rec.tool_call_results:
-                    try:
-                        tool_results: list[dict[str, Any]] = json.loads(
-                            rec.tool_call_results
-                        )
-                        result_by_id = {
-                            r["tool_call_id"]: r
-                            for r in tool_results
-                            if "tool_call_id" in r
-                        }
-                        tool_calls = action_output.get("tool_calls", [])
-                        for tc in tool_calls:
-                            matched = result_by_id.get(tc.get("id", ""))
-                            if matched is not None:
-                                tc["result"] = matched.get("result", "")
-                                tc["success"] = matched.get("success", False)
-                    except json.JSONDecodeError:
-                        pass
-
-                # Route to the matching plan step if plan_step_id is provided
-                added_to_plan = False
-                if rec.plan_step_id:
-                    for plan_step in context_dict["plan"]:
-                        if plan_step["step_id"] == rec.plan_step_id:
-                            plan_step["recursion_history"].append(rec_dict)
-                            added_to_plan = True
-                            break
-
-                # If it doesn't belong to a plan step (or the step was deleted),
-                # keep it in the top-level recursion list.
-                if not added_to_plan:
-                    recursions_list.append(rec_dict)
-
-        return cls(
-            global_state=global_state,
-            current_recursion=current_recursion,
-            context=context_dict,
-            recursion_history=recursions_list,
-        )
+        return normalized
 
     def update_for_new_recursion(self, trace_id: str) -> None:
         """

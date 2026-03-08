@@ -21,7 +21,7 @@
 ### 3.1. 统一外层结构
 ```json
 {
-  "trace_id": "本轮recursion的id",
+  "trace_id": "本轮recursion的id，user这一轮如何传给你的你就要如何返回",
   "observe": "...",
   "thought": "...",
   "iteration": 3, // 基于之前的历史判断当前我们到底处于第几轮iteration
@@ -41,14 +41,14 @@
 }
 ```
 ### 3.2. action_type = CALL_TOOL
-- 仅当你需要借助外部能力
-- 只能使用可用工具列表
+- 仅当你需要借助外部能力，只能使用可用工具列表
+- **切记要发动工具调用时，action_type是CALL_TOOL而不是要调用的tool名**
 - programmatic_tool_call函数可以帮助你大大减少recursion次数
 ```json
 {
   // ...
   "action": {
-    "action_type": "CALL_TOOL",
+    "action_type": "CALL_TOOL", // 切记这里不要把CALL_TOOL写成具体要调用的tool名
     "output": {
       "tool_calls": [
         {

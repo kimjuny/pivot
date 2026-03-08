@@ -213,7 +213,7 @@ class AbstractLLM(ABC):
         pass
 
     @abstractmethod
-    def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """
         Process a conversation with the LLM.
 
@@ -228,7 +228,7 @@ class AbstractLLM(ABC):
 
     @abstractmethod
     def chat_stream(
-        self, messages: list[dict[str, str]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> Iterator[Response]:
         """
         Process a conversation with the LLM in streaming mode.

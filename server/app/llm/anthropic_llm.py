@@ -20,6 +20,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
+from .multimodal import to_anthropic_content
 from .thinking_mode import normalize_thinking_mode
 
 
@@ -97,7 +98,7 @@ class AnthropicLLM(AbstractLLM):
         return updated_kwargs
 
     def _convert_messages(
-        self, messages: list[dict[str, str]]
+        self, messages: list[dict[str, Any]]
     ) -> tuple[str, list[dict[str, Any]]]:
         """Convert messages format to Anthropic's expected format.
 
@@ -118,10 +119,13 @@ class AnthropicLLM(AbstractLLM):
 
             if role == "system":
                 # Extract system message separately
-                system_message = content
+                if isinstance(content, str):
+                    system_message = content
             elif role in ["user", "assistant"]:
                 # Keep user and assistant messages
-                formatted_messages.append({"role": role, "content": content})
+                formatted_messages.append(
+                    {"role": role, "content": to_anthropic_content(content)}
+                )
             # Note: Anthropic doesn't use "tool" role the same way as OpenAI
             # Tool results are formatted differently in Anthropic's API
 
@@ -356,7 +360,7 @@ class AnthropicLLM(AbstractLLM):
             cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
         )
 
-    def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """Process a conversation with the LLM.
 
         Args:
@@ -431,7 +435,7 @@ class AnthropicLLM(AbstractLLM):
             ) from e
 
     def chat_stream(
-        self, messages: list[dict[str, str]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> Iterator[Response]:
         """Process a conversation with the LLM in streaming mode.
 

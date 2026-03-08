@@ -17,7 +17,8 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from podman import PodmanClient  # pyright: ignore[reportMissingImports]
-from pydantic import BaseModel, BaseSettings, Field
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 app = FastAPI(title="Pivot Sandbox Manager")
 logger = logging.getLogger("uvicorn.error")
@@ -29,9 +30,14 @@ _cleanup_started = False
 class ManagerSettings(BaseSettings):
     """Runtime settings for sandbox-manager."""
 
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+    )
+
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
     SANDBOX_PODMAN_BASE_URL: str = "unix:///run/podman/podman.sock"
-    SANDBOX_BASE_IMAGE: str = "docker.io/library/python:3.10-slim"
+    SANDBOX_BASE_IMAGE: str = "docker.io/library/python:3.11-slim"
     SANDBOX_BACKEND_CONTAINER_NAME: str = "pivot-backend"
     SANDBOX_CONTAINER_PREFIX: str = "pivot-sandbox"
     SANDBOX_DEFAULT_TIMEOUT_SECONDS: int = 30

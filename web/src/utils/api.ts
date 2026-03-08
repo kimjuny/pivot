@@ -23,6 +23,11 @@ interface RequestOptions {
   skipTokenCheck?: boolean;
 }
 
+/**
+ * Supported image upload source labels.
+ */
+export type FileUploadSource = 'local' | 'clipboard';
+
 /** Error class for authentication-related errors */
 export class AuthError extends Error {
   constructor(message: string = 'Authentication required') {
@@ -850,7 +855,37 @@ export interface SessionChatHistoryMessage {
   type: string;
   content: string;
   timestamp: string;
+  files?: ChatFileAsset[];
 }
+
+/**
+ * Uploaded file metadata returned by backend.
+ */
+export interface ChatFileAsset {
+  file_id: string;
+  kind: 'image' | 'document';
+  source: FileUploadSource;
+  original_name: string;
+  mime_type: string;
+  format: string;
+  extension: string;
+  size_bytes: number;
+  width: number;
+  height: number;
+  page_count?: number | null;
+  can_extract_text?: boolean;
+  suspected_scanned?: boolean;
+  text_encoding?: string | null;
+  session_id: string | null;
+  task_id: string | null;
+  created_at: string;
+  expires_at?: string;
+}
+
+/**
+ * Backward-compatible alias for legacy image-only call sites.
+ */
+export type ChatImageFile = ChatFileAsset;
 
 /**
  * Chat history response from session API.
@@ -910,6 +945,7 @@ export interface RecursionDetail {
 export interface TaskMessage {
   task_id: string;
   user_message: string;
+  files?: ChatFileAsset[];
   agent_answer: string | null;
   status: string;
   total_tokens: number;
@@ -945,6 +981,172 @@ export interface FullSessionHistoryResponse {
  */
 export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
   return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
+};
+
+/**
+ * Build auth headers for non-JSON requests.
+ *
+ * @returns Headers with bearer token when available
+ * @throws AuthError if token is invalid
+ */
+const getAuthorizedHeaders = (): Record<string, string> => {
+  if (!isTokenValid()) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Token expired or invalid. Please log in again.');
+  }
+
+  const headers: Record<string, string> = {};
+  const token = getAuthToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+};
+
+/**
+ * Upload one chat file for later multimodal sending.
+ *
+ * @param file - File selected locally or extracted from clipboard
+ * @param source - Upload source label stored in backend metadata
+ * @param signal - Optional abort signal for cancelling in-flight upload
+ * @returns Promise resolving to persisted file metadata
+ */
+export const uploadChatFile = async (
+  file: File,
+  source: FileUploadSource,
+  signal?: AbortSignal
+): Promise<ChatFileAsset> => {
+  const url = `${API_BASE_URL}/files/uploads`;
+  const headers = getAuthorizedHeaders();
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('source', source);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal,
+    });
+
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+      throw new AuthError('Authentication expired. Please log in again.');
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json() as { detail?: string };
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json() as ChatFileAsset;
+  } catch (error) {
+    console.error(`File upload failed for ${file.name}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Upload one chat image for later multimodal sending.
+ *
+ * @param file - Image file selected locally or extracted from clipboard
+ * @param source - Upload source label stored in backend metadata
+ * @param signal - Optional abort signal for cancelling in-flight upload
+ * @returns Promise resolving to persisted image metadata
+ */
+export const uploadChatImage = async (
+  file: File,
+  source: FileUploadSource,
+  signal?: AbortSignal
+): Promise<ChatFileAsset> => {
+  return uploadChatFile(file, source, signal);
+};
+
+/**
+ * Delete an uploaded chat file before it is used in a conversation.
+ *
+ * @param fileId - Backend file UUID
+ */
+export const deleteChatFile = async (fileId: string): Promise<void> => {
+  const url = `${API_BASE_URL}/files/${fileId}`;
+  const headers = getAuthorizedHeaders();
+
+  try {
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+      throw new AuthError('Authentication expired. Please log in again.');
+    }
+
+    if (!response.ok && response.status !== 204) {
+      const errorData = await response.json() as { detail?: string };
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+    }
+  } catch (error) {
+    console.error(`File deletion failed for ${fileId}:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Delete an uploaded chat image before it is used in a conversation.
+ *
+ * @param fileId - Backend file UUID
+ */
+export const deleteChatImage = async (fileId: string): Promise<void> => {
+  await deleteChatFile(fileId);
+};
+
+/**
+ * Fetch an uploaded file blob with auth so the UI can render historical thumbnails.
+ *
+ * @param fileId - Backend file UUID
+ * @param signal - Optional abort signal
+ * @returns Promise resolving to a file blob
+ */
+export const fetchChatFileBlob = async (
+  fileId: string,
+  signal?: AbortSignal
+): Promise<Blob> => {
+  const url = `${API_BASE_URL}/files/${fileId}/content`;
+  const headers = getAuthorizedHeaders();
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal,
+  });
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json() as { detail?: string };
+    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+  }
+
+  return await response.blob();
+};
+
+/**
+ * Fetch an uploaded image blob with auth so the UI can render historical thumbnails.
+ *
+ * @param fileId - Backend file UUID
+ * @param signal - Optional abort signal
+ * @returns Promise resolving to an image blob
+ */
+export const fetchChatImageBlob = async (
+  fileId: string,
+  signal?: AbortSignal
+): Promise<Blob> => {
+  return fetchChatFileBlob(fileId, signal);
 };
 
 // ---------------------------------------------------------------------------

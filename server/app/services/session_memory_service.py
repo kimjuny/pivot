@@ -13,6 +13,8 @@ from typing import Any
 
 from app.models.react import ReactTask
 from app.models.session import Session, SessionMemory
+from app.schemas.file import FileAssetListItem
+from app.services.file_service import FileService
 from sqlmodel import Session as DBSession, col, select
 
 logger = logging.getLogger(__name__)
@@ -512,6 +514,7 @@ class SessionMemoryService:
         session_id: str,
         message_type: str,
         content: str,
+        files: list[FileAssetListItem] | None = None,
     ) -> bool:
         """Update chat history with a new message.
 
@@ -542,6 +545,7 @@ class SessionMemoryService:
                 "type": message_type,
                 "content": content,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "files": [item.dict() for item in files or []],
             }
         )
 
@@ -605,6 +609,8 @@ class SessionMemoryService:
         if not session:
             return False
 
+        FileService(self.db).clear_files_by_session_id(session_id)
+
         # First delete the associated SessionMemory to avoid foreign key constraint
         memory = self.get_session_memory(session_id)
         if memory:
@@ -636,6 +642,9 @@ class SessionMemoryService:
             .order_by(col(ReactTask.created_at).asc())
         )
         tasks = list(self.db.exec(stmt).all())
+        file_history = FileService(self.db).build_history_items(
+            [task.task_id for task in tasks]
+        )
 
         result = []
         for task in tasks:
@@ -696,6 +705,7 @@ class SessionMemoryService:
                 {
                     "task_id": task.task_id,
                     "user_message": task.user_message,
+                    "files": file_history.get(task.task_id, []),
                     "agent_answer": agent_answer,
                     "status": task.status,
                     "total_tokens": task.total_tokens,

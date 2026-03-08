@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Optional
 
@@ -75,8 +75,8 @@ class Agent(SQLModel, table=True):
         default=None,
         description="JSON array of allowed skill names. None = all skills; '[]' = none.",
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scenes: list["Scene"] = Relationship(back_populates="agent")
 
 
@@ -100,8 +100,8 @@ class Scene(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     description: str | None = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     agent_id: int | None = Field(default=None, foreign_key="agent.id")
     agent: Optional["Agent"] = Relationship(back_populates="scenes")
     subscenes: list["Subscene"] = Relationship(back_populates="scene")
@@ -206,13 +206,14 @@ class Subscene(SQLModel, table=True):
     description: str | None = Field(default=None)
     mandatory: bool = Field(default=False)
     objective: str | None = Field(default=None)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scene_id: int | None = Field(default=None, foreign_key="scene.id")
     scene: Optional["Scene"] = Relationship(back_populates="subscenes")
 
-    # Runtime connection list (non-persisted, for agent execution)
-    _connections: list["Connection"] = PrivateAttr(default_factory=list)
+    # Keep this annotation broad so SQLAlchemy does not try to resolve the
+    # forward reference during declarative model scanning.
+    _connections: list[Any] = PrivateAttr(default_factory=list)
 
     @property
     def connections(self) -> list["Connection"]:
@@ -321,8 +322,8 @@ class Connection(SQLModel, table=True):
     from_subscene_id: int | None = Field(default=None, foreign_key="subscene.id")
     to_subscene_id: int | None = Field(default=None, foreign_key="subscene.id")
     scene_id: int | None = Field(default=None, foreign_key="scene.id")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert connection to dictionary for LLM consumption.
@@ -384,6 +385,6 @@ class ChatHistory(SQLModel, table=True):
         default=None, description="Updated scene graph in JSON format"
     )
     create_time: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(UTC),
         description="Time when the history was created",
     )

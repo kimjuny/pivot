@@ -27,6 +27,8 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
+from app.services.file_service import FileService
+from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_memory_service import SessionMemoryService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
@@ -119,8 +121,11 @@ async def react_chat_stream(
     async def event_generator():
         client_disconnected = False
         task = None
+        turn_files = []
+        turn_file_blocks = []
 
         try:
+            runtime_service = ReactRuntimeService(db)
             # Get agent
             agent = db.get(Agent, request.agent_id)
             if not agent:
@@ -211,13 +216,10 @@ async def react_chat_stream(
                             )
                             last_rec.updated_at = datetime.now(timezone.utc)
                             db.add(last_rec)
-                            # Persist reply as the next recursion's action_result
-                            # input so the model can continue from CLARIFY context.
-                            existing_task.pending_action_result = json.dumps(
+                            runtime_service.set_next_action_result(
+                                existing_task,
                                 [{"result": output}],
-                                ensure_ascii=False,
                             )
-                            db.add(existing_task)
 
                             # Resume task
                             task = existing_task
@@ -261,6 +263,36 @@ async def react_chat_stream(
 
             # Ensure task_id is set
             task_id = task.task_id
+
+            if request.file_ids:
+                file_service = FileService(db)
+                try:
+                    attached_files = file_service.attach_files_to_task(
+                        file_ids=request.file_ids,
+                        username=current_user.username,
+                        session_id=task.session_id,
+                        task_id=task_id,
+                    )
+                except ValueError as err:
+                    error_event = ReactStreamEvent(
+                        type=ReactStreamEventType.ERROR,
+                        task_id=task_id,
+                        trace_id=None,
+                        iteration=task.iteration,
+                        delta=None,
+                        data={"error": str(err)},
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    yield f"data: {error_event.json()}\n\n"
+                    return
+
+                turn_files = file_service.build_history_items([task_id]).get(
+                    task_id, []
+                )
+                turn_file_blocks = [
+                    item.content_block
+                    for item in file_service.preprocess_files(attached_files)
+                ]
 
             if agent.skill_resolution_llm_id:
                 skill_start_event = {
@@ -472,6 +504,8 @@ async def react_chat_stream(
                 task=task,
                 selected_skills_text=selected_skills_text,
                 turn_user_message=request.message,
+                turn_files=turn_files,
+                turn_file_blocks=turn_file_blocks,
             ):
                 # Check if client disconnected via Request object
                 if await raw_request.is_disconnected():

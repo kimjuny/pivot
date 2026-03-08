@@ -22,6 +22,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
+from .multimodal import to_openai_response_content
 from .thinking_mode import normalize_thinking_mode
 
 logger = get_logger("llm.openai_response")
@@ -82,7 +83,7 @@ class OpenAIResponseLLM(AbstractLLM):
 
     def _build_input_messages(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         """Convert chat history to Responses API ``input`` message format."""
         input_messages: list[dict[str, Any]] = []
@@ -90,11 +91,9 @@ class OpenAIResponseLLM(AbstractLLM):
         for message in messages:
             role = message.get("role", "")
             content = message.get("content", "")
-            if not isinstance(content, str):
-                continue
 
             if role == "system":
-                if content:
+                if isinstance(content, str) and content:
                     input_messages.append(
                         {
                             "role": "system",
@@ -104,11 +103,17 @@ class OpenAIResponseLLM(AbstractLLM):
                 continue
 
             if role in {"user", "assistant"}:
-                content_type = "input_text" if role == "user" else "output_text"
+                converted_content = to_openai_response_content(content, role)
+                if isinstance(converted_content, str) and not converted_content:
+                    continue
                 input_messages.append(
                     {
                         "role": role,
-                        "content": [{"type": content_type, "text": content}],
+                        "content": (
+                            [{"type": "input_text", "text": converted_content}]
+                            if isinstance(converted_content, str)
+                            else converted_content
+                        ),
                     }
                 )
 
@@ -254,7 +259,7 @@ class OpenAIResponseLLM(AbstractLLM):
             usage=usage,
         )
 
-    def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """Process a conversation with the Responses API."""
         try:
             pivot_task_id = kwargs.pop("_pivot_task_id", "")
@@ -310,7 +315,7 @@ class OpenAIResponseLLM(AbstractLLM):
             ) from e
 
     def chat_stream(
-        self, messages: list[dict[str, str]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> Iterator[Response]:
         """Process a conversation with the Responses API in streaming mode."""
         try:
@@ -408,7 +413,9 @@ class OpenAIResponseLLM(AbstractLLM):
                                 raw_usage = response_payload.get("usage")
                                 if isinstance(raw_usage, dict):
                                     prompt_tokens = raw_usage.get("input_tokens", 0)
-                                    completion_tokens = raw_usage.get("output_tokens", 0)
+                                    completion_tokens = raw_usage.get(
+                                        "output_tokens", 0
+                                    )
                                     total_tokens = raw_usage.get("total_tokens", 0)
                                     usage = UsageInfo(
                                         prompt_tokens=(

@@ -21,6 +21,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
+from .multimodal import to_openai_completion_content
 from .thinking_mode import normalize_thinking_mode
 
 
@@ -94,7 +95,7 @@ class OpenAICompletionLLM(AbstractLLM):
         return updated_kwargs
 
     def _messages_with_cached_last_block(
-        self, messages: list[dict[str, str]]
+        self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Return messages with ephemeral cache control on the last block."""
         if not messages:
@@ -223,7 +224,7 @@ class OpenAICompletionLLM(AbstractLLM):
                 normalized_kwargs.setdefault(key, value)
         return normalized_kwargs
 
-    def chat(self, messages: list[dict[str, str]], **kwargs: Any) -> Response:
+    def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """Process a conversation with the LLM.
 
         Args:
@@ -250,9 +251,17 @@ class OpenAICompletionLLM(AbstractLLM):
                 "Content-Type": "application/json",
             }
 
-            request_messages: list[dict[str, Any]] = list(messages)
+            request_messages: list[dict[str, Any]] = [
+                {
+                    **message,
+                    "content": to_openai_completion_content(message.get("content", "")),
+                }
+                for message in messages
+            ]
             if self.cache_policy == "qwen-completion-block-cache":
-                request_messages = self._messages_with_cached_last_block(messages)
+                request_messages = self._messages_with_cached_last_block(
+                    request_messages
+                )
 
             payload: dict[str, Any] = {
                 "model": self.model,
@@ -288,7 +297,7 @@ class OpenAICompletionLLM(AbstractLLM):
             ) from e
 
     def chat_stream(
-        self, messages: list[dict[str, str]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> Iterator[Response]:
         """Process a conversation with the LLM in streaming mode.
 
@@ -316,9 +325,17 @@ class OpenAICompletionLLM(AbstractLLM):
                 "Content-Type": "application/json",
             }
 
-            request_messages: list[dict[str, Any]] = list(messages)
+            request_messages: list[dict[str, Any]] = [
+                {
+                    **message,
+                    "content": to_openai_completion_content(message.get("content", "")),
+                }
+                for message in messages
+            ]
             if self.cache_policy == "qwen-completion-block-cache":
-                request_messages = self._messages_with_cached_last_block(messages)
+                request_messages = self._messages_with_cached_last_block(
+                    request_messages
+                )
 
             payload: dict[str, Any] = {
                 "model": self.model,
