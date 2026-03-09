@@ -133,15 +133,27 @@ def ensure_react_schema_compatibility() -> None:
     """Apply additive schema updates for legacy ReAct tables."""
     engine = get_engine()
     inspector = inspect(engine)
-    if not inspector.has_table("reacttask"):
-        return
-
-    columns = {column["name"] for column in inspector.get_columns("reacttask")}
     with engine.begin() as conn:
-        if "skill_selection_result" not in columns:
-            conn.execute(
-                text("ALTER TABLE reacttask ADD COLUMN skill_selection_result VARCHAR")
-            )
+        if inspector.has_table("reacttask"):
+            task_columns = {
+                column["name"] for column in inspector.get_columns("reacttask")
+            }
+            if "skill_selection_result" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask "
+                        "ADD COLUMN skill_selection_result VARCHAR"
+                    )
+                )
+
+        if inspector.has_table("reactrecursion"):
+            recursion_columns = {
+                column["name"] for column in inspector.get_columns("reactrecursion")
+            }
+            if "thinking" not in recursion_columns:
+                conn.execute(
+                    text("ALTER TABLE reactrecursion ADD COLUMN thinking VARCHAR")
+                )
 
 
 def ensure_file_schema_compatibility() -> None:

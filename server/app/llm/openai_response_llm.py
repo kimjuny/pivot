@@ -175,6 +175,60 @@ class OpenAIResponseLLM(AbstractLLM):
         return text, tool_calls or None
 
     @staticmethod
+    def _extract_reasoning_text(raw_dict: dict[str, Any]) -> str | None:
+        """Extract reasoning text from non-stream Responses payloads."""
+        parts: list[str] = []
+
+        def collect_text(value: Any) -> None:
+            if isinstance(value, str) and value:
+                parts.append(value)
+
+        def collect_from_content_items(items: Any) -> None:
+            if not isinstance(items, list):
+                return
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type")
+                if item_type in {
+                    "reasoning_text",
+                    "reasoning_summary_text",
+                    "summary_text",
+                } or (isinstance(item_type, str) and "reasoning" in item_type):
+                    collect_text(item.get("text"))
+
+        raw_reasoning = raw_dict.get("reasoning")
+        if isinstance(raw_reasoning, dict):
+            collect_text(raw_reasoning.get("text"))
+            collect_from_content_items(raw_reasoning.get("content"))
+            summary = raw_reasoning.get("summary")
+            if isinstance(summary, list):
+                for item in summary:
+                    if isinstance(item, dict):
+                        collect_text(item.get("text"))
+
+        output_items = raw_dict.get("output", [])
+        if isinstance(output_items, list):
+            for item in output_items:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type")
+                if item_type == "reasoning":
+                    collect_text(item.get("text"))
+                    collect_from_content_items(item.get("content"))
+                    summary = item.get("summary")
+                    if isinstance(summary, list):
+                        for summary_item in summary:
+                            if isinstance(summary_item, dict):
+                                collect_text(summary_item.get("text"))
+                elif item_type == "message":
+                    collect_from_content_items(item.get("content"))
+
+        if not parts:
+            return None
+        return "".join(parts)
+
+    @staticmethod
     def _merge_extra_body_kwargs(merged_kwargs: dict[str, Any]) -> dict[str, Any]:
         """Flatten SDK-style ``extra_body`` into raw Responses API payload."""
         normalized_kwargs = dict(merged_kwargs)
@@ -241,6 +295,7 @@ class OpenAIResponseLLM(AbstractLLM):
         message = ChatMessage(
             role="assistant",
             content=text,
+            reasoning_content=self._extract_reasoning_text(raw_dict),
             tool_calls=tool_calls,
         )
         choice = Choice(index=0, message=message, finish_reason=finish_reason)

@@ -136,7 +136,7 @@ class ReactEngine:
         token_counter: dict[str, int],
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> Response:
-        """Collect full model output via ``chat_stream`` while emitting token-rate snapshots."""
+        """Collect full model output via ``chat_stream`` while emitting live updates."""
         attempt_start_prompt = token_counter["prompt_tokens"]
         attempt_start_completion = token_counter["completion_tokens"]
         attempt_start_total = token_counter["total_tokens"]
@@ -179,6 +179,13 @@ class ReactEngine:
                 if isinstance(reasoning_delta, str) and reasoning_delta:
                     reasoning_parts.append(reasoning_delta)
                     estimated_completion_tokens += estimate_text_tokens(reasoning_delta)
+                    if token_meter_queue is not None:
+                        await token_meter_queue.put(
+                            {
+                                "type": "reasoning",
+                                "delta": reasoning_delta,
+                            }
+                        )
 
                 content_delta = chunk_message.content
                 if isinstance(content_delta, str) and content_delta:
@@ -195,6 +202,7 @@ class ReactEngine:
                     )
                     await token_meter_queue.put(
                         {
+                            "type": "token_rate",
                             "tokens_per_second": round(
                                 window_tokens / window_seconds,
                                 2,
@@ -212,6 +220,7 @@ class ReactEngine:
             window_tokens = max(estimated_completion_tokens - last_report_tokens, 0)
             await token_meter_queue.put(
                 {
+                    "type": "token_rate",
                     "tokens_per_second": round(window_tokens / window_seconds, 2),
                     "estimated_completion_tokens": estimated_completion_tokens,
                 }
@@ -534,6 +543,7 @@ class ReactEngine:
         try:
             token_counter = self._new_token_counter()
             response = None
+            message: ChatMessage | None = None
             assistant_message_raw: str | None = None
             decision: ParsedReactDecision | None = None
             parse_error: ValueError | None = None
@@ -592,7 +602,7 @@ class ReactEngine:
                         f"Error: {e}"
                     )
 
-            if response is None or decision is None:
+            if response is None or decision is None or message is None:
                 tokens_data = self.state_service.finalize_error(
                     task,
                     recursion,
@@ -611,6 +621,7 @@ class ReactEngine:
                 }
 
             observe = decision.observe
+            thinking = message.reasoning_content
             thought = decision.thought
             abstract = decision.abstract
             short_term_memory_append = decision.short_term_memory_append
@@ -693,6 +704,7 @@ class ReactEngine:
                 recursion=recursion,
                 context=context,
                 observe=observe,
+                thinking=thinking,
                 thought=thought,
                 abstract=abstract,
                 action_type=action_type,
@@ -710,6 +722,7 @@ class ReactEngine:
                 "action_type": action_type,
                 "llm_response_id": response.id,
                 "observe": observe,
+                "thinking": thinking,
                 "thought": thought,
                 "abstract": abstract,
                 "output": action_output,
@@ -921,6 +934,20 @@ class ReactEngine:
                                 last_meter_emit_at = now
                             continue
 
+                        meter_type = meter_data.get("type")
+                        if meter_type == "reasoning":
+                            reasoning_delta = meter_data.get("delta")
+                            if isinstance(reasoning_delta, str) and reasoning_delta:
+                                yield {
+                                    "type": "reasoning",
+                                    "task_id": task.task_id,
+                                    "trace_id": trace_id,
+                                    "iteration": task.iteration,
+                                    "delta": reasoning_delta,
+                                    "timestamp": datetime.now(UTC).isoformat(),
+                                }
+                            continue
+
                         raw_rate = meter_data.get("tokens_per_second")
                         raw_estimated = meter_data.get("estimated_completion_tokens")
                         tokens_per_second = (
@@ -1012,6 +1039,19 @@ class ReactEngine:
                     )
 
                 # Yield Observe, Thought, Action events with token info
+                if recursion.thinking and not self.stream_llm_responses:
+                    yield {
+                        "type": "reasoning",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "delta": recursion.thinking,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "created_at": recursion.created_at.isoformat(),
+                        "updated_at": recursion.updated_at.isoformat(),
+                        "tokens": event_data.get("tokens"),
+                    }
+
                 if recursion.observe:
                     yield {
                         "type": "observe",

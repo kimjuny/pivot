@@ -65,6 +65,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             recursion=recursion,
             context=context,
             observe="observe",
+            thinking="provider thinking",
             thought="thought",
             abstract="abstract",
             action_type="RE_PLAN",
@@ -106,6 +107,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.assertEqual(tokens["total_tokens"], 15)  # type: ignore[index]
         self.assertEqual(self.task.total_tokens, 15)
         self.assertEqual(recursion.status, "done")
+        self.assertEqual(recursion.thinking, "provider thinking")
         self.assertEqual(len(plan_steps), 1)
         self.assertEqual(plan_steps[0].step_id, "1")
         self.assertEqual(snapshot_payload["context"]["plan"][0]["step_id"], "1")
@@ -133,6 +135,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             recursion=recursion,
             context=context,
             observe="observe",
+            thinking=None,
             thought="thought",
             abstract="abstract",
             action_type="CALL_TOOL",

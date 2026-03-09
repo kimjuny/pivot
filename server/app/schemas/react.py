@@ -44,6 +44,7 @@ class ReactStreamEventType(str, Enum):
     """Types of events in ReAct stream."""
 
     RECURSION_START = "recursion_start"
+    REASONING = "reasoning"
     OBSERVE = "observe"
     THOUGHT = "thought"
     ABSTRACT = "abstract"
@@ -111,6 +112,7 @@ class ReactRecursionResponse(AppBaseModel):
     task_id: str
     iteration_index: int
     observe: str | None
+    thinking: str | None
     thought: str | None
     abstract: str | None
     action_type: str | None

@@ -62,6 +62,7 @@ class ReactContextTestCase(unittest.TestCase):
             recursion=recursion,
             context=context,
             observe="observe",
+            thinking=None,
             thought="thought",
             abstract="abstract",
             action_type="RE_PLAN",

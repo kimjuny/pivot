@@ -234,6 +234,21 @@ class AnthropicLLM(AbstractLLM):
                             created=int(time.time()),
                             model=response_model,
                         )
+                    elif delta_type == "thinking_delta":
+                        thinking = getattr(delta, "thinking", "")
+                        if isinstance(thinking, str) and thinking:
+                            message = ChatMessage(
+                                role="assistant",
+                                content="",
+                                reasoning_content=thinking,
+                            )
+                            choice = Choice(index=0, message=message)
+                            return Response(
+                                id=response_id,
+                                choices=[choice],
+                                created=int(time.time()),
+                                model=response_model,
+                            )
                     elif delta_type == "input_json_delta":
                         # Tool use input delta - could accumulate and return later if needed
                         # For now, we'll handle complete tool use in message_stop
@@ -251,6 +266,7 @@ class AnthropicLLM(AbstractLLM):
         # Extract content blocks (Anthropic returns array of content blocks)
         content_blocks = getattr(raw_response, "content", [])
         content_text = ""
+        reasoning_text = ""
         tool_calls = []
 
         for block in content_blocks:
@@ -260,6 +276,12 @@ class AnthropicLLM(AbstractLLM):
                 # Text content
                 if hasattr(block, "text"):
                     content_text += block.text
+            elif block_type == "thinking":
+                block_thinking = getattr(block, "thinking", None)
+                if not isinstance(block_thinking, str) or not block_thinking:
+                    block_thinking = getattr(block, "text", "")
+                if isinstance(block_thinking, str):
+                    reasoning_text += block_thinking
             elif block_type == "tool_use":
                 # Tool use block - convert to OpenAI format
                 tool_id = getattr(block, "id", "")
@@ -298,6 +320,7 @@ class AnthropicLLM(AbstractLLM):
         message = ChatMessage(
             role="assistant",
             content=content_text if content_text else None,
+            reasoning_content=reasoning_text if reasoning_text else None,
             tool_calls=tool_calls if tool_calls else None,
         )
 

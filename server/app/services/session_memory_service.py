@@ -673,6 +673,7 @@ class SessionMemoryService:
                         "iteration": recursion.iteration_index,
                         "trace_id": recursion.trace_id,
                         "observe": recursion.observe,
+                        "thinking": recursion.thinking,
                         "thought": recursion.thought,
                         "abstract": recursion.abstract,
                         "action_type": recursion.action_type,

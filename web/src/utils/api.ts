@@ -801,6 +801,7 @@ export interface RecursionDetail {
   iteration: number;
   trace_id: string;
   observe: string | null;
+  thinking: string | null;
   thought: string | null;
   abstract: string | null;
   action_type: string | null;

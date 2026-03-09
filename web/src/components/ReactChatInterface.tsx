@@ -49,6 +49,7 @@ type ReactStreamEventType =
   | 'skill_resolution_result'
   | 'token_rate'
   | 'recursion_start'
+  | 'reasoning'
   | 'observe'
   | 'thought'
   | 'abstract'
@@ -165,6 +166,7 @@ interface RecursionRecord {
   uid: string;
   iteration: number;
   trace_id: string | null;
+  thinking?: string;
   observe?: string;
   thought?: string;
   abstract?: string;
@@ -589,6 +591,7 @@ function ReactChatInterface({ agentId, agentName, primaryLlmId }: ReactChatInter
           uid: `history-${task.task_id}-${r.trace_id || `iter-${r.iteration}`}`,
           iteration: r.iteration,
           trace_id: r.trace_id,
+          thinking: r.thinking || undefined,
           observe: r.observe || undefined,
           thought: r.thought || undefined,
           abstract: r.abstract || undefined,
@@ -1465,6 +1468,14 @@ function ReactChatInterface({ agentId, agentName, primaryLlmId }: ReactChatInter
                   observe: event.delta ?? '',
                   tokens: event.tokens ?? existingRecursion.tokens,
                 };
+              } else if (event.type === 'reasoning') {
+                currentRecursion = {
+                  ...existingRecursion,
+                  trace_id: event.trace_id || existingRecursion.trace_id,
+                  events: updatedEvents,
+                  thinking: `${existingRecursion.thinking ?? ''}${event.delta ?? ''}`,
+                  tokens: event.tokens ?? existingRecursion.tokens,
+                };
               } else if (event.type === 'thought') {
                 currentRecursion = {
                   ...existingRecursion,
@@ -2022,6 +2033,19 @@ function ReactChatInterface({ agentId, agentName, primaryLlmId }: ReactChatInter
 
         {isExpanded && (
           <div className="px-3 pb-3 space-y-2">
+            {/* Provider Thinking */}
+            {recursion.thinking && (
+              <div className="bg-background/60 rounded border border-border p-2">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <Brain className="w-3.5 h-3.5 text-primary" />
+                  <span className="text-xs font-semibold text-foreground">THINKING</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto pl-5 pr-1 text-xs text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">
+                  {recursion.thinking}
+                </div>
+              </div>
+            )}
+
             {/* Observe */}
             {recursion.observe && (
               <div className="bg-background/50 rounded border border-border p-2">

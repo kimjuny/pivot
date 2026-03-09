@@ -83,6 +83,7 @@ class RecursionDetail(AppBaseModel):
     iteration: int
     trace_id: str
     observe: str | None = None
+    thinking: str | None = None
     thought: str | None = None
     abstract: str | None = None
     action_type: str | None = None

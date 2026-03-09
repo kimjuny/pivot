@@ -14,7 +14,7 @@ from app.models.react import (
     ReactRecursionState,
     ReactTask,
 )
-from sqlmodel import Session as DBSession, delete, select
+from sqlmodel import Session as DBSession, col, delete, select
 
 if TYPE_CHECKING:
     from app.orchestration.react.context import ReactContext
@@ -81,6 +81,7 @@ class ReactStateService:
         recursion: ReactRecursion,
         context: ReactContext,
         observe: str,
+        thinking: str | None,
         thought: str,
         abstract: str,
         action_type: str,
@@ -98,6 +99,7 @@ class ReactStateService:
             recursion: Recursion row created for this cycle.
             context: Mutable in-memory context snapshot for this cycle.
             observe: Assistant observe content.
+            thinking: Raw provider reasoning content, if available.
             thought: Assistant thought content.
             abstract: Assistant abstract content.
             action_type: Final normalized action type.
@@ -115,6 +117,7 @@ class ReactStateService:
         raw_action_output = copy.deepcopy(action_output)
 
         recursion.observe = observe
+        recursion.thinking = thinking
         recursion.thought = thought
         recursion.abstract = abstract
         recursion.action_type = action_type
@@ -403,7 +406,9 @@ class ReactStateService:
             context: Mutable context snapshot.
             plan_data: Raw plan payload from the model.
         """
-        delete_stmt = delete(ReactPlanStep).where(ReactPlanStep.task_id == task.task_id)
+        delete_stmt = delete(ReactPlanStep).where(
+            col(ReactPlanStep.task_id) == task.task_id
+        )
         self.db.exec(delete_stmt)  # type: ignore[arg-type]
 
         new_plan_context: list[dict[str, Any]] = []

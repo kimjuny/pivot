@@ -287,6 +287,7 @@ async def get_full_session_history(
                 iteration=r["iteration"],
                 trace_id=r["trace_id"],
                 observe=r["observe"],
+                thinking=r["thinking"],
                 thought=r["thought"],
                 abstract=r["abstract"],
                 action_type=r["action_type"],
