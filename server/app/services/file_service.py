@@ -95,7 +95,7 @@ class PreparedFileAttachment:
     mime_type: str
     width: int
     height: int
-    content_block: dict[str, Any]
+    content_blocks: list[dict[str, Any]]
 
 
 class FileService:
@@ -438,13 +438,15 @@ class FileService:
                         mime_type=file_asset.mime_type,
                         width=file_asset.width,
                         height=file_asset.height,
-                        content_block={
-                            "type": "text",
-                            "text": self._build_document_prompt_block(
-                                file_asset,
-                                markdown_text,
-                            ),
-                        },
+                        content_blocks=[
+                            {
+                                "type": "text",
+                                "text": self._build_document_prompt_block(
+                                    file_asset,
+                                    markdown_text,
+                                ),
+                            }
+                        ],
                     )
                 )
                 continue
@@ -459,11 +461,10 @@ class FileService:
                     mime_type=file_asset.mime_type,
                     width=file_asset.width,
                     height=file_asset.height,
-                    content_block={
-                        "type": "image",
-                        "media_type": file_asset.mime_type,
-                        "data": encoded_data,
-                    },
+                    content_blocks=self._build_image_prompt_blocks(
+                        file_asset,
+                        encoded_data,
+                    ),
                 )
             )
         return prepared
@@ -521,7 +522,7 @@ class FileService:
         """Delete uploaded files that were never attached to a session."""
         now = datetime.now(UTC)
         stmt = select(FileAsset).where(
-            FileAsset.session_id.is_(None),
+            col(FileAsset.session_id).is_(None),
             FileAsset.expires_at < now,
         )
         expired_files = list(self.db.exec(stmt).all())
@@ -682,6 +683,37 @@ class FileService:
         metadata_lines.append("Document content:")
         metadata_lines.append(content)
         return "\n".join(metadata_lines)
+
+    @staticmethod
+    def _build_image_prompt_blocks(
+        file_asset: FileAsset,
+        encoded_data: str,
+    ) -> list[dict[str, Any]]:
+        """Compose the multimodal blocks injected into the LLM request for an image.
+
+        Why: a short descriptor keeps the attachment visible in text-only logs while
+        the separate image block preserves the provider-specific base64 slot.
+        """
+        metadata_lines = [
+            f'Attached image: "{file_asset.original_name}"',
+            f"MIME type: {file_asset.mime_type}",
+        ]
+        if file_asset.width > 0 and file_asset.height > 0:
+            metadata_lines.append(
+                f"Dimensions: {file_asset.width}x{file_asset.height}"
+            )
+
+        return [
+            {
+                "type": "text",
+                "text": "\n".join(metadata_lines),
+            },
+            {
+                "type": "image",
+                "media_type": file_asset.mime_type,
+                "data": encoded_data,
+            },
+        ]
 
     def _delete_asset(self, file_asset: FileAsset, commit: bool = False) -> None:
         """Delete both structured metadata and raw file safely."""

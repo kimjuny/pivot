@@ -325,6 +325,14 @@ class LLMCreate(AppBaseModel):
         description="Thinking mode: 'auto', 'enabled', or 'disabled'",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
+    image_input: bool = Field(
+        default=False,
+        description="Accepts user-supplied image inputs",
+    )
+    image_output: bool = Field(
+        default=False,
+        description="Can produce image outputs",
+    )
     max_context: int = Field(default=128000, description="Maximum context token limit")
     extra_config: str | None = Field(
         default=None,
@@ -366,6 +374,8 @@ class LLMUpdate(AppBaseModel):
     json_schema: str | None = None
     thinking: str | None = None
     streaming: bool | None = None
+    image_input: bool | None = None
+    image_output: bool | None = None
     max_context: int | None = None
     extra_config: str | None = None
 
@@ -404,6 +414,8 @@ class LLMResponse(AppBaseModel):
     json_schema: str
     thinking: str
     streaming: bool
+    image_input: bool
+    image_output: bool
     max_context: int
     extra_config: str | None
     created_at: datetime

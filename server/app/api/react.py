@@ -43,7 +43,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import desc
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ async def react_chat_stream(
                         rec_stmt = (
                             select(ReactRecursion)
                             .where(ReactRecursion.task_id == existing_task.task_id)
-                            .order_by(desc(ReactRecursion.iteration_index))
+                            .order_by(desc(col(ReactRecursion.iteration_index)))
                         )
                         last_rec = db.exec(rec_stmt).first()
 
@@ -290,8 +290,9 @@ async def react_chat_stream(
                     task_id, []
                 )
                 turn_file_blocks = [
-                    item.content_block
+                    content_block
                     for item in file_service.preprocess_files(attached_files)
+                    for content_block in item.content_blocks
                 ]
 
             if agent.skill_resolution_llm_id:
@@ -643,7 +644,7 @@ async def get_task_recursions(
     stmt = (
         select(ReactRecursion)
         .where(ReactRecursion.task_id == task_id)
-        .order_by(ReactRecursion.iteration_index)
+        .order_by(col(ReactRecursion.iteration_index))
     )
     recursions = db.exec(stmt).all()
 
@@ -675,7 +676,7 @@ async def get_task_states(
     stmt = (
         select(ReactRecursionState)
         .where(ReactRecursionState.task_id == task_id)
-        .order_by(ReactRecursionState.iteration_index)
+        .order_by(col(ReactRecursionState.iteration_index))
     )
     states = db.exec(stmt).all()
 

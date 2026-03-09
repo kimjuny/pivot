@@ -8,6 +8,7 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
+from typing import Any, cast
 
 from PIL import Image
 from sqlmodel import Session, SQLModel, create_engine
@@ -26,8 +27,9 @@ class FileServiceTestCase(unittest.TestCase):
     def setUp(self) -> None:
         """Create isolated database and workspace fixtures."""
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.original_workspace_root = workspace_service._WORKSPACE_ROOT
-        workspace_service._WORKSPACE_ROOT = Path(self.temp_dir.name)
+        workspace_module = cast(Any, workspace_service)
+        self.original_workspace_root = workspace_module._WORKSPACE_ROOT
+        workspace_module._WORKSPACE_ROOT = Path(self.temp_dir.name)
 
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
         SQLModel.metadata.create_all(engine)
@@ -37,7 +39,7 @@ class FileServiceTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         """Clean up temporary resources after each test."""
         self.db.close()
-        workspace_service._WORKSPACE_ROOT = self.original_workspace_root
+        cast(Any, workspace_service)._WORKSPACE_ROOT = self.original_workspace_root
         self.temp_dir.cleanup()
 
     @staticmethod
@@ -72,8 +74,11 @@ class FileServiceTestCase(unittest.TestCase):
 
         self.assertEqual(attached[0].session_id, "session-1")
         self.assertEqual(attached[0].task_id, "task-1")
-        self.assertEqual(prepared[0].content_block["type"], "image")
-        decoded = base64.b64decode(prepared[0].content_block["data"])
+        self.assertEqual(len(prepared[0].content_blocks), 2)
+        self.assertEqual(prepared[0].content_blocks[0]["type"], "text")
+        self.assertIn("Attached image", prepared[0].content_blocks[0]["text"])
+        self.assertEqual(prepared[0].content_blocks[1]["type"], "image")
+        decoded = base64.b64decode(prepared[0].content_blocks[1]["data"])
         self.assertEqual(decoded, Path(asset.storage_path).read_bytes())
 
     def test_store_and_preprocess_document(self) -> None:
@@ -114,9 +119,10 @@ class FileServiceTestCase(unittest.TestCase):
         )
         prepared = self.service.preprocess_files(attached)
 
-        self.assertEqual(prepared[0].content_block["type"], "text")
-        self.assertIn("Attached document", prepared[0].content_block["text"])
-        self.assertIn("Hello from docling.", prepared[0].content_block["text"])
+        self.assertEqual(len(prepared[0].content_blocks), 1)
+        self.assertEqual(prepared[0].content_blocks[0]["type"], "text")
+        self.assertIn("Attached document", prepared[0].content_blocks[0]["text"])
+        self.assertIn("Hello from docling.", prepared[0].content_blocks[0]["text"])
 
     def test_prune_expired_unused_files_only(self) -> None:
         """Pruning should remove only expired files that were never attached."""

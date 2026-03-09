@@ -1317,6 +1317,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         <ReactChatInterface
           agentId={agentId}
           agentName={agent?.name}
+          primaryLlmId={agent?.llm_id}
         />
       </DraggableDialog>
 

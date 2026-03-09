@@ -21,6 +21,8 @@ class LLM(SQLModel, table=True):
         json_schema: JSON output reliability ('strong', 'weak', 'none').
         thinking: Thinking mode control ('auto', 'enabled', 'disabled').
         streaming: Whether the model supports streaming responses.
+        image_input: Whether the model accepts user-supplied image inputs.
+        image_output: Whether the model can produce image outputs.
         max_context: Maximum context token limit.
         extra_config: Additional kwargs to pass to LLM API calls (JSON format).
             Example: {"extra_body": {"reasoning_split": true}, "temperature": 0.7}
@@ -63,6 +65,14 @@ class LLM(SQLModel, table=True):
         description="Thinking mode: 'auto', 'enabled', or 'disabled'",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
+    image_input: bool = Field(
+        default=False,
+        description="Accepts user-supplied image inputs",
+    )
+    image_output: bool = Field(
+        default=False,
+        description="Can produce image outputs",
+    )
     max_context: int = Field(default=128000, description="Maximum context token limit")
     extra_config: str | None = Field(
         default=None,

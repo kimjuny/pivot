@@ -110,7 +110,16 @@ class OpenAIResponseLLM(AbstractLLM):
                     {
                         "role": role,
                         "content": (
-                            [{"type": "input_text", "text": converted_content}]
+                            [
+                                {
+                                    "type": (
+                                        "input_text"
+                                        if role == "user"
+                                        else "output_text"
+                                    ),
+                                    "text": converted_content,
+                                }
+                            ]
                             if isinstance(converted_content, str)
                             else converted_content
                         ),

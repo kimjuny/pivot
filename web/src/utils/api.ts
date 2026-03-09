@@ -569,6 +569,8 @@ export const createLLM = async (llmData: {
   json_schema?: string;
   thinking?: string;
   streaming?: boolean;
+  image_input?: boolean;
+  image_output?: boolean;
   max_context?: number;
   extra_config?: string;
 }): Promise<LLM> => {
@@ -610,6 +612,8 @@ export const updateLLM = async (
     json_schema?: string;
     thinking?: string;
     streaming?: boolean;
+    image_input?: boolean;
+    image_output?: boolean;
     max_context?: number;
     extra_config?: string;
   }

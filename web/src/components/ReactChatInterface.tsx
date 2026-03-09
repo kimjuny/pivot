@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react';
 import { ArrowUp, Plus, Loader2, CheckCircle2, XCircle, AlertCircle, Brain, MessageSquare, Square, MessageCircle, Trash2, PlusCircle, PanelLeftClose, PanelLeft, ImagePlus, Paperclip, FileText, FileSpreadsheet, Presentation, Wrench } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatTimestamp } from '../utils/timestamp';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -16,6 +17,7 @@ import {
   listSessions,
   deleteSession,
   getFullSessionHistory,
+  getLLMById,
   deleteChatFile,
   fetchChatFileBlob,
   uploadChatFile,
@@ -35,6 +37,8 @@ interface ReactChatInterfaceProps {
   agentId: number;
   /** Display name of the current agent shown in chat UI title copy */
   agentName?: string;
+  /** Primary LLM configuration ID used to gate image upload affordances */
+  primaryLlmId?: number;
 }
 
 /**
@@ -449,7 +453,7 @@ function RecursionStateViewer({ taskId, iteration }: { taskId: string; iteration
  * ReAct Chat interface component for agent interaction.
  * Displays streaming conversation with ReAct agent and shows execution details.
  */
-function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
+function ReactChatInterface({ agentId, agentName, primaryLlmId }: ReactChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState<string>('');
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -471,6 +475,7 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [supportsImageInput, setSupportsImageInput] = useState<boolean>(false);
   const previousMessageCountRef = useRef<number>(0);
   const autoScrollEnabledRef = useRef<boolean>(true);
   const lastScrollTopRef = useRef<number>(0);
@@ -733,15 +738,37 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   }, []);
 
   /**
+   * Filter image uploads when the primary LLM does not support them.
+   */
+  const partitionFilesByImageCapability = useCallback((files: File[]) => {
+    const acceptedFiles: File[] = [];
+    let blockedImageCount = 0;
+
+    files.forEach((file) => {
+      if (file.type.startsWith('image/') && !supportsImageInput) {
+        blockedImageCount += 1;
+        return;
+      }
+      acceptedFiles.push(file);
+    });
+
+    return { acceptedFiles, blockedImageCount };
+  }, [supportsImageInput]);
+
+  /**
    * Handle file picker changes from the composer menu.
    */
   const handleFileInputChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.target.files ?? []);
-    if (selectedFiles.length > 0) {
-      enqueueFiles(selectedFiles, 'local');
+    const { acceptedFiles, blockedImageCount } = partitionFilesByImageCapability(selectedFiles);
+    if (blockedImageCount > 0) {
+      toast.error('The primary LLM does not accept image input.');
+    }
+    if (acceptedFiles.length > 0) {
+      enqueueFiles(acceptedFiles, 'local');
     }
     event.target.value = '';
-  }, [enqueueFiles]);
+  }, [enqueueFiles, partitionFilesByImageCapability]);
 
   /**
    * Handle document picker changes from the composer menu.
@@ -793,9 +820,20 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
       return;
     }
 
+    const { acceptedFiles, blockedImageCount } = partitionFilesByImageCapability(filesToUpload);
+    if (acceptedFiles.length === 0) {
+      if (blockedImageCount > 0) {
+        toast.error('The primary LLM does not accept image input.');
+      }
+      return;
+    }
+
     event.preventDefault();
-    enqueueFiles(filesToUpload, 'clipboard');
-  }, [enqueueFiles]);
+    if (blockedImageCount > 0) {
+      toast.error('The primary LLM does not accept image input.');
+    }
+    enqueueFiles(acceptedFiles, 'clipboard');
+  }, [enqueueFiles, partitionFilesByImageCapability]);
 
   /**
    * Reload the session list for current agent.
@@ -867,6 +905,45 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
   useEffect(() => {
     pendingFilesRef.current = pendingFiles;
   }, [pendingFiles]);
+
+  /**
+   * Resolve primary LLM image-input support for composer capability gating.
+   *
+   * Why: users should not see or trigger image attachment paths when the
+   * selected primary model cannot consume them.
+   */
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!primaryLlmId) {
+      setSupportsImageInput(false);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    setSupportsImageInput(false);
+
+    const loadPrimaryLlm = async () => {
+      try {
+        const llm = await getLLMById(primaryLlmId);
+        if (!isCancelled) {
+          setSupportsImageInput(llm.image_input);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('Failed to load primary LLM capabilities:', err);
+          setSupportsImageInput(false);
+        }
+      }
+    };
+
+    void loadPrimaryLlm();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [primaryLlmId]);
 
   /**
    * Create a new session and switch to it.
@@ -2623,10 +2700,12 @@ function ReactChatInterface({ agentId, agentName }: ReactChatInterfaceProps) {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="z-[60]">
-                  <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    <span>Upload image</span>
-                  </DropdownMenuItem>
+                  {supportsImageInput && (
+                    <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      <span>Upload image</span>
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
                     <Paperclip className="mr-2 h-4 w-4" />
                     <span>Upload file</span>

@@ -38,6 +38,8 @@ export interface LLMFormData {
   json_schema: string;
   thinking: string;
   streaming: boolean;
+  image_input: boolean;
+  image_output: boolean;
   max_context: number;
   extra_config: string;
 }
@@ -188,6 +190,8 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     json_schema: 'strong',
     thinking: 'auto',
     streaming: true,
+    image_input: false,
+    image_output: false,
     max_context: 128000,
     extra_config: '',
   });
@@ -215,6 +219,8 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           json_schema: initialData.json_schema || 'strong',
           thinking: initialData.thinking || 'auto',
           streaming: initialData.streaming !== undefined ? initialData.streaming : true,
+          image_input: initialData.image_input !== undefined ? initialData.image_input : false,
+          image_output: initialData.image_output !== undefined ? initialData.image_output : false,
           max_context: initialData.max_context || 128000,
           extra_config: initialData.extra_config || '',
         });
@@ -233,6 +239,8 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           json_schema: 'strong',
           thinking: 'auto',
           streaming: true,
+          image_input: false,
+          image_output: false,
           max_context: 128000,
           extra_config: '',
         });
@@ -683,6 +691,46 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                       id="streaming"
                       checked={formData.streaming}
                       onCheckedChange={(checked) => setFormData({ ...formData, streaming: checked })}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="image_input" className="cursor-pointer">Image Input</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p>Whether the model accepts uploaded or pasted user images as part of chat input.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <Switch
+                      id="image_input"
+                      checked={formData.image_input}
+                      onCheckedChange={(checked) => setFormData({ ...formData, image_input: checked })}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Label htmlFor="image_output" className="cursor-pointer">Image Output</Label>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p>Whether the model can generate or return images in its responses.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                    <Switch
+                      id="image_output"
+                      checked={formData.image_output}
+                      onCheckedChange={(checked) => setFormData({ ...formData, image_output: checked })}
                       disabled={isSubmitting}
                     />
                   </div>

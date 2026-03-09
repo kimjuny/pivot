@@ -1,9 +1,28 @@
 import os
 from collections.abc import Generator
+from importlib import import_module
 from pathlib import Path
+from typing import Final
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel
+
+_REQUIRED_TABLES: Final[set[str]] = {
+    "agent",
+    "connection",
+    "fileasset",
+    "llm",
+    "reactplanstep",
+    "reactrecursion",
+    "reactrecursionstate",
+    "reacttask",
+    "scene",
+    "session",
+    "sessionmemory",
+    "subscene",
+    "user",
+}
 
 
 def get_engine():
@@ -42,6 +61,7 @@ def get_session() -> Generator[Session, None, None]:
         A database session that will be automatically closed after use.
     """
     engine = get_engine()
+    ensure_database_ready(engine)
     with Session(engine) as session:
         yield session
 
@@ -53,11 +73,39 @@ def init_db():
     if they don't already exist. It's safe to call this multiple times.
     """
     engine = get_engine()
-    SQLModel.metadata.create_all(engine)
+    ensure_database_ready(engine)
+    print("Database initialized successfully")
+
+
+def ensure_database_ready(engine: Engine | None = None) -> None:
+    """Ensure the active database has all required tables and seed data.
+
+    Why: in development the SQLite file may be deleted while the backend keeps
+    running. New requests then create an empty database file on demand, which
+    would otherwise fail later during auth lookups with missing-table errors.
+
+    Args:
+        engine: Optional engine instance to reuse.
+    """
+    if engine is None:
+        engine = get_engine()
+
+    # Import models lazily so every SQLModel table is registered before create_all.
+    import_module("app.models")
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    if not _REQUIRED_TABLES.issubset(existing_tables):
+        SQLModel.metadata.create_all(engine)
+
     ensure_llm_schema_compatibility()
     ensure_react_schema_compatibility()
     ensure_file_schema_compatibility()
-    print("Database initialized successfully")
+
+    from app.api.auth import init_default_user
+
+    with Session(engine) as session:
+        init_default_user(session)
 
 
 def ensure_llm_schema_compatibility() -> None:

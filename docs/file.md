@@ -8,9 +8,9 @@
 - preprocess：
     - 如果哦是图片，当用户点击发送信息时，将图片进行预处理，从原图片变成base64编码。
     - 如果是文件，需要通过docling把文件转成markdown格式。
-- assemble：
-    - 如果是图片：将base64编码好图片，塞入LLM的参数中（completion / response / anthropic三种协议都要实现），并进行正常问答环节。
-    - 如果是文件：同样地，塞入LLM的参数中（completion / response / anthropic三种协议都要实现），主要塞入到text环节就行，与用户的提问进行拼接。
+- assemble（completion / response / anthropic三种协议都要实现）：
+    - 如果是图片：将base64编码好图片，塞入LLM的参数中，并进行正常问答环节。
+    - 如果是文件：同样地，塞入LLM的参数，主要塞入到text环节就行，与用户的提问进行拼接。
 - prune：每隔一段时间，服务器应当把上传并保存的文件，但是没有实际用到的文件都清理掉。
 
 ## 框架

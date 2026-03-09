@@ -56,6 +56,8 @@ async def get_llms(
             "json_schema": llm.json_schema,
             "thinking": llm.thinking,
             "streaming": llm.streaming,
+            "image_input": llm.image_input,
+            "image_output": llm.image_output,
             "max_context": llm.max_context,
             "extra_config": llm.extra_config,
             "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
@@ -109,6 +111,8 @@ async def create_llm(
         json_schema=llm_data.json_schema,
         thinking=llm_data.thinking,
         streaming=llm_data.streaming,
+        image_input=llm_data.image_input,
+        image_output=llm_data.image_output,
         max_context=llm_data.max_context,
         extra_config=llm_data.extra_config,
     )
@@ -126,6 +130,8 @@ async def create_llm(
         "json_schema": llm.json_schema,
         "thinking": llm.thinking,
         "streaming": llm.streaming,
+        "image_input": llm.image_input,
+        "image_output": llm.image_output,
         "max_context": llm.max_context,
         "extra_config": llm.extra_config,
         "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
@@ -169,6 +175,8 @@ async def get_llm(
         "json_schema": llm.json_schema,
         "thinking": llm.thinking,
         "streaming": llm.streaming,
+        "image_input": llm.image_input,
+        "image_output": llm.image_output,
         "max_context": llm.max_context,
         "extra_config": llm.extra_config,
         "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
@@ -245,6 +253,10 @@ async def update_llm(
         update_data["thinking"] = llm_data.thinking
     if llm_data.streaming is not None:
         update_data["streaming"] = llm_data.streaming
+    if llm_data.image_input is not None:
+        update_data["image_input"] = llm_data.image_input
+    if llm_data.image_output is not None:
+        update_data["image_output"] = llm_data.image_output
     if llm_data.max_context is not None:
         update_data["max_context"] = llm_data.max_context
     if "extra_config" in llm_data.__fields_set__:
@@ -270,6 +282,8 @@ async def update_llm(
         "json_schema": updated_llm.json_schema,
         "thinking": updated_llm.thinking,
         "streaming": updated_llm.streaming,
+        "image_input": updated_llm.image_input,
+        "image_output": updated_llm.image_output,
         "max_context": updated_llm.max_context,
         "extra_config": updated_llm.extra_config,
         "created_at": updated_llm.created_at.replace(tzinfo=UTC).isoformat(),

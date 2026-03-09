@@ -200,6 +200,8 @@ function LLMList() {
         json_schema: llm.json_schema,
         thinking: llm.thinking,
         streaming: llm.streaming,
+        image_input: llm.image_input,
+        image_output: llm.image_output,
         max_context: llm.max_context,
         extra_config: llm.extra_config,
       });
@@ -298,6 +300,8 @@ function LLMList() {
           json_schema: (item.json_schema as string) ?? 'none',
           thinking: (item.thinking as string) ?? 'auto',
           streaming: (item.streaming as boolean) ?? false,
+          image_input: (item.image_input as boolean) ?? false,
+          image_output: (item.image_output as boolean) ?? false,
           max_context: (item.max_context as number) ?? 8192,
           extra_config: (item.extra_config as string) ?? '{}',
         });
@@ -333,6 +337,8 @@ function LLMList() {
     json_schema: string;
     thinking: string;
     streaming: boolean;
+    image_input: boolean;
+    image_output: boolean;
     max_context: number;
     extra_config: string;
   }) => {
@@ -607,6 +613,8 @@ function LLMList() {
                 json_schema: editingLLM.json_schema,
                 thinking: editingLLM.thinking,
                 streaming: editingLLM.streaming,
+                image_input: editingLLM.image_input,
+                image_output: editingLLM.image_output,
                 max_context: editingLLM.max_context,
                 extra_config: editingLLM.extra_config,
               }
@@ -650,6 +658,8 @@ function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowPr
     llm.tool_calling === "native" ? "Tools" : null,
     llm.json_schema === "strong" ? "JSON" : null,
     llm.chat ? "Chat" : null,
+    llm.image_input ? "Img In" : null,
+    llm.image_output ? "Img Out" : null,
   ].filter((label): label is string => Boolean(label));
 
   const capabilityText = capabilityLabels.join(" · ");

@@ -300,6 +300,10 @@ export interface LLM {
   thinking: string;
   /** Whether the model supports streaming responses */
   streaming: boolean;
+  /** Whether the model accepts user-supplied image inputs */
+  image_input: boolean;
+  /** Whether the model can produce image outputs */
+  image_output: boolean;
   /** Maximum context token limit */
   max_context: number;
   /** Extra JSON configuration for LLM API calls */

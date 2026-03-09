@@ -17,7 +17,7 @@ sys.path.append(str(Path(server_dir).parent))
 # Import core modules after path is set up (noqa: E402 - must be after sys.path setup)
 # Import server modules (noqa: E402 - must be after sys.path setup)
 from app.api.agents import router as agents_router  # noqa: E402
-from app.api.auth import init_default_user, router as auth_router  # noqa: E402
+from app.api.auth import router as auth_router  # noqa: E402
 from app.api.build import router as build_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
@@ -29,11 +29,8 @@ from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
-    ensure_file_schema_compatibility,
-    ensure_llm_schema_compatibility,
-    ensure_react_schema_compatibility,
     get_engine,
-    get_session,
+    init_db,
 )
 from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.services.file_service import FileService  # noqa: E402
@@ -146,23 +143,9 @@ async def startup_event():
     logger.info("=" * 50)
 
     logger.info("Initializing database...")
-    from sqlmodel import SQLModel
-
-    engine = get_engine()
-    SQLModel.metadata.create_all(engine)
-    ensure_llm_schema_compatibility()
-    ensure_react_schema_compatibility()
-    ensure_file_schema_compatibility()
+    init_db()
 
     logger.info("Database initialized successfully")
-
-    # Initialize default user
-    logger.info("Initializing default user...")
-    try:
-        with next(get_session()) as session:
-            init_default_user(session)
-    except Exception as e:
-        logger.error(f"Failed to initialize default user: {e}")
 
     # Initialize tool system
     logger.info("Initializing tool system...")
