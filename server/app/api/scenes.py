@@ -5,7 +5,7 @@ All endpoints require authentication.
 """
 
 import logging
-from datetime import timezone
+from datetime import UTC
 from typing import Any
 
 from app.api.auth import get_current_user
@@ -97,8 +97,8 @@ async def create_scene(
         "name": scene.name,
         "description": scene.description,
         "agent_id": scene.agent_id,
-        "created_at": scene.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": scene.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": scene.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": scene.updated_at.replace(tzinfo=UTC).isoformat(),
     }
 
 

@@ -1,26 +1,23 @@
 import { create } from 'zustand';
 import type { Agent, SceneGraph } from '../types';
-import { compareAgents, deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
+import { compareAgents, deepCopyAgent } from '../utils/compare';
 
 /**
- * Store for managing agent working state with A/B/C data comparison.
- * 
- * 1. OriginalAgentDetail (A data): From server, read-only baseline.
- * 2. WorkspaceAgentDetail (B data): User working copy, editable.
- * 3. PreviewAgentDetail (C data): For preview mode interaction.
+ * Store for managing agent working state with original and workspace copies.
+ *
+ * 1. OriginalAgentDetail: Server baseline used for dirty checking.
+ * 2. WorkspaceAgentDetail: Editable working copy used by the scene editor.
  */
 interface AgentWorkStore {
-  /** Original agent data from server (A data) */
+  /** Original agent data from server */
   originalAgent: Agent | null;
-  /** Working copy of agent data (B data) */
+  /** Working copy of agent data */
   workspaceAgent: Agent | null;
-  /** Preview copy of agent data (C data) */
-  previewAgent: Agent | null;
 
   /** Current scene ID being edited/viewed */
   currentSceneId: number | null;
-  
-  /** Whether there are unsaved changes (A != B) */
+
+  /** Whether there are unsaved changes */
   hasUnsavedChanges: boolean;
   /** Whether a submit operation is in progress */
   isSubmitting: boolean;
@@ -29,7 +26,7 @@ interface AgentWorkStore {
 
   /**
    * Initialize the store with data from server.
-   * Sets A and B data.
+   * Sets original and workspace data.
    */
   initialize: (agent: Agent) => void;
 
@@ -44,22 +41,12 @@ interface AgentWorkStore {
   updateSceneInWorkspace: (sceneId: number, graph: SceneGraph) => void;
 
   /**
-   * Enter preview mode: Copy B -> C.
-   */
-  enterPreviewMode: () => void;
-
-  /**
-   * Update preview agent (C data).
-   */
-  updatePreviewAgent: (agent: Agent) => void;
-
-  /**
-   * Discard all changes: Reset B -> A.
+   * Discard all changes and restore the original data.
    */
   discardChanges: () => void;
 
   /**
-   * Mark changes as committed: Update A -> B.
+   * Mark changes as committed.
    */
   markAsCommitted: (newAgentData?: Agent) => void;
 
@@ -76,7 +63,6 @@ interface AgentWorkStore {
 const useAgentWorkStore = create<AgentWorkStore>((set, get) => ({
   originalAgent: null,
   workspaceAgent: null,
-  previewAgent: null,
   currentSceneId: null,
   hasUnsavedChanges: false,
   isSubmitting: false,
@@ -87,7 +73,6 @@ const useAgentWorkStore = create<AgentWorkStore>((set, get) => ({
     set({
       originalAgent: agent, // Keep original reference or deep copy? Safer to deep copy if we mutate strictly, but here we treat it as immutable.
       workspaceAgent: copy,
-      previewAgent: null, // Clear preview on init
       hasUnsavedChanges: false,
       error: null
     });
@@ -123,19 +108,6 @@ const useAgentWorkStore = create<AgentWorkStore>((set, get) => ({
     });
   },
 
-  enterPreviewMode: () => {
-    const { workspaceAgent } = get();
-    if (workspaceAgent) {
-      set({
-        previewAgent: deepCopyAgent(workspaceAgent)
-      });
-    }
-  },
-
-  updatePreviewAgent: (agent) => {
-    set({ previewAgent: agent });
-  },
-
   discardChanges: () => {
     const { originalAgent } = get();
     set({
@@ -166,7 +138,6 @@ const useAgentWorkStore = create<AgentWorkStore>((set, get) => ({
     set({
       originalAgent: null,
       workspaceAgent: null,
-      previewAgent: null,
       currentSceneId: null,
       hasUnsavedChanges: false,
       isSubmitting: false,

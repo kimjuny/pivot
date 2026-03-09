@@ -19,7 +19,7 @@ import hashlib
 import json
 import re
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -182,11 +182,9 @@ def _build_metadata(
 
     created_iso = created_at
     if created_iso is None:
-        created_iso = datetime.fromtimestamp(
-            from_stat_created, tz=timezone.utc
-        ).isoformat()
+        created_iso = datetime.fromtimestamp(from_stat_created, tz=UTC).isoformat()
 
-    updated_iso = datetime.fromtimestamp(from_stat_updated, tz=timezone.utc).isoformat()
+    updated_iso = datetime.fromtimestamp(from_stat_updated, tz=UTC).isoformat()
 
     name = parsed.get("name") or fallback_name or path.stem
     description = parsed.get("description") or ""

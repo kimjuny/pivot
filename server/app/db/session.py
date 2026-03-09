@@ -107,9 +107,7 @@ def ensure_file_schema_compatibility() -> None:
     with engine.begin() as conn:
         if "kind" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN kind VARCHAR"))
-            conn.execute(
-                text("UPDATE fileasset SET kind = 'image' WHERE kind IS NULL")
-            )
+            conn.execute(text("UPDATE fileasset SET kind = 'image' WHERE kind IS NULL"))
         if "page_count" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN page_count INTEGER"))
         if "markdown_path" not in columns:

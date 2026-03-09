@@ -1,10 +1,9 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
-from pydantic import ConfigDict, Field, field_validator
-
 from app.schemas.base import AppBaseModel
+from pydantic import ConfigDict, Field, field_validator
 
 
 def _normalize_extra_config(extra_config: str | None) -> str | None:
@@ -87,6 +86,7 @@ class AgentResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class SceneCreate(AppBaseModel):
     name: str = Field(..., description="Scene name")
     description: str | None = Field(None, description="Scene description")
@@ -106,6 +106,7 @@ class SceneResponse(AppBaseModel):
     agent_id: int | None
     created_at: datetime
     updated_at: datetime
+
 
 class SubsceneCreate(AppBaseModel):
     name: str = Field(..., description="Subscene name")
@@ -139,6 +140,7 @@ class SubsceneResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class ConnectionCreate(AppBaseModel):
     name: str = Field(..., description="Connection name")
     condition: str | None = Field(None, description="Connection condition")
@@ -171,6 +173,7 @@ class ConnectionResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class SubsceneWithConnectionsResponse(AppBaseModel):
     id: int | str | None
     name: str
@@ -183,6 +186,7 @@ class SubsceneWithConnectionsResponse(AppBaseModel):
     connections: list[ConnectionResponse]
     created_at: datetime
     updated_at: datetime
+
 
 class SceneGraphResponse(AppBaseModel):
     id: int | str
@@ -206,47 +210,6 @@ class AgentDetailResponse(AgentResponse):
     scenes: list[SceneGraphResponse] = Field(default_factory=list)
 
 
-class ChatHistoryCreate(AppBaseModel):
-    agent_id: int = Field(..., description="Agent ID")
-    user: str = Field(..., description="Username of the user")
-    role: str = Field(..., description="Role: 'user' or 'agent'")
-    message: str = Field(..., description="Message content")
-    reason: str | None = Field(None, description="Reason from agent response")
-    update_scene: str | None = Field(
-        None, description="Updated scene graph in JSON format"
-    )
-
-
-class PreviewChatRequest(AppBaseModel):
-    """Schema for preview chat request."""
-
-    message: str = Field(..., description="User message")
-    agent_detail: AgentDetailResponse = Field(
-        ..., description="Full agent detail definition"
-    )
-    current_scene_name: str | None = Field(
-        None, description="Name of the currently active scene"
-    )
-    current_subscene_name: str | None = Field(
-        None, description="Name of the currently active subscene"
-    )
-
-
-class PreviewChatResponse(AppBaseModel):
-    """Schema for preview chat response."""
-
-    response: str
-    reason: str | None
-    graph: list[SceneGraphResponse] | None = Field(
-        None, description="Updated scene graph"
-    )
-    current_scene_name: str | None = Field(None, description="Updated active scene")
-    current_subscene_name: str | None = Field(
-        None, description="Updated active subscene"
-    )
-    create_time: str
-
-
 class StreamEventType(str, Enum):
     """Enum for SSE stream event types."""
 
@@ -254,51 +217,26 @@ class StreamEventType(str, Enum):
     REASON = "reason"
     RESPONSE = "response"
     UPDATED_SCENES = "updated_scenes"
-    MATCH_CONNECTION = "match_connection"
     ERROR = "error"
 
 
 class StreamEvent(AppBaseModel):
-    """Schema for SSE stream event data."""
+    """Schema for build-stream SSE event data."""
 
     type: StreamEventType = Field(
         ...,
-        description="Event type: 'reasoning', 'reason', 'response', 'updated_scenes', 'match_connection', 'error'",
+        description="Event type: 'reasoning', 'reason', 'response', 'updated_scenes', 'error'",
     )
     delta: str | None = Field(default=None, description="Incremental content update")
     updated_scenes: list[SceneGraphResponse] | None = Field(
         default=None, description="Updated scene graph"
     )
-    matched_connection: ConnectionResponse | None = Field(
-        default=None, description="Matched connection details"
-    )
     error: str | None = Field(default=None, description="Error message")
     create_time: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="Creation timestamp",
     )
 
-
-class ChatHistoryResponse(AppBaseModel):
-    id: int
-    agent_id: int
-    user: str
-    role: str
-    message: str
-    reason: str | None
-    update_scene: str | None
-    create_time: datetime
-
-class ChatHistoryWithGraphResponse(AppBaseModel):
-    id: int
-    agent_id: int
-    user: str
-    role: str
-    message: str
-    reason: str | None
-    update_scene: str | None
-    create_time: datetime
-    graph: dict | None = Field(None, description="Current scene graph")
 
 class SceneGraphUpdate(AppBaseModel):
     """Schema for bulk updating scene graph data."""

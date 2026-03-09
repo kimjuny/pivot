@@ -354,37 +354,3 @@ class Connection(SQLModel, table=True):
             to_subscene=data.get("to_subscene", ""),
             condition=data.get("condition"),
         )
-
-
-class ChatHistory(SQLModel, table=True):
-    """Chat history for user-agent conversations.
-
-    Stores all messages exchanged between users and agents,
-    including the agent's reasoning and scene graph updates.
-
-    Attributes:
-        id: Primary key of the chat history entry.
-        agent_id: Foreign key to the agent.
-        user: Username of the user.
-        role: Role of the message sender ('user' or 'agent').
-        message: Message content from user or agent.
-        reason: Reason from agent response.
-        update_scene: Updated scene graph in JSON format.
-        create_time: UTC timestamp when the history was created.
-    """
-
-    id: int | None = Field(default=None, primary_key=True)
-    agent_id: int | None = Field(default=None, foreign_key="agent.id", index=True)
-    user: str = Field(index=True, description="Username of the user")
-    role: str = Field(
-        index=True, description="Role of the message sender: 'user' or 'agent'"
-    )
-    message: str = Field(default="", description="Message content from user or agent")
-    reason: str | None = Field(default=None, description="Reason from agent response")
-    update_scene: str | None = Field(
-        default=None, description="Updated scene graph in JSON format"
-    )
-    create_time: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        description="Time when the history was created",
-    )

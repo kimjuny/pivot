@@ -5,7 +5,7 @@ All endpoints require authentication.
 """
 
 import logging
-from datetime import timezone
+from datetime import UTC
 from typing import Any
 
 from app.api.auth import get_current_user
@@ -15,7 +15,7 @@ from app.crud.connection import connection as connection_crud
 from app.crud.llm import llm as llm_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
-from app.models.agent import ChatHistory, Connection
+from app.models.agent import Connection
 from app.models.user import User
 from app.schemas.schemas import (
     AgentCreate,
@@ -76,8 +76,8 @@ async def get_agents(
                 "max_iteration": agent.max_iteration,
                 "tool_ids": agent.tool_ids,
                 "skill_ids": agent.skill_ids,
-                "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
-                "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+                "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
+                "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
             }
         )
     return result
@@ -153,8 +153,8 @@ async def create_agent(
         "max_iteration": agent.max_iteration,
         "tool_ids": agent.tool_ids,
         "skill_ids": agent.skill_ids,
-        "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
     }
 
 
@@ -253,8 +253,8 @@ async def update_agent(
         "max_iteration": updated_agent.max_iteration,
         "tool_ids": updated_agent.tool_ids,
         "skill_ids": updated_agent.skill_ids,
-        "created_at": updated_agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": updated_agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": updated_agent.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": updated_agent.updated_at.replace(tzinfo=UTC).isoformat(),
     }
 
 
@@ -347,8 +347,8 @@ async def get_agent(
         "max_iteration": agent.max_iteration,
         "tool_ids": agent.tool_ids,
         "skill_ids": agent.skill_ids,
-        "created_at": agent.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": agent.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
         "scenes": scenes_graph_responses,
     }
 
@@ -476,8 +476,8 @@ async def update_agent_scenes(
             "name": scene.name,
             "description": scene.description,
             "agent_id": scene.agent_id,
-            "created_at": scene.created_at.replace(tzinfo=timezone.utc).isoformat(),
-            "updated_at": scene.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+            "created_at": scene.created_at.replace(tzinfo=UTC).isoformat(),
+            "updated_at": scene.updated_at.replace(tzinfo=UTC).isoformat(),
         }
         for scene in scenes
     ]
@@ -533,14 +533,7 @@ async def delete_agent(
         # 3. Delete Scene
         db.delete(scene)
 
-    # 4. Delete Chat History
-    chat_histories = db.exec(
-        select(ChatHistory).where(ChatHistory.agent_id == agent_id)
-    ).all()
-    for history in chat_histories:
-        db.delete(history)
-
-    # 5. Delete Agent
+    # 4. Delete Agent
     db.delete(agent)
 
     db.commit()

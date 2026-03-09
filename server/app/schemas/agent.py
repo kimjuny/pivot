@@ -1,8 +1,7 @@
 from datetime import datetime
 
-from pydantic import Field
-
 from app.schemas.base import AppBaseModel
+from pydantic import Field
 
 
 class AgentCreate(AppBaseModel):
@@ -47,6 +46,7 @@ class AgentResponse(AppBaseModel):
     api_key: str
     created_at: datetime
     updated_at: datetime
+
 
 class SceneCreate(AppBaseModel):
     """Schema for creating a new scene.
@@ -98,6 +98,7 @@ class SceneResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
     subscenes: list["SubsceneResponse"]
+
 
 class SubsceneCreate(AppBaseModel):
     """Schema for creating a new subscene.
@@ -173,6 +174,7 @@ class SubsceneResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
     connections: list["ConnectionResponse"]
+
 
 class ConnectionCreate(AppBaseModel):
     """Schema for creating a new connection.

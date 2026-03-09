@@ -10,7 +10,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncIterator, Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
@@ -268,7 +268,7 @@ class ReactEngine:
                     ),
                 )
             ],
-            created=int(datetime.now(timezone.utc).timestamp()),
+            created=int(datetime.now(UTC).timestamp()),
             model=response_model,
             usage=usage_info,
         )
@@ -836,7 +836,7 @@ class ReactEngine:
                     "task_id": task.task_id,
                     "trace_id": trace_id,
                     "iteration": task.iteration,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
 
                 # Append iteration payload as a new user message.
@@ -900,7 +900,7 @@ class ReactEngine:
                                 token_meter_queue.get(),
                                 timeout=0.2,
                             )
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             now = perf_counter()
                             if now - last_meter_emit_at >= 1.0:
                                 # Keep UI cadence stable: when provider stream stalls,
@@ -916,7 +916,7 @@ class ReactEngine:
                                             last_estimated_completion_tokens
                                         ),
                                     },
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    "timestamp": datetime.now(UTC).isoformat(),
                                 }
                                 last_meter_emit_at = now
                             continue
@@ -949,7 +949,7 @@ class ReactEngine:
                                 "tokens_per_second": round(tokens_per_second, 2),
                                 "estimated_completion_tokens": estimated_completion_tokens,
                             },
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": datetime.now(UTC).isoformat(),
                         }
 
                 recursion, event_data = await recursion_task
@@ -1019,7 +1019,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "delta": recursion.observe,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),
                         "tokens": event_data.get("tokens"),
@@ -1032,7 +1032,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "delta": recursion.thought,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),
                         "tokens": event_data.get("tokens"),
@@ -1045,7 +1045,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "delta": recursion.abstract,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),
                         "tokens": event_data.get("tokens"),
@@ -1058,7 +1058,7 @@ class ReactEngine:
                     "trace_id": event_data.get("trace_id"),
                     "iteration": task.iteration,
                     "delta": action_type,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "created_at": recursion.created_at.isoformat(),
                     "updated_at": recursion.updated_at.isoformat(),
                     "tokens": event_data.get("tokens"),
@@ -1079,7 +1079,7 @@ class ReactEngine:
                             "tool_calls": tool_calls_data,
                             "tool_results": tool_results_data,
                         },
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
                 elif action_type == "RE_PLAN":
@@ -1090,7 +1090,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "data": plan_output,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
                 elif action_type == "REFLECT":
@@ -1103,7 +1103,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "data": reflect_output,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
                 elif action_type == "CLARIFY":
@@ -1113,7 +1113,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "data": event_data.get("output"),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
                     # Increment iteration before breaking so next run starts at next iteration
@@ -1129,7 +1129,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "data": event_data.get("output"),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
                     # Process session memory updates if session_id is provided
@@ -1157,7 +1157,7 @@ class ReactEngine:
                         "type": "task_complete",
                         "task_id": task.task_id,
                         "iteration": task.iteration,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "total_tokens": {
                             "prompt_tokens": task.total_prompt_tokens,
                             "completion_tokens": task.total_completion_tokens,
@@ -1192,7 +1192,7 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "data": {"error": error_msg},
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
                     if non_retryable_error:
@@ -1226,7 +1226,7 @@ class ReactEngine:
                     "task_id": task.task_id,
                     "iteration": task.iteration,
                     "data": {"error": "Maximum iteration reached"},
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
 
         except Exception as e:
@@ -1244,5 +1244,5 @@ class ReactEngine:
                 "task_id": task.task_id,
                 "iteration": task.iteration,
                 "data": {"error": error_message},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }

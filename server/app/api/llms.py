@@ -5,7 +5,7 @@ All endpoints require authentication.
 """
 
 import logging
-from datetime import timezone
+from datetime import UTC
 from typing import Any
 
 from app.api.auth import get_current_user
@@ -58,8 +58,8 @@ async def get_llms(
             "streaming": llm.streaming,
             "max_context": llm.max_context,
             "extra_config": llm.extra_config,
-            "created_at": llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
-            "updated_at": llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+            "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
+            "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
         }
         for llm in llms
     ]
@@ -128,8 +128,8 @@ async def create_llm(
         "streaming": llm.streaming,
         "max_context": llm.max_context,
         "extra_config": llm.extra_config,
-        "created_at": llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
     }
 
 
@@ -171,8 +171,8 @@ async def get_llm(
         "streaming": llm.streaming,
         "max_context": llm.max_context,
         "extra_config": llm.extra_config,
-        "created_at": llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
     }
 
 
@@ -272,8 +272,8 @@ async def update_llm(
         "streaming": updated_llm.streaming,
         "max_context": updated_llm.max_context,
         "extra_config": updated_llm.extra_config,
-        "created_at": updated_llm.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        "updated_at": updated_llm.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        "created_at": updated_llm.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": updated_llm.updated_at.replace(tzinfo=UTC).isoformat(),
     }
 
 

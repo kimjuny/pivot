@@ -7,7 +7,7 @@ All endpoints require authentication.
 
 import logging
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
@@ -71,7 +71,7 @@ async def build_chat_stream(
                     error_event = StreamEvent(
                         type=StreamEventType.ERROR,
                         error=f"Agent with ID {request.agent_id} not found",
-                        create_time=datetime.now(timezone.utc).isoformat(),
+                        create_time=datetime.now(UTC).isoformat(),
                     )
                     yield f"data: {error_event.json()}\n\n"
                     return
@@ -134,7 +134,7 @@ async def build_chat_stream(
                     error_event = StreamEvent(
                         type=StreamEventType.ERROR,
                         error=f"Agent {request.agent_id} has no ID",
-                        create_time=datetime.now(timezone.utc).isoformat(),
+                        create_time=datetime.now(UTC).isoformat(),
                     )
                     yield f"data: {error_event.json()}\n\n"
                     return
@@ -162,7 +162,7 @@ async def build_chat_stream(
                 error_event = StreamEvent(
                     type=StreamEventType.ERROR,
                     error="LLM ID is required. Please specify llm_id or provide an agent with configured LLM.",
-                    create_time=datetime.now(timezone.utc).isoformat(),
+                    create_time=datetime.now(UTC).isoformat(),
                 )
                 yield f"data: {error_event.json()}\n\n"
                 return
@@ -182,7 +182,7 @@ async def build_chat_stream(
             error_event = StreamEvent(
                 type=StreamEventType.ERROR,
                 error=str(e),
-                create_time=datetime.now(timezone.utc).isoformat(),
+                create_time=datetime.now(UTC).isoformat(),
             )
             yield f"data: {error_event.json()}\n\n"
 

@@ -4,7 +4,7 @@ This module defines database models for managing conversation sessions
 and their associated memory in the ReAct agent system.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -64,8 +64,8 @@ class Session(SQLModel, table=True):
         default=CHAT_HISTORY_VERSION,
         description="Version of chat_history schema",
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     memory: Optional["SessionMemory"] = Relationship(back_populates="session")
@@ -108,8 +108,8 @@ class SessionMemory(SQLModel, table=True):
         default="[]",
         description="JSON string of conversations summary array",
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     session: Optional["Session"] = Relationship(back_populates="memory")

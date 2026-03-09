@@ -3,7 +3,7 @@
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.models.react import ReactTask
@@ -216,7 +216,7 @@ class ReactRuntimeService:
             ),
             ensure_ascii=False,
         )
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self.db.add(task)
         self.db.commit()
 

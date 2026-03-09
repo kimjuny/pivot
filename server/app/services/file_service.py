@@ -8,7 +8,7 @@ import logging
 import tempfile
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -214,7 +214,9 @@ class FileService:
         format_name, mime_type = format_config
         text_encoding = self._detect_text_encoding(file_bytes, extension)
 
-        with tempfile.NamedTemporaryFile(suffix=f".{extension}", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            suffix=f".{extension}", delete=False
+        ) as handle:
             temp_path = Path(handle.name)
             handle.write(file_bytes)
 
@@ -250,7 +252,7 @@ class FileService:
         """Verify and persist an uploaded file on disk and in database."""
         normalized_name = self._normalize_original_name(filename)
         upload_kind = self._infer_upload_kind(normalized_name)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         file_id = str(uuid.uuid4())
 
         if upload_kind == "document":
@@ -390,7 +392,7 @@ class FileService:
         """Bind uploaded files to the current task right before send."""
         attached_files: list[FileAsset] = []
         seen_ids: set[str] = set()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for file_id in file_ids:
             normalized_id = file_id.strip()
@@ -403,7 +405,9 @@ class FileService:
                 raise ValueError(f"File '{normalized_id}' does not exist.")
 
             if file_asset.task_id is not None and file_asset.task_id != task_id:
-                raise ValueError(f"File '{normalized_id}' is already attached elsewhere.")
+                raise ValueError(
+                    f"File '{normalized_id}' is already attached elsewhere."
+                )
 
             file_asset.session_id = session_id
             file_asset.task_id = task_id
@@ -499,9 +503,7 @@ class FileService:
                     suspected_scanned=file_asset.suspected_scanned,
                     text_encoding=file_asset.text_encoding,
                     source=file_asset.source,
-                    created_at=file_asset.created_at.replace(
-                        tzinfo=timezone.utc
-                    ).isoformat(),
+                    created_at=file_asset.created_at.replace(tzinfo=UTC).isoformat(),
                 )
             )
         return grouped
@@ -517,7 +519,7 @@ class FileService:
 
     def prune_expired_unused_files(self) -> int:
         """Delete uploaded files that were never attached to a session."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = select(FileAsset).where(
             FileAsset.session_id.is_(None),
             FileAsset.expires_at < now,
@@ -546,7 +548,7 @@ class FileService:
         file_asset.suspected_scanned = (
             file_asset.extension == "pdf" and not file_asset.can_extract_text
         )
-        file_asset.updated_at = datetime.now(timezone.utc)
+        file_asset.updated_at = datetime.now(UTC)
         self.db.add(file_asset)
         self.db.commit()
         self.db.refresh(file_asset)
@@ -558,9 +560,7 @@ class FileService:
     ) -> tuple[str, int | None]:
         """Convert a supported document to markdown via Docling."""
         try:
-            document_converter_module = import_module(
-                "docling.document_converter"
-            )
+            document_converter_module = import_module("docling.document_converter")
         except ModuleNotFoundError as err:
             raise ValueError(
                 "Docling is not available in the current backend environment. "
@@ -590,7 +590,9 @@ class FileService:
 
         export_to_markdown = getattr(document, "export_to_markdown", None)
         if not callable(export_to_markdown):
-            raise ValueError("Docling document output does not support markdown export.")
+            raise ValueError(
+                "Docling document output does not support markdown export."
+            )
 
         markdown_text = export_to_markdown()
         if not isinstance(markdown_text, str):
@@ -637,7 +639,10 @@ class FileService:
     def _infer_upload_kind(filename: str) -> str:
         """Infer whether the upload should be processed as image or document."""
         extension = FileService._extract_extension(filename)
-        if extension in _ALLOWED_DOCUMENT_TYPES or extension in _LEGACY_OFFICE_REPLACEMENTS:
+        if (
+            extension in _ALLOWED_DOCUMENT_TYPES
+            or extension in _LEGACY_OFFICE_REPLACEMENTS
+        ):
             return "document"
         return "image"
 

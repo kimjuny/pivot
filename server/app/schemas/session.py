@@ -2,10 +2,9 @@
 
 from typing import Any
 
+from app.schemas.base import AppBaseModel
 from app.schemas.file import FileAssetListItem
 from pydantic import Field
-
-from app.schemas.base import AppBaseModel
 
 
 class SessionCreate(AppBaseModel):

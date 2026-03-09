@@ -6,7 +6,7 @@ and their associated memory.
 
 import json
 import logging
-from datetime import timezone
+from datetime import UTC
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
@@ -63,8 +63,8 @@ async def create_session(
         status=session.status,
         subject=json.loads(session.subject) if session.subject else None,
         object=json.loads(session.object) if session.object else None,
-        created_at=session.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        updated_at=session.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
+        updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
     )
 
 
@@ -117,8 +117,8 @@ async def list_sessions(
                 agent_id=session.agent_id,
                 status=session.status,
                 subject=subject_str,
-                created_at=session.created_at.replace(tzinfo=timezone.utc).isoformat(),
-                updated_at=session.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+                created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
+                updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
                 message_count=message_count,
             )
         )
@@ -165,8 +165,8 @@ async def get_session(
         status=session.status,
         subject=json.loads(session.subject) if session.subject else None,
         object=json.loads(session.object) if session.object else None,
-        created_at=session.created_at.replace(tzinfo=timezone.utc).isoformat(),
-        updated_at=session.updated_at.replace(tzinfo=timezone.utc).isoformat(),
+        created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
+        updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
     )
 
 
@@ -298,8 +298,8 @@ async def get_full_session_history(
                 completion_tokens=r["completion_tokens"],
                 total_tokens=r["total_tokens"],
                 cached_input_tokens=r["cached_input_tokens"],
-                created_at=r["created_at"].replace(tzinfo=timezone.utc).isoformat(),
-                updated_at=r["updated_at"].replace(tzinfo=timezone.utc).isoformat(),
+                created_at=r["created_at"].replace(tzinfo=UTC).isoformat(),
+                updated_at=r["updated_at"].replace(tzinfo=UTC).isoformat(),
             )
             for r in task_data["recursions"]
         ]
@@ -314,12 +314,8 @@ async def get_full_session_history(
                 total_tokens=task_data["total_tokens"],
                 skill_selection_result=task_data.get("skill_selection_result"),
                 recursions=recursions,
-                created_at=task_data["created_at"]
-                .replace(tzinfo=timezone.utc)
-                .isoformat(),
-                updated_at=task_data["updated_at"]
-                .replace(tzinfo=timezone.utc)
-                .isoformat(),
+                created_at=task_data["created_at"].replace(tzinfo=UTC).isoformat(),
+                updated_at=task_data["updated_at"].replace(tzinfo=UTC).isoformat(),
             )
         )
 

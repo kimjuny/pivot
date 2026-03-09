@@ -15,7 +15,6 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { X, Layers, Wrench, Zap } from 'lucide-react';
-import { usePreviewChatStore } from '../store/previewChatStore';
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useBuildChatStore } from '../store/buildChatStore';
 import { useAgentTabStore } from '../store/agentTabStore';
@@ -23,7 +22,6 @@ import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/s
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import DraggableDialog from './DraggableDialog';
 import BuildChatInterface from './BuildChatInterface';
-import PreviewChatInterface from './PreviewChatInterface';
 import ReactChatInterface from './ReactChatInterface';
 import EditPanel from './EditPanel';
 import SceneModal from './SceneModal';
@@ -31,7 +29,6 @@ import SubsceneModal from './SubsceneModal';
 import ConnectionModal from './ConnectionModal';
 import SubsceneNode from './SubsceneNode';
 import AgentDetailSidebar from './AgentDetailSidebar';
-import ControlButtons from './ControlButtons';
 import SceneContextMenu, { ContextMenuContext } from './SceneContextMenu';
 import SubmitArea from './SubmitArea';
 import ToolEditor from './ToolEditor';
@@ -155,10 +152,8 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
 }
 
 function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes, onAgentUpdate }: AgentDetailProps) {
-  const { chatHistory } = usePreviewChatStore();
   const {
     workspaceAgent,
-    previewAgent,
     currentSceneId,
     hasUnsavedChanges,
     isSubmitting,
@@ -166,7 +161,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     setWorkspaceAgent,
     updateSceneInWorkspace,
     setCurrentSceneId,
-    enterPreviewMode,
     discardChanges,
     markAsCommitted,
     setSubmitting,
@@ -179,9 +173,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isBuildChatOpen, setIsBuildChatOpen] = useState<boolean>(false);
   const [isReactChatOpen, setIsReactChatOpen] = useState<boolean>(false);
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit');
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  // Removed: previewModeSceneGraphData - now using previewAgent from store
   const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
   const [isEditSceneModalOpen, setIsEditSceneModalOpen] = useState<boolean>(false);
   const [isAddSubsceneModalOpen, setIsAddSubsceneModalOpen] = useState<boolean>(false);
@@ -195,10 +187,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [skillEditors, setSkillEditors] = useState<Record<string, TabEditorState>>({});
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
-  // Derived state: workspaceAgent for edit mode, previewAgent for preview mode
   const workingScenes = (workspaceAgent?.scenes || []) as unknown as Scene[];
   const workingSceneGraph = workspaceAgent?.scenes?.find(s => s.id === currentSceneId) || null;
-  const previewSceneGraph = previewAgent?.scenes?.find(s => s.id === currentSceneId) || null;
 
   // Detect current theme for graph styling
   const [isDarkMode, setIsDarkMode] = useState(() =>
@@ -621,58 +611,55 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const handleContextMenu = (event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    if (mode === 'edit' && currentSceneId) {
-      try {
-        const reactFlowBounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-        const flowPosition = {
-          x: event.clientX - reactFlowBounds.left,
-          y: event.clientY - reactFlowBounds.top
-        };
-        setContextMenu({
-          x: event.clientX,
-          y: event.clientY
-        });
-        setNewSubscenePosition({ x: flowPosition.x, y: flowPosition.y });
-        setContextMenuContext('pane');
-        setContextMenuElement(null);
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        console.error('Failed to calculate position:', error);
-        setContextMenu({
-          x: event.clientX,
-          y: event.clientY
-        });
-        setNewSubscenePosition({ x: 0, y: 0 });
-        setContextMenuContext('pane');
-        setContextMenuElement(null);
-      }
+    if (!currentSceneId) {
+      return;
+    }
+    try {
+      const reactFlowBounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      const flowPosition = {
+        x: event.clientX - reactFlowBounds.left,
+        y: event.clientY - reactFlowBounds.top
+      };
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY
+      });
+      setNewSubscenePosition({ x: flowPosition.x, y: flowPosition.y });
+      setContextMenuContext('pane');
+      setContextMenuElement(null);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Failed to calculate position:', error);
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY
+      });
+      setNewSubscenePosition({ x: 0, y: 0 });
+      setContextMenuContext('pane');
+      setContextMenuElement(null);
     }
   };
 
   const handleNodeContextMenu = (event: React.MouseEvent, node: Node) => {
     event.preventDefault();
     event.stopPropagation();
-    if (mode === 'edit') {
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY
-      });
-      setContextMenuContext('node');
-      setContextMenuElement({ id: node.id, data: node.data });
-    }
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY
+    });
+    setContextMenuContext('node');
+    setContextMenuElement({ id: node.id, data: node.data });
   };
 
   const handleEdgeContextMenu = (event: React.MouseEvent, edge: Edge) => {
     event.preventDefault();
     event.stopPropagation();
-    if (mode === 'edit') {
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY
-      });
-      setContextMenuContext('edge');
-      setContextMenuElement({ id: edge.id, data: edge.data });
-    }
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY
+    });
+    setContextMenuContext('edge');
+    setContextMenuElement({ id: edge.id, data: edge.data });
   };
 
   const handleContextMenuClose = () => {
@@ -746,10 +733,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     }
   }, [contextMenu]);
 
-  // Critical: Read from the correct state based on mode
-  // - Preview mode: Read from previewAgent (updated via SSE events)
-  // - Edit mode: Read from workspaceAgent (user's working copy)
-  const currentSceneGraphData = mode === 'preview' ? previewSceneGraph : workingSceneGraph;
+  const currentSceneGraphData = workingSceneGraph;
 
   const handleElementClick = (event: React.MouseEvent, element: Node | Edge) => {
     event.stopPropagation();
@@ -960,16 +944,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     }
   }, [currentSceneGraphData, convertToFlowElements, setNodes, setEdges]);
 
-  const handleModeChange = (newMode: 'edit' | 'preview') => {
-    setMode(newMode);
-
-    if (newMode === 'preview') {
-      // Copy workspaceAgent to previewAgent in store
-      enterPreviewMode();
-    }
-    // When exiting preview, graph automatically reverts to workspaceAgent
-  };
-
   const onConnect = useCallback((params: Connection) => {
     const fromSubscene = params.source.replace('subscene-', '');
     const toSubscene = params.target.replace('subscene-', '');
@@ -1139,30 +1113,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                 >
                   {tab.type === 'scene' ? (
                     // Scene content with ReactFlow graph
-                    <div
-                      className={`absolute inset-0 transition-all duration-300 ease-in-out ${mode === 'preview' ? 'right-96' : 'right-0'
-                        }`}
-                    >
+                    <div className="absolute inset-0">
                       {/* Sidebar Trigger Button - Inside tab content */}
                       <div className="absolute top-3 left-3 z-10">
                         <SidebarTrigger />
                       </div>
-
-                      {mode === 'preview' && (
-                        <div className="absolute top-3 left-14 z-10 flex items-center gap-2 px-3 py-1.5 bg-primary/20 border border-primary rounded-lg">
-                          <div className="relative">
-                            <div className="w-2 h-2 bg-danger rounded-full animate-ping absolute" />
-                            <div className="w-2 h-2 bg-danger rounded-full relative" />
-                          </div>
-                          <span className="text-xs font-medium text-foreground">Realtime Graph</span>
-                        </div>
-                      )}
-
-                      {/* Preview Button - Inside scene graph */}
-                      <ControlButtons
-                        mode={mode}
-                        onModeChange={handleModeChange}
-                      />
 
                       <ReactFlow
                         nodes={nodes}
@@ -1189,7 +1144,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                         <Background />
                       </ReactFlow>
 
-                      {selectedElement && mode === 'edit' && (
+                      {selectedElement && (
                         <EditPanel
                           key={`${selectedElement.type}-${selectedElement.id}`}
                           element={selectedElement}
@@ -1324,13 +1279,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             </div>
           )}
 
-          {/* Preview Chat Panel */}
-          {mode === 'preview' && (
-            <div className="absolute top-0 right-0 h-full w-96 bg-background border-l border-border transition-all duration-300 ease-in-out overflow-hidden">
-              <PreviewChatInterface agentId={agentId} />
-            </div>
-          )}
-
           {/* Context Menu */}
           <SceneContextMenu
             position={contextMenu}
@@ -1342,15 +1290,12 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
           />
         </div>
 
-        {/* Submit Area */}
-        {mode === 'edit' && (
-          <SubmitArea
-            hasUnsavedChanges={hasUnsavedChanges}
-            isSubmitting={isSubmitting}
-            onSubmit={handleSubmit}
-            onDiscard={handleDiscard}
-          />
-        )}
+        <SubmitArea
+          hasUnsavedChanges={hasUnsavedChanges}
+          isSubmitting={isSubmitting}
+          onSubmit={handleSubmit}
+          onDiscard={handleDiscard}
+        />
       </SidebarInset>
 
       {/* Build Chat Draggable Dialog */}

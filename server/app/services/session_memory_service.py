@@ -8,7 +8,7 @@ the persistent session state.
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.models.react import ReactTask
@@ -50,7 +50,7 @@ class SessionMemoryService:
             Created Session instance.
         """
         session_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create session
         session = Session(
@@ -212,7 +212,7 @@ class SessionMemoryService:
             logger.warning(f"Session or memory not found for session_id: {session_id}")
             return False
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         memory_updated = False
         session_updated = False
 
@@ -378,7 +378,7 @@ class SessionMemoryService:
 
         # Save updated memory
         memory.memory_items = json.dumps(memory_items, ensure_ascii=False)
-        memory.updated_at = datetime.now(timezone.utc)
+        memory.updated_at = datetime.now(UTC)
         self.db.commit()
 
         return True
@@ -433,7 +433,7 @@ class SessionMemoryService:
             return False
 
         session.subject = json.dumps(subject, ensure_ascii=False)
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = datetime.now(UTC)
         self.db.commit()
         return True
 
@@ -456,7 +456,7 @@ class SessionMemoryService:
             return False
 
         session.object = json.dumps(goal_data, ensure_ascii=False)
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = datetime.now(UTC)
         self.db.commit()
         return True
 
@@ -505,7 +505,7 @@ class SessionMemoryService:
         conversations.append(conversation)
 
         memory.conversations = json.dumps(conversations, ensure_ascii=False)
-        memory.updated_at = datetime.now(timezone.utc)
+        memory.updated_at = datetime.now(UTC)
         self.db.commit()
         return True
 
@@ -544,13 +544,13 @@ class SessionMemoryService:
             {
                 "type": message_type,
                 "content": content,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "files": [item.dict() for item in files or []],
             }
         )
 
         session.chat_history = json.dumps(history, ensure_ascii=False)
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = datetime.now(UTC)
         self.db.commit()
         return True
 
@@ -592,7 +592,7 @@ class SessionMemoryService:
             return False
 
         session.status = status
-        session.updated_at = datetime.now(timezone.utc)
+        session.updated_at = datetime.now(UTC)
         self.db.commit()
         return True
 

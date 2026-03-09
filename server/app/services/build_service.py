@@ -8,7 +8,7 @@ including streaming LLM responses for build mode.
 import json
 import logging
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.crud.llm import llm as llm_crud
 from app.llm.llm_factory import create_llm_from_config
@@ -44,8 +44,7 @@ class BuildService:
         Takes user's build request and streams LLM's response including thinking,
         response text, reason, and updated agent JSON.
 
-        Similar to preview chat stream, this follows the same event pattern
-        for consistency.
+        This uses the shared streaming event pattern consumed by the build UI.
 
         Args:
             agent_detail: Optional existing agent definition to modify.
@@ -66,7 +65,7 @@ class BuildService:
             yield StreamEvent(
                 type=StreamEventType.ERROR,
                 error="LLM ID is required for build chat",
-                create_time=datetime.now(timezone.utc).isoformat(),
+                create_time=datetime.now(UTC).isoformat(),
             )
             return
 
@@ -75,7 +74,7 @@ class BuildService:
             yield StreamEvent(
                 type=StreamEventType.ERROR,
                 error=f"LLM with ID {llm_id} not found",
-                create_time=datetime.now(timezone.utc).isoformat(),
+                create_time=datetime.now(UTC).isoformat(),
             )
             return
 
@@ -85,7 +84,7 @@ class BuildService:
             yield StreamEvent(
                 type=StreamEventType.ERROR,
                 error=f"Failed to create LLM instance: {e!s}",
-                create_time=datetime.now(timezone.utc).isoformat(),
+                create_time=datetime.now(UTC).isoformat(),
             )
             return
 
@@ -154,7 +153,7 @@ class BuildService:
                     yield StreamEvent(
                         type=StreamEventType.REASONING,
                         delta=reasoning,
-                        create_time=datetime.now(timezone.utc).isoformat(),
+                        create_time=datetime.now(UTC).isoformat(),
                     )
 
                 # Accumulate response (don't stream yet)
@@ -188,7 +187,7 @@ class BuildService:
                         yield StreamEvent(
                             type=StreamEventType.RESPONSE,
                             delta=char,
-                            create_time=datetime.now(timezone.utc).isoformat(),
+                            create_time=datetime.now(UTC).isoformat(),
                         )
 
                 # Yield reason if present
@@ -196,7 +195,7 @@ class BuildService:
                     yield StreamEvent(
                         type=StreamEventType.REASON,
                         delta=result["reason"],
-                        create_time=datetime.now(timezone.utc).isoformat(),
+                        create_time=datetime.now(UTC).isoformat(),
                     )
 
                 # Yield the complete agent configuration
@@ -206,7 +205,7 @@ class BuildService:
                     yield StreamEvent(
                         type=StreamEventType.UPDATED_SCENES,
                         delta=json.dumps(result["agent"], ensure_ascii=False),
-                        create_time=datetime.now(timezone.utc).isoformat(),
+                        create_time=datetime.now(UTC).isoformat(),
                     )
 
             except json.JSONDecodeError as e:
@@ -215,14 +214,14 @@ class BuildService:
                 yield StreamEvent(
                     type=StreamEventType.ERROR,
                     error=f"Failed to parse response as JSON: {e}",
-                    create_time=datetime.now(timezone.utc).isoformat(),
+                    create_time=datetime.now(UTC).isoformat(),
                 )
             except KeyError as e:
                 logger.error(f"Missing required field in LLM response: {e}")
                 yield StreamEvent(
                     type=StreamEventType.ERROR,
                     error=f"Invalid response format: missing {e}",
-                    create_time=datetime.now(timezone.utc).isoformat(),
+                    create_time=datetime.now(UTC).isoformat(),
                 )
 
         except Exception as e:
@@ -234,5 +233,5 @@ class BuildService:
             yield StreamEvent(
                 type=StreamEventType.ERROR,
                 error=str(e),
-                create_time=datetime.now(timezone.utc).isoformat(),
+                create_time=datetime.now(UTC).isoformat(),
             )

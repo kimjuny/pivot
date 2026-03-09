@@ -4,9 +4,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import Field
-
 from app.schemas.base import AppBaseModel
+from pydantic import Field
 
 
 class TokenUsage(AppBaseModel):
@@ -103,6 +102,7 @@ class ReactTaskResponse(AppBaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class ReactRecursionResponse(AppBaseModel):
     """Response schema for ReAct recursion information."""
 
@@ -121,6 +121,7 @@ class ReactRecursionResponse(AppBaseModel):
     error_log: str | None
     created_at: datetime
     updated_at: datetime
+
 
 class ReactPlanStepResponse(AppBaseModel):
     """Response schema for ReAct plan step information."""

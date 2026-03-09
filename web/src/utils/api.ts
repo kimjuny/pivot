@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, ChatResponse, ChatHistoryResponse, BuildChatRequest, BuildChatResponse, PreviewChatRequest, PreviewChatResponse, StreamEvent, LLM } from '../types';
+import type { Agent, Scene, SceneGraph, BuildChatRequest, BuildChatResponse, StreamEvent, LLM } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 
 /**
@@ -179,55 +179,6 @@ export const getSceneGraph = async (sceneId: number): Promise<unknown> => {
 };
 
 /**
- * Send a message to a specific agent by ID.
- * 
- * @param agentId - Unique identifier of the target agent
- * @param message - User message to send to the agent
- * @param user - User identifier (defaults to 'preview-user')
- * @returns Promise resolving to the agent's response
- */
-export const chatWithAgentById = async (
-  agentId: number,
-  message: string,
-  user: string = 'preview-user'
-): Promise<ChatResponse> => {
-  return apiRequest(`/agents/${agentId}/chat`, {
-    method: 'POST',
-    body: JSON.stringify({ message, user }),
-  }) as Promise<ChatResponse>;
-};
-
-/**
- * Fetch chat history for a specific agent and user.
- * 
- * @param agentId - Unique identifier of the agent
- * @param user - User identifier (defaults to 'preview-user')
- * @returns Promise resolving to chat history and latest graph
- */
-export const getChatHistory = async (
-  agentId: number,
-  user: string = 'preview-user'
-): Promise<ChatHistoryResponse> => {
-  return apiRequest(`/agents/${agentId}/chat-history?user=${user}`) as Promise<ChatHistoryResponse>;
-};
-
-/**
- * Clear chat history for a specific agent and user.
- * 
- * @param agentId - Unique identifier of the agent
- * @param user - User identifier (defaults to 'preview-user')
- * @returns Promise resolving when history is cleared
- */
-export const clearChatHistory = async (
-  agentId: number,
-  user: string = 'preview-user'
-): Promise<void> => {
-  await apiRequest(`/agents/${agentId}/chat-history?user=${user}`, {
-    method: 'DELETE',
-  });
-};
-
-/**
  * Update a subscene.
  * 
  * @param sceneId - Unique identifier of the scene
@@ -401,84 +352,6 @@ export const chatWithBuildAgent = async (request: BuildChatRequest): Promise<Bui
     method: 'POST',
     body: JSON.stringify(request),
   }) as Promise<BuildChatResponse>;
-};
-
-/**
- * Send a message to Preview Agent (stateless) with streaming response.
- *
- * @param request - Preview chat request containing message, agent definition, and state
- * @param onEvent - Callback for handling stream events
- * @returns Promise resolving when stream completes
- */
-export const previewChatStream = async (
-  request: PreviewChatRequest,
-  onEvent: (event: StreamEvent) => void
-): Promise<void> => {
-  // Check token validity before making request
-  if (!isTokenValid()) {
-    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
-    throw new AuthError('Token expired or invalid. Please log in again.');
-  }
-
-  const token = getAuthToken();
-  const url = `${API_BASE_URL}/preview/chat/stream`;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(request),
-  });
-
-  // Handle 401 Unauthorized
-  if (response.status === 401) {
-    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
-    throw new AuthError('Authentication expired. Please log in again.');
-  }
-
-  if (!response.ok) {
-    const errorData = await response.json() as { detail?: string };
-    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-  }
-
-  if (!response.body) {
-    throw new Error('ReadableStream not supported');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6)) as StreamEvent;
-            onEvent(data);
-          } catch (e) {
-            console.error('Error parsing SSE data:', e);
-          }
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
 };
 
 /**

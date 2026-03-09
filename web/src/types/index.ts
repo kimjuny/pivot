@@ -115,30 +115,6 @@ export interface Connection {
 }
 
 /**
- * Represents a single message in the chat history.
- */
-export interface ChatHistory {
-  /** Unique identifier of the message */
-  id: number;
-  /** ID of the agent that sent/received this message */
-  agent_id: number;
-  /** User identifier who sent the message */
-  user: string;
-  /** Role of the message sender */
-  role: 'user' | 'agent';
-  /** Content of the message */
-  message: string;
-  /** Optional reasoning provided by the agent */
-  reason?: string;
-  /** Optional scene update triggered by this message */
-  update_scene?: string;
-  /** UTC timestamp when the message was created */
-  create_time: string;
-  /** Optional scene graph data associated with this message */
-  graph?: SceneGraph;
-}
-
-/**
  * Represents the complete scene graph structure.
  * Used for visualizing and managing agent workflows.
  */
@@ -205,40 +181,6 @@ export interface SceneNode {
 }
 
 /**
- * Request payload for sending a chat message.
- */
-export interface ChatRequest {
-  /** Message content to send */
-  message: string;
-  /** Optional user identifier */
-  user?: string;
-}
-
-/**
- * Response from the agent after processing a message.
- */
-export interface ChatResponse {
-  /** Agent's response message */
-  response: string;
-  /** Optional reasoning behind the response */
-  reason: string;
-  /** Optional updated scene graph */
-  graph?: SceneGraph;
-  /** UTC timestamp of the response */
-  create_time?: string;
-}
-
-/**
- * Response containing chat history and latest graph.
- */
-export interface ChatHistoryResponse {
-  /** Array of chat messages */
-  history: ChatHistory[];
-  /** Optional latest scene graph state */
-  latest_graph?: SceneGraph;
-}
-
-/**
  * Request payload for Build Chat API.
  * Used to send messages to the Build Agent for agent editing assistance.
  */
@@ -302,38 +244,6 @@ export interface BuildHistory {
 }
 
 /**
- * Request payload for Preview Chat API.
- */
-export interface PreviewChatRequest {
-  /** User's message to the Preview Agent */
-  message: string;
-  /** Full agent detail definition */
-  agent_detail: Agent;
-  /** Name of the currently active scene */
-  current_scene_name?: string | null;
-  /** Name of the currently active subscene */
-  current_subscene_name?: string | null;
-}
-
-/**
- * Response from the Preview Chat API.
- */
-export interface PreviewChatResponse {
-  /** Agent's response message */
-  response: string;
-  /** Optional reasoning behind the response */
-  reason?: string;
-  /** Optional updated scene graph (list of scenes) */
-  graph?: SceneGraph[] | null;
-  /** Updated active scene */
-  current_scene_name?: string | null;
-  /** Updated active subscene */
-  current_subscene_name?: string | null;
-  /** UTC timestamp of the response */
-  create_time: string;
-}
-
-/**
  * Enum for SSE stream event types.
  */
 export enum StreamEventType {
@@ -341,12 +251,11 @@ export enum StreamEventType {
   REASON = 'reason',
   RESPONSE = 'response',
   UPDATED_SCENES = 'updated_scenes',
-  MATCH_CONNECTION = 'match_connection',
   ERROR = 'error',
 }
 
 /**
- * SSE stream event from Preview Chat API.
+ * Shared SSE stream event used by build-related streaming APIs.
  */
 export interface StreamEvent {
   /** Type of the stream event */
@@ -355,8 +264,6 @@ export interface StreamEvent {
   delta?: string | null;
   /** Updated scenes for scene update events */
   updated_scenes?: SceneGraph[] | null;
-  /** Matched connection for connection match events */
-  matched_connection?: Connection | null;
   /** Error message for error events */
   error?: string | null;
   /** UTC timestamp when the event was created */

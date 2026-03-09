@@ -13,7 +13,7 @@ class AppBaseModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def from_orm(cls, obj: Any) -> "AppBaseModel":
+    def from_orm(cls, obj: Any) -> AppBaseModel:
         """Preserve the legacy ``from_orm`` call pattern on Pydantic v2."""
         return cls.model_validate(obj)
 

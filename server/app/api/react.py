@@ -9,7 +9,7 @@ import json
 import logging
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from time import perf_counter
 
 from app.api.auth import get_current_user
@@ -136,7 +136,7 @@ async def react_chat_stream(
                     iteration=0,
                     delta=None,
                     data={"error": f"Agent {request.agent_id} not found"},
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
                 yield f"data: {error_event.json()}\n\n"
                 return
@@ -150,7 +150,7 @@ async def react_chat_stream(
                     iteration=0,
                     delta=None,
                     data={"error": f"Agent {agent.name} has no LLM configured"},
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
                 yield f"data: {error_event.json()}\n\n"
                 return
@@ -166,7 +166,7 @@ async def react_chat_stream(
                     data={
                         "error": f"LLM configuration with ID {agent.llm_id} not found"
                     },
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
                 yield f"data: {error_event.json()}\n\n"
                 return
@@ -182,7 +182,7 @@ async def react_chat_stream(
                     iteration=0,
                     delta=None,
                     data={"error": f"Failed to create LLM instance: {e!s}"},
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                 )
                 yield f"data: {error_event.json()}\n\n"
                 return
@@ -214,7 +214,7 @@ async def react_chat_stream(
                             last_rec.action_output = json.dumps(
                                 output, ensure_ascii=False
                             )
-                            last_rec.updated_at = datetime.now(timezone.utc)
+                            last_rec.updated_at = datetime.now(UTC)
                             db.add(last_rec)
                             runtime_service.set_next_action_result(
                                 existing_task,
@@ -254,8 +254,8 @@ async def react_chat_stream(
                     status="pending",
                     iteration=0,
                     max_iteration=agent.max_iteration,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
                 )
                 db.add(task)
                 db.commit()
@@ -281,7 +281,7 @@ async def react_chat_stream(
                         iteration=task.iteration,
                         delta=None,
                         data={"error": str(err)},
-                        timestamp=datetime.now(timezone.utc),
+                        timestamp=datetime.now(UTC),
                     )
                     yield f"data: {error_event.json()}\n\n"
                     return
@@ -299,7 +299,7 @@ async def react_chat_stream(
                     "type": "skill_resolution_start",
                     "task_id": task_id,
                     "iteration": task.iteration,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
                 yield f"data: {json.dumps(skill_start_event, ensure_ascii=False)}\n\n"
                 # Yield control so the start event is flushed before any blocking work.
@@ -480,7 +480,7 @@ async def react_chat_stream(
                     "type": "skill_resolution_result",
                     "task_id": task_id,
                     "iteration": task.iteration,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "data": {
                         "count": len(selected_skills),
                         "selected_skills": selected_skills,
@@ -494,7 +494,7 @@ async def react_chat_stream(
                     skill_result_event["data"],
                     ensure_ascii=False,
                 )
-                task.updated_at = datetime.now(timezone.utc)
+                task.updated_at = datetime.now(UTC)
                 db.add(task)
                 db.commit()
                 yield f"data: {json.dumps(skill_result_event, ensure_ascii=False)}\n\n"
@@ -537,9 +537,7 @@ async def react_chat_stream(
                     delta=event_data.get("delta"),
                     data=event_data.get("data"),
                     timestamp=datetime.fromisoformat(
-                        event_data.get(
-                            "timestamp", datetime.now(timezone.utc).isoformat()
-                        )
+                        event_data.get("timestamp", datetime.now(UTC).isoformat())
                     ),
                     created_at=event_data.get("created_at"),
                     updated_at=event_data.get("updated_at"),
@@ -575,7 +573,7 @@ async def react_chat_stream(
                         iteration=0,
                         delta=None,
                         data={"error": str(e)},
-                        timestamp=datetime.now(timezone.utc),
+                        timestamp=datetime.now(UTC),
                     )
                     yield f"data: {error_event.json()}\n\n"
                 except (GeneratorExit, ConnectionResetError, BrokenPipeError):
@@ -584,7 +582,7 @@ async def react_chat_stream(
             # Mark task as cancelled if client disconnected
             if client_disconnected and task:
                 task.status = "cancelled"
-                task.updated_at = datetime.now(timezone.utc)
+                task.updated_at = datetime.now(UTC)
                 try:
                     db.commit()
                     logger.info(f"Task {task.task_id} marked as cancelled")

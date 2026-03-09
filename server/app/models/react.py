@@ -4,7 +4,7 @@ This module defines database models for the ReAct (Reasoning and Acting) agent s
 which implements a recursive state machine for autonomous task execution.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -98,8 +98,8 @@ class ReactTask(SQLModel, table=True):
     total_cached_input_tokens: int = Field(
         default=0, description="Total cached input tokens consumed by this task"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     recursions: list["ReactRecursion"] = Relationship(
@@ -186,8 +186,8 @@ class ReactRecursion(SQLModel, table=True):
     cached_input_tokens: int = Field(
         default=0, description="Cached input tokens consumed in this recursion"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     task: Optional["ReactTask"] = Relationship(back_populates="recursions")
@@ -224,8 +224,8 @@ class ReactPlanStep(SQLModel, table=True):
         default="pending",
         description="Status: pending, running, done, error",
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Relationships
     task: Optional["ReactTask"] = Relationship(back_populates="plan_steps")
@@ -266,4 +266,4 @@ class ReactRecursionState(SQLModel, table=True):
     current_state: str = Field(
         description="Complete JSON snapshot of state machine at this recursion"
     )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

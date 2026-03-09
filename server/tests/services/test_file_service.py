@@ -5,7 +5,7 @@ import io
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 
@@ -133,10 +133,10 @@ class FileServiceTestCase(unittest.TestCase):
             file_bytes=self._build_png_bytes("#22c55e"),
         )
 
-        expired_asset.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        expired_asset.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         used_asset.session_id = "session-1"
         used_asset.task_id = "task-1"
-        used_asset.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        used_asset.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         self.db.add(expired_asset)
         self.db.add(used_asset)
         self.db.commit()

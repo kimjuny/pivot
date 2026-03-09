@@ -1,15 +1,16 @@
 """Schemas for uploaded file APIs."""
 
-from pydantic import Field
-
 from app.schemas.base import AppBaseModel
+from pydantic import Field
 
 
 class FileAssetResponse(AppBaseModel):
     """Metadata returned for an uploaded file."""
 
     file_id: str = Field(..., description="Public UUID for the uploaded file")
-    kind: str = Field(..., description="Normalized asset kind such as image or document")
+    kind: str = Field(
+        ..., description="Normalized asset kind such as image or document"
+    )
     source: str = Field(..., description="Upload source such as local or clipboard")
     original_name: str = Field(..., description="Original client-side filename")
     mime_type: str = Field(..., description="Verified MIME type")

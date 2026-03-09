@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from app.models.react import (
@@ -67,8 +67,8 @@ class ReactStateService:
             react_task_id=task.id or 0,
             iteration_index=task.iteration,
             status="running",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         self.db.add(recursion)
         self.db.commit()
@@ -134,7 +134,7 @@ class ReactStateService:
 
         tokens_data = self._apply_token_usage(task, recursion, token_counter)
         recursion.status = "done"
-        recursion.updated_at = datetime.now(timezone.utc)
+        recursion.updated_at = datetime.now(UTC)
         self.db.add(recursion)
 
         self._merge_tool_results_into_action_output(action_output, tool_results)
@@ -180,7 +180,7 @@ class ReactStateService:
         )
         recursion.status = "error"
         recursion.error_log = error_log
-        recursion.updated_at = datetime.now(timezone.utc)
+        recursion.updated_at = datetime.now(UTC)
         self.db.add(recursion)
         self.db.commit()
         return tokens_data
@@ -224,7 +224,7 @@ class ReactStateService:
             task: Task whose iteration should advance by one.
         """
         task.iteration += 1
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self.db.add(task)
         self.db.commit()
 
@@ -481,7 +481,7 @@ class ReactStateService:
                 continue
 
             plan_step.status = status_to_update
-            plan_step.updated_at = datetime.now(timezone.utc)
+            plan_step.updated_at = datetime.now(UTC)
             self.db.add(plan_step)
 
             for plan_step_ctx in context.context.get("plan", []):
@@ -554,7 +554,7 @@ class ReactStateService:
             task_id=task.task_id,
             iteration_index=task.iteration,
             current_state=current_state_json,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         self.db.add(recursion_state)
 
@@ -573,7 +573,7 @@ class ReactStateService:
             commit: Whether to commit immediately.
         """
         task.status = status
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self.db.add(task)
         if commit:
             self.db.commit()
