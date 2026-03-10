@@ -624,7 +624,7 @@ class ReactEngine:
             thinking = message.reasoning_content
             thought = decision.thought
             abstract = decision.abstract
-            short_term_memory_append = decision.short_term_memory_append
+            progress_update = decision.progress_update
             action = decision.action
             action_type = action.action_type
             action_output = dict(action.output)
@@ -711,7 +711,7 @@ class ReactEngine:
                 action_output=action_output,
                 action_step_id=action_step_id,
                 step_status_updates=step_status_updates_validated,
-                short_term_memory_append=short_term_memory_append,
+                progress_update=progress_update,
                 tool_results=tool_results,
                 token_counter=token_counter,
             )
@@ -725,6 +725,7 @@ class ReactEngine:
                 "thinking": thinking,
                 "thought": thought,
                 "abstract": abstract,
+                "progress_update": progress_update,
                 "output": action_output,
                 "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
@@ -1085,6 +1086,19 @@ class ReactEngine:
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
                         "delta": recursion.abstract,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "created_at": recursion.created_at.isoformat(),
+                        "updated_at": recursion.updated_at.isoformat(),
+                        "tokens": event_data.get("tokens"),
+                    }
+
+                if recursion.progress_update:
+                    yield {
+                        "type": "progress_update",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "delta": recursion.progress_update,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),

@@ -129,7 +129,7 @@ class ReactRecursion(SQLModel, table=True):
         action_type: Type of action (CALL_TOOL, RE_PLAN, ANSWER, REFLECT).
         action_output: JSON string of action output.
         tool_call_results: JSON string of tool execution results.
-        short_term_memory: Short-term memory appended in this recursion.
+        progress_update: User-facing progress update emitted in this recursion.
         status: Current status (running, done, error).
         error_log: Error message if any.
         created_at: UTC timestamp when recursion was created.
@@ -164,9 +164,9 @@ class ReactRecursion(SQLModel, table=True):
         default=None,
         description="JSON string of tool results",
     )
-    short_term_memory: str | None = Field(
+    progress_update: str | None = Field(
         default=None,
-        description="Short-term memory appended in this recursion",
+        description="User-facing progress update for this recursion",
     )
     plan_step_id: str | None = Field(
         default=None,

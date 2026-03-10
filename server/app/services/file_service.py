@@ -86,6 +86,27 @@ class VerifiedDocumentUpload:
 
 
 @dataclass(frozen=True, slots=True)
+class PdfTextLayerProbe:
+    """Fast PDF text-layer probe used to reject OCR-only files early."""
+
+    page_count: int
+    sampled_pages: int
+    extracted_char_count: int
+    non_empty_pages: int
+    printable_ratio: float
+
+    @property
+    def requires_ocr(self) -> bool:
+        """Return whether the sampled PDF pages appear to lack a usable text layer."""
+        if self.page_count == 0:
+            return True
+        return not (
+            (self.extracted_char_count >= 400 and self.non_empty_pages >= 1)
+            or (self.extracted_char_count >= 200 and self.printable_ratio >= 0.7)
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedFileAttachment:
     """Prepared multimodal payload and metadata for one stored file."""
 
@@ -221,6 +242,8 @@ class FileService:
             handle.write(file_bytes)
 
         try:
+            if extension == "pdf":
+                self._ensure_pdf_has_embedded_text_layer(temp_path)
             markdown_text, page_count = self._convert_document_with_docling(temp_path)
         finally:
             temp_path.unlink(missing_ok=True)
@@ -560,24 +583,7 @@ class FileService:
         file_path: Path,
     ) -> tuple[str, int | None]:
         """Convert a supported document to markdown via Docling."""
-        try:
-            document_converter_module = import_module("docling.document_converter")
-        except ModuleNotFoundError as err:
-            raise ValueError(
-                "Docling is not available in the current backend environment. "
-                "This project still runs on Python 3.10 and Pydantic v1, while "
-                "Docling requires Python 3.11 and Pydantic v2."
-            ) from err
-
-        document_converter_cls = getattr(
-            document_converter_module,
-            "DocumentConverter",
-            None,
-        )
-        if document_converter_cls is None:
-            raise ValueError("Docling is installed but DocumentConverter is missing.")
-
-        converter = document_converter_cls()
+        converter = self._build_docling_converter()
         try:
             conversion_result = converter.convert(file_path)
         except Exception as err:
@@ -599,6 +605,129 @@ class FileService:
         if not isinstance(markdown_text, str):
             markdown_text = str(markdown_text)
         return markdown_text, self._extract_page_count(conversion_result, document)
+
+    @staticmethod
+    def _build_docling_converter() -> Any:
+        """Create a Docling converter for supported non-OCR document extraction."""
+        try:
+            document_converter_module = import_module("docling.document_converter")
+        except ModuleNotFoundError as err:
+            raise ValueError(
+                "Docling is not available in the current backend environment. "
+                "This project still runs on Python 3.10 and Pydantic v1, while "
+                "Docling requires Python 3.11 and Pydantic v2."
+            ) from err
+
+        document_converter_cls = getattr(
+            document_converter_module,
+            "DocumentConverter",
+            None,
+        )
+        if document_converter_cls is None:
+            raise ValueError("Docling is installed but DocumentConverter is missing.")
+        return document_converter_cls()
+
+    def _ensure_pdf_has_embedded_text_layer(self, file_path: Path) -> None:
+        """Reject PDFs that appear to depend on OCR before slow parsing starts.
+
+        Args:
+            file_path: Temporary PDF file path.
+
+        Raises:
+            ValueError: If the PDF looks like a scan-only document.
+        """
+        probe = self._probe_pdf_text_layer(file_path)
+        if probe.requires_ocr:
+            raise ValueError(
+                "Scanned PDFs that require OCR are not supported in the current "
+                "deployment. Please upload a text-based PDF instead."
+            )
+
+    @staticmethod
+    def _probe_pdf_text_layer(file_path: Path) -> PdfTextLayerProbe:
+        """Sample a PDF's embedded text layer without invoking OCR or layout models.
+
+        Args:
+            file_path: Temporary PDF file path.
+
+        Returns:
+            Fast text-layer probe result for early routing.
+
+        Raises:
+            ValueError: If the PDF cannot be inspected.
+        """
+        try:
+            pdfium_module = import_module("pypdfium2")
+        except ModuleNotFoundError as err:
+            raise ValueError(
+                "PDF inspection support is not available in the current backend "
+                "environment."
+            ) from err
+
+        pdf_document_cls = getattr(pdfium_module, "PdfDocument", None)
+        if pdf_document_cls is None:
+            raise ValueError(
+                "PDF inspection support is incomplete in the installed backend "
+                "environment."
+            )
+
+        try:
+            pdf_document = pdf_document_cls(str(file_path))
+        except Exception as err:
+            raise ValueError("Uploaded PDF could not be inspected.") from err
+
+        page_count = len(pdf_document)
+        sampled_pages = min(page_count, 5)
+        extracted_fragments: list[str] = []
+        non_empty_pages = 0
+
+        try:
+            for page_index in range(sampled_pages):
+                page = pdf_document[page_index]
+                text_page: Any = None
+                try:
+                    text_page = page.get_textpage()
+                    char_count = int(text_page.count_chars())
+                    if char_count <= 0:
+                        continue
+                    snippet = text_page.get_text_range(
+                        index=0,
+                        count=min(char_count, 4000),
+                    )
+                    if not isinstance(snippet, str):
+                        snippet = str(snippet)
+                    normalized = "".join(snippet.split())
+                    if normalized:
+                        non_empty_pages += 1
+                        extracted_fragments.append(snippet)
+                finally:
+                    close_text_page = getattr(text_page, "close", None)
+                    if callable(close_text_page):
+                        close_text_page()
+                    close_page = getattr(page, "close", None)
+                    if callable(close_page):
+                        close_page()
+        finally:
+            close_document = getattr(pdf_document, "close", None)
+            if callable(close_document):
+                close_document()
+
+        combined_text = "".join(extracted_fragments)
+        printable_chars = sum(
+            1 for char in combined_text if char.isprintable() and not char.isspace()
+        )
+        visible_chars = sum(1 for char in combined_text if not char.isspace())
+        printable_ratio = (
+            printable_chars / visible_chars if visible_chars > 0 else 0.0
+        )
+
+        return PdfTextLayerProbe(
+            page_count=page_count,
+            sampled_pages=sampled_pages,
+            extracted_char_count=visible_chars,
+            non_empty_pages=non_empty_pages,
+            printable_ratio=printable_ratio,
+        )
 
     @staticmethod
     def _extract_page_count(

@@ -40,7 +40,7 @@
     ]
   },
   "abstract": "STEP-{id}: 本轮recursion的简短摘要，展示给用户", // 必须返回, STEP-{id}需与上面的"step_id"属性一致，如果当前还没进入step则不用返回STEP-{id}
-  "short_term_memory_append": "本轮recursion你希望增加的短期记忆" // 可选返回
+  "progress_update": "向用户反馈当前的进展" // 可选返回
 }
 ```
 ### 3.2. action_type = CALL_TOOL

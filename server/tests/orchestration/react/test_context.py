@@ -79,7 +79,7 @@ class ReactContextTestCase(unittest.TestCase):
             },
             action_step_id=None,
             step_status_updates=[],
-            short_term_memory_append="",
+            progress_update="",
             tool_results=[],
             token_counter={},
         )

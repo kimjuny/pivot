@@ -16,13 +16,11 @@ import {
 import '@xyflow/react/dist/style.css';
 import { X, Layers, Wrench, Zap } from 'lucide-react';
 import { useAgentWorkStore } from '../store/agentWorkStore';
-import { useBuildChatStore } from '../store/buildChatStore';
 import { useAgentTabStore } from '../store/agentTabStore';
-import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import DraggableDialog from './DraggableDialog';
-import BuildChatInterface from './BuildChatInterface';
-import ReactChatInterface from './ReactChatInterface';
+import ChatPage from '@/pages/chat/ChatPage';
 import EditPanel from './EditPanel';
 import SceneModal from './SceneModal';
 import SubsceneModal from './SubsceneModal';
@@ -166,12 +164,10 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     setSubmitting,
     reset
   } = useAgentWorkStore();
-  const { reset: resetBuildChat } = useBuildChatStore();
   const { tabs, activeTabId, setActiveTab, closeTab, replaceTabResource } = useAgentTabStore();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-  const [isBuildChatOpen, setIsBuildChatOpen] = useState<boolean>(false);
   const [isReactChatOpen, setIsReactChatOpen] = useState<boolean>(false);
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
   const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
@@ -1040,7 +1036,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         onSceneSelect={onSceneSelect}
         onCreateScene={handleCreateSceneModalOpen}
         onDeleteScene={handleDeleteScene}
-        onOpenBuildChat={() => setIsBuildChatOpen(true)}
         onOpenReactChat={() => setIsReactChatOpen(true)}
         onAgentUpdate={onAgentUpdate}
       />
@@ -1114,11 +1109,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                   {tab.type === 'scene' ? (
                     // Scene content with ReactFlow graph
                     <div className="absolute inset-0">
-                      {/* Sidebar Trigger Button - Inside tab content */}
-                      <div className="absolute top-3 left-3 z-10">
-                        <SidebarTrigger />
-                      </div>
-
                       <ReactFlow
                         nodes={nodes}
                         edges={edges}
@@ -1158,10 +1148,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                   ) : tab.type === 'tool' || tab.type === 'function' ? (
                     // Tool Monaco editor
                     <div className="relative h-full">
-                      {/* Sidebar Trigger Button */}
-                      <div className="absolute top-3 left-3 z-10">
-                        <SidebarTrigger />
-                      </div>
                       <div className="h-full pt-12">
                         {(() => {
                           const state = toolEditors[tab.id];
@@ -1211,10 +1197,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                   ) : tab.type === 'skill' ? (
                     // Skill Monaco editor
                     <div className="relative h-full">
-                      {/* Sidebar Trigger Button */}
-                      <div className="absolute top-3 left-3 z-10">
-                        <SidebarTrigger />
-                      </div>
                       <div className="h-full pt-12">
                         {(() => {
                           const state = skillEditors[tab.id];
@@ -1268,10 +1250,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
           ) : (
             // Empty state when no tabs are open
             <div className="flex-1 relative flex items-center justify-center text-muted-foreground">
-              {/* Sidebar Trigger Button - In empty state */}
-              <div className="absolute top-3 left-3 z-10">
-                <SidebarTrigger />
-              </div>
               <div className="text-center space-y-2">
                 <p className="text-lg font-medium">No Tab Open</p>
                 <p className="text-sm">Select a scene, tool, or skill from the sidebar to get started</p>
@@ -1298,15 +1276,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         />
       </SidebarInset>
 
-      {/* Build Chat Draggable Dialog */}
-      <DraggableDialog
-        open={isBuildChatOpen}
-        onOpenChange={setIsBuildChatOpen}
-        title="Build Assistant"
-      >
-        <BuildChatInterface agentId={agentId} />
-      </DraggableDialog>
-
       {/* ReAct Chat Draggable Dialog */}
       <DraggableDialog
         open={isReactChatOpen}
@@ -1314,7 +1283,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         title={agent?.name?.trim() || 'ReAct Agent Chat'}
         size="large"
       >
-        <ReactChatInterface
+        <ChatPage
           agentId={agentId}
           agentName={agent?.name}
           primaryLlmId={agent?.llm_id}

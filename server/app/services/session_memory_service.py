@@ -676,6 +676,7 @@ class SessionMemoryService:
                         "thinking": recursion.thinking,
                         "thought": recursion.thought,
                         "abstract": recursion.abstract,
+                        "progress_update": recursion.progress_update,
                         "action_type": recursion.action_type,
                         "action_output": recursion.action_output,
                         "tool_call_results": recursion.tool_call_results,

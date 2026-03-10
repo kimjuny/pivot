@@ -18,6 +18,7 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 FileService = import_module("app.services.file_service").FileService
+PdfTextLayerProbe = import_module("app.services.file_service").PdfTextLayerProbe
 workspace_service = import_module("app.services.workspace_service")
 
 
@@ -84,16 +85,33 @@ class FileServiceTestCase(unittest.TestCase):
     def test_store_and_preprocess_document(self) -> None:
         """Document uploads should persist extracted markdown for prompting."""
         original_converter = self.service._convert_document_with_docling
+        original_probe = self.service._probe_pdf_text_layer
 
         def fake_convert_document(_path: Path) -> tuple[str, int | None]:
             return "# Spec\n\nHello from docling.", 3
 
+        def fake_probe(_path: Path):
+            return PdfTextLayerProbe(
+                page_count=3,
+                sampled_pages=3,
+                extracted_char_count=1200,
+                non_empty_pages=3,
+                printable_ratio=0.95,
+            )
+
         self.service._convert_document_with_docling = fake_convert_document
+        self.service._probe_pdf_text_layer = fake_probe
         self.addCleanup(
             setattr,
             self.service,
             "_convert_document_with_docling",
             original_converter,
+        )
+        self.addCleanup(
+            setattr,
+            self.service,
+            "_probe_pdf_text_layer",
+            original_probe,
         )
 
         asset = self.service.store_uploaded_file(
@@ -123,6 +141,78 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertEqual(prepared[0].content_blocks[0]["type"], "text")
         self.assertIn("Attached document", prepared[0].content_blocks[0]["text"])
         self.assertIn("Hello from docling.", prepared[0].content_blocks[0]["text"])
+
+    def test_pdf_probe_flags_ocr_dependent_documents(self) -> None:
+        """OCR-only PDFs should be rejected before Docling conversion starts."""
+        original_probe = self.service._probe_pdf_text_layer
+        original_converter = self.service._convert_document_with_docling
+
+        def fake_probe(_path: Path):
+            return PdfTextLayerProbe(
+                page_count=4,
+                sampled_pages=4,
+                extracted_char_count=12,
+                non_empty_pages=0,
+                printable_ratio=0.0,
+            )
+
+        def fail_convert(_path: Path) -> tuple[str, int | None]:
+            raise AssertionError("Docling conversion should not run for OCR-only PDFs")
+
+        self.service._probe_pdf_text_layer = fake_probe
+        self.service._convert_document_with_docling = fail_convert
+        self.addCleanup(setattr, self.service, "_probe_pdf_text_layer", original_probe)
+        self.addCleanup(
+            setattr,
+            self.service,
+            "_convert_document_with_docling",
+            original_converter,
+        )
+
+        with self.assertRaisesRegex(ValueError, "require OCR are not supported"):
+            self.service.store_uploaded_file(
+                username="alice",
+                filename="scan.pdf",
+                source="local",
+                file_bytes=b"%PDF-1.7 fake scanned document bytes",
+            )
+
+    def test_pdf_probe_accepts_text_based_documents(self) -> None:
+        """Text PDFs should continue through the normal Docling conversion flow."""
+        original_probe = self.service._probe_pdf_text_layer
+        original_converter = self.service._convert_document_with_docling
+
+        def fake_probe(_path: Path):
+            return PdfTextLayerProbe(
+                page_count=2,
+                sampled_pages=2,
+                extracted_char_count=900,
+                non_empty_pages=2,
+                printable_ratio=0.98,
+            )
+
+        def fake_convert(_path: Path) -> tuple[str, int | None]:
+            return "Hello from text PDF.", 2
+
+        self.service._probe_pdf_text_layer = fake_probe
+        self.service._convert_document_with_docling = fake_convert
+        self.addCleanup(setattr, self.service, "_probe_pdf_text_layer", original_probe)
+        self.addCleanup(
+            setattr,
+            self.service,
+            "_convert_document_with_docling",
+            original_converter,
+        )
+
+        asset = self.service.store_uploaded_file(
+            username="alice",
+            filename="text.pdf",
+            source="local",
+            file_bytes=b"%PDF-1.7 fake text document bytes",
+        )
+
+        self.assertTrue(asset.can_extract_text)
+        self.assertFalse(asset.suspected_scanned)
 
     def test_prune_expired_unused_files_only(self) -> None:
         """Pruning should remove only expired files that were never attached."""

@@ -5,11 +5,11 @@ import {
     Layers,
     Wrench,
     Zap,
-    Sparkles,
     Plus,
     X,
     MessageSquare,
     Settings2,
+    PanelLeft,
 } from 'lucide-react';
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -37,6 +37,7 @@ import {
     TooltipContent,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
 import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
@@ -152,7 +153,6 @@ interface AgentDetailSidebarProps {
     onSceneSelect: (scene: Scene) => void;
     onCreateScene: () => void;
     onDeleteScene: (scene: Scene) => void;
-    onOpenBuildChat: () => void;
     onOpenReactChat: () => void;
     onAgentUpdate?: (agent: Agent) => void;
 }
@@ -169,7 +169,6 @@ function AgentDetailSidebar({
     onSceneSelect,
     onCreateScene,
     onDeleteScene,
-    onOpenBuildChat,
     onOpenReactChat,
     onAgentUpdate,
 }: AgentDetailSidebarProps) {
@@ -430,52 +429,69 @@ function AgentDetailSidebar({
                 <SidebarHeader className="p-2">
                     <SidebarMenu>
                         <SidebarMenuItem>
-                            <SidebarMenuButton
-                                size="lg"
-                                onClick={() => setIsEditModalOpen(true)}
-                                tooltip="Edit Agent"
-                                className="w-full"
-                            >
-                                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                                    <Bot className="size-4" />
-                                </div>
-                                <div className="flex flex-col gap-0.5 leading-none min-w-0 flex-1">
-                                    <span className="font-semibold truncate text-sm">
-                                        {agent?.name || 'Loading…'}
-                                    </span>
-                                    {agent?.is_active && (
-                                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-success" />
-                                            Active
-                                        </span>
-                                    )}
-                                </div>
+                            {state === 'collapsed' ? (
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <div
-                                            role="button"
-                                            tabIndex={0}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onOpenReactChat();
-                                            }}
-                                            onKeyDown={(e) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                    e.stopPropagation();
-                                                    onOpenReactChat();
-                                                }
-                                            }}
-                                            className="p-1.5 hover:bg-sidebar-accent rounded transition-colors cursor-pointer"
-                                            aria-label="Open Chat"
+                                        <button
+                                            type="button"
+                                            onClick={() => setOpen(true)}
+                                            aria-label="Expand sidebar"
+                                            className="group/avatar relative flex size-8 items-center justify-center overflow-hidden rounded-lg"
                                         >
-                                            <MessageSquare className="size-4" />
-                                        </div>
+                                            <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground transition-all group-hover/avatar:scale-95 group-hover/avatar:opacity-0">
+                                                <Bot className="size-4" />
+                                            </span>
+                                            <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-transparent text-sidebar-foreground/60 opacity-0 transition-all group-hover/avatar:opacity-100 group-hover/avatar:bg-sidebar-accent group-hover/avatar:text-sidebar-foreground">
+                                                <PanelLeft className="size-4" />
+                                            </span>
+                                        </button>
                                     </TooltipTrigger>
                                     <TooltipContent side="right">
-                                        <p>Chat with Agent</p>
+                                        Expand sidebar
                                     </TooltipContent>
                                 </Tooltip>
-                            </SidebarMenuButton>
+                            ) : (
+                                <div className="flex items-center gap-1">
+                                    <SidebarMenuButton
+                                        size="lg"
+                                        onClick={() => setIsEditModalOpen(true)}
+                                        tooltip="Edit Agent"
+                                        className="min-w-0 flex-1"
+                                    >
+                                        <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                                            <Bot className="size-4" />
+                                        </div>
+                                        <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
+                                            <span className="truncate text-sm font-semibold">
+                                                {agent?.name || 'Loading…'}
+                                            </span>
+                                            {agent?.is_active && (
+                                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                                                    Active
+                                                </span>
+                                            )}
+                                        </div>
+                                    </SidebarMenuButton>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => setOpen(false)}
+                                                className="h-7 w-7 shrink-0 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                                aria-label="Collapse sidebar"
+                                            >
+                                                <PanelLeft className="size-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right">
+                                            Collapse sidebar
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
+                            )}
                         </SidebarMenuItem>
                     </SidebarMenu>
                 </SidebarHeader>
@@ -820,24 +836,26 @@ function AgentDetailSidebar({
                     </Collapsible>
                 </SidebarContent>
 
+                <SidebarSeparator />
+
                 <SidebarFooter className="p-2">
                     <SidebarMenu>
                         <SidebarMenuItem>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <SidebarMenuButton
-                                        onClick={onOpenBuildChat}
-                                        className="bg-sidebar-primary/10 hover:bg-sidebar-primary/15 text-sidebar-primary"
-                                        size="lg"
-                                    >
-                                        <Sparkles className="size-4" />
-                                        <span className="font-medium">Build Mode</span>
-                                    </SidebarMenuButton>
-                                </TooltipTrigger>
-                                <TooltipContent side="right">
-                                    Open AI-assisted build chat
-                                </TooltipContent>
-                            </Tooltip>
+                            <SidebarMenuButton
+                                onClick={onOpenReactChat}
+                                tooltip="Chat with Agent"
+                                size="lg"
+                                className={
+                                    state === 'collapsed'
+                                        ? 'justify-center bg-sidebar-primary/10 text-sidebar-primary hover:bg-sidebar-primary/15 hover:text-sidebar-primary'
+                                        : 'bg-sidebar-primary/10 text-sidebar-primary hover:bg-sidebar-primary/15 hover:text-sidebar-primary'
+                                }
+                            >
+                                <MessageSquare className="size-4" />
+                                {state !== 'collapsed' && (
+                                    <span className="font-medium">Chat with Agent</span>
+                                )}
+                            </SidebarMenuButton>
                         </SidebarMenuItem>
                     </SidebarMenu>
                 </SidebarFooter>

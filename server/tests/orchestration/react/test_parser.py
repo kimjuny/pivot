@@ -24,6 +24,7 @@ class ReactParserTestCase(unittest.TestCase):
   "observe": "Need file content",
   "thought": "Call the file tool",
   "abstract": "Read a file",
+  "progress_update": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "step_id": "1",
@@ -55,6 +56,7 @@ class ReactParserTestCase(unittest.TestCase):
         decision = parse_react_output(content)
 
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
+        self.assertEqual(decision.progress_update, "Reading the requested file")
         self.assertEqual(decision.action.step_id, "1")
         self.assertEqual(len(decision.action.tool_calls), 1)
         self.assertEqual(

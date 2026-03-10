@@ -51,11 +51,7 @@
       "status": "pending | running | done | error",
       "recursion_history": [] // 外围程序将在这里维护每一个与step相关联的recursion的完整快照，也要加上iteration索引
     }
-  ],
-
-  "memory": {
-    "short_term": [{"trace_id": "uuid", "memory": "指定uuid的recursion中写入进来的短期记忆"}] // 短期记忆，当你在每一轮recursion中返回
-  }
+  ]
 }
 
 **关键语义（非常重要）：**
@@ -76,6 +72,7 @@
   "trace_id": "上一轮recursion的trace_id",
   "observe": "你对当前状态机和输入的客观观察",
   "thought": "你的分析与决策理由",
+  "progress_update": "本轮向用户暴露的阶段性进展",
   "action": {
     "action_type": "CALL_TOOL | RE_PLAN | REFLECT | ANSWER | CLARIFY",
     "output": {}

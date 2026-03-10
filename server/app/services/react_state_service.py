@@ -88,7 +88,7 @@ class ReactStateService:
         action_output: dict[str, Any],
         action_step_id: str | None,
         step_status_updates: list[dict[str, str]],
-        short_term_memory_append: str,
+        progress_update: str,
         tool_results: list[dict[str, Any]],
         token_counter: dict[str, int],
     ) -> dict[str, int] | None:
@@ -107,7 +107,7 @@ class ReactStateService:
                 merged into it for snapshot/event consistency.
             action_step_id: Optional plan step associated with this recursion.
             step_status_updates: Validated step status updates.
-            short_term_memory_append: Optional short-term memory append content.
+            progress_update: Optional user-facing progress update text.
             tool_results: Executed tool results for this recursion.
             token_counter: Aggregated token usage for the recursion.
 
@@ -129,8 +129,8 @@ class ReactStateService:
             trace_id=recursion.trace_id,
         )
 
-        if short_term_memory_append:
-            recursion.short_term_memory = short_term_memory_append
+        if progress_update:
+            recursion.progress_update = progress_update
 
         if tool_results:
             recursion.tool_call_results = json.dumps(tool_results, ensure_ascii=False)
@@ -148,7 +148,7 @@ class ReactStateService:
             action_type=action_type,
             action_output=action_output,
             step_status_updates=step_status_updates,
-            short_term_memory_append=short_term_memory_append,
+            progress_update=progress_update,
         )
         self._save_snapshot(task, recursion, context)
 
@@ -355,7 +355,7 @@ class ReactStateService:
         action_type: str,
         action_output: dict[str, Any],
         step_status_updates: list[dict[str, str]],
-        short_term_memory_append: str,
+        progress_update: str,
     ) -> None:
         """Apply recursion side effects to the in-memory context before snapshot.
 
@@ -366,17 +366,8 @@ class ReactStateService:
             action_type: Final action type.
             action_output: Enriched action output payload.
             step_status_updates: Validated step status updates.
-            short_term_memory_append: Optional short-term memory append content.
+            progress_update: Optional user-facing progress update text.
         """
-        if short_term_memory_append:
-            memory = context.context.setdefault("memory", {})
-            short_term = memory.setdefault("short_term", [])
-            short_term.append(
-                {
-                    "trace_id": recursion.trace_id,
-                    "memory": short_term_memory_append,
-                }
-            )
 
         if action_type == "RE_PLAN":
             self._replace_plan(task, context, action_output.get("plan", []))
@@ -391,6 +382,7 @@ class ReactStateService:
             action_type=action_type,
             action_output=action_output,
             step_status_updates=step_status_updates,
+            progress_update=progress_update,
         )
 
     def _replace_plan(
@@ -506,6 +498,7 @@ class ReactStateService:
         action_type: str,
         action_output: dict[str, Any],
         step_status_updates: list[dict[str, str]],
+        progress_update: str,
     ) -> None:
         """Attach the current recursion to the correct branch in the context.
 
@@ -516,12 +509,14 @@ class ReactStateService:
             action_type: Final action type.
             action_output: Enriched action output payload.
             step_status_updates: Validated step status updates.
+            progress_update: Optional user-facing progress update text.
         """
         current_rec_dict = {
             "iteration": task.iteration,
             "trace_id": recursion.trace_id,
             "observe": recursion.observe or "",
             "thought": recursion.thought or "",
+            "progress_update": progress_update,
             "action": {
                 "action_type": action_type,
                 "output": action_output,

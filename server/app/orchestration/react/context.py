@@ -206,13 +206,12 @@ class ReactContext:
             task: Task whose intent seeds the context.
 
         Returns:
-            A default context dictionary with empty plan and memory.
+            A default context dictionary with an empty plan.
         """
         return {
             "user_intent": task.user_intent,
             "constraints": [],
             "plan": [],
-            "memory": {"short_term": []},
         }
 
     @classmethod
@@ -242,13 +241,6 @@ class ReactContext:
         plan = raw_context.get("plan")
         if isinstance(plan, list):
             normalized["plan"] = plan
-
-        memory = raw_context.get("memory")
-        if isinstance(memory, dict):
-            short_term = memory.get("short_term")
-            normalized["memory"] = {
-                "short_term": short_term if isinstance(short_term, list) else []
-            }
 
         return normalized
 

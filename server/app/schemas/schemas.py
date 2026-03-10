@@ -1,6 +1,5 @@
 import json
-from datetime import UTC, datetime
-from enum import Enum
+from datetime import datetime
 
 from app.schemas.base import AppBaseModel
 from pydantic import ConfigDict, Field, field_validator
@@ -208,34 +207,6 @@ class AgentDetailResponse(AgentResponse):
     """Agent response with full details including scenes and their graphs."""
 
     scenes: list[SceneGraphResponse] = Field(default_factory=list)
-
-
-class StreamEventType(str, Enum):
-    """Enum for SSE stream event types."""
-
-    REASONING = "reasoning"
-    REASON = "reason"
-    RESPONSE = "response"
-    UPDATED_SCENES = "updated_scenes"
-    ERROR = "error"
-
-
-class StreamEvent(AppBaseModel):
-    """Schema for build-stream SSE event data."""
-
-    type: StreamEventType = Field(
-        ...,
-        description="Event type: 'reasoning', 'reason', 'response', 'updated_scenes', 'error'",
-    )
-    delta: str | None = Field(default=None, description="Incremental content update")
-    updated_scenes: list[SceneGraphResponse] | None = Field(
-        default=None, description="Updated scene graph"
-    )
-    error: str | None = Field(default=None, description="Error message")
-    create_time: str = Field(
-        default_factory=lambda: datetime.now(UTC).isoformat(),
-        description="Creation timestamp",
-    )
 
 
 class SceneGraphUpdate(AppBaseModel):

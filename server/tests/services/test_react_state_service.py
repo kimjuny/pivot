@@ -82,7 +82,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             },
             action_step_id=None,
             step_status_updates=[],
-            short_term_memory_append="",
+            progress_update="",
             tool_results=[],
             token_counter={
                 "prompt_tokens": 10,
@@ -150,7 +150,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             },
             action_step_id="1",
             step_status_updates=[{"step_id": "1", "status": "done"}],
-            short_term_memory_append="remember this",
+            progress_update="Working through the file analysis",
             tool_results=[
                 {
                     "tool_call_id": "call-1",
@@ -179,9 +179,10 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.assertEqual(updated_step.status, "done")
         self.assertEqual(recursion.plan_step_id, "1")
         self.assertIsNotNone(recursion.tool_call_results)
+        self.assertEqual(recursion.progress_update, "Working through the file analysis")
         self.assertEqual(
-            snapshot_payload["context"]["memory"]["short_term"][0]["memory"],
-            "remember this",
+            rec_entry["progress_update"],
+            "Working through the file analysis",
         )
         self.assertEqual(
             rec_entry["action"]["output"]["tool_calls"][0]["result"], "hello"

@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from typing import Any
 
 from app.models.agent import Scene, Subscene
 
@@ -8,7 +7,6 @@ from app.models.agent import Scene, Subscene
 class SystemPrompt:
     _instance = None
     _chat_prompt_template: str = ""
-    _build_prompt_template: str = ""
 
     def __new__(cls):
         if cls._instance is None:
@@ -21,9 +19,6 @@ class SystemPrompt:
 
         with (base_dir / "chat.md").open(encoding="utf-8") as f:
             self._chat_prompt_template = f.read()
-
-        with (base_dir / "build.md").open(encoding="utf-8") as f:
-            self._build_prompt_template = f.read()
 
     def get_chat_prompt(
         self,
@@ -55,32 +50,6 @@ class SystemPrompt:
 
         return {"role": "system", "content": content}
 
-    def get_build_prompt(
-        self, existing_agent: dict[str, Any] | None = None
-    ) -> dict[str, str]:
-        """
-        Construct the system message for Build Mode.
-
-        Args:
-            existing_agent (dict, optional): The dictionary representation of the existing agent.
-
-        Returns:
-            dict: The system message.
-        """
-        current_agent_config = ""
-
-        if existing_agent:
-            current_agent_config = json.dumps(
-                existing_agent, indent=2, ensure_ascii=False
-            )
-
-        content = self._build_prompt_template.replace(
-            "{{current_agent_config}}", current_agent_config
-        )
-
-        return {"role": "system", "content": content}
-
-
 # Global instance accessor
 _system_prompt = SystemPrompt()
 
@@ -89,7 +58,3 @@ def get_chat_prompt(
     scenes: list[Scene], current_scene: Scene | None, current_subscene: Subscene | None
 ) -> dict[str, str]:
     return _system_prompt.get_chat_prompt(scenes, current_scene, current_subscene)
-
-
-def get_build_prompt(existing_agent: dict[str, Any] | None = None) -> dict[str, str]:
-    return _system_prompt.get_build_prompt(existing_agent)

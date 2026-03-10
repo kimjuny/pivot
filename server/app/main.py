@@ -18,7 +18,6 @@ sys.path.append(str(Path(server_dir).parent))
 # Import server modules (noqa: E402 - must be after sys.path setup)
 from app.api.agents import router as agents_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
-from app.api.build import router as build_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
@@ -85,7 +84,6 @@ app.add_middleware(TimingMiddleware)
 # Include API routes
 app.include_router(agents_router, prefix="/api")
 app.include_router(scenes_router, prefix="/api")
-app.include_router(build_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")

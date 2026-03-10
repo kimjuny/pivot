@@ -4,7 +4,6 @@ Provides business logic layer for agent orchestration, separating
 concerns between API endpoints and core functionality.
 """
 
-from app.services.build_service import BuildService
 from app.services.session_memory_service import SessionMemoryService
 from app.services.workspace_service import (
     check_ast,
@@ -19,7 +18,6 @@ from app.services.workspace_service import (
 )
 
 __all__ = [
-    "BuildService",
     "SessionMemoryService",
     "check_ast",
     "check_pyright",

@@ -1,6 +1,5 @@
 from enum import Enum
 
-from app.models.agent import Scene
 from app.schemas.base import AppBaseModel
 from pydantic import ConfigDict
 
@@ -11,7 +10,6 @@ class AgentResponseChunkType(str, Enum):
     REASONING = "reasoning"
     REASON = "reason"
     RESPONSE = "response"
-    UPDATED_SCENES = "updated_scenes"
     ERROR = "error"
     PARSING = "parsing"  # Internal state, not usually yielded but good to have
 
@@ -23,7 +21,6 @@ class AgentResponseChunk(AppBaseModel):
 
     type: AgentResponseChunkType
     delta: str | None = None
-    updated_scenes: list[Scene] | None = None
 
     model_config = ConfigDict(
         from_attributes=True,
