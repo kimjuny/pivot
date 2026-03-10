@@ -32,7 +32,8 @@ from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_memory_service import SessionMemoryService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
-    list_all_skills,
+    build_skill_mounts,
+    list_visible_skills,
 )
 from app.services.workspace_service import (
     ensure_agent_workspace,
@@ -306,9 +307,7 @@ async def react_chat_stream(
                 # Yield control so the start event is flushed before any blocking work.
                 await asyncio.sleep(0)
 
-            available_skills = await run_in_threadpool(
-                list_all_skills, current_user.username
-            )
+            available_skills = list_visible_skills(db, current_user.username)
             total_skill_count = len(available_skills)
             allowed_skills = _parse_name_allowlist(agent.skill_ids)
             if allowed_skills is not None:
@@ -375,6 +374,12 @@ async def react_chat_stream(
                         filtered_manager.add_entry(meta)
                 request_tool_manager = filtered_manager
 
+            allowed_skill_mounts = build_skill_mounts(
+                db,
+                current_user.username,
+                allowed_skill_names,
+            )
+
             # Warm up sandbox with the full allowed skill set so skill mounts are
             # ready before the first sandbox tool call in this task.
             try:
@@ -383,7 +388,7 @@ async def react_chat_stream(
                 get_sandbox_service().create(
                     username=current_user.username,
                     agent_id=agent.id or 0,
-                    skills=allowed_skill_names,
+                    skills=allowed_skill_mounts,
                 )
             except Exception as exc:
                 logger.warning(
@@ -401,7 +406,7 @@ async def react_chat_stream(
                 tool_execution_context=ToolExecutionContext(
                     username=current_user.username,
                     agent_id=agent.id or 0,
-                    allowed_skills=tuple(allowed_skill_names),
+                    allowed_skills=tuple(allowed_skill_mounts),
                 ),
                 stream_llm_responses=bool(llm_config.streaming),
             )
@@ -445,6 +450,7 @@ async def react_chat_stream(
                             selected_skills = []
                         skill_resolution_tokens = selection_result.get("tokens")
                         selected_skills_text = build_selected_skills_prompt_block(
+                            session=db,
                             username=current_user.username,
                             selected_skills=selected_skills,
                         )

@@ -1,8 +1,4 @@
-"""API endpoints for markdown skill management.
-
-Skill sources are stored as `.md` files and metadata is extracted from top
-front matter (`--- ... ---`) with fields like `name` and `description`.
-"""
+"""API endpoints for markdown skill management."""
 
 from typing import Any, Literal
 
@@ -11,8 +7,8 @@ from app.api.dependencies import get_db
 from app.models.user import User
 from app.services.skill_service import (
     delete_user_skill,
-    list_builtin_skills,
-    list_user_skills,
+    list_private_skills,
+    list_shared_skills,
     read_shared_skill,
     read_user_skill,
     upsert_user_skill,
@@ -35,10 +31,8 @@ async def get_shared_skills(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """List shared skills (builtin + user-shared)."""
-    builtin = list_builtin_skills()
-    user_shared = list_user_skills(current_user.username, "shared")
-    return [*builtin, *user_shared]
+    """List shared skills visible to the current user."""
+    return list_shared_skills(db, current_user.username)
 
 
 @router.get("/skills/private")
@@ -47,7 +41,7 @@ async def get_private_skills(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """List private skills for current user."""
-    return list_user_skills(current_user.username, "private")
+    return list_private_skills(db, current_user.username)
 
 
 @router.get("/skills/shared/{skill_name}")
@@ -56,11 +50,13 @@ async def get_shared_skill_source(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Read shared skill source (user-shared takes precedence over builtin)."""
+    """Read one shared skill source visible to the current user."""
     try:
-        return read_shared_skill(current_user.username, skill_name)
+        return read_shared_skill(db, current_user.username, skill_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -74,9 +70,11 @@ async def get_user_skill_source(
 ) -> dict[str, Any]:
     """Read a user-owned skill source from private/shared namespace."""
     try:
-        return read_user_skill(current_user.username, kind, skill_name)
+        return read_user_skill(db, current_user.username, kind, skill_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -91,9 +89,9 @@ async def upsert_skill_source(
 ) -> dict[str, Any]:
     """Create or update a user-owned markdown skill."""
     try:
-        metadata = upsert_user_skill(
-            current_user.username, kind, skill_name, body.source
-        )
+        metadata = upsert_user_skill(db, current_user, kind, skill_name, body.source)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -114,9 +112,11 @@ async def delete_skill_source(
 ) -> dict[str, str]:
     """Delete a user-owned markdown skill."""
     try:
-        delete_user_skill(current_user.username, kind, skill_name)
+        delete_user_skill(db, current_user, kind, skill_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

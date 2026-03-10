@@ -71,6 +71,7 @@ interface SidebarSkill {
     description: string;
     kind: 'shared' | 'private';
     source: 'builtin' | 'user';
+    creator: string | null;
     readOnly: boolean;
 }
 
@@ -311,14 +312,16 @@ function AgentDetailSidebar({
                         description: s.description,
                         kind: 'shared' as const,
                         source: s.source,
-                        readOnly: s.source === 'builtin',
+                        creator: s.creator,
+                        readOnly: s.read_only,
                     })),
                     ...priv.map((s: UserSkill) => ({
                         name: s.name,
                         description: s.description,
                         kind: 'private' as const,
                         source: 'user' as const,
-                        readOnly: false,
+                        creator: s.creator,
+                        readOnly: s.read_only,
                     })),
                 ];
                 setSkills(merged);
@@ -807,6 +810,11 @@ function AgentDetailSidebar({
                                                                         me
                                                                     </span>
                                                                 )}
+                                                                {s.kind === 'shared' && !s.readOnly && (
+                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                        you
+                                                                    </span>
+                                                                )}
                                                             </SidebarMenuButton>
                                                         </TooltipTrigger>
                                                         <TooltipContent side="right" className="max-w-xs">
@@ -814,7 +822,13 @@ function AgentDetailSidebar({
                                                                 <div className="flex items-center gap-1.5">
                                                                     <p className="font-semibold">{s.name}</p>
                                                                     <span className="text-[10px] text-muted-foreground">
-                                                                        {s.kind === 'shared' ? '· shared' : '· private'}
+                                                                        {s.kind === 'shared'
+                                                                            ? s.source === 'builtin'
+                                                                                ? '· shared · builtin'
+                                                                                : s.readOnly
+                                                                                  ? `· shared · ${s.creator ?? 'unknown'}`
+                                                                                  : '· shared · you'
+                                                                            : '· private'}
                                                                     </span>
                                                                 </div>
                                                                 {s.description && (

@@ -8,6 +8,7 @@ from app.models.react import (
     ReactTask,
 )
 from app.models.session import Session, SessionMemory
+from app.models.skill import Skill
 from app.models.user import User, UserLogin, UserResponse
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "Scene",
     "Session",
     "SessionMemory",
+    "Skill",
     "Subscene",
     "User",
     "UserLogin",

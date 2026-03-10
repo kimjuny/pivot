@@ -23,6 +23,8 @@ interface SkillEntry {
   summary: string;
   kind: 'shared' | 'private';
   source: 'builtin' | 'user';
+  creator: string | null;
+  readOnly: boolean;
 }
 
 type FilterKind = 'all' | 'shared' | 'private';
@@ -66,12 +68,16 @@ function SkillSelectorDialog({
           summary: s.description,
           kind: 'shared',
           source: s.source,
+          creator: s.creator,
+          readOnly: s.read_only,
         })),
         ...priv.map((s: UserSkill): SkillEntry => ({
           name: s.name,
           summary: s.description,
           kind: 'private',
           source: 'user',
+          creator: s.creator,
+          readOnly: s.read_only,
         })),
       ];
 
@@ -277,7 +283,7 @@ function SkillSelectorDialog({
                           {skill.kind === 'shared' ? (
                             <Badge variant="secondary" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">
                               {skill.source === 'builtin' ? <Lock className="w-2.5 h-2.5" /> : <Globe2 className="w-2.5 h-2.5" />}
-                              Shared
+                              {skill.source === 'builtin' ? 'Builtin' : skill.readOnly ? `Shared / ${skill.creator ?? 'Unknown'}` : 'Shared / You'}
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">

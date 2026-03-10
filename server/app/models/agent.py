@@ -44,7 +44,8 @@ class Agent(SQLModel, table=True):
             ``None`` means no restriction (all tools visible); an empty list means
             no tools are available to the agent.
         skill_ids: JSON-encoded list of skill names this agent is allowed to use.
-            ``None`` means no restriction (all skills visible); an empty list means
+            Names are globally unique across builtin, shared, and private skills.
+            ``None`` means no restriction (all visible skills); an empty list means
             no skills are available to the agent.
         created_at: UTC timestamp when the agent was created.
         updated_at: UTC timestamp when the agent was last updated.
@@ -73,7 +74,10 @@ class Agent(SQLModel, table=True):
     )
     skill_ids: str | None = Field(
         default=None,
-        description="JSON array of allowed skill names. None = all skills; '[]' = none.",
+        description=(
+            "JSON array of allowed globally unique skill names. "
+            "None = all visible skills; '[]' = none."
+        ),
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

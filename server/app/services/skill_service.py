@@ -1,30 +1,23 @@
-"""Skill service for managing shared/private markdown skills and metadata.
-
-This service stores user-editable skills under:
-- ``server/workspace/{username}/skills/private/{name}/{name}.md``
-- ``server/workspace/{username}/skills/shared/{name}/{name}.md``
-
-Built-in skills are loaded from:
-- ``server/app/orchestration/skills/builtin/{name}/{name}.md``
-- ``server/app/orchestration/skills/builtin/{name}/SKILL.md``
-- ``server/app/orchestration/skills/builtin/{name}/skill.md``
-
-For each user skill file, a structured metadata JSON is stored under:
-- ``.../skills/{kind}/.metadata/{name}.json``
-"""
+"""Database-backed skill registry plus markdown source access helpers."""
 
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import shutil
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from app.models.skill import Skill
+from app.models.user import User
 from app.services.workspace_service import workspace_root
 from app.utils.logging_config import get_logger
+from sqlmodel import Session, select
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = get_logger("skill_service")
 
@@ -33,23 +26,44 @@ _ALLOWED_KINDS = {"private", "shared"}
 _SKILL_VARIANT_FILENAMES = ("SKILL.md", "skill.md", "Skill.md")
 
 
+@dataclass(frozen=True)
+class SkillMount:
+    """Minimal mount information for sandbox skill injection."""
+
+    name: str
+    location: str
+
+
+@dataclass(frozen=True)
+class _DiscoveredSkill:
+    """Metadata discovered from one markdown skill file on disk."""
+
+    name: str
+    description: str
+    kind: str
+    source: str
+    builtin: bool
+    creator_id: int | None
+    creator_username: str | None
+    location: str
+    filename: str
+    md5: str
+    updated_at: datetime
+
+
 def _builtin_skills_dir() -> Path:
     return (
         Path(__file__).resolve().parent.parent / "orchestration" / "skills" / "builtin"
     )
 
 
-def _user_skills_dir(username: str, kind: str) -> Path:
+def _user_skills_dir(username: str, kind: str, *, create: bool) -> Path:
     if kind not in _ALLOWED_KINDS:
         raise ValueError(f"Invalid skill kind: {kind}")
     base = workspace_root() / username / _SKILLS_DIRNAME / kind
-    base.mkdir(parents=True, exist_ok=True)
-    (base / ".metadata").mkdir(parents=True, exist_ok=True)
+    if create:
+        base.mkdir(parents=True, exist_ok=True)
     return base
-
-
-def _meta_path(base_dir: Path, skill_name: str) -> Path:
-    return base_dir / ".metadata" / f"{skill_name}.json"
 
 
 def _canonical_skill_path(base_dir: Path, skill_name: str) -> Path:
@@ -70,11 +84,10 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
             candidate = skill_dir / filename
             if candidate.exists():
                 return candidate
-        # Last-resort compatibility for uncommon naming variants.
         for candidate in sorted(skill_dir.glob("*.md")):
-            if candidate.name.startswith("_"):
-                continue
-            return candidate
+            if not candidate.name.startswith("_"):
+                return candidate
+
     legacy = _legacy_skill_path(base_dir, skill_name)
     if legacy.exists():
         return legacy
@@ -82,48 +95,49 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
 
 
 def _list_skill_paths(base_dir: Path) -> list[Path]:
-    """List skill markdown files in directory and flat legacy layout."""
+    """List markdown skill files under one base directory."""
+    if not base_dir.exists():
+        return []
+
     paths: list[Path] = []
-    dir_skill_names: set[str] = set()
+    directory_skill_names: set[str] = set()
 
     for item in sorted(base_dir.iterdir()):
-        if not item.is_dir() or item.name.startswith("_") or item.name == ".metadata":
+        if not item.is_dir() or item.name.startswith("_"):
             continue
         matched = _resolve_skill_path(base_dir, item.name)
         if matched is not None:
             paths.append(matched)
-            dir_skill_names.add(item.name)
+            directory_skill_names.add(item.name)
 
     for md_file in sorted(base_dir.glob("*.md")):
         if md_file.name.startswith("_"):
             continue
-        if md_file.stem in dir_skill_names:
-            continue
-        paths.append(md_file)
+        if md_file.stem not in directory_skill_names:
+            paths.append(md_file)
 
     return paths
 
 
-def _skill_name_for_path(base_dir: Path, skill_path: Path) -> str:
-    """Infer skill name from layout.
+def _skill_location_for_path(base_dir: Path, skill_path: Path) -> Path:
+    if skill_path.parent == base_dir:
+        return base_dir / skill_path.stem
+    return skill_path.parent
 
-    Directory layout uses the parent directory name as skill name.
-    Legacy flat layout uses the file stem.
-    """
+
+def _fallback_skill_name(base_dir: Path, skill_path: Path) -> str:
     if skill_path.parent == base_dir:
         return skill_path.stem
     return skill_path.parent.name
 
 
 def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
-    """Move legacy ``{name}.md`` to canonical ``{name}/{name}.md`` layout."""
+    """Normalize legacy flat files into directory layout for stable locations."""
     canonical = _canonical_skill_path(base_dir, skill_name)
     legacy = _legacy_skill_path(base_dir, skill_name)
     if canonical.exists():
         return canonical
     if not legacy.exists():
-        # Do not force a non-existent canonical path. Callers may have already
-        # resolved a valid variant (e.g. SKILL.md / skill.md) under skill dir.
         return legacy
 
     canonical.parent.mkdir(parents=True, exist_ok=True)
@@ -132,19 +146,18 @@ def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
     return canonical
 
 
+def _read_markdown(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
 def _file_md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
 
 
 def _parse_front_matter(source: str) -> dict[str, str]:
-    """Parse markdown front matter and return a lowercase string map.
-
-    Supports a simple YAML-like ``key: value`` format between ``---`` delimiters.
-    """
+    """Parse a minimal YAML-like front matter block from markdown."""
     lines = source.splitlines()
-    if len(lines) < 3:
-        return {}
-    if lines[0].strip() != "---":
+    if len(lines) < 3 or lines[0].strip() != "---":
         return {}
 
     end_idx = -1
@@ -156,52 +169,13 @@ def _parse_front_matter(source: str) -> dict[str, str]:
         return {}
 
     meta: dict[str, str] = {}
-    for raw in lines[1:end_idx]:
-        line = raw.strip()
-        if not line or line.startswith("#") or ":" not in line:
+    for raw_line in lines[1:end_idx]:
+        line = raw_line.strip()
+        if not line or ":" not in line or line.startswith("#"):
             continue
         key, value = line.split(":", 1)
-        normalized_key = key.strip().lower()
-        normalized_val = value.strip().strip('"').strip("'")
-        meta[normalized_key] = normalized_val
+        meta[key.strip().lower()] = value.strip().strip('"').strip("'")
     return meta
-
-
-def _build_metadata(
-    path: Path,
-    kind: str,
-    source_type: str,
-    created_at: str | None = None,
-    fallback_name: str | None = None,
-) -> dict[str, Any]:
-    raw = path.read_text(encoding="utf-8")
-    parsed = _parse_front_matter(raw)
-
-    from_stat_created = path.stat().st_ctime
-    from_stat_updated = path.stat().st_mtime
-
-    created_iso = created_at
-    if created_iso is None:
-        created_iso = datetime.fromtimestamp(from_stat_created, tz=UTC).isoformat()
-
-    updated_iso = datetime.fromtimestamp(from_stat_updated, tz=UTC).isoformat()
-
-    name = parsed.get("name") or fallback_name or path.stem
-    description = parsed.get("description") or ""
-
-    return {
-        "name": name,
-        "description": description,
-        "filename": path.name,
-        "kind": kind,
-        "source": source_type,
-        "md5": _file_md5(path),
-        # Keep both spellings for downstream compatibility.
-        "create_at": created_iso,
-        "update_at": updated_iso,
-        "created_at": created_iso,
-        "updated_at": updated_iso,
-    }
 
 
 def _validate_skill_name(skill_name: str) -> None:
@@ -209,243 +183,654 @@ def _validate_skill_name(skill_name: str) -> None:
         raise ValueError("Skill name can only contain letters, numbers, '_', '-', '.'")
 
 
-def list_builtin_skills() -> list[dict[str, Any]]:
-    """List metadata for built-in shared skills."""
+def _discover_skill(
+    *,
+    base_dir: Path,
+    skill_path: Path,
+    kind: str,
+    source: str,
+    builtin: bool,
+    creator: User | None,
+) -> _DiscoveredSkill:
+    """Build one discovered skill record from markdown on disk."""
+    fallback_name = _fallback_skill_name(base_dir, skill_path)
+    source_text = _read_markdown(skill_path)
+    parsed = _parse_front_matter(source_text)
+    name = parsed.get("name") or fallback_name
+    _validate_skill_name(name)
+
+    stat = skill_path.stat()
+    updated_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
+    location = _skill_location_for_path(base_dir, skill_path)
+
+    return _DiscoveredSkill(
+        name=name,
+        description=parsed.get("description", ""),
+        kind=kind,
+        source=source,
+        builtin=builtin,
+        creator_id=creator.id if creator is not None else None,
+        creator_username=creator.username if creator is not None else None,
+        location=str(location.resolve()),
+        filename=skill_path.name,
+        md5=_file_md5(skill_path),
+        updated_at=updated_at,
+    )
+
+
+def _discover_builtin_skills() -> list[_DiscoveredSkill]:
     root = _builtin_skills_dir()
     if not root.exists():
         return []
 
-    result: list[dict[str, Any]] = []
-    for md_file in _list_skill_paths(root):
-        skill_name = _skill_name_for_path(root, md_file)
-        try:
-            result.append(
-                _build_metadata(
-                    md_file,
-                    kind="shared",
-                    source_type="builtin",
-                    fallback_name=skill_name,
-                )
-            )
-        except Exception as exc:
-            logger.warning("Failed to parse builtin skill '%s': %s", md_file.name, exc)
-    return result
-
-
-def list_user_skills(username: str, kind: str) -> list[dict[str, Any]]:
-    """List metadata for user skills of a given kind."""
-    base = _user_skills_dir(username, kind)
-    result: list[dict[str, Any]] = []
-
-    for md_file in _list_skill_paths(base):
-        skill_name = _skill_name_for_path(base, md_file)
-        if md_file == _legacy_skill_path(base, skill_name):
-            md_file = _migrate_legacy_user_skill(base, skill_name)
-        if not md_file.exists():
-            logger.warning("Skip missing user skill file after resolution: %s", md_file)
-            continue
-        meta_file = _meta_path(base, skill_name)
-        existing_created: str | None = None
-        if meta_file.exists():
-            try:
-                saved = json.loads(meta_file.read_text(encoding="utf-8"))
-                existing_created = saved.get("created_at")
-            except json.JSONDecodeError:
-                existing_created = None
-
-        try:
-            meta = _build_metadata(
-                md_file,
-                kind=kind,
-                source_type="user",
-                created_at=existing_created,
-                fallback_name=skill_name,
-            )
-            meta_file.write_text(
-                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            result.append(meta)
-        except FileNotFoundError:
-            logger.warning(
-                "Skip user skill metadata build for missing file: %s", md_file
-            )
-        except Exception as exc:
-            logger.warning("Failed to parse user skill '%s': %s", md_file.name, exc)
-
-    return result
-
-
-def list_all_skills(username: str) -> list[dict[str, Any]]:
-    """List builtin + user shared + user private skill metadata."""
     return [
-        *list_builtin_skills(),
-        *list_user_skills(username, "shared"),
-        *list_user_skills(username, "private"),
+        _discover_skill(
+            base_dir=root,
+            skill_path=skill_path,
+            kind="shared",
+            source="builtin",
+            builtin=True,
+            creator=None,
+        )
+        for skill_path in _list_skill_paths(root)
     ]
 
 
-def get_skills_by_names(username: str, names: list[str]) -> list[dict[str, Any]]:
-    """Return skill metadata entries filtered by exact names preserving input order."""
-    all_by_name = {item["name"]: item for item in list_all_skills(username)}
-    return [all_by_name[name] for name in names if name in all_by_name]
+def _discover_user_skills(users: Sequence[User]) -> list[_DiscoveredSkill]:
+    discovered: list[_DiscoveredSkill] = []
+    for user in users:
+        for kind in ("private", "shared"):
+            base_dir = _user_skills_dir(user.username, kind, create=False)
+            if not base_dir.exists():
+                continue
+            for skill_path in _list_skill_paths(base_dir):
+                fallback_name = _fallback_skill_name(base_dir, skill_path)
+                if skill_path == _legacy_skill_path(base_dir, fallback_name):
+                    skill_path = _migrate_legacy_user_skill(base_dir, fallback_name)
+                if not skill_path.exists():
+                    continue
+                discovered.append(
+                    _discover_skill(
+                        base_dir=base_dir,
+                        skill_path=skill_path,
+                        kind=kind,
+                        source="user",
+                        builtin=False,
+                        creator=user,
+                    )
+                )
+    return discovered
 
 
-def read_user_skill(username: str, kind: str, skill_name: str) -> dict[str, Any]:
-    """Read markdown source and metadata for a user skill."""
-    _validate_skill_name(skill_name)
-    base = _user_skills_dir(username, kind)
-    skill_path = _resolve_skill_path(base, skill_name)
-    if skill_path is None:
-        raise FileNotFoundError(f"Skill '{skill_name}' not found in {kind}.")
-    if skill_path == _legacy_skill_path(base, skill_name):
-        skill_path = _migrate_legacy_user_skill(base, skill_name)
-
-    meta_file = _meta_path(base, skill_name)
-    existing_created: str | None = None
-    if meta_file.exists():
-        try:
-            existing_created = json.loads(meta_file.read_text(encoding="utf-8")).get(
-                "created_at"
+def _assert_unique_discovered_names(discovered: list[_DiscoveredSkill]) -> None:
+    seen_by_name: dict[str, str] = {}
+    for item in discovered:
+        existing_location = seen_by_name.get(item.name)
+        if existing_location is not None and existing_location != item.location:
+            raise ValueError(
+                "Skill names must be globally unique. "
+                f"Found duplicate name '{item.name}' in '{existing_location}' and "
+                f"'{item.location}'."
             )
-        except json.JSONDecodeError:
-            existing_created = None
+        seen_by_name[item.name] = item.location
 
-    meta = _build_metadata(
-        skill_path,
-        kind=kind,
-        source_type="user",
-        created_at=existing_created,
-        fallback_name=skill_name,
+
+def _skill_content_path(skill: Skill) -> Path:
+    return Path(skill.location) / skill.filename
+
+
+def _creator_name_map(session: Session) -> dict[int, str]:
+    users = session.exec(select(User)).all()
+    return {user.id: user.username for user in users if user.id is not None}
+
+
+def _serialize_utc_timestamp(value: datetime) -> str:
+    """Serialize persisted datetimes as explicit UTC ISO 8601 strings.
+
+    Why: SQLite commonly drops timezone info on round-trip. The frontend timestamp
+    helpers rely on explicit UTC offsets so browsers convert to the viewer's local
+    timezone instead of treating the string as local time already.
+    """
+    return value.replace(tzinfo=UTC).isoformat()
+
+
+def _serialize_skill(
+    skill: Skill,
+    *,
+    creator_lookup: dict[int, str],
+    current_username: str | None,
+) -> dict[str, Any]:
+    creator = (
+        creator_lookup.get(skill.creator_id) if skill.creator_id is not None else None
     )
-    meta_file.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    read_only = bool(skill.builtin)
+    if (
+        creator is not None
+        and current_username is not None
+        and creator != current_username
+    ):
+        read_only = True
 
     return {
-        "name": skill_name,
-        "source": skill_path.read_text(encoding="utf-8"),
-        "metadata": meta,
+        "name": skill.name,
+        "description": skill.description,
+        "location": skill.location,
+        "filename": skill.filename,
+        "kind": skill.kind,
+        "source": skill.source,
+        "creator": creator,
+        "builtin": skill.builtin,
+        "read_only": read_only,
+        "md5": skill.md5,
+        "created_at": _serialize_utc_timestamp(skill.created_at),
+        "updated_at": _serialize_utc_timestamp(skill.updated_at),
     }
 
 
-def read_shared_skill(username: str, skill_name: str) -> dict[str, Any]:
-    """Read shared skill source.
+def _all_skills_query(session: Session) -> list[Skill]:
+    return list(session.exec(select(Skill).order_by(Skill.name)).all())
 
-    Priority: user-shared first, then builtin shared.
+
+def _visible_skills_query(session: Session, username: str) -> list[Skill]:
+    user = session.exec(select(User).where(User.username == username)).first()
+    if user is None or user.id is None:
+        raise ValueError(f"User '{username}' not found.")
+
+    return [
+        skill
+        for skill in _all_skills_query(session)
+        if skill.kind == "shared" or skill.creator_id == user.id
+    ]
+
+
+def _find_skill_by_name(skills: list[Skill], skill_name: str) -> Skill | None:
+    for skill in skills:
+        if skill.name == skill_name:
+            return skill
+    return None
+
+
+def _upsert_skill_row(
+    session: Session,
+    *,
+    existing_by_location: dict[str, Skill],
+    existing_by_name: dict[str, Skill],
+    discovered: _DiscoveredSkill,
+) -> bool:
+    """Insert or update one registry row if discovered metadata changed."""
+    skill = existing_by_location.get(discovered.location)
+    if skill is None:
+        skill = existing_by_name.get(discovered.name)
+        if skill is not None and skill.location != discovered.location:
+            existing_by_location.pop(skill.location, None)
+
+    if skill is None:
+        session.add(
+            Skill(
+                name=discovered.name,
+                description=discovered.description,
+                kind=discovered.kind,
+                source=discovered.source,
+                builtin=discovered.builtin,
+                creator_id=discovered.creator_id,
+                location=discovered.location,
+                filename=discovered.filename,
+                md5=discovered.md5,
+                created_at=discovered.updated_at,
+                updated_at=discovered.updated_at,
+            )
+        )
+        return True
+
+    changed = False
+    new_values = {
+        "name": discovered.name,
+        "description": discovered.description,
+        "kind": discovered.kind,
+        "source": discovered.source,
+        "builtin": discovered.builtin,
+        "creator_id": discovered.creator_id,
+        "location": discovered.location,
+        "filename": discovered.filename,
+        "md5": discovered.md5,
+        "updated_at": discovered.updated_at,
+    }
+    for field_name, field_value in new_values.items():
+        if getattr(skill, field_name) != field_value:
+            setattr(skill, field_name, field_value)
+            changed = True
+
+    if changed:
+        session.add(skill)
+    return changed
+
+
+def sync_skill_registry(session: Session) -> None:
+    """Synchronize persistent skill metadata with skill markdown files.
+
+    Args:
+        session: Active database session.
+
+    Raises:
+        ValueError: If duplicate skill names exist across visible skill sources.
+    """
+    users = session.exec(select(User).order_by(User.username)).all()
+    discovered = [*_discover_builtin_skills(), *_discover_user_skills(users)]
+    _assert_unique_discovered_names(discovered)
+
+    existing_rows = _all_skills_query(session)
+    existing_by_location = {item.location: item for item in existing_rows}
+    existing_by_name = {item.name: item for item in existing_rows}
+    desired_locations = {item.location for item in discovered}
+
+    changed = False
+    for item in discovered:
+        changed = (
+            _upsert_skill_row(
+                session,
+                existing_by_location=existing_by_location,
+                existing_by_name=existing_by_name,
+                discovered=item,
+            )
+            or changed
+        )
+
+    for row in existing_rows:
+        if row.location in desired_locations:
+            continue
+        session.delete(row)
+        changed = True
+
+    if changed:
+        session.commit()
+
+
+def list_shared_skills(session: Session, username: str) -> list[dict[str, Any]]:
+    """List all shared skills visible to the current user.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+
+    Returns:
+        Serialized shared-skill metadata rows.
+    """
+    sync_skill_registry(session)
+    creator_lookup = _creator_name_map(session)
+    statement = select(Skill).where(Skill.kind == "shared").order_by(Skill.name)
+    skills = session.exec(statement).all()
+    return [
+        _serialize_skill(
+            skill,
+            creator_lookup=creator_lookup,
+            current_username=username,
+        )
+        for skill in skills
+    ]
+
+
+def list_private_skills(session: Session, username: str) -> list[dict[str, Any]]:
+    """List private skills owned by the current user.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+
+    Returns:
+        Serialized private-skill metadata rows.
+    """
+    sync_skill_registry(session)
+    creator_lookup = _creator_name_map(session)
+    user = session.exec(select(User).where(User.username == username)).first()
+    if user is None or user.id is None:
+        raise ValueError(f"User '{username}' not found.")
+
+    statement = (
+        select(Skill)
+        .where(Skill.kind == "private", Skill.creator_id == user.id)
+        .order_by(Skill.name)
+    )
+    skills = session.exec(statement).all()
+    return [
+        _serialize_skill(
+            skill,
+            creator_lookup=creator_lookup,
+            current_username=username,
+        )
+        for skill in skills
+    ]
+
+
+def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]:
+    """List compact metadata for every skill visible to a user.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+
+    Returns:
+        Serialized metadata for builtin, shared, and user-private skills.
+    """
+    sync_skill_registry(session)
+    creator_lookup = _creator_name_map(session)
+    skills = _visible_skills_query(session, username)
+    return [
+        _serialize_skill(
+            skill,
+            creator_lookup=creator_lookup,
+            current_username=username,
+        )
+        for skill in skills
+    ]
+
+
+def _read_skill_payload(
+    session: Session,
+    *,
+    skill: Skill,
+    username: str,
+) -> dict[str, Any]:
+    creator_lookup = _creator_name_map(session)
+    return {
+        "name": skill.name,
+        "source": _read_markdown(_skill_content_path(skill)),
+        "metadata": _serialize_skill(
+            skill,
+            creator_lookup=creator_lookup,
+            current_username=username,
+        ),
+    }
+
+
+def read_user_skill(
+    session: Session,
+    username: str,
+    kind: str,
+    skill_name: str,
+) -> dict[str, Any]:
+    """Read one user-owned skill markdown source and metadata.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        kind: Skill scope, either ``private`` or ``shared``.
+        skill_name: Globally unique skill name.
+
+    Returns:
+        Source markdown and serialized metadata.
+
+    Raises:
+        FileNotFoundError: If the skill is not owned by the user.
+        PermissionError: If the skill exists but belongs to someone else.
+        ValueError: If the skill name or scope is invalid.
     """
     _validate_skill_name(skill_name)
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError(f"Invalid skill kind: {kind}")
 
-    user_shared_base = _user_skills_dir(username, "shared")
-    user_shared_path = _resolve_skill_path(user_shared_base, skill_name)
-    if user_shared_path is not None:
-        return read_user_skill(username, "shared", skill_name)
+    sync_skill_registry(session)
+    user = session.exec(select(User).where(User.username == username)).first()
+    if user is None or user.id is None:
+        raise ValueError(f"User '{username}' not found.")
 
-    builtin_base = _builtin_skills_dir()
-    builtin_path = _resolve_skill_path(builtin_base, skill_name)
-    if builtin_path is None:
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if skill.creator_id != user.id or skill.kind != kind:
+        raise PermissionError(f"Skill '{skill_name}' is not editable by '{username}'.")
+
+    return _read_skill_payload(session, skill=skill, username=username)
+
+
+def read_shared_skill(
+    session: Session,
+    username: str,
+    skill_name: str,
+) -> dict[str, Any]:
+    """Read one shared skill visible to the current user.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        skill_name: Globally unique shared skill name.
+
+    Returns:
+        Source markdown and serialized metadata.
+
+    Raises:
+        FileNotFoundError: If the shared skill does not exist.
+        ValueError: If the skill name is invalid.
+    """
+    _validate_skill_name(skill_name)
+    sync_skill_registry(session)
+
+    skill = session.exec(
+        select(Skill).where(Skill.name == skill_name, Skill.kind == "shared")
+    ).first()
+    if skill is None:
         raise FileNotFoundError(f"Shared skill '{skill_name}' not found.")
 
-    meta = _build_metadata(
-        builtin_path,
-        kind="shared",
-        source_type="builtin",
-        fallback_name=skill_name,
-    )
-    return {
-        "name": skill_name,
-        "source": builtin_path.read_text(encoding="utf-8"),
-        "metadata": meta,
-    }
-
-
-def read_skill_content_for_prompt(username: str, skill_name: str) -> str:
-    """Read skill source by name from user shared/private first, then builtin."""
-    _validate_skill_name(skill_name)
-    for kind in ("private", "shared"):
-        base = _user_skills_dir(username, kind)
-        path = _resolve_skill_path(base, skill_name)
-        if path is not None:
-            if path == _legacy_skill_path(base, skill_name):
-                path = _migrate_legacy_user_skill(base, skill_name)
-            return path.read_text(encoding="utf-8")
-
-    builtin_path = _resolve_skill_path(_builtin_skills_dir(), skill_name)
-    if builtin_path is not None:
-        return builtin_path.read_text(encoding="utf-8")
-
-    raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    return _read_skill_payload(session, skill=skill, username=username)
 
 
 def build_selected_skills_prompt_block(
-    username: str, selected_skills: list[str]
+    session: Session,
+    username: str,
+    selected_skills: list[str],
 ) -> str:
-    """Build a markdown block containing selected skills full text for prompt injection."""
+    """Build prompt-injection markdown from selected visible skills.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        selected_skills: Selected globally unique skill names.
+
+    Returns:
+        Concatenated markdown block for system prompt injection.
+    """
     if not selected_skills:
         return ""
 
+    sync_skill_registry(session)
+    visible_skills = _visible_skills_query(session, username)
+    by_name = {skill.name: skill for skill in visible_skills}
+
     blocks: list[str] = []
-    for idx, skill_name in enumerate(selected_skills, start=1):
-        try:
-            content = read_skill_content_for_prompt(username, skill_name)
-        except FileNotFoundError:
+    for index, skill_name in enumerate(selected_skills, start=1):
+        skill = by_name.get(skill_name)
+        if skill is None:
             continue
-        blocks.append(f"### Skill {idx}: {skill_name}\n\n{content.strip()}\n")
+        try:
+            content = _read_markdown(_skill_content_path(skill)).strip()
+        except FileNotFoundError:
+            logger.warning("Selected skill source disappeared: %s", skill.location)
+            continue
+        blocks.append(f"### Skill {index}: {skill.name}\n\n{content}\n")
     return "\n".join(blocks).strip()
 
 
+def build_skill_mounts(
+    session: Session,
+    username: str,
+    skill_names: list[str],
+) -> list[dict[str, str]]:
+    """Build sandbox mount metadata for visible skills.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        skill_names: Allowed globally unique skill names.
+
+    Returns:
+        List of ``{"name": ..., "location": ...}`` payloads for sandbox-manager.
+    """
+    sync_skill_registry(session)
+    visible_skills = _visible_skills_query(session, username)
+    by_name = {skill.name: skill for skill in visible_skills}
+
+    mounts: list[dict[str, str]] = []
+    seen_names: set[str] = set()
+    for skill_name in skill_names:
+        if skill_name in seen_names:
+            continue
+        skill = by_name.get(skill_name)
+        if skill is None:
+            continue
+        seen_names.add(skill_name)
+        mounts.append({"name": skill.name, "location": skill.location})
+    return mounts
+
+
 def upsert_user_skill(
-    username: str, kind: str, skill_name: str, source: str
+    session: Session,
+    current_user: User,
+    kind: str,
+    skill_name: str,
+    source: str,
 ) -> dict[str, Any]:
-    """Create or update a user skill markdown file and metadata."""
+    """Create or update one user-owned skill and persist its metadata.
+
+    Args:
+        session: Active database session.
+        current_user: Authenticated user who owns the writable namespace.
+        kind: Skill scope, either ``private`` or ``shared``.
+        skill_name: Globally unique skill name to write.
+        source: Markdown skill source.
+
+    Returns:
+        Serialized metadata for the saved skill.
+
+    Raises:
+        PermissionError: If the target name belongs to another creator or builtin.
+        ValueError: If the name or scope is invalid.
+    """
     _validate_skill_name(skill_name)
-    base = _user_skills_dir(username, kind)
-    legacy_path = _legacy_skill_path(base, skill_name)
-    skill_path = _canonical_skill_path(base, skill_name)
-    skill_path.parent.mkdir(parents=True, exist_ok=True)
-    meta_file = _meta_path(base, skill_name)
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError(f"Invalid skill kind: {kind}")
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
 
-    existing_created: str | None = None
-    if meta_file.exists():
-        try:
-            existing_created = json.loads(meta_file.read_text(encoding="utf-8")).get(
-                "created_at"
+    sync_skill_registry(session)
+    existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if existing is not None:
+        if existing.builtin:
+            raise PermissionError(f"Skill '{skill_name}' is built-in and read-only.")
+        if existing.creator_id != current_user.id:
+            raise PermissionError(
+                f"Skill '{skill_name}' is owned by another creator and is read-only."
             )
-        except json.JSONDecodeError:
-            existing_created = None
+        if existing.kind != kind:
+            raise ValueError(
+                f"Skill '{skill_name}' already exists as a {existing.kind} skill."
+            )
 
-    skill_path.write_text(source, encoding="utf-8")
+    base_dir = _user_skills_dir(current_user.username, kind, create=True)
+    legacy_path = _legacy_skill_path(base_dir, skill_name)
+    canonical_path = _canonical_skill_path(base_dir, skill_name)
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.write_text(source, encoding="utf-8")
     if legacy_path.exists():
         legacy_path.unlink()
-    meta = _build_metadata(
-        skill_path,
+
+    discovered = _discover_skill(
+        base_dir=base_dir,
+        skill_path=canonical_path,
         kind=kind,
-        source_type="user",
-        created_at=existing_created,
-        fallback_name=skill_name,
-    )
-    meta_file.write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+        source="user",
+        builtin=False,
+        creator=current_user,
     )
 
-    logger.info("Saved %s skill '%s' for user '%s'", kind, skill_name, username)
-    return meta
+    if existing is None:
+        created_at = discovered.updated_at
+        row = Skill(
+            name=discovered.name,
+            description=discovered.description,
+            kind=kind,
+            source="user",
+            builtin=False,
+            creator_id=current_user.id,
+            location=discovered.location,
+            filename=discovered.filename,
+            md5=discovered.md5,
+            created_at=created_at,
+            updated_at=discovered.updated_at,
+        )
+    else:
+        row = existing
+        row.description = discovered.description
+        row.location = discovered.location
+        row.filename = discovered.filename
+        row.md5 = discovered.md5
+        row.updated_at = discovered.updated_at
+
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    logger.info(
+        "Saved %s skill '%s' for user '%s'",
+        kind,
+        skill_name,
+        current_user.username,
+    )
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        row,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+    )
 
 
-def delete_user_skill(username: str, kind: str, skill_name: str) -> None:
-    """Delete a user skill markdown file and metadata."""
+def delete_user_skill(
+    session: Session,
+    current_user: User,
+    kind: str,
+    skill_name: str,
+) -> None:
+    """Delete one user-owned skill and its persistent metadata row.
+
+    Args:
+        session: Active database session.
+        current_user: Authenticated user who owns the writable namespace.
+        kind: Skill scope, either ``private`` or ``shared``.
+        skill_name: Globally unique skill name to delete.
+
+    Raises:
+        FileNotFoundError: If the skill does not exist.
+        PermissionError: If the skill exists but is not owned by the current user.
+        ValueError: If the name or scope is invalid.
+    """
     _validate_skill_name(skill_name)
-    base = _user_skills_dir(username, kind)
-    canonical_path = _canonical_skill_path(base, skill_name)
-    legacy_path = _legacy_skill_path(base, skill_name)
-    if not canonical_path.exists() and not legacy_path.exists():
-        raise FileNotFoundError(f"Skill '{skill_name}' not found in {kind}.")
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError(f"Invalid skill kind: {kind}")
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before deleting skills.")
+
+    sync_skill_registry(session)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if skill.builtin or skill.creator_id != current_user.id or skill.kind != kind:
+        raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
+
+    skill_dir = Path(skill.location)
+    canonical_path = skill_dir / skill.filename
+    legacy_path = _legacy_skill_path(
+        _user_skills_dir(current_user.username, kind, create=True),
+        skill_name,
+    )
 
     if canonical_path.exists():
-        shutil.rmtree(canonical_path.parent, ignore_errors=True)
+        shutil.rmtree(skill_dir, ignore_errors=True)
     if legacy_path.exists():
         legacy_path.unlink()
-    meta_file = _meta_path(base, skill_name)
-    if meta_file.exists():
-        meta_file.unlink()
 
-    logger.info("Deleted %s skill '%s' for user '%s'", kind, skill_name, username)
+    session.delete(skill)
+    session.commit()
+    logger.info(
+        "Deleted %s skill '%s' for user '%s'",
+        kind,
+        skill_name,
+        current_user.username,
+    )

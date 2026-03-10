@@ -63,7 +63,7 @@ class SandboxService:
         username: str,
         agent_id: int,
         cmd: list[str],
-        skills: list[str] | None = None,
+        skills: list[dict[str, str]] | None = None,
     ) -> SandboxExecResult:
         """Execute one non-interactive command inside an agent sandbox."""
         if skills is None:
@@ -79,7 +79,10 @@ class SandboxService:
         )
 
     def create(
-        self, username: str, agent_id: int, skills: list[str] | None = None
+        self,
+        username: str,
+        agent_id: int,
+        skills: list[dict[str, str]] | None = None,
     ) -> None:
         """Ensure sandbox exists and is configured with current skill mounts."""
         if skills is None:

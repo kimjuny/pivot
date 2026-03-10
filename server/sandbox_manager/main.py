@@ -13,12 +13,15 @@ import threading
 import time
 from contextlib import suppress
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from podman import PodmanClient  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 app = FastAPI(title="Pivot Sandbox Manager")
 logger = logging.getLogger("uvicorn.error")
@@ -224,12 +227,18 @@ def _resolve_workspace_host_root() -> str:
 
 
 def _ensure_agent_workspace_dir(username: str, agent_id: int) -> None:
-    """Create agent workspace path via backend container to ensure bind source exists."""
+    """Create agent workspace paths needed for primary and nested skill mounts.
+
+    Why: sandbox skill directories are mounted under ``/workspace/skills/...``.
+    Some container runtimes do not reliably materialize nested bind targets when the
+    parent directory inside the primary ``/workspace`` bind mount is missing.
+    """
     path_in_backend = _workspace_target(username, agent_id)
+    skills_parent_in_backend = f"{path_in_backend}/skills"
     backend = _backend_container()
     try:
         exec_result = backend.exec_run(
-            ["mkdir", "-p", path_in_backend],
+            ["mkdir", "-p", path_in_backend, skills_parent_in_backend],
             workdir="/",
             tty=False,
             stream=False,
@@ -305,123 +314,91 @@ def _resolve_host_path_from_backend_path(path_in_backend: str) -> str | None:
     return matched_source
 
 
-def _normalize_skill_names(raw_skill_names: list[str] | None) -> list[str]:
-    """Sanitize and deduplicate skill names for mount resolution.
-
-    Args:
-        raw_skill_names: Raw skills list from request payload.
-
-    Returns:
-        Stable-order deduplicated skill names.
-    """
-    if not raw_skill_names:
+def _normalize_skill_mounts(
+    raw_skills: Sequence[SandboxSkillMount | dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    """Sanitize skill mount metadata coming from backend."""
+    if not raw_skills:
         return []
 
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in raw_skill_names:
-        if not isinstance(value, str):
+    normalized: list[dict[str, str]] = []
+    seen_names: set[str] = set()
+    for item in raw_skills:
+        if isinstance(item, SandboxSkillMount):
+            item = item.model_dump()
+        if not isinstance(item, dict):
             continue
-        skill_name = value.strip()
-        if not skill_name or skill_name in seen:
+        raw_name = item.get("name")
+        raw_location = item.get("location")
+        if not isinstance(raw_name, str) or not isinstance(raw_location, str):
+            continue
+
+        skill_name = raw_name.strip()
+        location = raw_location.strip()
+        if not skill_name or skill_name in seen_names:
             continue
         if re.fullmatch(r"[A-Za-z0-9_.-]+", skill_name) is None:
-            logger.warning("sandbox.skills skip invalid skill name: %s", value)
+            logger.warning("sandbox.skills skip invalid skill name: %s", raw_name)
             continue
-        seen.add(skill_name)
-        normalized.append(skill_name)
+        if not location.startswith("/app/server/"):
+            logger.warning(
+                "sandbox.skills skip unsafe location skill=%s location=%s",
+                skill_name,
+                location,
+            )
+            continue
+        host_path = _resolve_host_path_from_backend_path(location)
+        if host_path is None:
+            logger.warning(
+                "sandbox.skills host path unavailable skill=%s location=%s",
+                skill_name,
+                location,
+            )
+            continue
+
+        seen_names.add(skill_name)
+        normalized.append({"name": skill_name, "location": host_path})
     return normalized
 
 
-def _resolve_skill_source_dir(username: str, skill_name: str) -> str | None:
-    """Resolve host path for one allowed skill directory.
-
-    Search order mirrors prompt skill resolution precedence:
-    private -> shared -> builtin.
-    """
-    backend_candidates = (
-        f"/app/server/workspace/{username}/skills/private/{skill_name}",
-        f"/app/server/workspace/{username}/skills/shared/{skill_name}",
-        f"/app/server/app/orchestration/skills/builtin/{skill_name}",
-    )
-    backend = _backend_container()
-    for candidate in backend_candidates:
-        try:
-            exists_result = backend.exec_run(
-                ["test", "-d", candidate],
-                workdir="/",
-                tty=False,
-                stream=False,
-                socket=False,
-            )
-        except Exception:
-            continue
-
-        if isinstance(exists_result, tuple) and len(exists_result) == 2:
-            exists_exit_code = int(exists_result[0])
-        else:
-            exists_exit_code = int(getattr(exists_result, "exit_code", -1))
-        if exists_exit_code != 0:
-            continue
-
-        host_path = _resolve_host_path_from_backend_path(candidate)
-        if host_path is not None:
-            return host_path
-
-    return None
-
-
 def _build_skill_mounts(
-    username: str, skill_names: list[str]
-) -> tuple[dict[str, dict[str, str]], set[str]]:
-    """Build bind-mount map for allowed skills.
-
-    Args:
-        username: Current sandbox user.
-        skill_names: Sanitized skill names allowed for this agent.
-
-    Returns:
-        Tuple of ``(volumes_map, mounted_skill_name_set)``.
-    """
+    skill_mounts: list[dict[str, str]],
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """Build bind mounts and expected source map for allowed skills."""
     volumes: dict[str, dict[str, str]] = {}
-    mounted_skill_names: set[str] = set()
-    for skill_name in skill_names:
-        source_dir = _resolve_skill_source_dir(username, skill_name)
-        if source_dir is None:
-            logger.warning(
-                "sandbox.skills source not found; skip mount username=%s skill=%s",
-                username,
-                skill_name,
-            )
-            continue
+    expected_sources: dict[str, str] = {}
+    for skill in skill_mounts:
+        skill_name = skill["name"]
+        source_dir = skill["location"]
         volumes[source_dir] = {
             "bind": f"/workspace/skills/{skill_name}",
             "mode": "ro",
         }
-        mounted_skill_names.add(skill_name)
-    return volumes, mounted_skill_names
+        expected_sources[skill_name] = source_dir
+    return volumes, expected_sources
 
 
-def _mounted_skill_names(container: Any) -> set[str]:
-    """Read currently mounted skill names from a sandbox container."""
+def _mounted_skill_sources(container: Any) -> dict[str, str]:
+    """Read currently mounted skill source directories from a sandbox container."""
     try:
         mounts = _get_container_mounts(container)
     except HTTPException:
-        return set()
+        return {}
 
-    skill_names: set[str] = set()
+    skill_sources: dict[str, str] = {}
     for mount in mounts:
         destination = _mount_destination(mount)
+        source = _mount_source(mount)
         if not isinstance(destination, str):
             continue
         prefix = "/workspace/skills/"
         if not destination.startswith(prefix):
             continue
         suffix = destination[len(prefix) :]
-        if "/" in suffix or not suffix:
+        if "/" in suffix or not suffix or not isinstance(source, str):
             continue
-        skill_names.add(suffix)
-    return skill_names
+        skill_sources[suffix] = source
+    return skill_sources
 
 
 def _decode_bytes(value: Any) -> str:
@@ -481,7 +458,7 @@ def _container_working_dir(container: Any) -> str:
 
 
 def _should_recreate_container(
-    container: Any, expected_skill_names: set[str]
+    container: Any, expected_skill_sources: dict[str, str]
 ) -> tuple[bool, str]:
     """Decide whether an existing sandbox container must be recreated.
 
@@ -489,7 +466,7 @@ def _should_recreate_container(
     - working dir is not ``/workspace``
     - full project mounts (e.g. ``/app/server`` or ``/app/web``) are present
     - ``/workspace`` mount is missing
-    - mounted ``/workspace/skills/*`` set differs from expected
+    - mounted ``/workspace/skills/*`` sources differ from expected
     """
     workdir = _container_working_dir(container)
     try:
@@ -508,8 +485,8 @@ def _should_recreate_container(
         return True, "missing_workspace_mount"
     if "/app/server" in destinations or "/app/web" in destinations:
         return True, "unsafe_project_mount"
-    mounted_skills = _mounted_skill_names(container)
-    if mounted_skills != expected_skill_names:
+    mounted_skills = _mounted_skill_sources(container)
+    if mounted_skills != expected_skill_sources:
         return True, "skill_mount_mismatch"
     return False, "ok"
 
@@ -525,22 +502,22 @@ def _is_broken_exec_environment_error(message: str) -> bool:
 
 
 def _ensure_sandbox(
-    username: str, agent_id: int, skills: list[str] | None = None
+    username: str,
+    agent_id: int,
+    skills: Sequence[SandboxSkillMount | dict[str, Any]] | None = None,
 ) -> Any:
     """Create or start a reusable sidecar sandbox container."""
     op_started = time.perf_counter()
     settings = get_settings()
     name = _sandbox_name(username, agent_id)
     _ensure_agent_workspace_dir(username, agent_id)
-    normalized_skills = _normalize_skill_names(skills)
-    skill_volumes, expected_skill_names = _build_skill_mounts(
-        username, normalized_skills
-    )
+    normalized_skills = _normalize_skill_mounts(skills)
+    skill_volumes, expected_skill_sources = _build_skill_mounts(normalized_skills)
 
     existing = _find_container(name)
     if existing is not None:
         should_recreate, recreate_reason = _should_recreate_container(
-            existing, expected_skill_names
+            existing, expected_skill_sources
         )
     else:
         should_recreate, recreate_reason = (False, "no_container")
@@ -582,7 +559,10 @@ def _ensure_sandbox(
                             f"start_error={exc}; remove_error={remove_exc}"
                         ),
                     ) from remove_exc
-                return _ensure_sandbox(username, agent_id, normalized_skills)
+                # Reuse the original backend payload so skill locations are still
+                # backend paths (``/app/server/...``). Passing normalized host paths
+                # back through ``_normalize_skill_mounts`` would strip every skill.
+                return _ensure_sandbox(username, agent_id, skills)
             if "already running" not in message:
                 raise HTTPException(
                     status_code=500,
@@ -643,12 +623,19 @@ def _ensure_sandbox(
         ) from exc
 
 
+class SandboxSkillMount(BaseModel):
+    """One skill mount entry sent by backend."""
+
+    name: str = Field(min_length=1)
+    location: str = Field(min_length=1)
+
+
 class SandboxRequest(BaseModel):
     """Request payload for create/destroy operations."""
 
     username: str = Field(min_length=1)
     agent_id: int
-    skills: list[str] = Field(default_factory=list)
+    skills: list[SandboxSkillMount] = Field(default_factory=list)
 
 
 class SandboxExecRequest(SandboxRequest):

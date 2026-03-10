@@ -119,6 +119,7 @@ function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
 /**
  * Parse skill tab metadata/resourceId into a normalized descriptor.
  * Falls back to shared/builtin read-only for legacy tabs without metadata.
+ * Current tabs should always pass explicit readOnly metadata from the API.
  */
 function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
   const rawResourceId = String(tab.resourceId);
@@ -321,7 +322,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             const result =
               descriptor.kind === 'private'
                 ? await getUserSkillSource('private', descriptor.skillName)
-                : descriptor.source === 'user'
+                : !descriptor.readOnly && descriptor.source === 'user'
                   ? await getUserSkillSource('shared', descriptor.skillName)
                   : await getSharedSkillSource(descriptor.skillName);
             setSkillEditors((prev) => ({
@@ -408,8 +409,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
    */
   const handleSkillTabSave = useCallback(async (tab: AgentTab, source: string) => {
     const descriptor = parseSkillTabDescriptor(tab);
-    if (descriptor.readOnly || (descriptor.kind === 'shared' && descriptor.source === 'builtin')) {
-      toast.error('Built-in shared skills are read-only');
+    if (descriptor.readOnly) {
+      toast.error('This skill is read-only');
       return;
     }
 
@@ -1148,7 +1149,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                   ) : tab.type === 'tool' || tab.type === 'function' ? (
                     // Tool Monaco editor
                     <div className="relative h-full">
-                      <div className="h-full pt-12">
+                      <div className="h-full">
                         {(() => {
                           const state = toolEditors[tab.id];
                           const descriptor = parseToolTabDescriptor(tab);
@@ -1197,7 +1198,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                   ) : tab.type === 'skill' ? (
                     // Skill Monaco editor
                     <div className="relative h-full">
-                      <div className="h-full pt-12">
+                      <div className="h-full">
                         {(() => {
                           const state = skillEditors[tab.id];
                           const descriptor = parseSkillTabDescriptor(tab);

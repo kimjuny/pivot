@@ -8,7 +8,7 @@ from app.orchestration.tool import get_current_tool_execution_context
 from app.services.sandbox_service import get_sandbox_service
 
 
-def require_context() -> tuple[str, int, tuple[str, ...]]:
+def require_context() -> tuple[str, int, tuple[dict[str, str], ...]]:
     """Read tool execution context for sandbox tools.
 
     Returns:

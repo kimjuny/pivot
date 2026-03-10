@@ -20,6 +20,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "scene",
     "session",
     "sessionmemory",
+    "skill",
     "subscene",
     "user",
 }
@@ -103,9 +104,11 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_file_schema_compatibility()
 
     from app.api.auth import init_default_user
+    from app.services.skill_service import sync_skill_registry
 
     with Session(engine) as session:
         init_default_user(session)
+        sync_skill_registry(session)
 
 
 def ensure_llm_schema_compatibility() -> None:

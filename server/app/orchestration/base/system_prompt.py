@@ -50,6 +50,7 @@ class SystemPrompt:
 
         return {"role": "system", "content": content}
 
+
 # Global instance accessor
 _system_prompt = SystemPrompt()
 

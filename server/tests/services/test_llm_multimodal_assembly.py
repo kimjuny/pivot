@@ -60,7 +60,9 @@ class LlmMultimodalAssemblyTestCase(unittest.TestCase):
             ],
         }
 
-        with patch("app.llm.openai_completion_llm.requests.post", return_value=response) as mocked_post:
+        with patch(
+            "app.llm.openai_completion_llm.requests.post", return_value=response
+        ) as mocked_post:
             llm.chat(self.messages)
 
         payload = mocked_post.call_args.kwargs["json"]
@@ -72,7 +74,9 @@ class LlmMultimodalAssemblyTestCase(unittest.TestCase):
             "data:image/png;base64,YWJj",
         )
 
-    def test_openai_response_assembles_input_image_and_output_text_history(self) -> None:
+    def test_openai_response_assembles_input_image_and_output_text_history(
+        self,
+    ) -> None:
         """Responses payloads should keep image blocks and tag assistant history correctly."""
         llm = OpenAIResponseLLM(
             endpoint="https://example.com/v1",
@@ -88,7 +92,9 @@ class LlmMultimodalAssemblyTestCase(unittest.TestCase):
             "output": [],
         }
 
-        with patch("app.llm.openai_response_llm.requests.post", return_value=response) as mocked_post:
+        with patch(
+            "app.llm.openai_response_llm.requests.post", return_value=response
+        ) as mocked_post:
             llm.chat(self.messages)
 
         payload = mocked_post.call_args.kwargs["json"]
@@ -112,7 +118,9 @@ class LlmMultimodalAssemblyTestCase(unittest.TestCase):
             stop_reason="end_turn",
             usage=None,
         )
-        mock_client = SimpleNamespace(messages=SimpleNamespace(create=Mock(return_value=response)))
+        mock_client = SimpleNamespace(
+            messages=SimpleNamespace(create=Mock(return_value=response))
+        )
 
         with patch("app.llm.anthropic_llm.Anthropic", return_value=mock_client):
             llm = AnthropicLLM(

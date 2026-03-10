@@ -23,7 +23,7 @@ interface SkillEditorProps {
   onSave?: (value: string) => void;
   /** Whether save operation is in progress. */
   isSaving?: boolean;
-  /** Whether editor is read-only for built-in skills. */
+  /** Whether editor is read-only for visible but non-editable skills. */
   readOnly?: boolean;
 }
 
@@ -84,7 +84,7 @@ function SkillEditor({
       </div>
       <div className="flex items-center justify-between px-3 py-1.5 border-t border-border bg-muted/30 text-xs flex-shrink-0">
         <span className="text-muted-foreground">
-          {readOnly ? 'Built-in shared skill (read-only)' : 'Markdown skill source'}
+          {readOnly ? 'Read-only shared skill' : 'Markdown skill source'}
         </span>
         <Button
           size="sm"

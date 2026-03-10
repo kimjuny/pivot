@@ -27,8 +27,9 @@ export interface Agent {
    */
   tool_ids?: string | null;
   /**
-   * JSON-encoded list of allowed skill names, e.g. '["research","writer"]'.
-   * null means no restriction (all skills visible); '[]' means no skills.
+   * JSON-encoded list of allowed globally unique skill names, for example
+   * '["research","writer"]'. null means no restriction (all visible skills);
+   * '[]' means no skills.
    */
   skill_ids?: string | null;
   /** UTC timestamp when agent was created */

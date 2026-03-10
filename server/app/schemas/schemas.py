@@ -67,7 +67,7 @@ class AgentUpdate(AppBaseModel):
     max_iteration: int | None = None
     # JSON-encoded list of tool names, or None to leave unchanged
     tool_ids: str | None = None
-    # JSON-encoded list of skill names, or None to leave unchanged
+    # JSON-encoded list of globally unique skill names, or None to leave unchanged
     skill_ids: str | None = None
 
 

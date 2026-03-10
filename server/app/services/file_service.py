@@ -717,9 +717,7 @@ class FileService:
             1 for char in combined_text if char.isprintable() and not char.isspace()
         )
         visible_chars = sum(1 for char in combined_text if not char.isspace())
-        printable_ratio = (
-            printable_chars / visible_chars if visible_chars > 0 else 0.0
-        )
+        printable_ratio = printable_chars / visible_chars if visible_chars > 0 else 0.0
 
         return PdfTextLayerProbe(
             page_count=page_count,
@@ -828,9 +826,7 @@ class FileService:
             f"MIME type: {file_asset.mime_type}",
         ]
         if file_asset.width > 0 and file_asset.height > 0:
-            metadata_lines.append(
-                f"Dimensions: {file_asset.width}x{file_asset.height}"
-            )
+            metadata_lines.append(f"Dimensions: {file_asset.width}x{file_asset.height}")
 
         return [
             {

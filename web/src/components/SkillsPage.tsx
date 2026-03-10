@@ -49,6 +49,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { formatTimestamp } from '@/utils/timestamp';
 import DraggableDialog from './DraggableDialog';
 import SkillEditor from './SkillEditor';
 
@@ -186,7 +187,7 @@ function SkillsPage() {
         return;
       }
 
-      if (row.source === 'user') {
+      if (!row.skill.read_only) {
         const result = await getUserSkillSource('shared', row.skill.name);
         setEditingKind('shared');
         setEditingName(row.skill.name);
@@ -209,7 +210,7 @@ function SkillsPage() {
 
   const handleSave = useCallback(async (source: string) => {
     if (editorReadOnly) {
-      toast.error('Built-in shared skills are read-only');
+      toast.error('This skill is read-only');
       return;
     }
 
@@ -232,8 +233,8 @@ function SkillsPage() {
   }, [editingKind, editingName, editorReadOnly, loadSkills]);
 
   const handleDelete = useCallback(async (row: SkillRow) => {
-    if (row.kind === 'shared' && row.source === 'builtin') {
-      toast.error('Built-in shared skills cannot be deleted');
+    if (row.skill.read_only) {
+      toast.error('This skill is read-only');
       return;
     }
 
@@ -256,7 +257,7 @@ function SkillsPage() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Skills</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Built-in shared skills are read-only. You can create private/shared markdown skills.
+            Shared skills are visible to everyone, but only the creator can edit them.
           </p>
         </div>
         <div
@@ -393,17 +394,24 @@ function SkillsPage() {
                         <Lock className="w-2.5 h-2.5" />
                         Shared / Builtin
                       </Badge>
+                    ) : row.skill.read_only ? (
+                      <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
+                        <Globe2 className="w-2.5 h-2.5" />
+                        {`Shared / ${row.skill.creator ?? 'Unknown'}`}
+                      </Badge>
                     ) : (
                       <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
                         <Globe2 className="w-2.5 h-2.5" />
-                        Shared / User
+                        Shared / You
                       </Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
                     {row.skill.description || '—'}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{row.skill.updated_at}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {formatTimestamp(row.skill.updated_at)}
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
                       <Button
@@ -415,7 +423,7 @@ function SkillsPage() {
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
-                      {(row.kind === 'private' || row.source === 'user') && (
+                      {!row.skill.read_only && (
                         <Button
                           variant="ghost"
                           size="icon"

@@ -1015,9 +1015,13 @@ export interface ToolDiagnostic {
 export interface SharedSkill {
   name: string;
   description: string;
+  location: string;
   filename: string;
   kind: 'shared';
   source: 'builtin' | 'user';
+  creator: string | null;
+  builtin: boolean;
+  read_only: boolean;
   md5: string;
   created_at: string;
   updated_at: string;
@@ -1029,9 +1033,13 @@ export interface SharedSkill {
 export interface UserSkill {
   name: string;
   description: string;
+  location: string;
   filename: string;
   kind: 'private' | 'shared';
   source: 'user';
+  creator: string | null;
+  builtin: boolean;
+  read_only: boolean;
   md5: string;
   created_at: string;
   updated_at: string;
@@ -1047,7 +1055,7 @@ export interface SkillSourcePayload {
 }
 
 /**
- * Fetch all shared skills (builtin + user shared).
+ * Fetch all shared skills visible to the current user.
  */
 export const getSharedSkills = async (): Promise<SharedSkill[]> => {
   return apiRequest('/skills/shared') as Promise<SharedSkill[]>;
@@ -1061,7 +1069,7 @@ export const getPrivateSkills = async (): Promise<UserSkill[]> => {
 };
 
 /**
- * Fetch a user-owned skill source from private/shared namespace.
+ * Fetch a creator-owned skill source from private/shared namespace.
  */
 export const getUserSkillSource = async (
   kind: 'private' | 'shared',
@@ -1072,7 +1080,7 @@ export const getUserSkillSource = async (
 };
 
 /**
- * Fetch shared skill source (user-shared preferred over builtin).
+ * Fetch one shared skill source visible to the current user.
  */
 export const getSharedSkillSource = async (skillName: string): Promise<SkillSourcePayload> => {
   const encodedSkillName = encodeURIComponent(skillName);
