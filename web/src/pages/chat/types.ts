@@ -24,7 +24,7 @@ export type ReactStreamEventType =
   | "observe"
   | "thought"
   | "abstract"
-  | "progress_update"
+  | "summary"
   | "action"
   | "tool_call"
   | "plan_update"
@@ -83,7 +83,7 @@ export interface RecursionRecord {
   observe?: string;
   thought?: string;
   abstract?: string;
-  progressUpdate?: string;
+  summary?: string;
   action?: string;
   events: ReactStreamEvent[];
   status: "running" | "completed" | "error";

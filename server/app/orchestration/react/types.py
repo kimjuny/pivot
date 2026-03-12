@@ -100,7 +100,7 @@ class ParsedReactDecision:
         observe: Assistant observation text.
         thought: Assistant reasoning text.
         abstract: Brief summary of the recursion.
-        progress_update: Optional user-facing progress update.
+        summary: Optional user-facing progress summary.
         action: Parsed action definition.
         session_memory_delta: Optional session-memory delta from ANSWER.
         session_subject: Optional session subject update from ANSWER.
@@ -112,7 +112,7 @@ class ParsedReactDecision:
     observe: str
     thought: str
     abstract: str
-    progress_update: str
+    summary: str
     action: ParsedAction
     session_memory_delta: dict[str, Any]
     session_subject: dict[str, Any]

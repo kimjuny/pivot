@@ -415,6 +415,204 @@ export const updateAgentSkillIds = async (
   }) as Promise<Agent>;
 };
 
+// ---------------------------------------------------------------------------
+// Channels API
+// ---------------------------------------------------------------------------
+
+/**
+ * One schema-driven field used by the channel binding form.
+ */
+export interface ChannelConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'secret' | 'textarea' | 'boolean';
+  required: boolean;
+  placeholder?: string | null;
+  description?: string | null;
+}
+
+/**
+ * Declarative manifest for one built-in channel provider.
+ */
+export interface ChannelManifest {
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  docs_url: string;
+  transport_mode: 'webhook' | 'websocket' | 'polling';
+  visibility: string;
+  status: string;
+  capabilities: string[];
+  auth_schema: ChannelConfigField[];
+  config_schema: ChannelConfigField[];
+  setup_steps: string[];
+}
+
+/**
+ * Endpoint details shown during channel setup.
+ */
+export interface ChannelEndpointInfo {
+  label: string;
+  method: string;
+  url: string;
+  description: string;
+}
+
+/**
+ * Channel catalog row returned by the backend.
+ */
+export interface ChannelCatalogItem {
+  manifest: ChannelManifest;
+}
+
+/**
+ * Configured channel binding returned for an agent.
+ */
+export interface ChannelBinding {
+  id: number;
+  agent_id: number;
+  channel_key: string;
+  name: string;
+  enabled: boolean;
+  auth_config: Record<string, string>;
+  runtime_config: Record<string, unknown>;
+  manifest: ChannelManifest;
+  endpoint_infos: ChannelEndpointInfo[];
+  last_health_status: string | null;
+  last_health_message: string | null;
+  last_health_check_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Public status payload for a channel link token.
+ */
+export interface ChannelLinkStatus {
+  token: string;
+  status: string;
+  provider_name: string;
+  binding_name: string;
+  agent_id: number;
+  external_user_id: string;
+  external_conversation_id: string | null;
+  expires_at: string;
+  used_at: string | null;
+}
+
+/**
+ * Fetch the built-in channel catalog.
+ */
+export const getChannels = async (): Promise<ChannelCatalogItem[]> => {
+  return apiRequest('/channels') as Promise<ChannelCatalogItem[]>;
+};
+
+/**
+ * Fetch a single channel manifest by key.
+ */
+export const getChannel = async (channelKey: string): Promise<ChannelCatalogItem> => {
+  return apiRequest(`/channels/${encodeURIComponent(channelKey)}`) as Promise<ChannelCatalogItem>;
+};
+
+/**
+ * Fetch all channel bindings configured for one agent.
+ */
+export const getAgentChannels = async (agentId: number): Promise<ChannelBinding[]> => {
+  return apiRequest(`/agents/${agentId}/channels`) as Promise<ChannelBinding[]>;
+};
+
+/**
+ * Create a new channel binding for an agent.
+ */
+export const createAgentChannel = async (
+  agentId: number,
+  payload: {
+    channel_key: string;
+    name: string;
+    enabled?: boolean;
+    auth_config: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+  }
+): Promise<ChannelBinding> => {
+  return apiRequest(`/agents/${agentId}/channels`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<ChannelBinding>;
+};
+
+/**
+ * Update one configured channel binding.
+ */
+export const updateAgentChannel = async (
+  bindingId: number,
+  payload: {
+    name?: string;
+    enabled?: boolean;
+    auth_config?: Record<string, unknown>;
+    runtime_config?: Record<string, unknown>;
+  }
+): Promise<ChannelBinding> => {
+  return apiRequest(`/agent-channels/${bindingId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }) as Promise<ChannelBinding>;
+};
+
+/**
+ * Delete one configured channel binding.
+ */
+export const deleteAgentChannel = async (bindingId: number): Promise<void> => {
+  await apiRequest(`/agent-channels/${bindingId}`, {
+    method: 'DELETE',
+  });
+};
+
+/**
+ * Run one binding health check.
+ */
+export const testAgentChannel = async (
+  bindingId: number
+): Promise<{ result: { ok: boolean; status: string; message: string; endpoint_infos: ChannelEndpointInfo[] } }> => {
+  return apiRequest(`/agent-channels/${bindingId}/test`, {
+    method: 'POST',
+  }) as Promise<{ result: { ok: boolean; status: string; message: string; endpoint_infos: ChannelEndpointInfo[] } }>;
+};
+
+/**
+ * Manually poll one polling-based channel binding once.
+ */
+export const pollAgentChannel = async (
+  bindingId: number
+): Promise<{ fetched: number; next_offset: number | null; replies: Array<{ conversation_id: string; external_user_id: string | null; reply: string }> }> => {
+  return apiRequest(`/agent-channels/${bindingId}/poll`, {
+    method: 'POST',
+  }) as Promise<{ fetched: number; next_offset: number | null; replies: Array<{ conversation_id: string; external_user_id: string | null; reply: string }> }>;
+};
+
+/**
+ * Fetch the public status for a channel linking token.
+ */
+export const getChannelLinkStatus = async (
+  token: string
+): Promise<ChannelLinkStatus> => {
+  return apiRequest(`/channel-link/${encodeURIComponent(token)}`, {
+    skipAuth: true,
+    skipTokenCheck: true,
+  }) as Promise<ChannelLinkStatus>;
+};
+
+/**
+ * Complete a channel link token using the current authenticated user.
+ */
+export const completeChannelLink = async (
+  token: string
+): Promise<{ status: string; message: string; pivot_user_id: number; workspace_owner: string; linked_at: string }> => {
+  return apiRequest(`/channel-link/${encodeURIComponent(token)}/complete`, {
+    method: 'POST',
+  }) as Promise<{ status: string; message: string; pivot_user_id: number; workspace_owner: string; linked_at: string }>;
+};
+
 /**
  * Get all available LLM models.
  * 
@@ -713,7 +911,7 @@ export interface RecursionDetail {
   thinking: string | null;
   thought: string | null;
   abstract: string | null;
-  progress_update: string | null;
+  summary: string | null;
   action_type: string | null;
   action_output: string | null;
   tool_call_results: string | null;

@@ -290,7 +290,7 @@ async def get_full_session_history(
                 thinking=r["thinking"],
                 thought=r["thought"],
                 abstract=r["abstract"],
-                progress_update=r["progress_update"],
+                summary=r["summary"],
                 action_type=r["action_type"],
                 action_output=r["action_output"],
                 tool_call_results=r["tool_call_results"],

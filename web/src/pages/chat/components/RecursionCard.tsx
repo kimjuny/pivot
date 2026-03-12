@@ -172,18 +172,18 @@ export function RecursionCard({
             </div>
           )}
 
-          {recursion.progressUpdate && (
+          {recursion.summary && (
             <div className="rounded border border-border bg-background/50 p-2">
               <div className="mb-1 flex items-center gap-1.5">
                 <div className="flex h-3.5 w-3.5 items-center justify-center">
                   <div className="h-4 w-1 rounded-full bg-amber-500" />
                 </div>
                 <span className="text-xs font-semibold text-foreground">
-                  PROGRESS
+                  SUMMARY
                 </span>
               </div>
               <p className="pl-5 text-xs leading-relaxed text-muted-foreground">
-                {recursion.progressUpdate}
+                {recursion.summary}
               </p>
             </div>
           )}

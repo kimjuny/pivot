@@ -51,7 +51,7 @@ class CRUDBase(Generic[ModelType]):
             A list of model instances.
         """
         statement = select(self.model).offset(skip).limit(limit)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def create(self, session: Session, **kwargs: Any) -> ModelType:
         """Create a new record in the database.
@@ -127,7 +127,7 @@ class ConnectionCRUD(CRUDBase[Connection]):
             A list of Connection instances originating from the subscene.
         """
         statement = select(Connection).where(Connection.from_subscene == from_subscene)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def get_by_from_subscene_id(
         self, from_subscene_id: int, session: Session
@@ -144,7 +144,7 @@ class ConnectionCRUD(CRUDBase[Connection]):
         statement = select(Connection).where(
             Connection.from_subscene_id == from_subscene_id
         )
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
 
 connection = ConnectionCRUD(Connection)

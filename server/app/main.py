@@ -18,6 +18,7 @@ sys.path.append(str(Path(server_dir).parent))
 # Import server modules (noqa: E402 - must be after sys.path setup)
 from app.api.agents import router as agents_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
+from app.api.channels import router as channels_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
@@ -26,6 +27,7 @@ from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
+from app.channels.runtime import channel_runtime_manager  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
     get_engine,
@@ -89,6 +91,7 @@ app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
+app.include_router(channels_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
@@ -157,6 +160,7 @@ async def startup_event():
         logger.error(f"Failed to initialize tool system: {e}")
 
     app.state.file_prune_task = create_task(_prune_unused_files_loop())
+    await channel_runtime_manager.start()
 
     logger.info("=" * 50)
     logger.info("Application startup complete")
@@ -176,6 +180,7 @@ async def shutdown_event():
     prune_task: Task[None] | None = getattr(app.state, "file_prune_task", None)
     if prune_task is not None:
         prune_task.cancel()
+    await channel_runtime_manager.stop()
 
 
 # Global exception handler for better error logging

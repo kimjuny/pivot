@@ -7,11 +7,13 @@ This module provides a centralized logging configuration with:
 
 import logging
 import sys
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 # Log file path: server/logs/app.log
 LOG_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
 LOG_FILE = LOG_DIR / "app.log"
+LOG_FILE_BACKUP_COUNT = 30
 
 # Log format (used by both handlers)
 LOG_FORMAT = (
@@ -50,6 +52,8 @@ core_logger = logging.getLogger("core")
 core_logger.setLevel(logging.DEBUG)
 core_logger.propagate = False
 
+_HANDLERS: list[logging.Handler] | None = None
+
 
 def _ensure_log_dir() -> None:
     """Ensure the log directory exists."""
@@ -63,29 +67,32 @@ def _create_console_handler() -> logging.Handler:
         Handler: A configured console handler for terminal output with colors.
     """
     handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
+    handler.setLevel(logging.INFO)
     # Use colored formatter for terminal
     handler.setFormatter(ColoredFormatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
     return handler
 
 
-def _create_file_handler() -> logging.FileHandler | None:
-    """Create a file handler with plain text output (no ANSI codes).
+def _create_file_handler() -> TimedRotatingFileHandler | None:
+    """Create a daily rotating file handler with plain text output.
 
     Returns:
-        FileHandler: A configured file handler for log file output.
+        TimedRotatingFileHandler: A configured rotating file handler for log output.
         None: If the log file cannot be opened due to permission issues.
     """
     try:
         _ensure_log_dir()
 
-        handler = logging.FileHandler(
+        handler = TimedRotatingFileHandler(
             filename=LOG_FILE,
-            mode="a",
+            when="midnight",
+            interval=1,
+            backupCount=LOG_FILE_BACKUP_COUNT,
             encoding="utf-8",
+            delay=True,
         )
+        handler.suffix = "%Y-%m-%d"
         handler.setLevel(logging.DEBUG)
-        # Use standard formatter for file (no colors)
         handler.setFormatter(logging.Formatter(fmt=LOG_FORMAT, datefmt=DATE_FORMAT))
         return handler
     except OSError as exc:
@@ -105,16 +112,28 @@ def _get_handlers() -> list[logging.Handler]:
     Returns:
         List of configured logging handlers.
     """
-    handlers: list[logging.Handler] = [_create_console_handler()]
-    file_handler = _create_file_handler()
-    if file_handler is not None:
-        handlers.append(file_handler)
-    return handlers
+    global _HANDLERS
+    if _HANDLERS is None:
+        handlers: list[logging.Handler] = [_create_console_handler()]
+        file_handler = _create_file_handler()
+        if file_handler is not None:
+            handlers.append(file_handler)
+        _HANDLERS = handlers
+    return list(_HANDLERS)
 
 
-# Add both handlers to the core logger
-for handler in _get_handlers():
-    core_logger.addHandler(handler)
+def _attach_handlers(logger: logging.Logger) -> None:
+    """Attach the shared logging handlers to the given logger once.
+
+    Args:
+        logger: Logger that should emit to the shared console/file handlers.
+    """
+    for handler in _get_handlers():
+        if handler not in logger.handlers:
+            logger.addHandler(handler)
+
+
+_attach_handlers(core_logger)
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -134,11 +153,7 @@ def get_logger(name: str | None = None) -> logging.Logger:
         logger.setLevel(logging.DEBUG)
         logger.propagate = False
 
-        # Add both handlers to child logger if it doesn't have any
-        if not logger.handlers:
-            for h in _get_handlers():
-                logger.addHandler(h)
-
+        _attach_handlers(logger)
         return logger
     return core_logger
 
@@ -153,16 +168,10 @@ def setup_logging() -> None:
     """
     _ensure_log_dir()
 
-    # Configure root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-
-    # Remove any existing handlers
+    root_logger.setLevel(logging.DEBUG)
     root_logger.handlers.clear()
-
-    # Add both handlers
-    for h in _get_handlers():
-        root_logger.addHandler(h)
+    _attach_handlers(root_logger)
 
     # Suppress noisy third-party loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
@@ -172,6 +181,6 @@ def setup_logging() -> None:
 
 # For backward compatibility: set up basic logging with both handlers
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     handlers=_get_handlers(),
 )

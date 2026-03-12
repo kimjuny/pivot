@@ -581,12 +581,12 @@ function ChatContainer({
                   abstract: event.delta ?? "",
                   tokens: event.tokens ?? existingRecursion.tokens,
                 };
-              } else if (event.type === "progress_update") {
+              } else if (event.type === "summary") {
                 currentRecursion = {
                   ...existingRecursion,
                   trace_id: event.trace_id || existingRecursion.trace_id,
                   events: updatedEvents,
-                  progressUpdate: event.delta ?? "",
+                  summary: event.delta ?? "",
                   tokens: event.tokens ?? existingRecursion.tokens,
                 };
               } else if (event.type === "action") {

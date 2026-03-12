@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
     Bot,
     ChevronDown,
     Layers,
     Wrench,
     Zap,
+    Radio,
     Plus,
     X,
     MessageSquare,
@@ -41,6 +42,7 @@ import { Button } from '@/components/ui/button';
 import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
+import ChannelBindingDialog from './ChannelBindingDialog';
 import type { Agent, Scene } from '../types';
 import {
     updateAgent,
@@ -48,10 +50,15 @@ import {
     getPrivateTools,
     getSharedSkills,
     getPrivateSkills,
+    getChannels,
+    getAgentChannels,
+    deleteAgentChannel,
     type SharedTool,
     type PrivateTool,
     type SharedSkill,
     type UserSkill,
+    type ChannelBinding,
+    type ChannelCatalogItem,
 } from '../utils/api';
 import { toast } from 'sonner';
 import { useAgentTabStore } from '../store/agentTabStore';
@@ -73,6 +80,28 @@ interface SidebarSkill {
     source: 'builtin' | 'user';
     creator: string | null;
     readOnly: boolean;
+}
+
+/** Unified channel binding row for sidebar display. */
+interface SidebarChannel {
+    id: number;
+    name: string;
+    channelKey: string;
+    providerName: string;
+    enabled: boolean;
+    transportMode: 'webhook' | 'websocket' | 'polling';
+    lastHealthStatus: string | null;
+}
+
+/**
+ * Render a compact status label for channel health.
+ * Why: users need to distinguish "configured but untested" from "ready" at a glance.
+ */
+function formatChannelStatus(status: string | null): string {
+    if (!status) {
+        return 'untested';
+    }
+    return status;
 }
 
 /**
@@ -177,19 +206,26 @@ function AgentDetailSidebar({
     const [isScenesOpen, setIsScenesOpen] = useState(true);
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
+    const [isChannelsOpen, setIsChannelsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
+    const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
+    const [editingChannel, setEditingChannel] = useState<ChannelBinding | null>(null);
     const [tools, setTools] = useState<SidebarTool[]>([]);
     const [skills, setSkills] = useState<SidebarSkill[]>([]);
+    const [channels, setChannels] = useState<SidebarChannel[]>([]);
+    const [channelCatalog, setChannelCatalog] = useState<ChannelCatalogItem[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const [skillsLoading, setSkillsLoading] = useState(false);
+    const [channelsLoading, setChannelsLoading] = useState(false);
     // Local copy of the agent's tool_ids so it updates without a page reload
     const [localToolIds, setLocalToolIds] = useState<string | null | undefined>(agent?.tool_ids);
     // Local copy of the agent's skill_ids so it updates without a page reload
     const [localSkillIds, setLocalSkillIds] = useState<string | null | undefined>(agent?.skill_ids);
     const hasFetchedToolsRef = useRef(false);
     const hasFetchedSkillsRef = useRef(false);
+    const hasFetchedChannelsCatalogRef = useRef(false);
     const { openTab, activeTabId } = useAgentTabStore();
 
     // Sync localToolIds when the agent prop changes
@@ -337,6 +373,65 @@ function AgentDetailSidebar({
         void fetchSkills();
     }, []);
 
+    /**
+     * Load the built-in channel catalog once because the binding dialog reuses it
+     * for schema-driven provider forms.
+     */
+    useEffect(() => {
+        if (hasFetchedChannelsCatalogRef.current) return;
+
+        const fetchChannelCatalog = async () => {
+            hasFetchedChannelsCatalogRef.current = true;
+            try {
+                const catalog = await getChannels();
+                setChannelCatalog(catalog);
+            } catch (err) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                console.error('Failed to fetch channel catalog:', error);
+                toast.error('Failed to load channels');
+            }
+        };
+
+        void fetchChannelCatalog();
+    }, []);
+
+    /**
+     * Channel bindings are agent-specific, so reload them whenever the current
+     * agent changes or after any binding mutation.
+     */
+    const loadChannels = useCallback(async () => {
+        if (!agent?.id) {
+            setChannels([]);
+            return;
+        }
+
+        setChannelsLoading(true);
+        try {
+            const bindings = await getAgentChannels(agent.id);
+            setChannels(
+                bindings.map((binding) => ({
+                    id: binding.id,
+                    name: binding.name,
+                    channelKey: binding.channel_key,
+                    providerName: binding.manifest.name,
+                    enabled: binding.enabled,
+                    transportMode: binding.manifest.transport_mode,
+                    lastHealthStatus: binding.last_health_status,
+                }))
+            );
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch channel bindings:', error);
+            toast.error('Failed to load agent channels');
+        } finally {
+            setChannelsLoading(false);
+        }
+    }, [agent?.id]);
+
+    useEffect(() => {
+        void loadChannels();
+    }, [loadChannels]);
+
     const handleEditAgent = async (data: AgentFormData) => {
         if (!agent) return;
 
@@ -357,7 +452,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills') => {
+    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'channels') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -366,12 +461,14 @@ function AgentDetailSidebar({
                 setIsScenesOpen(section === 'scenes');
                 setIsToolsOpen(section === 'tools');
                 setIsSkillsOpen(section === 'skills');
+                setIsChannelsOpen(section === 'channels');
             }, 100);
         } else {
             // In expanded mode, toggle section immediately
             setIsScenesOpen(section === 'scenes');
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
+            setIsChannelsOpen(section === 'channels');
         }
     };
 
@@ -423,6 +520,46 @@ function AgentDetailSidebar({
                 readOnly: skill.readOnly,
             },
         });
+    };
+
+    /**
+     * Open the channel binding dialog in create mode.
+     */
+    const handleAddChannel = () => {
+        setEditingChannel(null);
+        setIsChannelDialogOpen(true);
+    };
+
+    /**
+     * Open the channel binding dialog with the latest binding payload.
+     * Why: the sidebar keeps a compact projection, so we refetch the richer row.
+     */
+    const handleEditChannel = async (bindingId: number) => {
+        if (!agent?.id) {
+            return;
+        }
+        try {
+            const bindings = await getAgentChannels(agent.id);
+            const selectedBinding = bindings.find((binding) => binding.id === bindingId) ?? null;
+            setEditingChannel(selectedBinding);
+            setIsChannelDialogOpen(true);
+        } catch {
+            toast.error('Failed to load channel binding');
+        }
+    };
+
+    /**
+     * Delete one channel binding from the current agent.
+     */
+    const handleDeleteChannel = async (bindingId: number) => {
+        try {
+            await deleteAgentChannel(bindingId);
+            toast.success('Channel binding removed');
+            await loadChannels();
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            toast.error(error.message);
+        }
     };
 
     return (
@@ -848,6 +985,114 @@ function AgentDetailSidebar({
                             </CollapsibleContent>
                         </SidebarGroup>
                     </Collapsible>
+
+                    {/* Channels Section */}
+                    <Collapsible
+                        open={isChannelsOpen}
+                        onOpenChange={setIsChannelsOpen}
+                        className="group/collapsible"
+                    >
+                        <SidebarGroup className="py-0">
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('channels')}
+                                        tooltip="Channels"
+                                        isActive={isChannelsOpen}
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Radio className="size-4" />
+                                        <span>Channels</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('channels')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
+                                    <Radio className="size-4" />
+                                    <span className="flex-1 text-left">Channels</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+                                        {channelsLoading ? '…' : channels.length}
+                                    </span>
+                                    {agent?.id && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(e) => { e.stopPropagation(); handleAddChannel(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddChannel(); } }}
+                                                    className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                    aria-label="Add channel"
+                                                >
+                                                    <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right">Add channel</TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                </CollapsibleTrigger>
+                            </SidebarGroupLabel>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
+                                <SidebarGroupContent>
+                                    {channelsLoading ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            Loading channels…
+                                        </div>
+                                    ) : channels.length === 0 ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            No channels configured for this agent
+                                        </div>
+                                    ) : (
+                                        <SidebarMenu>
+                                            {channels.map((channel) => (
+                                                <SidebarMenuItem key={channel.id} className="group/item">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <SidebarMenuButton
+                                                                size="sm"
+                                                                onClick={() => void handleEditChannel(channel.id)}
+                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                            >
+                                                                <span className="w-4 shrink-0" />
+                                                                <span className="truncate flex-1">{channel.name}</span>
+                                                                <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                    {channel.enabled ? 'on' : 'off'}
+                                                                </span>
+                                                            </SidebarMenuButton>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-xs">
+                                                            <div className="space-y-1">
+                                                                <p className="font-semibold">{channel.providerName}</p>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {channel.transportMode} · {formatChannelStatus(channel.lastHealthStatus)}
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <SidebarMenuAction
+                                                        showOnHover
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void handleDeleteChannel(channel.id);
+                                                        }}
+                                                        className="hover:bg-destructive/10 hover:text-destructive"
+                                                    >
+                                                        <X className="size-3.5" />
+                                                        <span className="sr-only">Delete channel</span>
+                                                    </SidebarMenuAction>
+                                                </SidebarMenuItem>
+                                            ))}
+                                        </SidebarMenu>
+                                    )}
+                                </SidebarGroupContent>
+                            </CollapsibleContent>
+                        </SidebarGroup>
+                    </Collapsible>
                 </SidebarContent>
 
                 <SidebarSeparator />
@@ -925,6 +1170,20 @@ function AgentDetailSidebar({
                         if (onAgentUpdate && agent) {
                             onAgentUpdate({ ...agent, skill_ids: newSkillIds });
                         }
+                    }}
+                />
+            )}
+
+            {/* Channel Binding Dialog */}
+            {agent?.id && (
+                <ChannelBindingDialog
+                    open={isChannelDialogOpen}
+                    onOpenChange={setIsChannelDialogOpen}
+                    agentId={agent.id}
+                    catalog={channelCatalog}
+                    initialBinding={editingChannel}
+                    onSaved={async () => {
+                        await loadChannels();
                     }}
                 />
             )}

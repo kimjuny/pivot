@@ -48,7 +48,7 @@ class ReactStreamEventType(str, Enum):
     OBSERVE = "observe"
     THOUGHT = "thought"
     ABSTRACT = "abstract"
-    PROGRESS_UPDATE = "progress_update"
+    SUMMARY = "summary"
     ACTION = "action"
     TOOL_CALL = "tool_call"
     SKILL_RESOLUTION_START = "skill_resolution_start"
@@ -116,10 +116,10 @@ class ReactRecursionResponse(AppBaseModel):
     thinking: str | None
     thought: str | None
     abstract: str | None
+    summary: str | None
     action_type: str | None
     action_output: str | None
     tool_call_results: str | None
-    progress_update: str | None
     status: str
     error_log: str | None
     created_at: datetime

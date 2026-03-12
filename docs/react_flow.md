@@ -121,7 +121,13 @@ content = {
             "general_goal": "该步骤的整体目标",
             "specific_description": "详细的说明，例如预计要用什么tools什么样的参数",
             "completion_criteria": "该步骤完成的验收标准或标志性事件",
-            "status": "pending"
+            "status": "done",
+            "recursion_history": [
+                {
+                    "iteration": 3,
+                    "summary": "向用户对进度的更新说明...",
+                }
+            ]
         }
     ],
     "action_result": [ // 只有当上一轮是action_type = CALL_TOOL的时候，这里就应当返回出来

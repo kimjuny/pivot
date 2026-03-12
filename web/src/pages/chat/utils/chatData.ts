@@ -249,7 +249,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         observe: recursion.observe || undefined,
         thought: recursion.thought || undefined,
         abstract: recursion.abstract || undefined,
-        progressUpdate: recursion.progress_update || undefined,
+        summary: recursion.summary || undefined,
         action: recursion.action_type || undefined,
         events,
         status:

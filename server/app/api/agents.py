@@ -316,7 +316,7 @@ async def get_agent(
                     objective=subscene.objective,
                     scene_id=subscene.scene_id,
                     connections=[
-                        ConnectionResponse.from_orm(conn) for conn in connections
+                        ConnectionResponse.model_validate(conn) for conn in connections
                     ],
                     created_at=subscene.created_at,
                     updated_at=subscene.updated_at,

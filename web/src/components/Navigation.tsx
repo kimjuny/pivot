@@ -203,6 +203,14 @@ function Navigation() {
           <Button
             variant="ghost"
             size="sm"
+            onClick={() => navigate('/channels')}
+            aria-label="Channels"
+          >
+            Channels
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => navigate('/tools')}
             aria-label="Tools"
           >

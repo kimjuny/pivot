@@ -42,7 +42,7 @@ class LLMCRUD:
             A list of LLM instances.
         """
         statement = select(self.model).offset(skip).limit(limit)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def get_by_name(self, name: str, session: Session) -> LLM | None:
         """Retrieve an LLM by its unique name.

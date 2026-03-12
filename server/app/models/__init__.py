@@ -1,4 +1,11 @@
 from app.models.agent import Agent, Connection, Scene, Subscene
+from app.models.channel import (
+    AgentChannelBinding,
+    ChannelEventLog,
+    ChannelLinkToken,
+    ChannelSession,
+    ExternalIdentityBinding,
+)
 from app.models.file import FileAsset
 from app.models.llm import LLM
 from app.models.react import (
@@ -14,7 +21,12 @@ from app.models.user import User, UserLogin, UserResponse
 __all__ = [
     "LLM",
     "Agent",
+    "AgentChannelBinding",
+    "ChannelEventLog",
+    "ChannelLinkToken",
+    "ChannelSession",
     "Connection",
+    "ExternalIdentityBinding",
     "FileAsset",
     "ReactPlanStep",
     "ReactRecursion",

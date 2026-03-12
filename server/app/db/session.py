@@ -10,7 +10,12 @@ from sqlmodel import Session, SQLModel
 
 _REQUIRED_TABLES: Final[set[str]] = {
     "agent",
+    "agentchannelbinding",
+    "channeleventlog",
+    "channellinktoken",
+    "channelsession",
     "connection",
+    "externalidentitybinding",
     "fileasset",
     "llm",
     "reactplanstep",

@@ -262,7 +262,9 @@ async def get_scene_graph(
                 mandatory=subscene.mandatory,
                 objective=subscene.objective,
                 scene_id=subscene.scene_id,
-                connections=[ConnectionResponse.from_orm(conn) for conn in connections],
+                connections=[
+                    ConnectionResponse.model_validate(conn) for conn in connections
+                ],
                 created_at=subscene.created_at,
                 updated_at=subscene.updated_at,
             )
@@ -457,7 +459,9 @@ async def update_scene_graph(
                 mandatory=subscene.mandatory,
                 objective=subscene.objective,
                 scene_id=subscene.scene_id,
-                connections=[ConnectionResponse.from_orm(conn) for conn in connections],
+                connections=[
+                    ConnectionResponse.model_validate(conn) for conn in connections
+                ],
                 created_at=subscene.created_at,
                 updated_at=subscene.updated_at,
             )

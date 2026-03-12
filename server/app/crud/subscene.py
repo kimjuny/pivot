@@ -51,7 +51,7 @@ class CRUDBase(Generic[ModelType]):
             A list of model instances.
         """
         statement = select(self.model).offset(skip).limit(limit)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def create(self, session: Session, **kwargs: Any) -> ModelType:
         """Create a new record in the database.
@@ -129,7 +129,7 @@ class SubsceneCRUD(CRUDBase[Subscene]):
         if scene_id is None:
             return []
         statement = select(Subscene).where(Subscene.scene_id == scene_id)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def get_by_name(
         self, name: str, scene_id: int, session: Session

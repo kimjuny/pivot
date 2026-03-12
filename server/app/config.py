@@ -1,6 +1,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any, cast
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -17,6 +18,14 @@ class Settings(BaseSettings):
     # App Settings
     ENV: str = "development"
     PROJECT_NAME: str = "Pivot Server"
+    SERVER_PUBLIC_BASE_URL: str = "http://localhost:8003"
+    WEB_PUBLIC_BASE_URL: str | None = None
+    CHANNEL_RUNTIME_SCAN_INTERVAL_SECONDS: int = 5
+    CHANNEL_PROGRESS_MIN_INTERVAL_SECONDS: float = 1.0
+    REACT_CURRENT_PLAN_HISTORY_LIMIT: int = 3
+    WORK_WECHAT_WS_URL: str = "wss://openws.work.weixin.qq.com"
+    WORK_WECHAT_WS_HEARTBEAT_SECONDS: int = 30
+    WORK_WECHAT_WS_REQUEST_TIMEOUT_SECONDS: int = 10
 
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
@@ -43,6 +52,21 @@ class Settings(BaseSettings):
     FILE_EXPIRE_MINUTES: int = 120
     FILE_PRUNE_INTERVAL_MINUTES: int = 5
 
+    @property
+    def server_public_base_url(self) -> str:
+        """Return the normalized external backend base URL."""
+        return self.SERVER_PUBLIC_BASE_URL.rstrip("/")
+
+    @property
+    def web_public_base_url(self) -> str:
+        """Return the normalized external web base URL.
+
+        Why: channel link pages may be served from the same backend in production
+        or from a separate Vite server during development.
+        """
+        raw_url = self.WEB_PUBLIC_BASE_URL or self.SERVER_PUBLIC_BASE_URL
+        return raw_url.rstrip("/")
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -54,11 +78,11 @@ def get_settings() -> Settings:
 
     # If specific env file exists, use it
     if env_file.exists():
-        return Settings(_env_file=str(env_file))
+        return cast(Any, Settings)(_env_file=str(env_file))
 
     # Fallback to .env in server dir
     base_env = server_dir / ".env"
     if base_env.exists():
-        return Settings(_env_file=str(base_env))
+        return cast(Any, Settings)(_env_file=str(base_env))
 
     return Settings()

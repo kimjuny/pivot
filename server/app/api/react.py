@@ -102,6 +102,7 @@ async def react_chat_stream(
     - observe: LLM observation
     - thought: LLM reasoning
     - abstract: Brief summary of the recursion cycle
+    - summary: User-facing progress summary for the recursion
     - action: Action decision
     - tool_call: Tool execution
     - tool_result: Tool execution result

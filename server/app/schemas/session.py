@@ -86,7 +86,7 @@ class RecursionDetail(AppBaseModel):
     thinking: str | None = None
     thought: str | None = None
     abstract: str | None = None
-    progress_update: str | None = None
+    summary: str | None = None
     action_type: str | None = None
     action_output: str | None = None
     tool_call_results: str | None = None

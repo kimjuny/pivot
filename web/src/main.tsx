@@ -7,6 +7,8 @@ import AgentDetailPage from './components/AgentDetailPage'
 import LLMList from './components/LLMList'
 import ToolsPage from './components/ToolsPage'
 import SkillsPage from './components/SkillsPage'
+import ChannelsPage from './components/ChannelsPage'
+import ChannelLinkPage from './components/ChannelLinkPage'
 import Navigation from './components/Navigation'
 import { AuthProvider } from './contexts/AuthContext'
 import { isTokenValid, useAuth } from './contexts/auth-core'
@@ -99,6 +101,17 @@ export function SkillsListPage() {
   );
 }
 
+/**
+ * Channels Page with layout.
+ */
+export function ChannelsListPage() {
+  return (
+    <AuthenticatedLayout>
+      <ChannelsPage />
+    </AuthenticatedLayout>
+  );
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="pivot-ui-theme">
@@ -114,6 +127,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/llms" element={<LLMListPage />} />
             <Route path="/tools" element={<ToolsListPage />} />
             <Route path="/skills" element={<SkillsListPage />} />
+            <Route path="/channels" element={<ChannelsListPage />} />
+            <Route path="/channel-link/:token" element={<ChannelLinkPage />} />
 
             {/* Catch-all redirect */}
             <Route path="*" element={<Navigate to="/" replace />} />

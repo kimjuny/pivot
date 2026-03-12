@@ -51,7 +51,7 @@ class CRUDBase(Generic[ModelType]):
             A list of model instances.
         """
         statement = select(self.model).offset(skip).limit(limit)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def create(self, session: Session, **kwargs: Any) -> ModelType:
         """Create a new record in the database.
@@ -146,7 +146,7 @@ class SceneCRUD(CRUDBase[Scene]):
             A list of Scene instances belonging to the agent.
         """
         statement = select(Scene).where(Scene.agent_id == agent_id)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def get_by_name(self, name: str, session: Session) -> Scene | None:
         """Retrieve a scene by its name.
@@ -195,7 +195,7 @@ class SubsceneCRUD(CRUDBase[Subscene]):
             A list of Subscene instances belonging to the scene.
         """
         statement = select(Subscene).where(Subscene.scene_id == scene_id)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
     def get_by_name(
         self, name: str, scene_id: int, session: Session
@@ -236,7 +236,7 @@ class ConnectionCRUD(CRUDBase[Connection]):
             A list of Connection instances originating from the subscene.
         """
         statement = select(Connection).where(Connection.from_subscene == from_subscene)
-        return session.exec(statement).all()
+        return list(session.exec(statement).all())
 
 
 agent = AgentCRUD(Agent)

@@ -39,8 +39,32 @@ const PROTOCOL_LABELS: Record<string, string> = {
   anthropic_compatible: 'Anthropic Compatible',
 };
 
+const LLM_BRAND_ICON_MATCHERS: Array<{ keywords: string[]; iconPath: string }> = [
+  { keywords: ['claude'], iconPath: '/llms/claude.svg' },
+  { keywords: ['deepseek'], iconPath: '/llms/deepseek.svg' },
+  { keywords: ['doubao'], iconPath: '/llms/doubao.svg' },
+  { keywords: ['gemini'], iconPath: '/llms/gemini.svg' },
+  { keywords: ['gpt'], iconPath: '/llms/gpt.svg' },
+  { keywords: ['glm'], iconPath: '/llms/glm.svg' },
+  { keywords: ['kimi'], iconPath: '/llms/kimi.svg' },
+  { keywords: ['minimax'], iconPath: '/llms/minimax.svg' },
+  { keywords: ['qwen'], iconPath: '/llms/qwen.svg' },
+];
+
 function formatProtocolLabel(protocol: string): string {
   return PROTOCOL_LABELS[protocol] ?? protocol;
+}
+
+/**
+ * Resolve one brand icon from the configured model identifier.
+ * Why: model names are the most stable signal users control across custom endpoints.
+ */
+function getLLMBrandIconPath(model: string): string | null {
+  const normalizedModel = model.toLowerCase();
+  const match = LLM_BRAND_ICON_MATCHERS.find(({ keywords }) => (
+    keywords.some((keyword) => normalizedModel.includes(keyword))
+  ));
+  return match?.iconPath ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -653,6 +677,7 @@ interface LLMTableRowProps {
  * Shows key fields and a compact capability badge list.
  */
 function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowProps) {
+  const brandIconPath = getLLMBrandIconPath(llm.model);
   const capabilityLabels = [
     llm.streaming ? "Stream" : null,
     llm.tool_calling === "native" ? "Tools" : null,
@@ -670,7 +695,17 @@ function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowPr
       <TableCell>
         <div className="flex items-center gap-2">
           <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <Server className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
+            {brandIconPath ? (
+              <img
+                src={brandIconPath}
+                alt=""
+                className="w-3.5 h-3.5"
+                loading="lazy"
+                aria-hidden="true"
+              />
+            ) : (
+              <Server className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
+            )}
           </div>
           <span className="font-medium text-sm truncate max-w-[120px]">{llm.name}</span>
         </div>

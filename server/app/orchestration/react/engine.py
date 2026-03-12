@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
+from app.config import get_settings
 from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
 from app.models.react import (
@@ -407,7 +408,7 @@ class ReactEngine:
             rendered_lines.append(self._format_message_content_for_log(content))
             display_message_index += 1
 
-        logger.info("\n%s", "\n".join(rendered_lines))
+        logger.debug("\n%s", "\n".join(rendered_lines))
 
     def _uses_incremental_request_messages(self) -> bool:
         """Whether current LLM transport uses incremental-only request messages."""
@@ -425,12 +426,28 @@ class ReactEngine:
             List of plan step dictionaries for user-message injection.
         """
         current_plan: list[dict[str, Any]] = []
+        history_limit = max(get_settings().REACT_CURRENT_PLAN_HISTORY_LIMIT, 0)
         for step in context.context.get("plan", []):
             if not isinstance(step, dict):
                 continue
             step_id = step.get("step_id")
             if not isinstance(step_id, str):
                 continue
+            recursion_history: list[dict[str, Any]] = []
+            raw_history = step.get("recursion_history", [])
+            if isinstance(raw_history, list):
+                history_slice = (
+                    raw_history[-history_limit:] if history_limit > 0 else []
+                )
+                for history_entry in history_slice:
+                    if not isinstance(history_entry, dict):
+                        continue
+                    recursion_history.append(
+                        {
+                            "iteration": history_entry.get("iteration"),
+                            "summary": history_entry.get("summary", ""),
+                        }
+                    )
             current_plan.append(
                 {
                     "step_id": step_id,
@@ -438,6 +455,7 @@ class ReactEngine:
                     "specific_description": step.get("specific_description", ""),
                     "completion_criteria": step.get("completion_criteria", ""),
                     "status": step.get("status", "pending"),
+                    "recursion_history": recursion_history,
                 }
             )
         return current_plan
@@ -624,7 +642,7 @@ class ReactEngine:
             thinking = message.reasoning_content
             thought = decision.thought
             abstract = decision.abstract
-            progress_update = decision.progress_update
+            summary = decision.summary
             action = decision.action
             action_type = action.action_type
             action_output = dict(action.output)
@@ -711,7 +729,7 @@ class ReactEngine:
                 action_output=action_output,
                 action_step_id=action_step_id,
                 step_status_updates=step_status_updates_validated,
-                progress_update=progress_update,
+                summary=summary,
                 tool_results=tool_results,
                 token_counter=token_counter,
             )
@@ -725,7 +743,7 @@ class ReactEngine:
                 "thinking": thinking,
                 "thought": thought,
                 "abstract": abstract,
-                "progress_update": progress_update,
+                "summary": summary,
                 "output": action_output,
                 "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
@@ -736,6 +754,7 @@ class ReactEngine:
                 "session_goal": session_goal,
                 "task_summary": task_summary,
                 "step_status_update": step_status_updates_validated,
+                "current_plan": self._build_current_plan_payload(context),
             }
 
             # Add token usage if available
@@ -1092,17 +1111,20 @@ class ReactEngine:
                         "tokens": event_data.get("tokens"),
                     }
 
-                if recursion.progress_update:
+                if recursion.summary:
                     yield {
-                        "type": "progress_update",
+                        "type": "summary",
                         "task_id": task.task_id,
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
-                        "delta": recursion.progress_update,
+                        "delta": recursion.summary,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),
                         "tokens": event_data.get("tokens"),
+                        "data": {
+                            "current_plan": event_data.get("current_plan", []),
+                        },
                     }
 
                 # Yield action event with type and token info

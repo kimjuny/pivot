@@ -92,47 +92,47 @@ class Response:
 
     def pretty_print(self) -> None:
         """Print the core information of the response in a formatted way."""
-        logger.info("Response from LLM:")
-        logger.info(f"  ID: {self.id}")
-        logger.info(f"  Model: {self.model}")
-        logger.info(f"  Created: {self.created}")
-        logger.info("  Choices:")
+        logger.debug("Response from LLM:")
+        logger.debug(f"  ID: {self.id}")
+        logger.debug(f"  Model: {self.model}")
+        logger.debug(f"  Created: {self.created}")
+        logger.debug("  Choices:")
         for choice in self.choices:
-            logger.info(f"    Choice {choice.index}:")
-            logger.info(f"      Role: {choice.message.role}")
-            logger.info(f"      Content: {choice.message.content}")
+            logger.debug(f"    Choice {choice.index}:")
+            logger.debug(f"      Role: {choice.message.role}")
+            logger.debug(f"      Content: {choice.message.content}")
             if choice.message.reasoning_content:
-                logger.info(f"      Reasoning: {choice.message.reasoning_content}")
+                logger.debug(f"      Reasoning: {choice.message.reasoning_content}")
         if self.usage:
-            logger.info("  Usage:")
-            logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
-            logger.info(f"    Completion Tokens: {self.usage.completion_tokens}")
-            logger.info(f"    Total Tokens: {self.usage.total_tokens}")
-            logger.info(f"    Cached Input Tokens: {self.usage.cached_input_tokens}")
+            logger.debug("  Usage:")
+            logger.debug(f"    Prompt Tokens: {self.usage.prompt_tokens}")
+            logger.debug(f"    Completion Tokens: {self.usage.completion_tokens}")
+            logger.debug(f"    Total Tokens: {self.usage.total_tokens}")
+            logger.debug(f"    Cached Input Tokens: {self.usage.cached_input_tokens}")
 
     def pretty_print_full(self) -> None:
         """Print all information of the response in a formatted way."""
-        logger.info("Response from LLM (Full):")
-        logger.info(f"  ID: {self.id}")
-        logger.info(f"  Model: {self.model}")
-        logger.info(f"  Created: {self.created}")
-        logger.info(f"  Object: {self.object}")
-        logger.info("  Choices:")
+        logger.debug("Response from LLM (Full):")
+        logger.debug(f"  ID: {self.id}")
+        logger.debug(f"  Model: {self.model}")
+        logger.debug(f"  Created: {self.created}")
+        logger.debug(f"  Object: {self.object}")
+        logger.debug("  Choices:")
         for choice in self.choices:
-            logger.info(f"    Choice {choice.index}:")
-            logger.info(f"      Role: {choice.message.role}")
-            logger.info(f"      Content: {choice.message.content}")
+            logger.debug(f"    Choice {choice.index}:")
+            logger.debug(f"      Role: {choice.message.role}")
+            logger.debug(f"      Content: {choice.message.content}")
             if choice.message.reasoning_content:
-                logger.info(f"      Reasoning: {choice.message.reasoning_content}")
-            logger.info(
+                logger.debug(f"      Reasoning: {choice.message.reasoning_content}")
+            logger.debug(
                 f"      Finish Reason: {choice.finish_reason.value if choice.finish_reason else None}"
             )
         if self.usage:
-            logger.info("  Usage:")
-            logger.info(f"    Prompt Tokens: {self.usage.prompt_tokens}")
-            logger.info(f"    Completion Tokens: {self.usage.completion_tokens}")
-            logger.info(f"    Total Tokens: {self.usage.total_tokens}")
-            logger.info(f"    Cached Input Tokens: {self.usage.cached_input_tokens}")
+            logger.debug("  Usage:")
+            logger.debug(f"    Prompt Tokens: {self.usage.prompt_tokens}")
+            logger.debug(f"    Completion Tokens: {self.usage.completion_tokens}")
+            logger.debug(f"    Total Tokens: {self.usage.total_tokens}")
+            logger.debug(f"    Cached Input Tokens: {self.usage.cached_input_tokens}")
 
     def first(self) -> Choice:
         """Return the first choice in the response.

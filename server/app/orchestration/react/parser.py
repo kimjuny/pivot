@@ -157,9 +157,9 @@ def parse_react_output(content: str) -> ParsedReactDecision:
     observe = _expect_optional_string(resolved_payload.get("observe"), "observe")
     thought = _expect_optional_string(resolved_payload.get("thought"), "thought")
     abstract = _expect_optional_string(resolved_payload.get("abstract"), "abstract")
-    progress_update = _expect_optional_string(
-        resolved_payload.get("progress_update"),
-        "progress_update",
+    summary = _expect_optional_string(
+        resolved_payload.get("summary"),
+        "summary",
     )
 
     session_memory_delta = _expect_optional_dict(
@@ -184,7 +184,7 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         observe=observe,
         thought=thought,
         abstract=abstract,
-        progress_update=progress_update,
+        summary=summary,
         action=action,
         session_memory_delta=session_memory_delta,
         session_subject=session_subject,
