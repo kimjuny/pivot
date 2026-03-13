@@ -4,6 +4,7 @@ import asyncio
 import sys
 import unittest
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,6 +28,10 @@ ChannelPlanStepProgressView = import_module(
 ChannelProgressView = import_module("app.channels.types").ChannelProgressView
 channel_service_module = import_module("app.services.channel_service")
 ExternalIdentityBinding = import_module("app.models.channel").ExternalIdentityBinding
+ChannelSession = import_module("app.models.channel").ChannelSession
+SessionMemoryService = import_module(
+    "app.services.session_memory_service"
+).SessionMemoryService
 
 
 class ChannelServiceTestCase(unittest.TestCase):
@@ -241,6 +246,73 @@ class ChannelServiceTestCase(unittest.TestCase):
             "The user sent 1 attachment through the channel.",
         )
         self.assertEqual(captured_kwargs["channel_file_ids"], ["file-1"])
+
+    def test_idle_channel_session_starts_a_new_pivot_session(self) -> None:
+        """Idle channel conversations should reopen in a fresh Pivot session."""
+        binding = self.service.create_binding(
+            agent_id=self.agent.id or 0,
+            channel_key="telegram",
+            name="Telegram Support",
+            enabled=True,
+            auth_config={"bot_token": "123:abc"},
+            runtime_config={"poll_timeout_seconds": 15},
+        )
+        identity = ExternalIdentityBinding(
+            channel_binding_id=binding.id,
+            provider_key="telegram",
+            external_user_id="tg-user",
+            external_conversation_id="tg-chat",
+            pivot_user_id=self.user.id or 0,
+            workspace_owner=self.user.username,
+            status="linked",
+            auth_method="link_page",
+        )
+        self.session.add(identity)
+        self.session.commit()
+        self.session.refresh(identity)
+
+        session_service = SessionMemoryService(self.session)
+        original_session = session_service.create_session(
+            agent_id=self.agent.id or 0,
+            user=self.user.username,
+        )
+        original_session.updated_at = datetime.now(UTC) - timedelta(minutes=16)
+        self.session.add(original_session)
+        self.session.commit()
+        self.session.refresh(original_session)
+
+        channel_session = ChannelSession(
+            channel_binding_id=binding.id,
+            external_conversation_id="tg-chat",
+            external_user_id="tg-user",
+            pivot_user_id=self.user.id or 0,
+            pivot_session_id=original_session.session_id,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        self.session.add(channel_session)
+        self.session.commit()
+
+        binding_row = self.session.get(
+            import_module("app.models.channel").AgentChannelBinding,
+            binding.id,
+        )
+        if binding_row is None:
+            self.fail("Expected binding row to exist")
+
+        resolved_session = self.service._get_or_create_channel_session(
+            binding=binding_row,
+            identity=identity,
+            external_conversation_id="tg-chat",
+        )
+
+        self.assertNotEqual(
+            resolved_session.pivot_session_id,
+            original_session.session_id,
+        )
+        self.assertIsNotNone(
+            session_service.get_session(resolved_session.pivot_session_id)
+        )
 
     def test_collect_outbound_actions_includes_summary_progress(self) -> None:
         """ReAct summaries should surface as structured channel progress actions."""

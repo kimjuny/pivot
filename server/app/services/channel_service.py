@@ -512,6 +512,8 @@ class ChannelService:
         external_conversation_id: str,
     ) -> ChannelSession:
         """Resolve the backing Pivot session for one external conversation."""
+        session_service = SessionMemoryService(self.db)
+        now = datetime.now(UTC)
         existing = self.db.exec(
             select(ChannelSession).where(
                 ChannelSession.channel_binding_id == (binding.id or 0),
@@ -519,8 +521,27 @@ class ChannelService:
             )
         ).first()
         if existing is not None:
+            user = self.db.get(User, identity.pivot_user_id)
+            if user is None:
+                raise ValueError("Linked Pivot user not found.")
+
+            pivot_session = session_service.get_session(existing.pivot_session_id)
+            if (
+                pivot_session is None
+                or session_service.has_session_exceeded_idle_timeout(
+                    pivot_session,
+                    now=now,
+                )
+            ):
+                fresh_session = session_service.create_session(
+                    agent_id=binding.agent_id,
+                    user=user.username,
+                )
+                existing.pivot_session_id = fresh_session.session_id
+
             existing.external_user_id = identity.external_user_id
-            existing.updated_at = datetime.now(UTC)
+            existing.pivot_user_id = identity.pivot_user_id
+            existing.updated_at = now
             self.db.add(existing)
             self.db.commit()
             self.db.refresh(existing)
@@ -530,7 +551,7 @@ class ChannelService:
         if user is None:
             raise ValueError("Linked Pivot user not found.")
 
-        session_row = SessionMemoryService(self.db).create_session(
+        session_row = session_service.create_session(
             agent_id=binding.agent_id,
             user=user.username,
         )

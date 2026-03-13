@@ -7,6 +7,7 @@ import {
   getFullSessionHistory,
   listSessions,
   type SessionListItem,
+  type SessionResponse,
   API_BASE_URL,
 } from "@/utils/api";
 import {
@@ -33,7 +34,23 @@ import {
   parseJson,
   parseTokenRateData,
 } from "./utils/chatData";
+import { hasSessionExceededIdleTimeout } from "./utils/sessionActivity";
 import { ZERO_RATE_STREAK_TO_RENDER } from "./utils/chatSelectors";
+
+/**
+ * Convert a session creation payload into the sidebar row shape.
+ */
+function toSessionListItem(session: SessionResponse): SessionListItem {
+  return {
+    session_id: session.session_id,
+    agent_id: session.agent_id,
+    status: session.status,
+    subject: session.subject?.content || null,
+    created_at: session.created_at,
+    updated_at: session.updated_at,
+    message_count: 0,
+  };
+}
 
 /**
  * Coordinates the page-scoped chat state and delegates visual rendering to smaller components.
@@ -95,17 +112,33 @@ function ChatContainer({
         const existingSessions = await refreshSessionList();
 
         if (existingSessions.length > 0) {
-          const firstSessionId = existingSessions[0].session_id;
-          setCurrentSessionId(firstSessionId);
+          const latestSession = existingSessions[0];
+          if (hasSessionExceededIdleTimeout(latestSession)) {
+            const freshSession = await createSession(agentId);
+            const freshSessionItem = toSessionListItem(freshSession);
 
-          try {
-            const history = await getFullSessionHistory(firstSessionId);
-            setMessages(buildMessagesFromHistory(history.tasks));
-          } catch (historyError) {
-            console.error(
-              "Failed to load initial session history:",
-              historyError,
-            );
+            setCurrentSessionId(freshSession.session_id);
+            setReplyTaskId(null);
+            setMessages([]);
+            setSessions([
+              freshSessionItem,
+              ...existingSessions.filter(
+                (session) => session.session_id !== freshSession.session_id,
+              ),
+            ]);
+          } else {
+            const firstSessionId = latestSession.session_id;
+            setCurrentSessionId(firstSessionId);
+
+            try {
+              const history = await getFullSessionHistory(firstSessionId);
+              setMessages(buildMessagesFromHistory(history.tasks));
+            } catch (historyError) {
+              console.error(
+                "Failed to load initial session history:",
+                historyError,
+              );
+            }
           }
         } else {
           setCurrentSessionId(null);
@@ -142,17 +175,13 @@ function ChatContainer({
       setCurrentSessionId(session.session_id);
       setMessages([]);
       setReplyTaskId(null);
+      const sessionItem = toSessionListItem(session);
       setSessions((previous) => [
-        {
-          session_id: session.session_id,
-          agent_id: session.agent_id,
-          status: session.status,
-          subject: session.subject?.content || null,
-          created_at: session.created_at,
-          updated_at: session.updated_at,
-          message_count: 0,
-        },
-        ...previous,
+        sessionItem,
+        ...previous.filter(
+          (existingSession) =>
+            existingSession.session_id !== sessionItem.session_id,
+        ),
       ]);
     } catch (createError) {
       console.error("Failed to create new session:", createError);
@@ -231,7 +260,9 @@ function ChatContainer({
    * Sends the current composer state and incrementally applies streamed backend updates.
    */
   const sendMessage = async () => {
+    const pendingMessage = inputMessage;
     const currentReplyTaskId = replyTaskId;
+    let assistantMessageId: string | null = null;
     const filesToSend = readyPendingFiles;
     const sentAttachments = filesToSend.map((file) => ({
       fileId: file.fileId,
@@ -250,63 +281,85 @@ function ChatContainer({
       previewUrl: file.previewUrl,
     }));
 
-    if (currentReplyTaskId) {
-      setReplyTaskId(null);
-    }
-
     prepareForProgrammaticScroll();
-
-    const userMessage: ChatMessage = {
-      id: `user-${Date.now()}`,
-      role: "user",
-      content: inputMessage,
-      attachments: sentAttachments,
-      timestamp: new Date().toISOString(),
-    };
-
-    setMessages((previous) => [...previous, userMessage]);
-    setInputMessage("");
-    discardReadyPendingFiles();
-    setError(null);
-    setIsStreaming(true);
-
-    const assistantMessageId = `assistant-${Date.now()}`;
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      content: "",
-      timestamp: new Date().toISOString(),
-      recursions: [],
-      status: "running",
-    };
-
-    setMessages((previous) => [...previous, assistantMessage]);
     abortControllerRef.current = new AbortController();
 
     try {
       let activeSessionId = currentSessionId;
+      let requestTaskId = currentReplyTaskId;
+      let shouldResetConversation = false;
+      const activeSession = activeSessionId
+        ? sessions.find((session) => session.session_id === activeSessionId) ?? null
+        : null;
+
+      if (activeSessionId && hasSessionExceededIdleTimeout(activeSession)) {
+        shouldResetConversation = true;
+        requestTaskId = null;
+      }
+
       if (!activeSessionId) {
         const session = await createSession(agentId);
         activeSessionId = session.session_id;
+        shouldResetConversation = true;
+        const sessionItem = toSessionListItem(session);
         setCurrentSessionId(activeSessionId);
         setSessions((previous) => [
-          {
-            session_id: session.session_id,
-            agent_id: session.agent_id,
-            status: session.status,
-            subject: session.subject?.content || null,
-            created_at: session.created_at,
-            updated_at: session.updated_at,
-            message_count: 0,
-          },
-          ...previous,
+          sessionItem,
+          ...previous.filter(
+            (existingSession) =>
+              existingSession.session_id !== sessionItem.session_id,
+          ),
         ]);
+      } else if (shouldResetConversation) {
+        const session = await createSession(agentId);
+        activeSessionId = session.session_id;
+        const sessionItem = toSessionListItem(session);
+        setCurrentSessionId(activeSessionId);
+        setSessions((previous) => [
+          sessionItem,
+          ...previous.filter(
+            (existingSession) =>
+              existingSession.session_id !== sessionItem.session_id,
+          ),
+        ]);
+      }
+
+      if (currentReplyTaskId) {
+        setReplyTaskId(null);
       }
 
       if (!isTokenValid()) {
         window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
         throw new Error("Token expired or invalid. Please log in again.");
       }
+
+      const messageTimestamp = new Date().toISOString();
+      const userMessage: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: pendingMessage,
+        attachments: sentAttachments,
+        timestamp: messageTimestamp,
+      };
+      assistantMessageId = `assistant-${Date.now()}`;
+      const assistantMessage: ChatMessage = {
+        id: assistantMessageId,
+        role: "assistant",
+        content: "",
+        timestamp: messageTimestamp,
+        recursions: [],
+        status: "running",
+      };
+
+      if (shouldResetConversation) {
+        setMessages([userMessage, assistantMessage]);
+      } else {
+        setMessages((previous) => [...previous, userMessage, assistantMessage]);
+      }
+      setInputMessage("");
+      discardReadyPendingFiles();
+      setError(null);
+      setIsStreaming(true);
 
       const apiUrl = `${API_BASE_URL}/react/chat/stream`;
       const token = getAuthToken();
@@ -325,7 +378,7 @@ function ChatContainer({
           agent_id: agentId,
           message: userMessage.content,
           user: "web-user",
-          task_id: currentReplyTaskId,
+          task_id: requestTaskId,
           session_id: activeSessionId,
           file_ids: filesToSend.map((file) => file.fileId),
         }),
@@ -750,7 +803,7 @@ function ChatContainer({
         const cancelTime = new Date().toISOString();
         setMessages((previous) =>
           previous.map((message) => {
-            if (message.id !== assistantMessageId) {
+            if (!assistantMessageId || message.id !== assistantMessageId) {
               return message;
             }
 

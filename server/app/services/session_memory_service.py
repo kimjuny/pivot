@@ -8,7 +8,7 @@ the persistent session state.
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.models.react import ReactTask
@@ -18,6 +18,8 @@ from app.services.file_service import FileService
 from sqlmodel import Session as DBSession, col, select
 
 logger = logging.getLogger(__name__)
+
+SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
 
 
 class SessionMemoryService:
@@ -91,6 +93,29 @@ class SessionMemoryService:
         """
         stmt = select(Session).where(Session.session_id == session_id)
         return self.db.exec(stmt).first()
+
+    def has_session_exceeded_idle_timeout(
+        self,
+        session: Session,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        """Return whether a session has been idle beyond the reuse threshold.
+
+        Args:
+            session: Session row whose last activity should be evaluated.
+            now: Optional comparison timestamp for deterministic tests.
+
+        Returns:
+            ``True`` when the session should no longer be reused.
+        """
+        reference_now = now or datetime.now(UTC)
+        updated_at = (
+            session.updated_at
+            if session.updated_at.tzinfo is not None
+            else session.updated_at.replace(tzinfo=UTC)
+        )
+        return reference_now - updated_at > SESSION_IDLE_TIMEOUT
 
     def get_session_memory(self, session_id: str) -> SessionMemory | None:
         """Get session memory by session_id.
