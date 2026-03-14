@@ -5,6 +5,18 @@
 # =============================================================================
 
 services:
+  # ---------- Sandbox base image (one-shot builder for per-agent containers) ----------
+  sandbox-base:
+    image: localhost/pivot-sandbox-base:py311-rg
+    build:
+      context: .
+      dockerfile: Containerfile.dev
+      target: sandbox-base
+    container_name: pivot-sandbox-base-builder
+    restart: "no"
+    command: >
+      python -c "print('sandbox base image is ready')"
+
   # ---------- Backend (FastAPI + Uvicorn, non-privileged) ----------
   backend:
     build:
@@ -53,7 +65,7 @@ services:
     environment:
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
       - SANDBOX_PODMAN_BASE_URL=unix:///run/podman/podman.sock
-      - SANDBOX_BASE_IMAGE=docker.io/library/python:3.11-slim
+      - SANDBOX_BASE_IMAGE=localhost/pivot-sandbox-base:py311-rg
       - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
       - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
       - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30
@@ -64,6 +76,9 @@ services:
       - SANDBOX_POOL_SCAN_INTERVAL_SECONDS=30
       - SANDBOX_POOL_IDLE_TTL_SECONDS=300
       - SANDBOX_POOL_MAX_SIZE=100
+    depends_on:
+      sandbox-base:
+        condition: service_completed_successfully
     command: >
       poetry run python -m uvicorn server.sandbox_manager.main:app
       --reload

@@ -11,7 +11,7 @@ import ChannelsPage from './components/ChannelsPage'
 import ChannelLinkPage from './components/ChannelLinkPage'
 import Navigation from './components/Navigation'
 import { AuthProvider } from './contexts/AuthContext'
-import { isTokenValid, useAuth } from './contexts/auth-core'
+import { getStoredUser, isTokenValid, useAuth } from './contexts/auth-core'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './index.css'
@@ -22,6 +22,8 @@ import './index.css'
  */
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const persistedUser = getStoredUser();
+  const activeUser = user ?? persistedUser;
 
   // Show loading while checking auth state
   if (isLoading) {
@@ -36,7 +38,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   // Redirect to login if not authenticated
-  if (!user || !isTokenValid()) {
+  if (!activeUser || !isTokenValid()) {
     return <Navigate to="/" replace />;
   }
 

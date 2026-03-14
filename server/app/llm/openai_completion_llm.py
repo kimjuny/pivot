@@ -42,6 +42,7 @@ class OpenAICompletionLLM(AbstractLLM):
 
     DEFAULT_TIMEOUT = 120  # Request timeout in seconds
     MAX_RETRIES = 3  # Maximum number of retry attempts
+    QWEN_MAX_CACHE_MARKERS = 4
 
     def __init__(
         self,
@@ -94,33 +95,82 @@ class OpenAICompletionLLM(AbstractLLM):
             updated_kwargs["reasoning"] = {"enabled": self.thinking == "enabled"}
         return updated_kwargs
 
-    def _messages_with_cached_last_block(
+    @staticmethod
+    def _normalize_qwen_cacheable_content(
+        content: str | list[dict[str, Any]],
+    ) -> str | list[dict[str, Any]]:
+        """Normalize message content into a stable block format for Qwen caching.
+
+        Why: explicit cache reuse compares prompt prefixes across requests. When a
+        text message is sometimes sent as a raw string and sometimes as a block list
+        with ``cache_control``, providers may treat those requests as different
+        prompt shapes. We therefore keep Chat Completions payloads structurally
+        stable whenever Qwen block cache is enabled.
+        """
+        if isinstance(content, str):
+            return [{"type": "text", "text": content}]
+        if isinstance(content, list):
+            return [dict(block) for block in content if isinstance(block, dict)]
+        return content
+
+    @staticmethod
+    def _with_ephemeral_cache_control(
+        content: str | list[dict[str, Any]],
+    ) -> str | list[dict[str, Any]]:
+        """Return content with an ephemeral cache marker on the last block."""
+        if not isinstance(content, list) or not content:
+            return content
+
+        content_blocks = [dict(block) for block in content]
+        content_blocks[-1]["cache_control"] = {"type": "ephemeral"}
+        return content_blocks
+
+    def _messages_with_qwen_cache_markers(
         self, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Return messages with ephemeral cache control on the last block."""
+        """Return messages with stable content blocks and rolling Qwen markers.
+
+        Qwen explicit cache supports up to four cache markers per request. We mark
+        the most recent cacheable messages so each recursion can reuse the newest
+        stable prefix from the prior recursion while also creating fresh prefixes
+        for the next one.
+        """
         if not messages:
             return []
 
-        cached_messages: list[dict[str, Any]] = [dict(m) for m in messages]
-        last_message = dict(cached_messages[-1])
-        last_content = last_message.get("content", "")
+        cached_messages: list[dict[str, Any]] = []
+        eligible_indexes: list[int] = []
+        for message in messages:
+            normalized_message = dict(message)
+            normalized_content = self._normalize_qwen_cacheable_content(
+                message.get("content", "")
+            )
+            normalized_message["content"] = normalized_content
+            cached_messages.append(normalized_message)
 
-        if isinstance(last_content, str):
-            last_message["content"] = [
-                {
-                    "type": "text",
-                    "text": last_content,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-        elif isinstance(last_content, list) and last_content:
-            content_blocks = [dict(block) for block in last_content]
-            if isinstance(content_blocks[-1], dict):
-                content_blocks[-1]["cache_control"] = {"type": "ephemeral"}
-            last_message["content"] = content_blocks
+            if isinstance(normalized_content, list) and normalized_content:
+                eligible_indexes.append(len(cached_messages) - 1)
 
-        cached_messages[-1] = last_message
+        for index in eligible_indexes[-self.QWEN_MAX_CACHE_MARKERS :]:
+            cached_messages[index]["content"] = self._with_ephemeral_cache_control(
+                cached_messages[index]["content"]
+            )
+
         return cached_messages
+
+    @staticmethod
+    def _with_stream_usage_enabled(
+        payload_kwargs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ensure streaming payloads request usage so cache hits surface in the UI."""
+        updated_kwargs = dict(payload_kwargs)
+        raw_stream_options = updated_kwargs.get("stream_options")
+        stream_options = (
+            dict(raw_stream_options) if isinstance(raw_stream_options, dict) else {}
+        )
+        stream_options["include_usage"] = True
+        updated_kwargs["stream_options"] = stream_options
+        return updated_kwargs
 
     def _parse_dict_response(self, raw_dict: dict[str, Any], model: str) -> Response:
         """Parse raw JSON dict into structured Response object."""
@@ -259,7 +309,7 @@ class OpenAICompletionLLM(AbstractLLM):
                 for message in messages
             ]
             if self.cache_policy == "qwen-completion-block-cache":
-                request_messages = self._messages_with_cached_last_block(
+                request_messages = self._messages_with_qwen_cache_markers(
                     request_messages
                 )
 
@@ -318,6 +368,8 @@ class OpenAICompletionLLM(AbstractLLM):
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             normalized_kwargs = self._apply_thinking_mode(normalized_kwargs)
+            if self.cache_policy == "qwen-completion-block-cache":
+                normalized_kwargs = self._with_stream_usage_enabled(normalized_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
             headers = {
@@ -333,7 +385,7 @@ class OpenAICompletionLLM(AbstractLLM):
                 for message in messages
             ]
             if self.cache_policy == "qwen-completion-block-cache":
-                request_messages = self._messages_with_cached_last_block(
+                request_messages = self._messages_with_qwen_cache_markers(
                     request_messages
                 )
 

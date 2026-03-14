@@ -457,17 +457,138 @@ def _container_working_dir(container: Any) -> str:
     return ""
 
 
+def _container_labels(container: Any) -> dict[str, str]:
+    """Read container labels from inspect data across engine variants."""
+    attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        config = attrs.get("Config")
+        if isinstance(config, dict):
+            labels = config.get("Labels")
+            if isinstance(labels, dict):
+                return {
+                    str(key): str(value)
+                    for key, value in labels.items()
+                    if isinstance(key, str)
+                }
+
+    inspect_func = getattr(container, "inspect", None)
+    if callable(inspect_func):
+        inspected = inspect_func()
+        if isinstance(inspected, dict):
+            config = inspected.get("Config")
+            if isinstance(config, dict):
+                labels = config.get("Labels")
+                if isinstance(labels, dict):
+                    return {
+                        str(key): str(value)
+                        for key, value in labels.items()
+                        if isinstance(key, str)
+                    }
+
+    return {}
+
+
+def _container_image_ref(container: Any) -> str | None:
+    """Read configured image reference from container inspect data."""
+    labels = _container_labels(container)
+    labeled_ref = labels.get("pivot.sandbox.base_image_ref")
+    if labeled_ref:
+        return labeled_ref
+
+    attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        config = attrs.get("Config")
+        if isinstance(config, dict):
+            image = config.get("Image")
+            if isinstance(image, str):
+                return image
+        image_name = attrs.get("ImageName")
+        if isinstance(image_name, str):
+            return image_name
+
+    inspect_func = getattr(container, "inspect", None)
+    if callable(inspect_func):
+        inspected = inspect_func()
+        if isinstance(inspected, dict):
+            config = inspected.get("Config")
+            if isinstance(config, dict):
+                image = config.get("Image")
+                if isinstance(image, str):
+                    return image
+            image_name = inspected.get("ImageName")
+            if isinstance(image_name, str):
+                return image_name
+
+    return None
+
+
+def _container_image_id(container: Any) -> str | None:
+    """Read the concrete image ID used by an existing container."""
+    labels = _container_labels(container)
+    labeled_id = labels.get("pivot.sandbox.base_image_id")
+    if labeled_id:
+        return labeled_id
+
+    attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        image_id = attrs.get("Image")
+        if isinstance(image_id, str):
+            return image_id
+
+    inspect_func = getattr(container, "inspect", None)
+    if callable(inspect_func):
+        inspected = inspect_func()
+        if isinstance(inspected, dict):
+            image_id = inspected.get("Image")
+            if isinstance(image_id, str):
+                return image_id
+
+    image = getattr(container, "image", None)
+    image_id = getattr(image, "id", None)
+    if isinstance(image_id, str):
+        return image_id
+    return None
+
+
+def _resolve_image_id(image_ref: str) -> str | None:
+    """Resolve the current local image ID for a configured image reference."""
+    try:
+        image = get_client().images.get(image_ref)
+    except Exception as exc:
+        logger.warning(
+            "sandbox.image resolve failed image=%s err=%s",
+            image_ref,
+            exc,
+        )
+        return None
+
+    image_id = getattr(image, "id", None)
+    if isinstance(image_id, str):
+        return image_id
+
+    attrs = getattr(image, "attrs", None)
+    if isinstance(attrs, dict):
+        for key in ("Id", "ID"):
+            value = attrs.get(key)
+            if isinstance(value, str):
+                return value
+    return None
+
+
 def _should_recreate_container(
     container: Any, expected_skill_sources: dict[str, str]
 ) -> tuple[bool, str]:
     """Decide whether an existing sandbox container must be recreated.
 
-    Recreate when configuration is unsafe/legacy or skill mounts drift:
+    Recreate when configuration is unsafe/legacy, skill mounts drift, or the
+    base sandbox image tag now points at a newer local image:
     - working dir is not ``/workspace``
     - full project mounts (e.g. ``/app/server`` or ``/app/web``) are present
     - ``/workspace`` mount is missing
     - mounted ``/workspace/skills/*`` sources differ from expected
+    - current container image differs from ``SANDBOX_BASE_IMAGE``
     """
+    settings = get_settings()
     workdir = _container_working_dir(container)
     try:
         mounts = _get_container_mounts(container)
@@ -488,6 +609,18 @@ def _should_recreate_container(
     mounted_skills = _mounted_skill_sources(container)
     if mounted_skills != expected_skill_sources:
         return True, "skill_mount_mismatch"
+    configured_image_ref = settings.SANDBOX_BASE_IMAGE
+    container_image_ref = _container_image_ref(container)
+    if container_image_ref and container_image_ref != configured_image_ref:
+        return True, "base_image_ref_mismatch"
+    configured_image_id = _resolve_image_id(configured_image_ref)
+    container_image_id = _container_image_id(container)
+    if (
+        configured_image_id is not None
+        and container_image_id is not None
+        and configured_image_id != container_image_id
+    ):
+        return True, "base_image_id_mismatch"
     return False, "ok"
 
 
@@ -586,6 +719,12 @@ def _ensure_sandbox(
     volumes = {workspace_host_dir: {"bind": "/workspace", "mode": "rw"}}
     volumes.update(skill_volumes)
     setup_cmd = "sleep infinity"
+    base_image_id = _resolve_image_id(settings.SANDBOX_BASE_IMAGE)
+    labels = {
+        "pivot.sandbox.base_image_ref": settings.SANDBOX_BASE_IMAGE,
+    }
+    if base_image_id is not None:
+        labels["pivot.sandbox.base_image_id"] = base_image_id
     create_started = time.perf_counter()
     try:
         container = get_client().containers.create(
@@ -600,6 +739,7 @@ def _ensure_sandbox(
             # Mount only the current agent workspace; never mount full project tree.
             volumes=volumes,
             environment={"PYTHONUNBUFFERED": "1"},
+            labels=labels,
         )
         create_ms = int((time.perf_counter() - create_started) * 1000)
         start_started = time.perf_counter()

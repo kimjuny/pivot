@@ -74,6 +74,82 @@ class LlmMultimodalAssemblyTestCase(unittest.TestCase):
             "data:image/png;base64,YWJj",
         )
 
+    def test_qwen_cache_normalizes_text_messages_and_marks_recent_blocks(
+        self,
+    ) -> None:
+        """Qwen block cache should keep text history structurally stable.
+
+        Why: rolling cache reuse depends on prior prompt prefixes being serialized
+        the same way across iterations, even after a message is no longer the last
+        message in the request.
+        """
+        llm = OpenAICompletionLLM(
+            endpoint="https://example.com/v1",
+            model="qwen-test",
+            api_key="secret",
+            cache_policy="qwen-completion-block-cache",
+        )
+        messages = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Iteration 1"},
+            {"role": "assistant", "content": "Thought 1"},
+            {"role": "user", "content": "Iteration 2"},
+            {"role": "assistant", "content": "Thought 2"},
+        ]
+
+        normalized_messages = llm._messages_with_qwen_cache_markers(messages)
+
+        self.assertEqual(normalized_messages[0]["content"][0]["text"], "System prompt")
+        self.assertNotIn(
+            "cache_control",
+            normalized_messages[0]["content"][0],
+        )
+        for index in range(1, len(normalized_messages)):
+            self.assertIsInstance(normalized_messages[index]["content"], list)
+            self.assertEqual(
+                normalized_messages[index]["content"][-1]["cache_control"],
+                {"type": "ephemeral"},
+            )
+
+    def test_qwen_stream_includes_usage_and_cache_reporting(self) -> None:
+        """Qwen streaming requests should ask for usage so cache hits are observable."""
+        llm = OpenAICompletionLLM(
+            endpoint="https://example.com/v1",
+            model="qwen-test",
+            api_key="secret",
+            cache_policy="qwen-completion-block-cache",
+        )
+        stream_response = Mock()
+        stream_response.raise_for_status.return_value = None
+        stream_response.iter_lines.return_value = [
+            (
+                b'data: {"id":"resp-1","choices":[{"index":0,"delta":{"role":"assistant","content":"done"}}]}'
+            ),
+            (
+                b'data: {"id":"resp-1","choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":20,"total_tokens":1220,"prompt_tokens_details":{"cached_tokens":900}}}'
+            ),
+            b"data: [DONE]",
+        ]
+        stream_response.__enter__ = Mock(return_value=stream_response)
+        stream_response.__exit__ = Mock(return_value=None)
+
+        with patch(
+            "app.llm.openai_completion_llm.requests.post", return_value=stream_response
+        ) as mocked_post:
+            chunks = list(
+                llm.chat_stream(
+                    [{"role": "system", "content": "System prompt"}],
+                )
+            )
+
+        payload = mocked_post.call_args.kwargs["json"]
+        self.assertTrue(payload["stream"])
+        self.assertEqual(
+            payload["stream_options"],
+            {"include_usage": True},
+        )
+        self.assertEqual(chunks[-1].usage.cached_input_tokens, 900)
+
     def test_openai_response_assembles_input_image_and_output_text_history(
         self,
     ) -> None:

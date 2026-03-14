@@ -31,6 +31,22 @@ const USER_KEY = 'pivot_auth_user';
 export const AUTH_EXPIRED_EVENT = 'pivot:auth-expired';
 
 /**
+ * Decode a JWT payload segment from base64url into UTF-8 text.
+ *
+ * Why: JWT uses base64url encoding without padding, while `atob()` expects
+ * standard base64 input. Normalizing here keeps auth checks reliable across
+ * browsers and token shapes.
+ */
+function decodeBase64Url(segment: string): string {
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const paddingLength = (4 - (normalized.length % 4)) % 4;
+  const padded = normalized.padEnd(normalized.length + paddingLength, '=');
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/**
  * Decode JWT token to extract payload.
  *
  * Returns null if token is invalid or cannot be decoded.
@@ -39,7 +55,7 @@ function decodeToken(token: string): { exp?: number; sub?: string } | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-    return JSON.parse(atob(parts[1])) as { exp?: number; sub?: string };
+    return JSON.parse(decodeBase64Url(parts[1])) as { exp?: number; sub?: string };
   } catch {
     return null;
   }
