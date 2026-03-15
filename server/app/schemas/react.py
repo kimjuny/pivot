@@ -40,6 +40,83 @@ class ReactChatRequest(AppBaseModel):
     )
 
 
+class ReactContextUsageRequest(AppBaseModel):
+    """Request schema for estimating current or next-turn ReAct context usage."""
+
+    agent_id: int = Field(..., description="Agent ID used to build the prompt")
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session ID used for session-memory prompt injection",
+    )
+    task_id: str | None = Field(
+        default=None,
+        description="Optional active task ID whose runtime messages should be measured",
+    )
+    draft_message: str = Field(
+        default="",
+        description="Current unsent composer text to include in the estimate",
+    )
+    file_ids: list[str] = Field(
+        default_factory=list,
+        description="Uploaded file IDs whose prompt blocks should be included",
+    )
+
+
+class ReactContextUsageResponse(AppBaseModel):
+    """Estimated prompt-context usage for the current composer or task."""
+
+    task_id: str | None = Field(
+        default=None,
+        description="Task ID used for estimation when measuring an active task",
+    )
+    session_id: str | None = Field(
+        default=None,
+        description="Session ID used for session-memory lookup",
+    )
+    estimation_mode: str = Field(
+        ...,
+        description=(
+            "Estimation mode such as next_turn_preview, active_task, or reply_preview"
+        ),
+    )
+    message_count: int = Field(
+        ...,
+        description="Number of messages included in the estimated prompt",
+    )
+    used_tokens: int = Field(
+        ...,
+        description="Estimated prompt tokens currently occupied",
+    )
+    remaining_tokens: int = Field(
+        ...,
+        description="Estimated prompt tokens remaining before max context",
+    )
+    max_context_tokens: int = Field(
+        ...,
+        description="Maximum context window declared by the configured LLM",
+    )
+    used_percent: int = Field(
+        ...,
+        description="Rounded percentage of the context window currently used",
+    )
+    remaining_percent: int = Field(
+        ...,
+        description="Rounded percentage of the context window remaining",
+    )
+    system_tokens: int = Field(
+        ...,
+        description="Estimated tokens contributed by the system prompt",
+    )
+    conversation_tokens: int = Field(
+        ...,
+        description="Estimated tokens contributed by non-system messages",
+    )
+    draft_tokens: int = Field(
+        ...,
+        description="Estimated tokens contributed by the unsent draft turn",
+    )
+
+
 class ReactStreamEventType(str, Enum):
     """Types of events in ReAct stream."""
 

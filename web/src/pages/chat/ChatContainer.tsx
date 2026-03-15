@@ -5,7 +5,9 @@ import {
   createSession,
   deleteSession,
   getFullSessionHistory,
+  getReactContextUsage,
   listSessions,
+  type ReactContextUsageSummary,
   type SessionListItem,
   type SessionResponse,
   API_BASE_URL,
@@ -13,6 +15,7 @@ import {
 import {
   AUTH_EXPIRED_EVENT,
   getAuthToken,
+  getStoredUser,
   isTokenValid,
 } from "@/contexts/auth-core";
 
@@ -73,7 +76,15 @@ function ChatContainer({
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
+    null,
+  );
+  const [contextUsage, setContextUsage] =
+    useState<ReactContextUsageSummary | null>(null);
+  const [isContextUsageLoading, setIsContextUsageLoading] =
+    useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const contextUsageRequestIdRef = useRef(0);
 
   const {
     pendingFiles,
@@ -119,6 +130,7 @@ function ChatContainer({
 
             setCurrentSessionId(freshSession.session_id);
             setReplyTaskId(null);
+            setActiveContextTaskId(null);
             setMessages([]);
             setSessions([
               freshSessionItem,
@@ -129,6 +141,7 @@ function ChatContainer({
           } else {
             const firstSessionId = latestSession.session_id;
             setCurrentSessionId(firstSessionId);
+            setActiveContextTaskId(null);
 
             try {
               const history = await getFullSessionHistory(firstSessionId);
@@ -142,6 +155,7 @@ function ChatContainer({
           }
         } else {
           setCurrentSessionId(null);
+          setActiveContextTaskId(null);
           setMessages([]);
         }
 
@@ -161,6 +175,108 @@ function ChatContainer({
     !isStreaming &&
     !hasUploadingFiles &&
     (inputMessage.trim().length > 0 || readyPendingFiles.length > 0);
+  const readyPendingFileIds = readyPendingFiles.map((file) => file.fileId);
+  const readyPendingFileIdsKey = readyPendingFileIds.join(",");
+
+  useEffect(() => {
+    if (isStreaming) {
+      return;
+    }
+    if (
+      !replyTaskId &&
+      inputMessage.trim().length === 0 &&
+      readyPendingFileIdsKey === "" &&
+      contextUsage !== null
+    ) {
+      return;
+    }
+
+    const draftFileIds = readyPendingFileIdsKey
+      ? readyPendingFileIdsKey.split(",")
+      : [];
+    const timer = window.setTimeout(() => {
+      const requestId = contextUsageRequestIdRef.current + 1;
+      contextUsageRequestIdRef.current = requestId;
+      setIsContextUsageLoading(true);
+
+      void getReactContextUsage({
+        agent_id: agentId,
+        session_id: currentSessionId,
+        task_id: replyTaskId,
+        draft_message: inputMessage,
+        file_ids: draftFileIds,
+      })
+        .then((usage) => {
+          if (contextUsageRequestIdRef.current === requestId) {
+            setContextUsage(usage);
+          }
+        })
+        .catch((contextError) => {
+          console.error("Failed to estimate context usage:", contextError);
+          if (contextUsageRequestIdRef.current === requestId) {
+            setContextUsage(null);
+          }
+        })
+        .finally(() => {
+          if (contextUsageRequestIdRef.current === requestId) {
+            setIsContextUsageLoading(false);
+          }
+        });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    agentId,
+    contextUsage,
+    currentSessionId,
+    inputMessage,
+    isStreaming,
+    readyPendingFileIdsKey,
+    replyTaskId,
+  ]);
+
+  useEffect(() => {
+    if (!isStreaming || !activeContextTaskId) {
+      return;
+    }
+
+    const runEstimate = () => {
+      const requestId = contextUsageRequestIdRef.current + 1;
+      contextUsageRequestIdRef.current = requestId;
+      setIsContextUsageLoading(true);
+
+      void getReactContextUsage({
+        agent_id: agentId,
+        session_id: currentSessionId,
+        task_id: activeContextTaskId,
+        draft_message: "",
+        file_ids: [],
+      })
+        .then((usage) => {
+          if (contextUsageRequestIdRef.current === requestId) {
+            setContextUsage(usage);
+          }
+        })
+        .catch((contextError) => {
+          console.error("Failed to estimate context usage:", contextError);
+          if (contextUsageRequestIdRef.current === requestId) {
+            setContextUsage(null);
+          }
+        })
+        .finally(() => {
+          if (contextUsageRequestIdRef.current === requestId) {
+            setIsContextUsageLoading(false);
+          }
+        });
+    };
+
+    runEstimate();
+    const intervalId = window.setInterval(() => {
+      runEstimate();
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeContextTaskId, agentId, currentSessionId, isStreaming]);
 
   /**
    * Creates a new explicit conversation and resets transient page-local state.
@@ -175,6 +291,7 @@ function ChatContainer({
       setCurrentSessionId(session.session_id);
       setMessages([]);
       setReplyTaskId(null);
+      setActiveContextTaskId(null);
       const sessionItem = toSessionListItem(session);
       setSessions((previous) => [
         sessionItem,
@@ -202,6 +319,7 @@ function ChatContainer({
     setCurrentSessionId(sessionId);
     setIsLoadingSession(true);
     setReplyTaskId(null);
+    setActiveContextTaskId(null);
     prepareForProgrammaticScroll();
     await clearPendingFiles();
 
@@ -230,12 +348,14 @@ function ChatContainer({
 
       if (sessionId === currentSessionId) {
         setReplyTaskId(null);
+        setActiveContextTaskId(null);
 
         if (remainingSessions.length > 0) {
           await handleSelectSession(remainingSessions[0].session_id);
         } else {
           await clearPendingFiles();
           setCurrentSessionId(null);
+          setActiveContextTaskId(null);
           setMessages([]);
           setIsInitialized(false);
         }
@@ -377,7 +497,7 @@ function ChatContainer({
         body: JSON.stringify({
           agent_id: agentId,
           message: userMessage.content,
-          user: "web-user",
+          user: getStoredUser()?.username ?? "web-user",
           task_id: requestTaskId,
           session_id: activeSessionId,
           file_ids: filesToSend.map((file) => file.fileId),
@@ -434,6 +554,7 @@ function ChatContainer({
 
             if (event.type === "skill_resolution_start") {
               currentTaskId = event.task_id;
+              setActiveContextTaskId(event.task_id);
               setMessages((previous) =>
                 previous.map((message) =>
                   message.id === assistantMessageId
@@ -513,6 +634,7 @@ function ChatContainer({
               }
 
               currentTaskId = event.task_id;
+              setActiveContextTaskId(event.task_id);
               const newRecursionSnapshot: RecursionRecord = {
                 uid: `live-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
                 iteration: event.iteration,
@@ -717,6 +839,7 @@ function ChatContainer({
                   endTime: event.timestamp,
                 };
               } else if (event.type === "task_complete") {
+                setActiveContextTaskId(null);
                 setMessages((previous) =>
                   previous.map((message) => {
                     if (message.id !== assistantMessageId) {
@@ -798,8 +921,10 @@ function ChatContainer({
       }
 
       setIsStreaming(false);
+      setActiveContextTaskId(null);
     } catch (streamError) {
       if (streamError instanceof Error && streamError.name === "AbortError") {
+        setActiveContextTaskId(null);
         const cancelTime = new Date().toISOString();
         setMessages((previous) =>
           previous.map((message) => {
@@ -837,6 +962,7 @@ function ChatContainer({
           }),
         );
       } else {
+        setActiveContextTaskId(null);
         const normalizedError =
           streamError instanceof Error
             ? streamError
@@ -948,6 +1074,8 @@ function ChatContainer({
           isStreaming={isStreaming}
           isConversationEmpty={isConversationEmpty}
           hasUploadingFiles={hasUploadingFiles}
+          contextUsage={contextUsage}
+          isContextUsageLoading={isContextUsageLoading}
           supportsImageInput={supportsImageInput}
           imageInputRef={imageInputRef}
           documentInputRef={documentInputRef}

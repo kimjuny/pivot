@@ -23,9 +23,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import type { ReactContextUsageSummary } from "@/utils/api";
 
 import type { PendingUploadItem } from "../types";
 import { AttachmentList } from "./AttachmentList";
+import { ContextUsageRing } from "./ContextUsageRing";
 
 interface ChatComposerProps {
   inputMessage: string;
@@ -36,6 +38,8 @@ interface ChatComposerProps {
   isStreaming: boolean;
   isConversationEmpty: boolean;
   hasUploadingFiles: boolean;
+  contextUsage: ReactContextUsageSummary | null;
+  isContextUsageLoading: boolean;
   supportsImageInput: boolean;
   imageInputRef: RefObject<HTMLInputElement>;
   documentInputRef: RefObject<HTMLInputElement>;
@@ -62,6 +66,8 @@ export function ChatComposer({
   isStreaming,
   isConversationEmpty,
   hasUploadingFiles,
+  contextUsage,
+  isContextUsageLoading,
   supportsImageInput,
   imageInputRef,
   documentInputRef,
@@ -172,6 +178,10 @@ export function ChatComposer({
                 <span>Processing attachments...</span>
               </div>
             )}
+            <ContextUsageRing
+              usage={contextUsage}
+              isLoading={isContextUsageLoading}
+            />
             {isStreaming ? (
               <Button
                 type="button"

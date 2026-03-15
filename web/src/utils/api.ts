@@ -960,6 +960,24 @@ export interface FullSessionHistoryResponse {
 }
 
 /**
+ * Prompt-context usage summary returned by the ReAct context estimator API.
+ */
+export interface ReactContextUsageSummary {
+  task_id: string | null;
+  session_id: string | null;
+  estimation_mode: string;
+  message_count: number;
+  used_tokens: number;
+  remaining_tokens: number;
+  max_context_tokens: number;
+  used_percent: number;
+  remaining_percent: number;
+  system_tokens: number;
+  conversation_tokens: number;
+  draft_tokens: number;
+}
+
+/**
  * Get full session history with recursion details.
  *
  * @param sessionId - Session UUID
@@ -967,6 +985,25 @@ export interface FullSessionHistoryResponse {
  */
 export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
   return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
+};
+
+/**
+ * Estimate the current ReAct prompt-window usage for the chat composer.
+ *
+ * @param payload - Agent/session/task identifiers plus the current draft input
+ * @returns Promise resolving to the estimated context usage summary
+ */
+export const getReactContextUsage = async (payload: {
+  agent_id: number;
+  session_id?: string | null;
+  task_id?: string | null;
+  draft_message?: string;
+  file_ids?: string[];
+}): Promise<ReactContextUsageSummary> => {
+  return apiRequest('/react/context-usage', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<ReactContextUsageSummary>;
 };
 
 /**

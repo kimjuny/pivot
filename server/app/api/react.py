@@ -26,8 +26,15 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
     make_programmatic_tool_call,
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
-from app.schemas.react import ReactChatRequest, ReactStreamEvent, ReactStreamEventType
+from app.schemas.react import (
+    ReactChatRequest,
+    ReactContextUsageRequest,
+    ReactContextUsageResponse,
+    ReactStreamEvent,
+    ReactStreamEventType,
+)
 from app.services.file_service import FileService
+from app.services.react_context_service import ReactContextUsageService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_memory_service import SessionMemoryService
 from app.services.skill_service import (
@@ -39,7 +46,7 @@ from app.services.workspace_service import (
     ensure_agent_workspace,
     load_all_user_tool_metadata,
 )
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -598,6 +605,42 @@ async def react_chat_stream(
                     logger.error(f"Failed to mark task as cancelled: {e}")
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post(
+    "/react/context-usage",
+    response_model=ReactContextUsageResponse,
+)
+async def estimate_react_context_usage(
+    request: ReactContextUsageRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Estimate the prompt-context usage for the current chat composer.
+
+    Args:
+        request: Context-estimation request payload.
+        db: Database session dependency.
+        current_user: Authenticated user requesting the estimate.
+
+    Returns:
+        Estimated prompt-window usage for the requested chat surface.
+
+    Raises:
+        HTTPException: If the agent, task, or uploaded files cannot be resolved.
+    """
+    service = ReactContextUsageService(db)
+    try:
+        return service.estimate(
+            agent_id=request.agent_id,
+            username=current_user.username,
+            session_id=request.session_id,
+            task_id=request.task_id,
+            draft_message=request.draft_message,
+            file_ids=request.file_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/react/tasks/{task_id}")
