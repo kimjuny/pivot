@@ -36,6 +36,11 @@ class Session(SQLModel, table=True):
         object: JSON string containing session object (purpose) info.
         chat_history: JSON string containing the complete chat history.
         chat_history_version: Version number for chat_history schema.
+        react_llm_messages: Serialized OpenAI-style message list reused across
+            tasks in the same session.
+        react_pending_action_result: Serialized action result injected into the
+            next recursion payload while a task is active.
+        react_llm_cache_state: Serialized provider-specific cache linkage state.
         created_at: UTC timestamp when session was created.
         updated_at: UTC timestamp when session was last updated.
     """
@@ -63,6 +68,27 @@ class Session(SQLModel, table=True):
     chat_history_version: int = Field(
         default=CHAT_HISTORY_VERSION,
         description="Version of chat_history schema",
+    )
+    react_llm_messages: str = Field(
+        default="[]",
+        description=(
+            "Serialized list[message] reused across tasks in the same session. "
+            "Messages are appended incrementally to maximize prompt cache reuse."
+        ),
+    )
+    react_pending_action_result: str | None = Field(
+        default=None,
+        description=(
+            "Serialized action result payload to inject into the next recursion "
+            "user message while a task is active."
+        ),
+    )
+    react_llm_cache_state: str = Field(
+        default="{}",
+        description=(
+            "Serialized protocol-specific cache state used by LLM transport "
+            "(e.g. previous_response_id chaining)."
+        ),
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -1,9 +1,36 @@
-## ReAct机制
+## ReAct机制概述
+
+```mermaid
+stateDiagram-v2
+state if_first_time_in_session <<choice>>
+
+[*] --> if_first_time_in_session
+if_first_time_in_session --> [message]system_prompt: if this is the first task for the user input
+if_first_time_in_session --> skill_search: if this isn't
+
+[message]system_prompt --> skill_search
+skill_search --> skill_memory_tools_injection
+skill_memory_tools_injection --> [message]user_prompt
+[message]user_prompt --> RECURSION
+state RECURSION {
+  [message][recursion_1]prepare --> [message][recursion_1]user
+  [message][recursion_1]user --> [message][recursion_1]assistant
+  [message][recursion_1]assistant --> [message][recursion_1]execute&conclude
+}
+
+state if_action_type_is_answer <<choice>>
+
+RECURSION --> if_action_type_is_answer
+if_action_type_is_answer --> [*]: action_type is ANSWER means the task is completed
+if_action_type_is_answer --> RECURSION: not ANSWER
+```
+
+## ReAct机制模拟
 
 以下为一种兼容目前所有主流LLM厂商缓存机制的messages结构。在task开始时构建，在task结束时清空。
 
 **提前准备**
-照常运行原来的skill寻找步骤，寻找合适的skill
+运行的skill寻找步骤，寻找合适的skill
 
 **第一轮 recursion：**
 【prepare】

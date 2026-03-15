@@ -7,7 +7,8 @@ from typing import Any
 from app.orchestration.tool.manager import ToolManager
 
 _TEMPLATE_DIR = Path(__file__).parent
-_MONO_TEMPLATE_PATH = _TEMPLATE_DIR / "system_prompt.md"
+_SYSTEM_TEMPLATE_PATH = _TEMPLATE_DIR / "system_prompt.md"
+_USER_TEMPLATE_PATH = _TEMPLATE_DIR / "user_prompt.md"
 
 
 def _read_template(path: Path) -> str:
@@ -28,39 +29,82 @@ def _read_template(path: Path) -> str:
         raise RuntimeError(f"Failed to load ReAct template: {path} not found") from e
 
 
-_REACT_SYSTEM_PROMPT_MONO = _read_template(_MONO_TEMPLATE_PATH)
+_REACT_SYSTEM_PROMPT = _read_template(_SYSTEM_TEMPLATE_PATH)
+_REACT_USER_PROMPT = _read_template(_USER_TEMPLATE_PATH)
 
 
 def build_runtime_system_prompt(
+) -> str:
+    """Build the stable system prompt used once for an entire session.
+
+    Returns:
+        System prompt text containing only stable role/schema guidance.
+    """
+    return _REACT_SYSTEM_PROMPT
+
+
+def build_runtime_user_prompt(
     tool_manager: ToolManager | None = None,
     session_memory: dict[str, Any] | None = None,
     skills: str = "",
 ) -> str:
-    """Build a single system prompt used for an entire task lifecycle.
-
-    This prompt intentionally excludes per-recursion mutable fields so that task
-    execution can append user/assistant messages incrementally without mutating
-    existing prompt tokens, which improves provider-side context cache hit rates.
+    """Build the task bootstrap user prompt injected once per task.
 
     Args:
-        tool_manager: Optional tool manager to get available tools description.
-        session_memory: Optional session memory dictionary for context injection.
+        tool_manager: Optional tool manager to describe available tools.
+        session_memory: Optional session memory dictionary for prompt injection.
         skills: Selected skills full-text block for prompt injection.
 
     Returns:
-        System prompt text with tools/session-memory/skills injected.
+        Rendered user prompt text with task-scoped dynamic context injected.
     """
     tools_description = ""
     if tool_manager:
         tools_description = tool_manager.to_text_catalog()
 
-    if session_memory:
-        session_memory_json = json.dumps(session_memory, ensure_ascii=False, indent=2)
-    else:
-        session_memory_json = json.dumps({}, ensure_ascii=False, indent=2)
+    session_memory_json = json.dumps(
+        session_memory or {},
+        ensure_ascii=False,
+        indent=2,
+    )
 
     return (
-        _REACT_SYSTEM_PROMPT_MONO.replace("{{tools_description}}", tools_description)
+        _REACT_USER_PROMPT.replace("{{tools_description}}", tools_description)
         .replace("{{session_memory}}", session_memory_json)
         .replace("{{skills}}", skills)
     )
+
+
+def build_runtime_task_bootstrap_message(user_prompt: str) -> dict[str, Any]:
+    """Build the task-opening user prompt message.
+
+    Args:
+        user_prompt: Rendered task bootstrap prompt.
+
+    Returns:
+        One chat message dictionary ready for persistence or transport.
+    """
+    return {"role": "user", "content": user_prompt}
+
+
+def build_runtime_payload_message(
+    payload: dict[str, Any],
+    *,
+    attachments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build one runtime payload user message.
+
+    Args:
+        payload: Structured recursion payload injected into the user turn.
+        attachments: Optional multimodal blocks appended after the text payload.
+
+    Returns:
+        One chat message dictionary ready for persistence or transport.
+    """
+    message_content: str | list[dict[str, Any]] = json.dumps(
+        payload,
+        ensure_ascii=False,
+    )
+    if attachments:
+        message_content = [{"type": "text", "text": message_content}, *attachments]
+    return {"role": "user", "content": message_content}

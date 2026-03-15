@@ -11,7 +11,12 @@ from app.llm.token_estimator import estimate_messages_tokens
 from app.models.agent import Agent
 from app.models.react import ReactTask
 from app.orchestration.react.context import ReactContext
-from app.orchestration.react.prompt_template import build_runtime_system_prompt
+from app.orchestration.react.prompt_template import (
+    build_runtime_payload_message,
+    build_runtime_system_prompt,
+    build_runtime_task_bootstrap_message,
+    build_runtime_user_prompt,
+)
 from app.orchestration.tool import get_tool_manager
 from app.orchestration.tool.manager import ToolManager
 from app.schemas.react import ReactContextUsageResponse
@@ -87,54 +92,61 @@ class ReactContextUsageService:
         )
         effective_session_id = session_id or (task.session_id if task else None)
 
-        messages: list[dict[str, Any]]
-        estimation_mode = "next_turn_preview"
+        base_messages = self._load_session_runtime_messages(
+            session_id=effective_session_id,
+        )
+        messages = [dict(message) for message in base_messages]
+        estimation_mode = "session_runtime"
         draft_tokens = 0
+        bootstrap_tokens = 0
+        preview_tokens = 0
+        includes_task_bootstrap = False
 
         if task is not None:
             runtime_state = self.runtime_service.load(task)
             messages = [dict(message) for message in runtime_state.messages]
-            if messages:
-                estimation_mode = "active_task"
-                if draft_message or attachment_blocks:
-                    draft_message_payload = self._build_task_user_payload(
-                        task=task,
-                        draft_message=draft_message,
-                        pending_action_result=runtime_state.pending_action_result,
-                    )
-                    draft_message_object = self._build_user_message(
-                        payload=draft_message_payload,
-                        attachment_blocks=attachment_blocks,
-                    )
-                    messages.append(draft_message_object)
-                    draft_tokens = estimate_messages_tokens([draft_message_object])
-                    estimation_mode = (
-                        "reply_preview"
-                        if task.status == "waiting_input"
-                        else "next_iteration_preview"
-                    )
-            else:
-                messages = self._build_new_task_messages(
-                    agent=agent,
-                    username=username,
-                    session_id=effective_session_id,
+            base_messages = [dict(message) for message in runtime_state.messages]
+            estimation_mode = "active_task"
+            if draft_message or attachment_blocks:
+                draft_message_payload = self._build_task_user_payload(
+                    task=task,
                     draft_message=draft_message,
-                    attachment_blocks=attachment_blocks,
+                    pending_action_result=runtime_state.pending_action_result,
                 )
-                if len(messages) > 1:
-                    draft_tokens = estimate_messages_tokens([messages[-1]])
-        else:
-            messages = self._build_new_task_messages(
+                draft_message_object = build_runtime_payload_message(
+                    draft_message_payload,
+                    attachments=attachment_blocks,
+                )
+                messages.append(draft_message_object)
+                draft_tokens = estimate_messages_tokens([draft_message_object])
+                estimation_mode = (
+                    "reply_preview"
+                    if task.status == "waiting_input"
+                    else "next_iteration_preview"
+                )
+        elif draft_message or attachment_blocks:
+            preview_messages = self._build_new_task_preview_messages(
                 agent=agent,
                 username=username,
                 session_id=effective_session_id,
                 draft_message=draft_message,
                 attachment_blocks=attachment_blocks,
+                include_system_prompt=(
+                    not messages or messages[0].get("role") != "system"
+                ),
             )
-            if len(messages) > 1:
-                draft_tokens = estimate_messages_tokens([messages[-1]])
+            if preview_messages:
+                messages.extend(preview_messages)
+                includes_task_bootstrap = True
+                if len(preview_messages) >= 1:
+                    bootstrap_tokens = estimate_messages_tokens([preview_messages[0]])
+                if len(preview_messages) >= 2:
+                    draft_tokens = estimate_messages_tokens([preview_messages[1]])
+                estimation_mode = "next_turn_preview"
 
+        session_tokens = estimate_messages_tokens(base_messages)
         used_tokens = estimate_messages_tokens(messages)
+        preview_tokens = max(used_tokens - session_tokens, 0)
         max_context_tokens = max(int(llm_config.max_context or 0), 0)
         remaining_tokens = max(max_context_tokens - used_tokens, 0)
         used_percent = self._to_percent(used_tokens, max_context_tokens)
@@ -150,6 +162,7 @@ class ReactContextUsageService:
             session_id=effective_session_id,
             estimation_mode=estimation_mode,
             message_count=len(messages),
+            session_message_count=len(base_messages),
             used_tokens=used_tokens,
             remaining_tokens=remaining_tokens,
             max_context_tokens=max_context_tokens,
@@ -157,7 +170,11 @@ class ReactContextUsageService:
             remaining_percent=remaining_percent,
             system_tokens=system_tokens,
             conversation_tokens=conversation_tokens,
+            session_tokens=session_tokens,
+            preview_tokens=preview_tokens,
+            bootstrap_tokens=bootstrap_tokens,
             draft_tokens=draft_tokens,
+            includes_task_bootstrap=includes_task_bootstrap,
         )
 
     @staticmethod
@@ -191,7 +208,7 @@ class ReactContextUsageService:
             raise ValueError("Task does not belong to the current user.")
         return task
 
-    def _build_new_task_messages(
+    def _build_new_task_preview_messages(
         self,
         *,
         agent: Agent,
@@ -199,41 +216,41 @@ class ReactContextUsageService:
         session_id: str | None,
         draft_message: str,
         attachment_blocks: list[dict[str, Any]],
+        include_system_prompt: bool,
     ) -> list[dict[str, Any]]:
-        """Build the initial message list for a brand-new task preview."""
-        system_prompt = self._build_system_prompt(
+        """Build preview messages for the next new task in a session."""
+        messages: list[dict[str, Any]] = []
+        if include_system_prompt:
+            messages.append({"role": "system", "content": build_runtime_system_prompt()})
+
+        user_prompt = self._build_user_prompt(
             agent=agent,
             username=username,
             session_id=session_id,
         )
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-        ]
-
-        if draft_message or attachment_blocks:
-            payload = {
-                "trace_id": "preview",
-                "iteration": 1,
-                "user_intent": draft_message,
-                "current_plan": [],
-            }
-            messages.append(
-                self._build_user_message(
-                    payload=payload,
-                    attachment_blocks=attachment_blocks,
-                )
+        messages.append(build_runtime_task_bootstrap_message(user_prompt))
+        payload = {
+            "trace_id": "preview",
+            "iteration": 1,
+            "user_intent": draft_message,
+            "current_plan": [],
+        }
+        messages.append(
+            build_runtime_payload_message(
+                payload,
+                attachments=attachment_blocks,
             )
-
+        )
         return messages
 
-    def _build_system_prompt(
+    def _build_user_prompt(
         self,
         *,
         agent: Agent,
         username: str,
         session_id: str | None,
     ) -> str:
-        """Build the system prompt used for next-turn context previews."""
+        """Build the task bootstrap user prompt used for next-turn previews."""
         tool_manager = self._build_request_tool_manager(
             username=username,
             agent=agent,
@@ -243,7 +260,7 @@ class ReactContextUsageService:
             session_memory = SessionMemoryService(self.db).get_full_session_memory_dict(
                 session_id
             )
-        return build_runtime_system_prompt(
+        return build_runtime_user_prompt(
             tool_manager=tool_manager,
             session_memory=session_memory,
             skills="",
@@ -334,14 +351,19 @@ class ReactContextUsageService:
     ) -> dict[str, Any]:
         """Build the next user payload using the task's current plan context."""
         context = ReactContext.from_task(task, self.db)
+        effective_action_result = self._with_clarify_reply_preview(
+            pending_action_result=pending_action_result,
+            reply=draft_message,
+            task=task,
+        )
         payload: dict[str, Any] = {
             "trace_id": "preview",
             "iteration": task.iteration + 1,
-            "user_intent": draft_message or task.user_intent,
+            "user_intent": task.user_intent,
             "current_plan": self._build_current_plan_payload(context),
         }
-        if pending_action_result is not None:
-            payload["action_result"] = pending_action_result
+        if effective_action_result is not None:
+            payload["action_result"] = effective_action_result
         return payload
 
     def _build_current_plan_payload(
@@ -384,23 +406,51 @@ class ReactContextUsageService:
             )
         return current_plan
 
-    @staticmethod
-    def _build_user_message(
+    def _load_session_runtime_messages(
+        self,
         *,
-        payload: dict[str, Any],
-        attachment_blocks: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Build one user message matching the runtime multimodal payload shape."""
-        message_content: str | list[dict[str, Any]] = json.dumps(
-            payload,
-            ensure_ascii=False,
-        )
-        if attachment_blocks:
-            message_content = [
-                {"type": "text", "text": message_content},
-                *attachment_blocks,
-            ]
-        return {"role": "user", "content": message_content}
+        session_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Load persisted session runtime messages when a session exists."""
+        if not session_id:
+            return []
+        try:
+            runtime_state = self.runtime_service.load_session(session_id)
+        except RuntimeError:
+            return []
+        return [dict(message) for message in runtime_state.messages]
+
+    @staticmethod
+    def _with_clarify_reply_preview(
+        *,
+        pending_action_result: list[dict[str, Any]] | None,
+        reply: str,
+        task: ReactTask,
+    ) -> list[dict[str, Any]] | None:
+        """Project the draft clarify reply into the pending action_result preview.
+
+        Why: the persisted runtime state does not include the user's unsent
+        clarify reply yet, but the composer preview should reflect the exact
+        payload shape that will be submitted once the user sends it.
+        """
+        if not pending_action_result:
+            return None
+        if task.status != "waiting_input" or not reply:
+            return pending_action_result
+
+        preview_results: list[dict[str, Any]] = []
+        for item in pending_action_result:
+            if not isinstance(item, dict):
+                continue
+            preview_item = dict(item)
+            result_value = preview_item.get("result")
+            if isinstance(result_value, dict):
+                preview_item["result"] = {
+                    **result_value,
+                    "reply": reply,
+                }
+            preview_results.append(preview_item)
+        return preview_results
 
     @staticmethod
     def _to_percent(used_tokens: int, max_context_tokens: int) -> int:

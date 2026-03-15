@@ -83,6 +83,10 @@ class ReactContextUsageResponse(AppBaseModel):
         ...,
         description="Number of messages included in the estimated prompt",
     )
+    session_message_count: int = Field(
+        ...,
+        description="Number of persisted session-runtime messages before preview additions",
+    )
     used_tokens: int = Field(
         ...,
         description="Estimated prompt tokens currently occupied",
@@ -111,9 +115,25 @@ class ReactContextUsageResponse(AppBaseModel):
         ...,
         description="Estimated tokens contributed by non-system messages",
     )
+    session_tokens: int = Field(
+        ...,
+        description="Estimated tokens already occupied by persisted session-runtime messages",
+    )
+    preview_tokens: int = Field(
+        ...,
+        description="Estimated tokens added by the current unsent preview over the persisted session state",
+    )
+    bootstrap_tokens: int = Field(
+        ...,
+        description="Estimated tokens contributed by the once-per-task user_prompt bootstrap message",
+    )
     draft_tokens: int = Field(
         ...,
         description="Estimated tokens contributed by the unsent draft turn",
+    )
+    includes_task_bootstrap: bool = Field(
+        ...,
+        description="Whether the estimate includes a once-per-task user_prompt bootstrap message",
     )
 
 

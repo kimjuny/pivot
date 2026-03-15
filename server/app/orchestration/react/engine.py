@@ -31,7 +31,7 @@ from sqlmodel import Session
 
 from .context import ReactContext
 from .parser import PARSE_RETRY_INSTRUCTION, PARSE_RETRY_LIMIT, parse_react_output
-from .prompt_template import build_runtime_system_prompt
+from .prompt_template import build_runtime_system_prompt, build_runtime_user_prompt
 
 if TYPE_CHECKING:
     from .types import ParsedReactDecision
@@ -556,8 +556,9 @@ class ReactEngine:
         recursion = self.state_service.start_recursion(task, trace_id)
 
         # Call LLM WITHOUT tools parameter (using prompt-based approach).
-        # Tools are described in the system prompt, and LLM returns tool calls
-        # in action.output.
+        # Stable schema rules live in the session-level system prompt, while the
+        # task-scoped tool/session-memory/skills catalog is injected once via the
+        # task bootstrap user prompt before recursion begins.
         try:
             token_counter = self._new_token_counter()
             response = None
@@ -811,7 +812,8 @@ class ReactEngine:
 
         Args:
             task: The ReactTask to execute.
-            selected_skills_text: Selected skill markdown block injected in system prompt.
+            selected_skills_text: Selected skill markdown block injected in the
+                once-per-task bootstrap user prompt.
             turn_user_message: User input of the current turn (used for chat history).
             turn_files: Uploaded file summaries for chat history and prompting.
             turn_file_blocks: Neutral multimodal content blocks for this turn.
@@ -841,14 +843,30 @@ class ReactEngine:
 
         runtime_state = self.runtime_service.initialize(
             task,
-            build_runtime_system_prompt(
-                tool_manager=self.tool_manager,
-                session_memory=session_memory_dict,
-                skills=selected_skills_text,
-            ),
+            build_runtime_system_prompt(),
         )
         logged_message_count = len(runtime_state.messages)
         pending_turn_file_blocks = turn_file_blocks
+
+        if task.iteration == 0:
+            runtime_state = self.runtime_service.append_task_bootstrap_prompt(
+                task,
+                build_runtime_user_prompt(
+                    tool_manager=self.tool_manager,
+                    session_memory=session_memory_dict,
+                    skills=selected_skills_text,
+                ),
+            )
+            self._log_messages_pretty(
+                messages=runtime_state.messages,
+                task_id=task.task_id,
+                iteration=task.iteration + 1,
+                trace_id="task-bootstrap",
+                phase="send",
+                start_index=logged_message_count,
+                iteration_message_start=0,
+            )
+            logged_message_count = len(runtime_state.messages)
 
         try:
             while task.iteration < task.max_iteration:
@@ -858,7 +876,7 @@ class ReactEngine:
                 if self.cancelled:
                     logger.info(f"Task {task.task_id} cancelled, exiting loop")
                     self.state_service.mark_cancelled(task)
-                    self.runtime_service.clear(task)
+                    self.runtime_service.clear_task_state(task)
                     break
                 # Load current context
                 context = self.state_service.load_context(task)
@@ -906,7 +924,9 @@ class ReactEngine:
                     llm_chat_kwargs["_pivot_previous_response_id"] = (
                         runtime_state.previous_response_id
                     )
-                    messages_for_llm = runtime_state.messages[-1:]
+                    messages_for_llm = self.runtime_service.get_incremental_messages(
+                        task
+                    )
 
                 # Execute recursion against the fully accumulated message history.
                 token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None
@@ -1227,7 +1247,7 @@ class ReactEngine:
 
                     # Task complete
                     self.state_service.mark_completed(task)
-                    self.runtime_service.clear(task)
+                    self.runtime_service.clear_task_state(task)
 
                     yield {
                         "type": "task_complete",
@@ -1280,7 +1300,10 @@ class ReactEngine:
                             error_msg,
                         )
                         self.state_service.mark_failed(task)
-                        self.runtime_service.clear(task)
+                        self.runtime_service.clear_task_state(
+                            task,
+                            rollback_last_user_message=not rollback_messages,
+                        )
                         break
 
                     # For malformed JSON we roll back this recursion from the LLM
@@ -1295,7 +1318,7 @@ class ReactEngine:
             # Max iteration reached
             if task.iteration >= task.max_iteration and task.status == "running":
                 self.state_service.mark_failed(task)
-                self.runtime_service.clear(task)
+                self.runtime_service.clear_task_state(task)
 
                 yield {
                     "type": "error",
@@ -1312,7 +1335,10 @@ class ReactEngine:
                 task.iteration,
             )
             self.state_service.mark_failed(task)
-            self.runtime_service.clear(task)
+            self.runtime_service.clear_task_state(
+                task,
+                rollback_last_user_message=True,
+            )
             error_message = str(e) or repr(e)
 
             yield {

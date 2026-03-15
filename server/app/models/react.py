@@ -28,9 +28,6 @@ class ReactTask(SQLModel, table=True):
         user: Username of the user who initiated the task.
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
-        llm_messages: Serialized OpenAI-style message list used during recursion.
-        pending_action_result: Serialized action result to inject into next user message.
-        llm_cache_state: Serialized runtime cache state for protocol-specific caching.
         skill_selection_result: Serialized skill resolution summary payload.
         status: Current status (pending, running, completed, failed).
         iteration: Current number of recursion cycles executed.
@@ -52,27 +49,6 @@ class ReactTask(SQLModel, table=True):
     user: str = Field(index=True, description="Username")
     user_message: str = Field(description="Original user input")
     user_intent: str = Field(description="Task user intent")
-    llm_messages: str = Field(
-        default="[]",
-        description=(
-            "Serialized list[message] sent to LLM during this task. "
-            "Messages are appended per recursion to maximize prompt cache reuse."
-        ),
-    )
-    pending_action_result: str | None = Field(
-        default=None,
-        description=(
-            "Serialized action result payload to inject into the next recursion "
-            "user message as action_result."
-        ),
-    )
-    llm_cache_state: str = Field(
-        default="{}",
-        description=(
-            "Serialized protocol-specific cache state used by LLM transport "
-            "(e.g., response previous_response_id chaining)."
-        ),
-    )
     skill_selection_result: str | None = Field(
         default=None,
         description=(

@@ -6,10 +6,11 @@ with recursive state machine execution.
 
 from .context import ReactContext
 from .engine import ReactEngine
-from .prompt_template import build_runtime_system_prompt
+from .prompt_template import build_runtime_system_prompt, build_runtime_user_prompt
 
 __all__ = [
     "ReactContext",
     "ReactEngine",
     "build_runtime_system_prompt",
+    "build_runtime_user_prompt",
 ]

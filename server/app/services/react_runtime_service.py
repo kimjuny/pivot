@@ -7,7 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.react import ReactTask
-from sqlmodel import Session as DBSession
+from app.models.session import Session
+from app.orchestration.react.prompt_template import (
+    build_runtime_payload_message,
+    build_runtime_task_bootstrap_message,
+)
+from sqlmodel import Session as DBSession, select
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +36,8 @@ class ReactRuntimeService:
     """Encapsulates persistence of task-level runtime prompt state.
 
     This service exists so the orchestration loop does not need to know how the
-    runtime state is serialized on `ReactTask`, while still keeping the current
-    schema unchanged until a later schema-cleanup phase.
+    runtime state is serialized on `Session`, while still keeping state
+    mutations centralized and easy to reason about.
     """
 
     def __init__(self, db: DBSession) -> None:
@@ -52,10 +57,30 @@ class ReactRuntimeService:
         Returns:
             A normalized runtime state snapshot.
         """
+        session = self._get_session_or_raise(task)
         return TaskRuntimeState(
-            messages=self._load_messages(task),
-            pending_action_result=self._load_pending_action_result(task),
-            previous_response_id=self._load_previous_response_id(task),
+            messages=self._load_messages(session),
+            pending_action_result=self._load_pending_action_result(session),
+            previous_response_id=self._load_previous_response_id(session),
+        )
+
+    def load_session(self, session_id: str) -> TaskRuntimeState:
+        """Load runtime state directly from a session identifier.
+
+        Args:
+            session_id: Session whose runtime state should be loaded.
+
+        Returns:
+            A normalized runtime state snapshot.
+
+        Raises:
+            RuntimeError: If the session does not exist.
+        """
+        session = self._get_session_by_id_or_raise(session_id)
+        return TaskRuntimeState(
+            messages=self._load_messages(session),
+            pending_action_result=self._load_pending_action_result(session),
+            previous_response_id=self._load_previous_response_id(session),
         )
 
     def initialize(
@@ -72,12 +97,33 @@ class ReactRuntimeService:
         Returns:
             The initialized runtime state.
         """
+        session = self._get_session_or_raise(task)
         state = self.load(task)
-        if state.messages:
+        if state.messages and state.messages[0].get("role") == "system":
             return state
 
-        state.messages = [{"role": "system", "content": system_prompt}]
-        self._persist_state(task, state)
+        state.messages = [{"role": "system", "content": system_prompt}, *state.messages]
+        self._persist_state(session, state)
+        return state
+
+    def append_task_bootstrap_prompt(
+        self,
+        task: ReactTask,
+        user_prompt: str,
+    ) -> TaskRuntimeState:
+        """Append the task-opening user prompt and persist it.
+
+        Args:
+            task: Task whose runtime state should be updated.
+            user_prompt: Rendered dynamic user prompt for the new task.
+
+        Returns:
+            The updated runtime state.
+        """
+        state = self.load(task)
+        state.messages.append(build_runtime_task_bootstrap_message(user_prompt))
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
         return state
 
     def append_user_payload(
@@ -97,17 +143,11 @@ class ReactRuntimeService:
             The updated runtime state.
         """
         state = self.load(task)
-        message_content: str | list[dict[str, Any]] = json.dumps(
-            payload, ensure_ascii=False
+        state.messages.append(
+            build_runtime_payload_message(payload, attachments=attachments)
         )
-        if attachments:
-            message_content = [
-                {"type": "text", "text": message_content},
-                *attachments,
-            ]
-
-        state.messages.append({"role": "user", "content": message_content})
-        self._persist_state(task, state)
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
         return state
 
     def append_assistant_message(
@@ -126,7 +166,8 @@ class ReactRuntimeService:
         """
         state = self.load(task)
         state.messages.append({"role": "assistant", "content": content})
-        self._persist_state(task, state)
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
         return state
 
     def rollback_last_user_message(self, task: ReactTask) -> TaskRuntimeState:
@@ -141,7 +182,8 @@ class ReactRuntimeService:
         state = self.load(task)
         if state.messages and state.messages[-1].get("role") == "user":
             state.messages.pop()
-            self._persist_state(task, state)
+            session = self._get_session_or_raise(task)
+            self._persist_state(session, state)
         return state
 
     def set_next_action_result(
@@ -160,7 +202,8 @@ class ReactRuntimeService:
         """
         state = self.load(task)
         state.pending_action_result = action_result
-        self._persist_state(task, state)
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
         return state
 
     def set_previous_response_id(
@@ -179,36 +222,77 @@ class ReactRuntimeService:
         """
         state = self.load(task)
         state.previous_response_id = response_id.strip() if response_id else None
-        self._persist_state(task, state)
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
         return state
 
-    def clear(self, task: ReactTask) -> None:
-        """Clear all ephemeral runtime state for a finished task.
+    def clear_task_state(
+        self,
+        task: ReactTask,
+        *,
+        preserve_cache_state: bool = True,
+        rollback_last_user_message: bool = False,
+    ) -> TaskRuntimeState:
+        """Clear task-local runtime state while preserving session history.
 
         Args:
             task: Task whose runtime state should be reset.
-        """
-        state = TaskRuntimeState(
-            messages=[],
-            pending_action_result=None,
-            previous_response_id=None,
-        )
-        self._persist_state(task, state)
+            preserve_cache_state: Whether provider cache linkage should survive.
+            rollback_last_user_message: Whether to drop a dangling trailing user
+                message before clearing task-local state.
 
-    def _persist_state(self, task: ReactTask, state: TaskRuntimeState) -> None:
-        """Write a normalized runtime state back into `ReactTask`.
+        Returns:
+            The updated runtime state.
+        """
+        state = self.load(task)
+        if (
+            rollback_last_user_message
+            and state.messages
+            and state.messages[-1].get("role") == "user"
+        ):
+            state.messages.pop()
+        state.pending_action_result = None
+        if not preserve_cache_state:
+            state.previous_response_id = None
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
+        return state
+
+    def get_incremental_messages(
+        self,
+        task: ReactTask,
+    ) -> list[dict[str, Any]]:
+        """Return messages added after the latest assistant reply.
 
         Args:
-            task: Task row to update.
+            task: Task whose session runtime state should be examined.
+
+        Returns:
+            The trailing message slice that still needs to be sent when the
+            provider uses previous-response chaining.
+        """
+        state = self.load(task)
+        last_assistant_index = -1
+        for index in range(len(state.messages) - 1, -1, -1):
+            if state.messages[index].get("role") == "assistant":
+                last_assistant_index = index
+                break
+        return state.messages[last_assistant_index + 1 :]
+
+    def _persist_state(self, session: Session, state: TaskRuntimeState) -> None:
+        """Write a normalized runtime state back into ``Session``.
+
+        Args:
+            session: Session row to update.
             state: Runtime state to serialize.
         """
-        task.llm_messages = json.dumps(state.messages, ensure_ascii=False)
-        task.pending_action_result = (
+        session.react_llm_messages = json.dumps(state.messages, ensure_ascii=False)
+        session.react_pending_action_result = (
             json.dumps(state.pending_action_result, ensure_ascii=False)
             if state.pending_action_result is not None
             else None
         )
-        task.llm_cache_state = json.dumps(
+        session.react_llm_cache_state = json.dumps(
             (
                 {"previous_response_id": state.previous_response_id}
                 if state.previous_response_id
@@ -216,35 +300,35 @@ class ReactRuntimeService:
             ),
             ensure_ascii=False,
         )
-        task.updated_at = datetime.now(UTC)
-        self.db.add(task)
+        session.updated_at = datetime.now(UTC)
+        self.db.add(session)
         self.db.commit()
 
-    def _load_messages(self, task: ReactTask) -> list[dict[str, Any]]:
-        """Load persisted runtime messages from the task row.
+    def _load_messages(self, session: Session) -> list[dict[str, Any]]:
+        """Load persisted runtime messages from the session row.
 
         Args:
-            task: Task whose serialized messages should be loaded.
+            session: Session whose serialized messages should be loaded.
 
         Returns:
             A normalized OpenAI-style message list.
         """
-        if not task.llm_messages:
+        if not session.react_llm_messages:
             return []
 
         try:
-            raw_messages = json.loads(task.llm_messages)
+            raw_messages = json.loads(session.react_llm_messages)
         except json.JSONDecodeError:
             logger.warning(
-                "Invalid llm_messages JSON detected; resetting task messages. task_id=%s",
-                task.task_id,
+                "Invalid react_llm_messages JSON detected; resetting session messages. session_id=%s",
+                session.session_id,
             )
             return []
 
         if not isinstance(raw_messages, list):
             logger.warning(
-                "Invalid llm_messages payload type; expected list. task_id=%s",
-                task.task_id,
+                "Invalid react_llm_messages payload type; expected list. session_id=%s",
+                session.session_id,
             )
             return []
 
@@ -270,25 +354,25 @@ class ReactRuntimeService:
 
     def _load_pending_action_result(
         self,
-        task: ReactTask,
+        session: Session,
     ) -> list[dict[str, Any]] | None:
-        """Load the pending action result from serialized task state.
+        """Load the pending action result from serialized session state.
 
         Args:
-            task: Task whose pending action result should be loaded.
+            session: Session whose pending action result should be loaded.
 
         Returns:
             Parsed action-result payload, or `None` when absent or invalid.
         """
-        if not task.pending_action_result:
+        if not session.react_pending_action_result:
             return None
 
         try:
-            payload = json.loads(task.pending_action_result)
+            payload = json.loads(session.react_pending_action_result)
         except json.JSONDecodeError:
             logger.warning(
-                "Invalid pending_action_result JSON; dropping it. task_id=%s",
-                task.task_id,
+                "Invalid react_pending_action_result JSON; dropping it. session_id=%s",
+                session.session_id,
             )
             return None
 
@@ -311,24 +395,24 @@ class ReactRuntimeService:
                 normalized_results.append(normalized_item)
         return normalized_results
 
-    def _load_previous_response_id(self, task: ReactTask) -> str | None:
-        """Load the provider cache linkage ID from serialized task state.
+    def _load_previous_response_id(self, session: Session) -> str | None:
+        """Load the provider cache linkage ID from serialized session state.
 
         Args:
-            task: Task whose runtime cache state should be loaded.
+            session: Session whose runtime cache state should be loaded.
 
         Returns:
             The normalized previous response ID, or `None`.
         """
-        if not task.llm_cache_state:
+        if not session.react_llm_cache_state:
             return None
 
         try:
-            payload = json.loads(task.llm_cache_state)
+            payload = json.loads(session.react_llm_cache_state)
         except json.JSONDecodeError:
             logger.warning(
-                "Invalid llm_cache_state JSON detected; resetting. task_id=%s",
-                task.task_id,
+                "Invalid react_llm_cache_state JSON detected; resetting. session_id=%s",
+                session.session_id,
             )
             return None
 
@@ -339,3 +423,40 @@ class ReactRuntimeService:
         if isinstance(previous_response_id, str) and previous_response_id.strip():
             return previous_response_id.strip()
         return None
+
+    def _get_session_or_raise(self, task: ReactTask) -> Session:
+        """Resolve the owning session row for one task.
+
+        Args:
+            task: Task whose session runtime state should be mutated.
+
+        Returns:
+            The owning session row.
+
+        Raises:
+            RuntimeError: If the task does not have a valid session.
+        """
+        if not task.session_id:
+            raise RuntimeError(
+                f"Task {task.task_id} does not have a session_id required for ReAct runtime state."
+            )
+
+        return self._get_session_by_id_or_raise(task.session_id)
+
+    def _get_session_by_id_or_raise(self, session_id: str) -> Session:
+        """Resolve one session row by its public session identifier.
+
+        Args:
+            session_id: Public session UUID string.
+
+        Returns:
+            The owning session row.
+
+        Raises:
+            RuntimeError: If the session does not exist.
+        """
+        statement = select(Session).where(Session.session_id == session_id)
+        session = self.db.exec(statement).first()
+        if session is None:
+            raise RuntimeError(f"Session {session_id} not found.")
+        return session

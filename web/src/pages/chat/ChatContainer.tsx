@@ -182,14 +182,6 @@ function ChatContainer({
     if (isStreaming) {
       return;
     }
-    if (
-      !replyTaskId &&
-      inputMessage.trim().length === 0 &&
-      readyPendingFileIdsKey === "" &&
-      contextUsage !== null
-    ) {
-      return;
-    }
 
     const draftFileIds = readyPendingFileIdsKey
       ? readyPendingFileIdsKey.split(",")
@@ -227,7 +219,6 @@ function ChatContainer({
     return () => window.clearTimeout(timer);
   }, [
     agentId,
-    contextUsage,
     currentSessionId,
     inputMessage,
     isStreaming,
@@ -292,6 +283,7 @@ function ChatContainer({
       setMessages([]);
       setReplyTaskId(null);
       setActiveContextTaskId(null);
+      setContextUsage(null);
       const sessionItem = toSessionListItem(session);
       setSessions((previous) => [
         sessionItem,
@@ -320,6 +312,7 @@ function ChatContainer({
     setIsLoadingSession(true);
     setReplyTaskId(null);
     setActiveContextTaskId(null);
+    setContextUsage(null);
     prepareForProgrammaticScroll();
     await clearPendingFiles();
 
@@ -349,6 +342,7 @@ function ChatContainer({
       if (sessionId === currentSessionId) {
         setReplyTaskId(null);
         setActiveContextTaskId(null);
+        setContextUsage(null);
 
         if (remainingSessions.length > 0) {
           await handleSelectSession(remainingSessions[0].session_id);
@@ -356,6 +350,7 @@ function ChatContainer({
           await clearPendingFiles();
           setCurrentSessionId(null);
           setActiveContextTaskId(null);
+          setContextUsage(null);
           setMessages([]);
           setIsInitialized(false);
         }

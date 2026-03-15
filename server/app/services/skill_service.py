@@ -626,7 +626,7 @@ def build_selected_skills_prompt_block(
         selected_skills: Selected globally unique skill names.
 
     Returns:
-        Concatenated markdown block for system prompt injection.
+        Concatenated markdown block for once-per-task bootstrap user-prompt injection.
     """
     if not selected_skills:
         return ""

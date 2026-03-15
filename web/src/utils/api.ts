@@ -967,6 +967,7 @@ export interface ReactContextUsageSummary {
   session_id: string | null;
   estimation_mode: string;
   message_count: number;
+  session_message_count: number;
   used_tokens: number;
   remaining_tokens: number;
   max_context_tokens: number;
@@ -974,7 +975,11 @@ export interface ReactContextUsageSummary {
   remaining_percent: number;
   system_tokens: number;
   conversation_tokens: number;
+  session_tokens: number;
+  preview_tokens: number;
+  bootstrap_tokens: number;
   draft_tokens: number;
+  includes_task_bootstrap: boolean;
 }
 
 /**

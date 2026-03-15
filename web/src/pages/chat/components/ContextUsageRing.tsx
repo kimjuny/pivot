@@ -16,7 +16,7 @@ const RING_RADIUS = 12;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 /**
- * Shows the current prompt-window occupancy beside the composer send button.
+ * Shows the current session-context occupancy beside the composer send button.
  */
 export function ContextUsageRing({
   usage,
@@ -38,7 +38,7 @@ export function ContextUsageRing({
         <TooltipTrigger asChild>
           <span
             className="inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-accent/70"
-            aria-label="Context usage"
+            aria-label="Session context usage"
           >
             <span className="relative flex h-7 w-7 items-center justify-center">
               <svg
@@ -84,6 +84,22 @@ export function ContextUsageRing({
                 {formatCompactTokenCount(usage.used_tokens)} /{" "}
                 {formatCompactTokenCount(usage.max_context_tokens)} tokens used
               </div>
+              <div>
+                {formatCompactTokenCount(usage.session_tokens)} tokens already in
+                session
+              </div>
+              {usage.preview_tokens > 0 && (
+                <div>
+                  +{formatCompactTokenCount(usage.preview_tokens)} tokens if sent
+                  now
+                </div>
+              )}
+              {usage.includes_task_bootstrap && usage.bootstrap_tokens > 0 && (
+                <div>
+                  Includes {formatCompactTokenCount(usage.bootstrap_tokens)} tokens
+                  from task bootstrap
+                </div>
+              )}
             </>
           ) : (
             <div>Calculating context usage</div>

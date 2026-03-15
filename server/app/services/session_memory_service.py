@@ -61,6 +61,9 @@ class SessionMemoryService:
             user=user,
             status="active",
             chat_history=json.dumps({"version": 1, "messages": []}),
+            react_llm_messages="[]",
+            react_pending_action_result=None,
+            react_llm_cache_state="{}",
             created_at=now,
             updated_at=now,
         )
