@@ -78,15 +78,15 @@ export function ContextUsageRing({
           {usage ? (
             <>
               <div>
-                {usage.used_percent}%已用（剩余{usage.remaining_percent}%）
+                {usage.used_percent} used ({usage.remaining_percent}% left)
               </div>
               <div>
-                已用{formatCompactTokenCount(usage.used_tokens)}标记，共
-                {formatCompactTokenCount(usage.max_context_tokens)}
+                {formatCompactTokenCount(usage.used_tokens)} /{" "}
+                {formatCompactTokenCount(usage.max_context_tokens)} tokens used
               </div>
             </>
           ) : (
-            <div>正在统计上下文占用</div>
+            <div>Calculating context usage</div>
           )}
         </TooltipContent>
       </Tooltip>

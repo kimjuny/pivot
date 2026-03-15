@@ -92,12 +92,6 @@ export function AssistantMessageBlock({
       )}
 
       <div className="flex items-center gap-2 px-3">
-        {message.status === "running" && (message.recursions?.length ?? 0) > 0 && (
-          <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            <span className="text-xs text-muted-foreground">Processing...</span>
-          </>
-        )}
         {message.status === "skill_resolving" && (
           <>
             <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />

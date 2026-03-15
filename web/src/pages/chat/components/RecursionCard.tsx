@@ -37,6 +37,18 @@ export function RecursionCard({
   const key = `${messageId}-${recursion.uid}`;
   const effectiveStatus = getRecursionStatus(recursion);
   const toolCallEvents = recursion.events.filter((event) => event.type === "tool_call");
+  const hasStartedGenerating =
+    Boolean(
+      recursion.observe ||
+        recursion.thought ||
+        recursion.abstract ||
+        recursion.summary ||
+        recursion.action,
+    ) ||
+    recursion.events.some(
+      (event) =>
+        !["recursion_start", "reasoning", "token_rate"].includes(event.type),
+    );
 
   return (
     <div className="mb-3 overflow-hidden rounded-md border border-border bg-muted/20">
@@ -69,7 +81,7 @@ export function RecursionCard({
               className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-danger"
             />
           )}
-          {effectiveStatus === "running" && !recursion.abstract ? (
+          {effectiveStatus === "running" ? (
             <span
               className="animate-thinking-wave truncate text-xs font-semibold"
               style={{
@@ -81,7 +93,7 @@ export function RecursionCard({
                 WebkitTextFillColor: "transparent",
               }}
             >
-              Thinking...
+              {hasStartedGenerating ? "Generating..." : "Thinking..."}
             </span>
           ) : (
             <span
