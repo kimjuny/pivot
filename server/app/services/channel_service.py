@@ -272,6 +272,27 @@ class ChannelService:
         self.db.commit()
         return {"result": result.model_dump()}
 
+    def test_binding_draft(
+        self,
+        *,
+        channel_key: str,
+        auth_config: dict[str, Any],
+        runtime_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run a provider health check against unsaved form values.
+
+        Why: setup should let users validate credentials before persisting a
+        new binding row, otherwise failed experiments leave behind junk rows.
+        """
+        provider = get_channel_provider(channel_key)
+        provider.validate_config(auth_config, runtime_config)
+        result = provider.test_connection(
+            auth_config,
+            runtime_config,
+            0,
+        )
+        return {"result": result.model_dump()}
+
     def get_link_token_status(self, token: str) -> ChannelLinkTokenStatusResponse:
         """Return public metadata for one external identity link token."""
         row = self.db.exec(

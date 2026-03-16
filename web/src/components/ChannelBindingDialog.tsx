@@ -12,6 +12,7 @@ import DraggableDialog from './DraggableDialog';
 import {
   createAgentChannel,
   pollAgentChannel,
+  testChannelDraft,
   testAgentChannel,
   updateAgentChannel,
   type ChannelBinding,
@@ -153,14 +154,19 @@ function ChannelBindingDialog({
   };
 
   const handleTest = async () => {
-    if (!initialBinding) {
-      toast.message('Save this binding first so Pivot can generate its endpoint URLs.');
+    if (!manifest) {
+      toast.error('Please select a channel provider');
       return;
     }
 
     setIsTesting(true);
     try {
-      const result = await testAgentChannel(initialBinding.id);
+      const result = initialBinding
+        ? await testAgentChannel(initialBinding.id)
+        : await testChannelDraft(manifest.key, {
+            auth_config: authConfig,
+            runtime_config: runtimeConfig,
+          });
       setTestMessage(result.result.message);
       toast.success(result.result.message);
     } catch (error) {
@@ -359,7 +365,7 @@ function ChannelBindingDialog({
             </Button>
             <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {initialBinding ? 'Save Changes' : 'Create Binding'}
+              Save
             </Button>
           </div>
         </div>

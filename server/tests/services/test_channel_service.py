@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
@@ -86,6 +86,23 @@ class ChannelServiceTestCase(unittest.TestCase):
         result = self.service.complete_link_token(token_payload.token, self.user)
         self.assertEqual(result.status, "linked")
         self.assertEqual(result.workspace_owner, "alice")
+
+    def test_draft_connection_check_does_not_persist_a_binding(self) -> None:
+        """Credential testing should work before saving a binding row."""
+        result = self.service.test_binding_draft(
+            channel_key="dingtalk",
+            auth_config={
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+            },
+            runtime_config={},
+        )
+
+        self.assertTrue(result["result"]["ok"])
+        binding_rows = self.session.exec(
+            select(import_module("app.models.channel").AgentChannelBinding)
+        ).all()
+        self.assertEqual(binding_rows, [])
 
     def test_unlinked_enter_event_returns_link_prompt(self) -> None:
         """Non-text entry events should still trigger the web linking flow."""

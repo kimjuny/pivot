@@ -33,6 +33,13 @@ export interface SessionActivityInfo {
 }
 
 /**
+ * Minimal session identity shape used when auto-selecting the latest session.
+ */
+export interface AutoSelectableSessionInfo extends SessionActivityInfo {
+  session_id: string;
+}
+
+/**
  * Decide whether a session has been idle long enough to require a new session.
  * Why: once a conversation sits idle for too long, continuing in the same thread
  * makes the UX feel sticky across unrelated asks.
@@ -52,4 +59,26 @@ export function hasSessionExceededIdleTimeout(
   }
 
   return nowMs - updatedAtMs > idleTimeoutMs;
+}
+
+/**
+ * Resolve which existing session can be auto-selected on page entry.
+ * Why: once the latest session is stale we intentionally fall back to a blank
+ * draft state so the UI avoids creating or preselecting an empty follow-up thread.
+ */
+export function getAutoSelectedSessionId(
+  sessions: readonly AutoSelectableSessionInfo[],
+  nowMs: number = Date.now(),
+  idleTimeoutMs: number = SESSION_IDLE_TIMEOUT_MS,
+): string | null {
+  const latestSession = sessions[0];
+  if (!latestSession) {
+    return null;
+  }
+
+  if (hasSessionExceededIdleTimeout(latestSession, nowMs, idleTimeoutMs)) {
+    return null;
+  }
+
+  return latestSession.session_id;
 }

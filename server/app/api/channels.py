@@ -13,6 +13,7 @@ from app.models.channel import AgentChannelBinding
 from app.schemas.channel import (
     ChannelBindingCreate,
     ChannelBindingResponse,
+    ChannelBindingTestRequest,
     ChannelBindingUpdate,
     ChannelCatalogItemResponse,
     ChannelLinkCompletionResponse,
@@ -164,6 +165,29 @@ async def test_agent_channel(
     db.add(binding)
     db.commit()
     return {"result": result.model_dump()}
+
+
+@router.post("/channels/{channel_key}/test", response_model=ChannelTestResponse)
+async def test_channel_draft(
+    channel_key: str,
+    payload: ChannelBindingTestRequest,
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> dict[str, object]:
+    """Run one provider-specific connection test for unsaved form values."""
+    del current_user
+    try:
+        return ChannelService(db).test_binding_draft(
+            channel_key=channel_key,
+            auth_config=payload.auth_config,
+            runtime_config=payload.runtime_config,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="Channel provider not found"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/agent-channels/{binding_id}/poll")

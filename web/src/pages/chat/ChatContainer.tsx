@@ -38,7 +38,7 @@ import {
   parseTokenRateData,
 } from "./utils/chatData";
 import {
-  hasSessionExceededIdleTimeout,
+  getAutoSelectedSessionId,
   resolveSessionIdleTimeoutMs,
 } from "./utils/sessionActivity";
 import {
@@ -133,34 +133,19 @@ function ChatContainer({
         const existingSessions = await refreshSessionList();
 
         if (existingSessions.length > 0) {
-          const latestSession = existingSessions[0];
-          if (
-            hasSessionExceededIdleTimeout(
-              latestSession,
-              Date.now(),
-              sessionIdleTimeoutMs,
-            )
-          ) {
-            const freshSession = await createSession(agentId);
-            const freshSessionItem = toSessionListItem(freshSession);
+          const autoSelectedSessionId = getAutoSelectedSessionId(
+            existingSessions,
+            Date.now(),
+            sessionIdleTimeoutMs,
+          );
 
-            setCurrentSessionId(freshSession.session_id);
-            setReplyTaskId(null);
-            setActiveContextTaskId(null);
-            setMessages([]);
-            setSessions([
-              freshSessionItem,
-              ...existingSessions.filter(
-                (session) => session.session_id !== freshSession.session_id,
-              ),
-            ]);
-          } else {
-            const firstSessionId = latestSession.session_id;
-            setCurrentSessionId(firstSessionId);
-            setActiveContextTaskId(null);
+          setCurrentSessionId(autoSelectedSessionId);
+          setReplyTaskId(null);
+          setActiveContextTaskId(null);
 
+          if (autoSelectedSessionId) {
             try {
-              const history = await getFullSessionHistory(firstSessionId);
+              const history = await getFullSessionHistory(autoSelectedSessionId);
               setMessages(buildMessagesFromHistory(history.tasks));
             } catch (historyError) {
               console.error(
@@ -168,9 +153,12 @@ function ChatContainer({
                 historyError,
               );
             }
+          } else {
+            setMessages([]);
           }
         } else {
           setCurrentSessionId(null);
+          setReplyTaskId(null);
           setActiveContextTaskId(null);
           setMessages([]);
         }
@@ -292,7 +280,7 @@ function ChatContainer({
   }, [activeContextTaskId, agentId, currentSessionId, isStreaming]);
 
   /**
-   * Creates a new explicit conversation and resets transient page-local state.
+   * Enters a blank draft state and postpones session persistence until send time.
    */
   const handleNewSession = async () => {
     setIsLoadingSession(true);
@@ -300,23 +288,15 @@ function ChatContainer({
       await clearPendingFiles();
       prepareForProgrammaticScroll();
 
-      const session = await createSession(agentId);
-      setCurrentSessionId(session.session_id);
+      setCurrentSessionId(null);
       setMessages([]);
       setReplyTaskId(null);
       setActiveContextTaskId(null);
       setContextUsage(null);
-      const sessionItem = toSessionListItem(session);
-      setSessions((previous) => [
-        sessionItem,
-        ...previous.filter(
-          (existingSession) =>
-            existingSession.session_id !== sessionItem.session_id,
-        ),
-      ]);
+      setError(null);
     } catch (createError) {
-      console.error("Failed to create new session:", createError);
-      setError("Failed to create new session");
+      console.error("Failed to prepare new session draft:", createError);
+      setError("Failed to prepare new session draft");
     } finally {
       setIsLoadingSession(false);
     }
@@ -423,40 +403,13 @@ function ChatContainer({
 
     try {
       let activeSessionId = currentSessionId;
-      let requestTaskId = currentReplyTaskId;
+      const requestTaskId = currentReplyTaskId;
       let shouldResetConversation = false;
-      const activeSession = activeSessionId
-        ? sessions.find((session) => session.session_id === activeSessionId) ?? null
-        : null;
-
-      if (
-        activeSessionId &&
-        hasSessionExceededIdleTimeout(
-          activeSession,
-          Date.now(),
-          sessionIdleTimeoutMs,
-        )
-      ) {
-        shouldResetConversation = true;
-        requestTaskId = null;
-      }
 
       if (!activeSessionId) {
         const session = await createSession(agentId);
         activeSessionId = session.session_id;
         shouldResetConversation = true;
-        const sessionItem = toSessionListItem(session);
-        setCurrentSessionId(activeSessionId);
-        setSessions((previous) => [
-          sessionItem,
-          ...previous.filter(
-            (existingSession) =>
-              existingSession.session_id !== sessionItem.session_id,
-          ),
-        ]);
-      } else if (shouldResetConversation) {
-        const session = await createSession(agentId);
-        activeSessionId = session.session_id;
         const sessionItem = toSessionListItem(session);
         setCurrentSessionId(activeSessionId);
         setSessions((previous) => [

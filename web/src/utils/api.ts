@@ -582,6 +582,22 @@ export const testAgentChannel = async (
 };
 
 /**
+ * Run one provider health check against unsaved channel form values.
+ */
+export const testChannelDraft = async (
+  channelKey: string,
+  payload: {
+    auth_config: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+  }
+): Promise<{ result: { ok: boolean; status: string; message: string; endpoint_infos: ChannelEndpointInfo[] } }> => {
+  return apiRequest(`/channels/${encodeURIComponent(channelKey)}/test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<{ result: { ok: boolean; status: string; message: string; endpoint_infos: ChannelEndpointInfo[] } }>;
+};
+
+/**
  * Manually poll one polling-based channel binding once.
  */
 export const pollAgentChannel = async (

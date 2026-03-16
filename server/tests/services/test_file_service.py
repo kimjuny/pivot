@@ -82,6 +82,29 @@ class FileServiceTestCase(unittest.TestCase):
         decoded = base64.b64decode(prepared[0].content_blocks[1]["data"])
         self.assertEqual(decoded, Path(asset.storage_path).read_bytes())
 
+    def test_uploaded_files_remain_unbound_until_a_session_is_known(self) -> None:
+        """Uploads should stay reusable until a send operation binds them."""
+        asset = self.service.store_uploaded_image(
+            username="alice",
+            filename="draft.png",
+            source="clipboard",
+            file_bytes=self._build_png_bytes("#14b8a6"),
+        )
+
+        self.assertIsNone(asset.session_id)
+        self.assertIsNone(asset.task_id)
+
+        attached = self.service.attach_files_to_task(
+            [asset.file_id],
+            username="alice",
+            session_id="session-draft",
+            task_id="task-draft",
+        )
+
+        self.assertEqual(len(attached), 1)
+        self.assertEqual(attached[0].session_id, "session-draft")
+        self.assertEqual(attached[0].task_id, "task-draft")
+
     def test_store_and_preprocess_document(self) -> None:
         """Document uploads should persist extracted markdown for prompting."""
         original_converter = self.service._convert_document_with_docling

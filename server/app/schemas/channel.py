@@ -33,6 +33,19 @@ class ChannelBindingUpdate(AppBaseModel):
     runtime_config: dict[str, Any] | None = None
 
 
+class ChannelBindingTestRequest(AppBaseModel):
+    """Payload used to validate one unsaved channel binding draft."""
+
+    auth_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider auth config collected from the generated form",
+    )
+    runtime_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Provider runtime config collected from the generated form",
+    )
+
+
 class ChannelBindingResponse(AppBaseModel):
     """Serialized agent channel binding with manifest and setup details."""
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   SESSION_IDLE_TIMEOUT_MS,
+  getAutoSelectedSessionId,
   hasSessionExceededIdleTimeout,
   resolveSessionIdleTimeoutMs,
 } from "./sessionActivity";
@@ -57,5 +58,39 @@ describe("hasSessionExceededIdleTimeout", () => {
     expect(
       hasSessionExceededIdleTimeout({ updated_at: "not-a-timestamp" }),
     ).toBe(true);
+  });
+
+  it("auto-selects the latest session only while it is still fresh", () => {
+    const nowMs = Date.parse("2026-03-12T12:00:00.000Z");
+
+    expect(
+      getAutoSelectedSessionId(
+        [
+          {
+            session_id: "session-fresh",
+            updated_at: new Date(nowMs - 60_000).toISOString(),
+          },
+        ],
+        nowMs,
+      ),
+    ).toBe("session-fresh");
+
+    expect(
+      getAutoSelectedSessionId(
+        [
+          {
+            session_id: "session-expired",
+            updated_at: new Date(
+              nowMs - (SESSION_IDLE_TIMEOUT_MS + 60_000),
+            ).toISOString(),
+          },
+          {
+            session_id: "session-older",
+            updated_at: new Date(nowMs - (2 * SESSION_IDLE_TIMEOUT_MS)).toISOString(),
+          },
+        ],
+        nowMs,
+      ),
+    ).toBeNull();
   });
 });
