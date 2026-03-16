@@ -27,7 +27,7 @@ export function calculateDuration(startTime: string, endTime?: string): number {
 
   const start = new Date(startTime).getTime();
   const end = new Date(endTime).getTime();
-  return Math.round(((end - start) / 1000) * 10) / 10;
+  return Math.max(0, Math.round(((end - start) / 1000) * 10) / 10);
 }
 
 /**

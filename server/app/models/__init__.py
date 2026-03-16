@@ -13,6 +13,7 @@ from app.models.react import (
     ReactRecursion,
     ReactRecursionState,
     ReactTask,
+    ReactTaskEvent,
 )
 from app.models.session import Session, SessionMemory
 from app.models.skill import Skill
@@ -32,6 +33,7 @@ __all__ = [
     "ReactRecursion",
     "ReactRecursionState",
     "ReactTask",
+    "ReactTaskEvent",
     "Scene",
     "Session",
     "SessionMemory",

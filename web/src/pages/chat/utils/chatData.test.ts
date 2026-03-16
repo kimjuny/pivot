@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getUniqueClipboardFiles } from "./chatData";
+import { buildMessagesFromHistory, getUniqueClipboardFiles } from "./chatData";
 
 interface ClipboardDataStubOptions {
   itemFiles?: File[];
@@ -54,5 +54,49 @@ describe("getUniqueClipboardFiles", () => {
     );
 
     expect(result).toEqual([copiedFile]);
+  });
+});
+
+describe("buildMessagesFromHistory", () => {
+  it("preserves running recursion state so reconnecting observers can continue applying live events", () => {
+    const messages = buildMessagesFromHistory([
+      {
+        task_id: "task-1",
+        user_message: "Keep going",
+        agent_answer: null,
+        status: "running",
+        total_tokens: 0,
+        current_plan: [],
+        recursions: [
+          {
+            iteration: 0,
+            trace_id: "trace-1",
+            observe: null,
+            thinking: "thinking",
+            thought: null,
+            abstract: null,
+            summary: null,
+            action_type: null,
+            action_output: null,
+            tool_call_results: null,
+            status: "running",
+            error_log: null,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cached_input_tokens: 0,
+            created_at: "2026-03-16T00:00:00.000Z",
+            updated_at: "2026-03-16T00:00:01.000Z",
+          },
+        ],
+        created_at: "2026-03-16T00:00:00.000Z",
+        updated_at: "2026-03-16T00:00:01.000Z",
+      },
+    ]);
+
+    const assistantMessage = messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.status).toBe("running");
+    expect(assistantMessage?.recursions?.[0]?.status).toBe("running");
+    expect(assistantMessage?.recursions?.[0]?.endTime).toBeUndefined();
   });
 });

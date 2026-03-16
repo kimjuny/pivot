@@ -41,15 +41,6 @@ export function deriveComposerTaskPlan(
 export function deriveTaskPlanSnapshot(
   message: ChatMessage,
 ): TaskPlanSnapshot | null {
-  const persistedPlan = normalizePlanSteps(message.currentPlan);
-  if (persistedPlan.length > 0) {
-    return {
-      messageId: message.id,
-      taskId: message.task_id,
-      steps: applyTaskPlanHeuristics(persistedPlan, message.status),
-    };
-  }
-
   const recursions = message.recursions ?? [];
   let latestPlanSteps: TaskPlanStep[] | null = null;
   let latestIteration = -1;
@@ -68,14 +59,23 @@ export function deriveTaskPlanSnapshot(
     });
   });
 
-  if (!latestPlanSteps) {
+  if (latestPlanSteps) {
+    return {
+      messageId: message.id,
+      taskId: message.task_id,
+      steps: applyTaskPlanHeuristics(latestPlanSteps, message.status),
+    };
+  }
+
+  const persistedPlan = normalizePlanSteps(message.currentPlan);
+  if (persistedPlan.length === 0) {
     return null;
   }
 
   return {
     messageId: message.id,
     taskId: message.task_id,
-    steps: applyTaskPlanHeuristics(latestPlanSteps, message.status),
+    steps: applyTaskPlanHeuristics(persistedPlan, message.status),
   };
 }
 

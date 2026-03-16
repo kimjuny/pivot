@@ -11,7 +11,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.models.react import ReactPlanStep, ReactRecursionState, ReactTask
+from app.models.react import (
+    ReactPlanStep,
+    ReactRecursionState,
+    ReactTask,
+    ReactTaskEvent,
+)
 from app.models.session import Session, SessionMemory
 from app.schemas.file import FileAssetListItem
 from app.services.file_service import FileService
@@ -749,6 +754,58 @@ class SessionMemoryService:
             )
 
         return result
+
+    def get_last_task_event_id(self, session_id: str) -> int:
+        """Return the latest persisted task-event cursor for a session.
+
+        Args:
+            session_id: Session UUID whose event cursor should be inspected.
+
+        Returns:
+            The latest event primary key, or ``0`` when none exist yet.
+        """
+        statement = (
+            select(ReactTaskEvent)
+            .where(ReactTaskEvent.session_id == session_id)
+            .order_by(col(ReactTaskEvent.id).desc())
+        )
+        event = self.db.exec(statement).first()
+        return int(event.id or 0) if event is not None else 0
+
+    def get_resume_from_task_event_id(self, session_id: str) -> int:
+        """Return the reconnect cursor that safely replays active task events.
+
+        Why: full-history cannot include in-flight recursion fields such as
+        ``abstract`` or ``summary`` until that recursion is finalized, so a
+        reconnecting observer must replay active-task events from the event log.
+
+        Args:
+            session_id: Session UUID whose reconnect cursor should be derived.
+
+        Returns:
+            The event cursor after which reconnecting observers should subscribe.
+        """
+        tasks_statement = (
+            select(ReactTask)
+            .where(ReactTask.session_id == session_id)
+            .where(col(ReactTask.status).in_(["pending", "running"]))
+            .order_by(col(ReactTask.created_at).asc())
+        )
+        active_tasks = list(self.db.exec(tasks_statement).all())
+        if not active_tasks:
+            return self.get_last_task_event_id(session_id)
+
+        task_ids = [task.task_id for task in active_tasks]
+        event_statement = (
+            select(ReactTaskEvent)
+            .where(ReactTaskEvent.session_id == session_id)
+            .where(col(ReactTaskEvent.task_id).in_(task_ids))
+            .order_by(col(ReactTaskEvent.id).asc())
+        )
+        first_active_event = self.db.exec(event_statement).first()
+        if first_active_event is None or first_active_event.id is None:
+            return self.get_last_task_event_id(session_id)
+        return max(first_active_event.id - 1, 0)
 
     def _load_current_plan_by_task(
         self,

@@ -50,6 +50,7 @@ export interface TokenUsage {
  * Runtime shape of a backend stream event after guard validation.
  */
 export interface ReactStreamEvent {
+  event_id?: number;
   type: ReactStreamEventType;
   task_id: string;
   trace_id?: string | null;

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import secrets
-import uuid
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -32,13 +31,12 @@ from app.models.channel import (
 )
 from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
-from app.orchestration.react import ReactEngine
 from app.orchestration.skills import select_skills_with_usage
 from app.orchestration.tool import get_tool_manager
 from app.orchestration.tool.builtin.programmatic_tool_call import (
     make_programmatic_tool_call,
 )
-from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
+from app.orchestration.tool.manager import ToolManager
 from app.schemas.channel import (
     ChannelBindingResponse,
     ChannelLinkCompletionResponse,
@@ -46,11 +44,13 @@ from app.schemas.channel import (
     ChannelLinkTokenStatusResponse,
 )
 from app.services.file_service import FileService
+from app.services.react_task_supervisor import (
+    ReactTaskLaunchRequest,
+    get_react_task_supervisor,
+)
 from app.services.session_memory_service import SessionMemoryService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
-    build_skill_mounts,
-    list_visible_skills,
 )
 from app.services.workspace_service import (
     ensure_agent_workspace,
@@ -66,7 +66,6 @@ if TYPE_CHECKING:
         ChannelOutboundAction,
         ChannelProgressView,
     )
-    from app.schemas.file import FileAssetListItem
 
 
 def _load_json_object(raw_value: str | None) -> dict[str, Any]:
@@ -749,105 +748,27 @@ class ChannelService:
             )
             return
 
-        llm_config = llm_crud.get(agent.llm_id, self.db)
-        if llm_config is None:
-            yield ChannelOutboundAction(
-                kind="error",
-                text="The agent's LLM configuration could not be found.",
-                delivery_hint="append",
-                is_terminal=True,
-            )
-            return
-
+        supervisor = get_react_task_supervisor()
+        resumable_task = self._find_resumable_task(session_id=session_id)
         try:
-            llm = create_llm_from_config(llm_config)
-        except (ValueError, NotImplementedError) as exc:
+            launch_result = await supervisor.start_task(
+                ReactTaskLaunchRequest(
+                    agent_id=agent_id,
+                    message=message,
+                    username=user.username,
+                    session_id=session_id,
+                    file_ids=channel_file_ids or [],
+                    task_id=resumable_task.task_id if resumable_task else None,
+                )
+            )
+        except ValueError as exc:
             yield ChannelOutboundAction(
                 kind="error",
-                text=f"Failed to create the agent LLM instance: {exc!s}",
+                text=str(exc),
                 delivery_hint="append",
                 is_terminal=True,
             )
             return
-
-        task = self._find_resumable_task(session_id=session_id)
-        if task is None:
-            task = ReactTask(
-                task_id=str(uuid.uuid4()),
-                session_id=session_id,
-                agent_id=agent.id or 0,
-                user=user.username,
-                user_message=message,
-                user_intent=message,
-                status="pending",
-                iteration=0,
-                max_iteration=agent.max_iteration,
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
-            self.db.add(task)
-            self.db.commit()
-            self.db.refresh(task)
-        else:
-            self._inject_clarify_reply(task=task, reply=message)
-
-        turn_files: list[FileAssetListItem] | None = None
-        turn_file_blocks: list[dict[str, Any]] | None = None
-        if channel_file_ids:
-            file_service = FileService(self.db)
-            attached_files = file_service.attach_files_to_task(
-                file_ids=channel_file_ids,
-                username=user.username,
-                session_id=task.session_id,
-                task_id=task.task_id,
-            )
-            turn_files = file_service.build_history_items([task.task_id]).get(
-                task.task_id,
-                [],
-            )
-            turn_file_blocks = [
-                content_block
-                for item in file_service.preprocess_files(attached_files)
-                for content_block in item.content_blocks
-            ]
-
-        tool_manager = self._build_request_tool_manager(
-            username=user.username,
-            agent_id=agent.id or 0,
-            raw_tool_ids=agent.tool_ids,
-        )
-
-        available_skills = list_visible_skills(self.db, user.username)
-        allowed_skill_names = self._allowed_skill_names(
-            username=user.username,
-            available_skills=available_skills,
-            raw_skill_ids=agent.skill_ids,
-        )
-        allowed_skill_mounts = build_skill_mounts(
-            self.db,
-            user.username,
-            allowed_skill_names,
-        )
-
-        engine = ReactEngine(
-            llm=llm,
-            tool_manager=tool_manager,
-            db=self.db,
-            tool_execution_context=ToolExecutionContext(
-                username=user.username,
-                agent_id=agent.id or 0,
-                allowed_skills=tuple(allowed_skill_mounts),
-            ),
-            stream_llm_responses=bool(llm_config.streaming),
-        )
-
-        selected_skills_text = await self._resolve_skills_text(
-            agent=agent,
-            username=user.username,
-            message=message,
-            session_id=session_id,
-            available_skills=available_skills,
-        )
 
         answer_emitted = False
         last_progress_text = ""
@@ -858,13 +779,33 @@ class ChannelService:
             get_settings().CHANNEL_PROGRESS_MIN_INTERVAL_SECONDS,
             0.0,
         )
-        async for event_data in engine.run_task(
-            task=task,
-            selected_skills_text=selected_skills_text,
-            turn_user_message=message,
-            turn_files=turn_files,
-            turn_file_blocks=turn_file_blocks,
-        ):
+
+        async def iter_task_events() -> AsyncIterator[dict[str, Any]]:
+            for payload in supervisor.list_events(
+                session_id=session_id,
+                after_id=launch_result.cursor_before_start,
+                task_id=launch_result.task_id,
+            ):
+                yield payload
+
+            subscriber = await supervisor.subscribe(
+                session_id=session_id,
+                task_id=launch_result.task_id,
+            )
+            try:
+                while True:
+                    payload = await subscriber.queue.get()
+                    yield payload
+                    event_type = payload.get("type")
+                    if event_type in {"clarify", "error", "task_complete"}:
+                        break
+            finally:
+                await supervisor.unsubscribe(
+                    session_id=session_id,
+                    subscriber=subscriber,
+                )
+
+        async for event_data in iter_task_events():
             event_type = event_data.get("type")
             if event_type == "summary":
                 summary_data = event_data.get("data")
@@ -956,6 +897,8 @@ class ChannelService:
                     is_terminal=True,
                     metadata=self._build_action_metadata(event_data),
                 )
+            elif event_type == "task_complete":
+                break
 
         if pending_progress_text and pending_progress_text != last_progress_text:
             yield ChannelOutboundAction(

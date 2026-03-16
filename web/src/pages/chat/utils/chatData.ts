@@ -288,12 +288,15 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         status:
           recursion.status === "done"
             ? ("completed" as const)
+            : recursion.status === "running"
+              ? ("running" as const)
             : recursion.status === "error"
               ? ("error" as const)
               : ("completed" as const),
         errorLog: recursion.error_log || undefined,
         startTime: recursion.created_at,
-        endTime: recursion.updated_at,
+        endTime:
+          recursion.status === "running" ? undefined : recursion.updated_at,
         tokens: {
           prompt_tokens: recursion.prompt_tokens,
           completion_tokens: recursion.completion_tokens,

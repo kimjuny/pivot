@@ -32,6 +32,7 @@ class ReactTask(SQLModel, table=True):
         status: Current status (pending, running, completed, failed).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
+        cancel_requested_at: Explicit user cancellation request timestamp.
         created_at: UTC timestamp when task was created.
         updated_at: UTC timestamp when task was last updated.
         recursions: List of recursion cycles for this task.
@@ -73,6 +74,10 @@ class ReactTask(SQLModel, table=True):
     )
     total_cached_input_tokens: int = Field(
         default=0, description="Total cached input tokens consumed by this task"
+    )
+    cancel_requested_at: datetime | None = Field(
+        default=None,
+        description="UTC timestamp when a user explicitly requested cancellation",
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -247,4 +252,38 @@ class ReactRecursionState(SQLModel, table=True):
     current_state: str = Field(
         description="Complete JSON snapshot of state machine at this recursion"
     )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class ReactTaskEvent(SQLModel, table=True):
+    """Append-only task event log used for reconnectable observation.
+
+    Attributes:
+        id: Primary key and stable cursor for incremental subscribers.
+        session_id: Session UUID owning this event stream, if any.
+        task_id: Task UUID that emitted the event.
+        type: Stable event type matching ``ReactStreamEventType`` labels.
+        trace_id: Optional recursion trace identifier.
+        iteration: Task iteration associated with the event.
+        delta: Optional text delta for streaming UI surfaces.
+        data_json: Serialized structured payload for the event.
+        tokens_json: Serialized per-recursion token usage.
+        total_tokens_json: Serialized aggregate task token usage.
+        created_at: UTC timestamp when the event was recorded.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    session_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Owning session UUID when the task is session-backed",
+    )
+    task_id: str = Field(index=True, description="Task UUID")
+    type: str = Field(index=True, description="Stable stream event type")
+    trace_id: str | None = Field(default=None, index=True)
+    iteration: int = Field(default=0)
+    delta: str | None = Field(default=None)
+    data_json: str | None = Field(default=None)
+    tokens_json: str | None = Field(default=None)
+    total_tokens_json: str | None = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

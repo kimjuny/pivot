@@ -344,6 +344,8 @@ async def get_full_session_history(
 
     return FullSessionHistoryResponse(
         session_id=session_id,
+        last_event_id=service.get_last_task_event_id(session_id),
+        resume_from_event_id=service.get_resume_from_task_event_id(session_id),
         tasks=tasks,
     )
 

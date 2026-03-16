@@ -1,56 +1,28 @@
-"""API endpoints for ReAct agent chat stream.
-
-This module provides streaming chat endpoints for the ReAct agent system.
-All endpoints require authentication.
-"""
+"""API endpoints for reconnectable ReAct task execution and observation."""
 
 import asyncio
-import json
 import logging
-import traceback
-import uuid
-from datetime import UTC, datetime
-from time import perf_counter
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
-from app.crud.llm import llm as llm_crud
-from app.llm.llm_factory import create_llm_from_config
-from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
-from app.orchestration.react import ReactEngine
-from app.orchestration.skills import select_skills_with_usage
-from app.orchestration.tool import get_tool_manager
-from app.orchestration.tool.builtin.programmatic_tool_call import (
-    make_programmatic_tool_call,
-)
-from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import (
     ReactChatRequest,
     ReactContextUsageRequest,
     ReactContextUsageResponse,
     ReactStreamEvent,
-    ReactStreamEventType,
+    ReactTaskCancelResponse,
+    ReactTaskStartResponse,
 )
-from app.services.file_service import FileService
 from app.services.react_context_service import ReactContextUsageService
-from app.services.react_runtime_service import ReactRuntimeService
-from app.services.session_memory_service import SessionMemoryService
-from app.services.skill_service import (
-    build_selected_skills_prompt_block,
-    build_skill_mounts,
-    list_visible_skills,
-)
-from app.services.workspace_service import (
-    ensure_agent_workspace,
-    load_all_user_tool_metadata,
+from app.services.react_task_supervisor import (
+    ReactTaskLaunchRequest,
+    get_react_task_supervisor,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc
 from sqlmodel import Session, col, select
 
 # Get logger for this module
@@ -59,552 +31,167 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
-    """Parse optional JSON allowlist string into a normalized name set.
+async def _stream_supervisor_events(
+    *,
+    raw_request: Request,
+    session_id: str,
+    after_id: int,
+    task_id: str | None = None,
+) -> StreamingResponse:
+    """Stream persisted and live task events for one session."""
+    supervisor = get_react_task_supervisor()
 
-    Args:
-        raw_json: JSON string from model field. ``None``/blank means unrestricted.
+    async def event_generator():
+        cursor = after_id
+        subscriber = await supervisor.subscribe(session_id=session_id, task_id=task_id)
+        try:
+            for payload in supervisor.list_events(
+                session_id=session_id,
+                after_id=cursor,
+                task_id=task_id,
+            ):
+                event_id = payload.get("event_id")
+                if isinstance(event_id, int):
+                    cursor = max(cursor, event_id)
+                yield f"data: {ReactStreamEvent(**payload).json()}\n\n"
 
-    Returns:
-        ``None`` when unrestricted; otherwise a set of allowed names.
-    """
-    if raw_json is None:
-        return None
+            while True:
+                if await raw_request.is_disconnected():
+                    break
 
-    text = raw_json.strip()
-    if text == "":
-        return None
+                try:
+                    payload = await asyncio.wait_for(subscriber.queue.get(), timeout=15.0)
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
 
+                event_id = payload.get("event_id")
+                if isinstance(event_id, int) and event_id <= cursor:
+                    continue
+                if isinstance(event_id, int):
+                    cursor = event_id
+                yield f"data: {ReactStreamEvent(**payload).json()}\n\n"
+        finally:
+            await supervisor.unsubscribe(session_id=session_id, subscriber=subscriber)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/react/tasks", response_model=ReactTaskStartResponse)
+async def start_react_task(
+    request: ReactChatRequest,
+    current_user: User = Depends(get_current_user),
+) -> ReactTaskStartResponse:
+    """Queue one ReAct task for background execution."""
+    supervisor = get_react_task_supervisor()
     try:
-        parsed = json.loads(text)
-    except (ValueError, TypeError):
-        return set()
+        launch_result = await supervisor.start_task(
+            ReactTaskLaunchRequest(
+                agent_id=request.agent_id,
+                message=request.message,
+                username=current_user.username,
+                session_id=request.session_id,
+                file_ids=request.file_ids,
+                task_id=request.task_id,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if not isinstance(parsed, list):
-        return set()
+    return ReactTaskStartResponse(
+        task_id=launch_result.task_id,
+        session_id=launch_result.session_id,
+        status=launch_result.status,
+        cursor_before_start=launch_result.cursor_before_start,
+    )
 
-    result: set[str] = set()
-    for item in parsed:
-        if isinstance(item, str):
-            normalized = item.strip()
-            if normalized:
-                result.add(normalized)
-    return result
+
+@router.post("/react/tasks/{task_id}/cancel", response_model=ReactTaskCancelResponse)
+async def cancel_react_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user),
+) -> ReactTaskCancelResponse:
+    """Request cancellation for one running ReAct task."""
+    supervisor = get_react_task_supervisor()
+    task = supervisor.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user != current_user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    cancel_requested = await supervisor.request_cancel(task_id)
+    refreshed_task = supervisor.get_task(task_id)
+    if refreshed_task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return ReactTaskCancelResponse(
+        task_id=task_id,
+        status=refreshed_task.status,
+        cancel_requested=cancel_requested or refreshed_task.cancel_requested_at is not None,
+    )
+
+
+@router.get("/react/sessions/{session_id}/events/stream")
+async def stream_react_session_events(
+    session_id: str,
+    raw_request: Request,
+    after_id: int = 0,
+    task_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Stream reconnectable ReAct task events for one session."""
+    from app.services.session_memory_service import SessionMemoryService
+
+    session = SessionMemoryService(db).get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user != current_user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return await _stream_supervisor_events(
+        raw_request=raw_request,
+        session_id=session_id,
+        after_id=after_id,
+        task_id=task_id,
+    )
 
 
 @router.post("/react/chat/stream")
 async def react_chat_stream(
     request: ReactChatRequest,
     raw_request: Request,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    ReAct streaming chat endpoint.
+    """Compatibility stream that starts a task then tails its events."""
+    session_id = request.session_id
+    if session_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id is required for reconnectable chat streaming",
+        )
 
-    This endpoint creates a new ReAct task and executes it with streaming updates.
-    The stream returns Server-Sent Events (SSE) with the following event types:
-    - recursion_start: New recursion cycle started
-    - token_rate: Realtime estimated output token rate during streaming
-    - observe: LLM observation
-    - thought: LLM reasoning
-    - abstract: Brief summary of the recursion cycle
-    - summary: User-facing progress summary for the recursion
-    - action: Action decision
-    - tool_call: Tool execution
-    - tool_result: Tool execution result
-    - plan_update: Plan update from RE_PLAN action
-    - reflect: Reflection summary from REFLECT action
-    - answer: Final answer from ANSWER action
-    - error: Error occurred
-    - task_complete: Task completed successfully
-
-    Args:
-        request: ReactChatRequest containing agent_id, message, and user
-        db: Database session dependency
-
-    Returns:
-        StreamingResponse with text/event-stream content
-    """
-
-    async def event_generator():
-        client_disconnected = False
-        task = None
-        turn_files = []
-        turn_file_blocks = []
-
-        try:
-            runtime_service = ReactRuntimeService(db)
-            # Get agent
-            agent = db.get(Agent, request.agent_id)
-            if not agent:
-                error_event = ReactStreamEvent(
-                    type=ReactStreamEventType.ERROR,
-                    task_id="",
-                    trace_id=None,
-                    iteration=0,
-                    delta=None,
-                    data={"error": f"Agent {request.agent_id} not found"},
-                    timestamp=datetime.now(UTC),
-                )
-                yield f"data: {error_event.json()}\n\n"
-                return
-
-            # Get LLM configuration for this agent
-            if not agent.llm_id:
-                error_event = ReactStreamEvent(
-                    type=ReactStreamEventType.ERROR,
-                    task_id="",
-                    trace_id=None,
-                    iteration=0,
-                    delta=None,
-                    data={"error": f"Agent {agent.name} has no LLM configured"},
-                    timestamp=datetime.now(UTC),
-                )
-                yield f"data: {error_event.json()}\n\n"
-                return
-
-            llm_config = llm_crud.get(agent.llm_id, db)
-            if not llm_config:
-                error_event = ReactStreamEvent(
-                    type=ReactStreamEventType.ERROR,
-                    task_id="",
-                    trace_id=None,
-                    iteration=0,
-                    delta=None,
-                    data={
-                        "error": f"LLM configuration with ID {agent.llm_id} not found"
-                    },
-                    timestamp=datetime.now(UTC),
-                )
-                yield f"data: {error_event.json()}\n\n"
-                return
-
-            # Create LLM instance from configuration
-            try:
-                llm = create_llm_from_config(llm_config)
-            except (ValueError, NotImplementedError) as e:
-                error_event = ReactStreamEvent(
-                    type=ReactStreamEventType.ERROR,
-                    task_id="",
-                    trace_id=None,
-                    iteration=0,
-                    delta=None,
-                    data={"error": f"Failed to create LLM instance: {e!s}"},
-                    timestamp=datetime.now(UTC),
-                )
-                yield f"data: {error_event.json()}\n\n"
-                return
-
-            # Check if this is a resume request for an existing task
-            if request.task_id:
-                stmt = select(ReactTask).where(ReactTask.task_id == request.task_id)
-                existing_task = db.exec(stmt).first()
-
-                if existing_task:
-                    # If task is waiting for input, this is a reply to CLARIFY
-                    if existing_task.status == "waiting_input":
-                        # Find the last recursion (which should be CLARIFY)
-                        rec_stmt = (
-                            select(ReactRecursion)
-                            .where(ReactRecursion.task_id == existing_task.task_id)
-                            .order_by(desc(col(ReactRecursion.iteration_index)))
-                        )
-                        last_rec = db.exec(rec_stmt).first()
-
-                        if last_rec and last_rec.action_type == "CLARIFY":
-                            # Update action_output with user's reply
-                            try:
-                                output = json.loads(last_rec.action_output or "{}")
-                            except json.JSONDecodeError:
-                                output = {}
-
-                            output["reply"] = request.message
-                            last_rec.action_output = json.dumps(
-                                output, ensure_ascii=False
-                            )
-                            last_rec.updated_at = datetime.now(UTC)
-                            db.add(last_rec)
-                            runtime_service.set_next_action_result(
-                                existing_task,
-                                [{"result": output}],
-                            )
-
-                            # Resume task
-                            task = existing_task
-                            # Status will be updated to 'running' in engine.run_task
-                            logger.info(
-                                f"Resuming task {task.task_id} with CLARIFY reply"
-                            )
-                        else:
-                            # Fallback if state is inconsistent
-                            logger.warning(
-                                f"Task {existing_task.task_id} is waiting_input but last recursion is not CLARIFY"
-                            )
-                            task = existing_task
-                    else:
-                        # Task exists but not waiting for input? Maybe reviving?
-                        # For now, assume we just attach to it
-                        task = existing_task
-                else:
-                    # Requests task_id but not found, create new
-                    pass
-
-            if not task:
-                # Create ReactTask
-                task_id = str(uuid.uuid4())
-                task = ReactTask(
-                    task_id=task_id,
-                    session_id=request.session_id,
-                    agent_id=agent.id or 0,
-                    user=request.user,
-                    user_message=request.message,
-                    user_intent=request.message,
-                    status="pending",
-                    iteration=0,
-                    max_iteration=agent.max_iteration,
-                    created_at=datetime.now(UTC),
-                    updated_at=datetime.now(UTC),
-                )
-                db.add(task)
-                db.commit()
-                db.refresh(task)
-
-            # Ensure task_id is set
-            task_id = task.task_id
-
-            if request.file_ids:
-                file_service = FileService(db)
-                try:
-                    attached_files = file_service.attach_files_to_task(
-                        file_ids=request.file_ids,
-                        username=current_user.username,
-                        session_id=task.session_id,
-                        task_id=task_id,
-                    )
-                except ValueError as err:
-                    error_event = ReactStreamEvent(
-                        type=ReactStreamEventType.ERROR,
-                        task_id=task_id,
-                        trace_id=None,
-                        iteration=task.iteration,
-                        delta=None,
-                        data={"error": str(err)},
-                        timestamp=datetime.now(UTC),
-                    )
-                    yield f"data: {error_event.json()}\n\n"
-                    return
-
-                turn_files = file_service.build_history_items([task_id]).get(
-                    task_id, []
-                )
-                turn_file_blocks = [
-                    content_block
-                    for item in file_service.preprocess_files(attached_files)
-                    for content_block in item.content_blocks
-                ]
-
-            if agent.skill_resolution_llm_id:
-                skill_start_event = {
-                    "type": "skill_resolution_start",
-                    "task_id": task_id,
-                    "iteration": task.iteration,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }
-                yield f"data: {json.dumps(skill_start_event, ensure_ascii=False)}\n\n"
-                # Yield control so the start event is flushed before any blocking work.
-                await asyncio.sleep(0)
-
-            available_skills = list_visible_skills(db, current_user.username)
-            total_skill_count = len(available_skills)
-            allowed_skills = _parse_name_allowlist(agent.skill_ids)
-            if allowed_skills is not None:
-                available_skills = [
-                    item
-                    for item in available_skills
-                    if item.get("name") in allowed_skills
-                ]
-            candidate_skill_count = len(available_skills)
-            allowed_skill_names: list[str] = []
-            seen_skill_names: set[str] = set()
-            for skill_item in available_skills:
-                skill_name = skill_item.get("name")
-                if (
-                    not isinstance(skill_name, str)
-                    or not skill_name
-                    or skill_name in seen_skill_names
-                ):
-                    continue
-                seen_skill_names.add(skill_name)
-                allowed_skill_names.append(skill_name)
-
-            # Build a request-scoped ToolManager that merges shared (builtin) tools
-            # with the current user's private workspace tools.
-            # We copy the shared registry into a fresh instance so the global
-            # singleton is never mutated across requests.
-            ensure_agent_workspace(current_user.username, agent.id or 0)
-            shared_manager = get_tool_manager()
-            request_tool_manager = ToolManager()
-            for meta in shared_manager.list_tools():
-                request_tool_manager.add_entry(meta)
-
-            # Dynamically load private tools from workspace at request time so that
-            # tools saved by the user are visible without a server restart.
-            private_metas = load_all_user_tool_metadata(current_user.username)
-            for meta in private_metas:
-                if request_tool_manager.get_tool(meta.name) is None:
-                    request_tool_manager.add_entry(meta)
-                else:
-                    logger.warning(
-                        "Private tool '%s' conflicts with a shared tool name and was skipped.",
-                        meta.name,
-                    )
-
-            # Rebind programmatic_tool_call so its exec sandbox sees the full
-            # request-scoped registry (shared + private tools).  The global stub
-            # only knows about shared tools; without this, private tools imported
-            # inside a snippet raise ModuleNotFoundError.
-            ptc_meta = request_tool_manager.get_tool("programmatic_tool_call")
-            if ptc_meta is not None:
-                full_callables = {
-                    m.name: m.func for m in request_tool_manager.list_tools()
-                }
-                ptc_meta.func = make_programmatic_tool_call(full_callables)
-
-            # Filter the tool registry to only tools the agent is allowed to use.
-            # agent.tool_ids is a JSON-encoded list of names, e.g. '["add","test_tool"]'.
-            # None means no restriction; '[]' means the agent has no tools.
-            allowed_tools = _parse_name_allowlist(agent.tool_ids)
-            if allowed_tools is not None:
-                filtered_manager = ToolManager()
-                for meta in request_tool_manager.list_tools():
-                    if meta.name in allowed_tools:
-                        filtered_manager.add_entry(meta)
-                request_tool_manager = filtered_manager
-
-            allowed_skill_mounts = build_skill_mounts(
-                db,
-                current_user.username,
-                allowed_skill_names,
+    supervisor = get_react_task_supervisor()
+    try:
+        launch_result = await supervisor.start_task(
+            ReactTaskLaunchRequest(
+                agent_id=request.agent_id,
+                message=request.message,
+                username=current_user.username,
+                session_id=session_id,
+                file_ids=request.file_ids,
+                task_id=request.task_id,
             )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-            # Warm up sandbox with the full allowed skill set so skill mounts are
-            # ready before the first sandbox tool call in this task.
-            try:
-                from app.services.sandbox_service import get_sandbox_service
-
-                get_sandbox_service().create(
-                    username=current_user.username,
-                    agent_id=agent.id or 0,
-                    skills=allowed_skill_mounts,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Sandbox pre-create failed task_id=%s username=%s agent_id=%d err=%s",
-                    task_id,
-                    current_user.username,
-                    agent.id or 0,
-                    exc,
-                )
-
-            engine = ReactEngine(
-                llm=llm,
-                tool_manager=request_tool_manager,
-                db=db,
-                tool_execution_context=ToolExecutionContext(
-                    username=current_user.username,
-                    agent_id=agent.id or 0,
-                    allowed_skills=tuple(allowed_skill_mounts),
-                ),
-                stream_llm_responses=bool(llm_config.streaming),
-            )
-
-            selected_skills: list[str] = []
-            skill_resolution_tokens: dict[str, int] | None = None
-            selected_skills_text = ""
-            resolution_duration_ms = 0
-            # Skill resolution is optional and only runs when a resolver LLM is configured.
-            if agent.skill_resolution_llm_id:
-                resolution_started_at = perf_counter()
-                try:
-                    resolver_llm_config = llm_crud.get(
-                        agent.skill_resolution_llm_id, db
-                    )
-                    if resolver_llm_config:
-                        resolver_llm = create_llm_from_config(resolver_llm_config)
-                        session_memory = {}
-                        if task.session_id:
-                            session_memory = SessionMemoryService(
-                                db
-                            ).get_full_session_memory_dict(task.session_id)
-
-                        selection_result = await run_in_threadpool(
-                            select_skills_with_usage,
-                            resolver_llm,
-                            request.message,
-                            available_skills,
-                            session_memory,
-                        )
-                        raw_selected_skills = selection_result.get(
-                            "selected_skills", []
-                        )
-                        if isinstance(raw_selected_skills, list):
-                            selected_skills = [
-                                item
-                                for item in raw_selected_skills
-                                if isinstance(item, str)
-                            ]
-                        else:
-                            selected_skills = []
-                        skill_resolution_tokens = selection_result.get("tokens")
-                        selected_skills_text = build_selected_skills_prompt_block(
-                            session=db,
-                            username=current_user.username,
-                            selected_skills=selected_skills,
-                        )
-                        resolution_duration_ms = int(
-                            (perf_counter() - resolution_started_at) * 1000
-                        )
-                        logger.info(
-                            "Skill resolution finished: task_id=%s session_id=%s total=%d candidates=%d selected=%d selected_names=%s duration_ms=%d",
-                            task_id,
-                            task.session_id,
-                            total_skill_count,
-                            candidate_skill_count,
-                            len(selected_skills),
-                            selected_skills,
-                            resolution_duration_ms,
-                        )
-                    else:
-                        resolution_duration_ms = int(
-                            (perf_counter() - resolution_started_at) * 1000
-                        )
-                        logger.warning(
-                            "Skill resolution skipped because resolver LLM not found: task_id=%s resolver_llm_id=%s duration_ms=%d",
-                            task_id,
-                            agent.skill_resolution_llm_id,
-                            resolution_duration_ms,
-                        )
-                except Exception as skill_err:
-                    logger.warning("Skill resolution failed: %s", skill_err)
-                    resolution_duration_ms = int(
-                        (perf_counter() - resolution_started_at) * 1000
-                    )
-
-                skill_result_event = {
-                    "type": "skill_resolution_result",
-                    "task_id": task_id,
-                    "iteration": task.iteration,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "data": {
-                        "count": len(selected_skills),
-                        "selected_skills": selected_skills,
-                        "total_skill_count": total_skill_count,
-                        "candidate_skill_count": candidate_skill_count,
-                        "duration_ms": resolution_duration_ms,
-                        "tokens": skill_resolution_tokens,
-                    },
-                }
-                task.skill_selection_result = json.dumps(
-                    skill_result_event["data"],
-                    ensure_ascii=False,
-                )
-                task.updated_at = datetime.now(UTC)
-                db.add(task)
-                db.commit()
-                yield f"data: {json.dumps(skill_result_event, ensure_ascii=False)}\n\n"
-
-            # Execute task and stream events
-            async for event_data in engine.run_task(
-                task=task,
-                selected_skills_text=selected_skills_text,
-                turn_user_message=request.message,
-                turn_files=turn_files,
-                turn_file_blocks=turn_file_blocks,
-            ):
-                # Check if client disconnected via Request object
-                if await raw_request.is_disconnected():
-                    logger.info(f"Client disconnected, stopping task {task_id}")
-                    client_disconnected = True
-                    engine.cancelled = True  # Signal engine to stop
-                    break
-
-                # Check if client disconnected via flag
-                if client_disconnected:
-                    logger.info(f"Client disconnected, stopping task {task_id}")
-                    engine.cancelled = True  # Signal engine to stop
-                    break
-
-                # Convert event data to ReactStreamEvent
-                event_type_str = event_data.get("type", "")
-                try:
-                    event_type = ReactStreamEventType(event_type_str)
-                except ValueError:
-                    # Unknown event type, skip
-                    logger.warning(f"Unknown event type: {event_type_str}")
-                    continue
-
-                event = ReactStreamEvent(
-                    type=event_type,
-                    task_id=event_data.get("task_id", task_id),
-                    trace_id=event_data.get("trace_id"),
-                    iteration=event_data.get("iteration", 0),
-                    delta=event_data.get("delta"),
-                    data=event_data.get("data"),
-                    timestamp=datetime.fromisoformat(
-                        event_data.get("timestamp", datetime.now(UTC).isoformat())
-                    ),
-                    created_at=event_data.get("created_at"),
-                    updated_at=event_data.get("updated_at"),
-                    tokens=event_data.get("tokens"),
-                    total_tokens=event_data.get("total_tokens"),
-                )
-
-                try:
-                    yield f"data: {event.json()}\n\n"
-                except (
-                    GeneratorExit,
-                    ConnectionResetError,
-                    BrokenPipeError,
-                ) as e:
-                    # Client disconnected
-                    logger.info(f"Client disconnected during yield: {e}")
-                    client_disconnected = True
-                    break
-
-        except (GeneratorExit, ConnectionResetError, BrokenPipeError) as e:
-            # Client disconnected
-            logger.info(f"Client disconnected: {e}")
-            client_disconnected = True
-        except Exception as e:
-            logger.error(f"Error in ReAct chat stream: {e}")
-            logger.error(traceback.format_exc())
-            if not client_disconnected:
-                try:
-                    error_event = ReactStreamEvent(
-                        type=ReactStreamEventType.ERROR,
-                        task_id="",
-                        trace_id=None,
-                        iteration=0,
-                        delta=None,
-                        data={"error": str(e)},
-                        timestamp=datetime.now(UTC),
-                    )
-                    yield f"data: {error_event.json()}\n\n"
-                except (GeneratorExit, ConnectionResetError, BrokenPipeError):
-                    pass
-        finally:
-            # Mark task as cancelled if client disconnected
-            if client_disconnected and task:
-                task.status = "cancelled"
-                task.updated_at = datetime.now(UTC)
-                try:
-                    db.commit()
-                    logger.info(f"Task {task.task_id} marked as cancelled")
-                except Exception as e:
-                    logger.error(f"Failed to mark task as cancelled: {e}")
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return await _stream_supervisor_events(
+        raw_request=raw_request,
+        session_id=session_id,
+        after_id=launch_result.cursor_before_start,
+        task_id=launch_result.task_id,
+    )
 
 
 @router.post(
@@ -659,7 +246,6 @@ async def get_react_task(
     Returns:
         ReactTask information
     """
-    from app.models.react import ReactTask
     from sqlmodel import select
 
     stmt = select(ReactTask).where(ReactTask.task_id == task_id)
@@ -688,7 +274,6 @@ async def get_task_recursions(
     Returns:
         List of recursions
     """
-    from app.models.react import ReactRecursion
     from sqlmodel import select
 
     stmt = (
@@ -721,7 +306,6 @@ async def get_task_states(
         List of recursion states with complete state snapshots
     """
     from app.models.react import ReactRecursionState
-    from sqlmodel import select
 
     stmt = (
         select(ReactRecursionState)
@@ -755,7 +339,6 @@ async def get_task_state_at_iteration(
         Recursion state at the specified iteration
     """
     from app.models.react import ReactRecursionState
-    from sqlmodel import select
 
     stmt = (
         select(ReactRecursionState)

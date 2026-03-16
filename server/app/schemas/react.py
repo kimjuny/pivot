@@ -163,6 +163,10 @@ class ReactStreamEventType(str, Enum):
 class ReactStreamEvent(AppBaseModel):
     """Stream event schema for ReAct execution updates."""
 
+    event_id: int | None = Field(
+        default=None,
+        description="Stable incremental cursor for reconnectable subscribers",
+    )
     type: ReactStreamEventType = Field(..., description="Event type")
     task_id: str = Field(..., description="Task UUID")
     trace_id: str | None = Field(default=None, description="Current recursion trace ID")
@@ -200,6 +204,32 @@ class ReactTaskResponse(AppBaseModel):
     max_iteration: int
     created_at: datetime
     updated_at: datetime
+
+
+class ReactTaskStartResponse(AppBaseModel):
+    """Response schema returned when a task has been queued for execution."""
+
+    task_id: str = Field(..., description="Task UUID")
+    session_id: str | None = Field(
+        default=None,
+        description="Owning session UUID when the task is session-backed",
+    )
+    status: str = Field(..., description="Current task status after enqueueing")
+    cursor_before_start: int = Field(
+        default=0,
+        description="Latest session event cursor before this launch began",
+    )
+
+
+class ReactTaskCancelResponse(AppBaseModel):
+    """Response schema returned after a cancellation request."""
+
+    task_id: str = Field(..., description="Task UUID")
+    status: str = Field(..., description="Current task status")
+    cancel_requested: bool = Field(
+        ...,
+        description="Whether an active execution acknowledged the cancel request",
+    )
 
 
 class ReactRecursionResponse(AppBaseModel):

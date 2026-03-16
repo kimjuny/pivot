@@ -138,4 +138,6 @@ class FullSessionHistoryResponse(AppBaseModel):
     """Response schema for full session history with recursion details."""
 
     session_id: str
+    last_event_id: int = 0
+    resume_from_event_id: int = 0
     tasks: list[TaskMessage]

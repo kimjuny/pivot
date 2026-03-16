@@ -22,6 +22,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "reactrecursion",
     "reactrecursionstate",
     "reacttask",
+    "reacttaskevent",
     "scene",
     "session",
     "sessionmemory",
@@ -181,6 +182,13 @@ def ensure_react_schema_compatibility() -> None:
                     text(
                         "ALTER TABLE reacttask "
                         "ADD COLUMN skill_selection_result VARCHAR"
+                    )
+                )
+            if "cancel_requested_at" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask "
+                        "ADD COLUMN cancel_requested_at DATETIME"
                     )
                 )
 

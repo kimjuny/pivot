@@ -995,7 +995,28 @@ export interface TaskMessage {
  */
 export interface FullSessionHistoryResponse {
   session_id: string;
+  last_event_id: number;
+  resume_from_event_id: number;
   tasks: TaskMessage[];
+}
+
+/**
+ * Response returned when a ReAct task has been queued for execution.
+ */
+export interface ReactTaskStartResponse {
+  task_id: string;
+  session_id: string | null;
+  status: string;
+  cursor_before_start: number;
+}
+
+/**
+ * Response returned after a task cancellation request.
+ */
+export interface ReactTaskCancelResponse {
+  task_id: string;
+  status: string;
+  cancel_requested: boolean;
 }
 
 /**
@@ -1029,6 +1050,39 @@ export interface ReactContextUsageSummary {
  */
 export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
   return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
+};
+
+/**
+ * Queue one ReAct task for background execution.
+ *
+ * @param payload - Launch payload for the task
+ * @returns Promise resolving to launch metadata
+ */
+export const startReactTask = async (payload: {
+  agent_id: number;
+  message: string;
+  task_id?: string | null;
+  session_id?: string | null;
+  file_ids?: string[];
+}): Promise<ReactTaskStartResponse> => {
+  return apiRequest('/react/tasks', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<ReactTaskStartResponse>;
+};
+
+/**
+ * Request cancellation for one running ReAct task.
+ *
+ * @param taskId - Task UUID to cancel
+ * @returns Promise resolving to the cancellation acknowledgement
+ */
+export const cancelReactTask = async (
+  taskId: string,
+): Promise<ReactTaskCancelResponse> => {
+  return apiRequest(`/react/tasks/${taskId}/cancel`, {
+    method: 'POST',
+  }) as Promise<ReactTaskCancelResponse>;
 };
 
 /**
