@@ -13,6 +13,8 @@ from app.api.dependencies import get_db
 from app.models.user import User
 from app.schemas.session import (
     ChatHistoryResponse,
+    CurrentPlanRecursionSummary,
+    CurrentPlanStep,
     FullSessionHistoryResponse,
     RecursionDetail,
     SessionCreate,
@@ -315,6 +317,25 @@ async def get_full_session_history(
                 status=task_data["status"],
                 total_tokens=task_data["total_tokens"],
                 skill_selection_result=task_data.get("skill_selection_result"),
+                current_plan=[
+                    CurrentPlanStep(
+                        step_id=step["step_id"],
+                        general_goal=step["general_goal"],
+                        specific_description=step["specific_description"],
+                        completion_criteria=step["completion_criteria"],
+                        status=step["status"],
+                        recursion_history=[
+                            CurrentPlanRecursionSummary(
+                                iteration=entry.get("iteration"),
+                                summary=entry.get("summary", ""),
+                            )
+                            for entry in step.get("recursion_history", [])
+                            if isinstance(entry, dict)
+                        ],
+                    )
+                    for step in task_data.get("current_plan", [])
+                    if isinstance(step, dict)
+                ],
                 recursions=recursions,
                 created_at=task_data["created_at"].replace(tzinfo=UTC).isoformat(),
                 updated_at=task_data["updated_at"].replace(tzinfo=UTC).isoformat(),

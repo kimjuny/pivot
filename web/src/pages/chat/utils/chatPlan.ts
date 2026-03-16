@@ -10,6 +10,10 @@ interface PlanEventPayload {
   plan?: PlanStepData[];
 }
 
+interface SummaryEventPayload {
+  current_plan?: PlanStepData[];
+}
+
 const DONE_PLAN_STATUSES = new Set(["done", "completed"]);
 const RUNNING_PLAN_STATUSES = new Set(["running", "in_progress", "active"]);
 const ERROR_PLAN_STATUSES = new Set(["failed", "error"]);
@@ -32,23 +36,27 @@ export function deriveComposerTaskPlan(
 }
 
 /**
- * Builds a plan snapshot from one assistant message if it contains a RE_PLAN iteration.
+ * Builds a plan snapshot from one assistant message using persisted or streamed plan state.
  */
 export function deriveTaskPlanSnapshot(
   message: ChatMessage,
 ): TaskPlanSnapshot | null {
+  const persistedPlan = normalizePlanSteps(message.currentPlan);
+  if (persistedPlan.length > 0) {
+    return {
+      messageId: message.id,
+      taskId: message.task_id,
+      steps: applyTaskPlanHeuristics(persistedPlan, message.status),
+    };
+  }
+
   const recursions = message.recursions ?? [];
   let latestPlanSteps: TaskPlanStep[] | null = null;
   let latestIteration = -1;
 
   recursions.forEach((recursion) => {
     recursion.events.forEach((event) => {
-      if (event.type !== "plan_update") {
-        return;
-      }
-
-      const payload = asPlanEventPayload(event.data);
-      const normalizedSteps = normalizePlanSteps(payload?.plan);
+      const normalizedSteps = extractPlanStepsFromEvent(event);
       if (normalizedSteps.length === 0) {
         return;
       }
@@ -80,6 +88,34 @@ function asPlanEventPayload(value: unknown): PlanEventPayload | undefined {
   }
 
   return value as PlanEventPayload;
+}
+
+/**
+ * Narrows summary payloads to the current-plan shape emitted by the live stream.
+ */
+function asSummaryEventPayload(value: unknown): SummaryEventPayload | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as SummaryEventPayload;
+}
+
+/**
+ * Extracts plan-step data from either an explicit plan update or a summary snapshot.
+ */
+function extractPlanStepsFromEvent(
+  event: { type: string; data?: unknown },
+): TaskPlanStep[] {
+  if (event.type === "plan_update") {
+    return normalizePlanSteps(asPlanEventPayload(event.data)?.plan);
+  }
+
+  if (event.type === "summary") {
+    return normalizePlanSteps(asSummaryEventPayload(event.data)?.current_plan);
+  }
+
+  return [];
 }
 
 /**

@@ -100,6 +100,24 @@ class RecursionDetail(AppBaseModel):
     updated_at: str
 
 
+class CurrentPlanRecursionSummary(AppBaseModel):
+    """Compact recursion summary attached to one current-plan step."""
+
+    iteration: int | None = None
+    summary: str = ""
+
+
+class CurrentPlanStep(AppBaseModel):
+    """Latest visible plan-step state returned with task history."""
+
+    step_id: str
+    general_goal: str
+    specific_description: str
+    completion_criteria: str
+    status: str
+    recursion_history: list[CurrentPlanRecursionSummary] = Field(default_factory=list)
+
+
 class TaskMessage(AppBaseModel):
     """Schema for a task message with full recursion details."""
 
@@ -110,6 +128,7 @@ class TaskMessage(AppBaseModel):
     status: str
     total_tokens: int = 0
     skill_selection_result: dict[str, Any] | None = None
+    current_plan: list[CurrentPlanStep] = Field(default_factory=list)
     recursions: list[RecursionDetail] = Field(default_factory=list)
     created_at: str
     updated_at: str

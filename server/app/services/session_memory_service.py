@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from app.models.react import ReactTask
+from app.models.react import ReactPlanStep, ReactRecursionState, ReactTask
 from app.models.session import Session, SessionMemory
 from app.schemas.file import FileAssetListItem
 from app.services.file_service import FileService
@@ -673,6 +673,7 @@ class SessionMemoryService:
         file_history = FileService(self.db).build_history_items(
             [task.task_id for task in tasks]
         )
+        current_plan_by_task = self._load_current_plan_by_task(tasks)
 
         result = []
         for task in tasks:
@@ -740,6 +741,7 @@ class SessionMemoryService:
                     "status": task.status,
                     "total_tokens": task.total_tokens,
                     "skill_selection_result": skill_selection_result,
+                    "current_plan": current_plan_by_task.get(task.task_id, []),
                     "recursions": recursion_list,
                     "created_at": task.created_at,
                     "updated_at": task.updated_at,
@@ -747,3 +749,163 @@ class SessionMemoryService:
             )
 
         return result
+
+    def _load_current_plan_by_task(
+        self,
+        tasks: list[ReactTask],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Load the latest persisted current-plan snapshot for each task.
+
+        Args:
+            tasks: Tasks whose latest visible current-plan should be returned.
+
+        Returns:
+            Mapping from task_id to the normalized current-plan payload.
+        """
+        task_ids = [task.task_id for task in tasks]
+        if not task_ids:
+            return {}
+
+        state_stmt = (
+            select(ReactRecursionState)
+            .where(col(ReactRecursionState.task_id).in_(task_ids))
+            .order_by(
+                col(ReactRecursionState.task_id).asc(),
+                col(ReactRecursionState.iteration_index).desc(),
+            )
+        )
+        states = list(self.db.exec(state_stmt).all())
+
+        current_plan_by_task: dict[str, list[dict[str, Any]]] = {}
+        for state in states:
+            if state.task_id in current_plan_by_task:
+                continue
+
+            normalized_plan = self._extract_current_plan_from_snapshot(
+                state.current_state
+            )
+            if normalized_plan:
+                current_plan_by_task[state.task_id] = normalized_plan
+
+        missing_task_ids = [
+            task_id for task_id in task_ids if task_id not in current_plan_by_task
+        ]
+        if not missing_task_ids:
+            return current_plan_by_task
+
+        fallback_stmt = (
+            select(ReactPlanStep)
+            .where(col(ReactPlanStep.task_id).in_(missing_task_ids))
+            .order_by(
+                col(ReactPlanStep.task_id).asc(),
+                col(ReactPlanStep.created_at).asc(),
+            )
+        )
+        fallback_steps = list(self.db.exec(fallback_stmt).all())
+        for step in fallback_steps:
+            current_plan_by_task.setdefault(step.task_id, []).append(
+                {
+                    "step_id": step.step_id,
+                    "general_goal": step.general_goal,
+                    "specific_description": step.specific_description,
+                    "completion_criteria": step.completion_criteria,
+                    "status": step.status,
+                    "recursion_history": [],
+                }
+            )
+
+        return current_plan_by_task
+
+    def _extract_current_plan_from_snapshot(
+        self,
+        snapshot_payload: str,
+    ) -> list[dict[str, Any]]:
+        """Extract the compact current-plan shape from one persisted snapshot.
+
+        Args:
+            snapshot_payload: Serialized React current-state JSON payload.
+
+        Returns:
+            Normalized current-plan entries, or an empty list when unavailable.
+        """
+        try:
+            parsed_snapshot = json.loads(snapshot_payload)
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(parsed_snapshot, dict):
+            return []
+
+        raw_context = parsed_snapshot.get("context")
+        if not isinstance(raw_context, dict):
+            return []
+
+        return self._normalize_current_plan(raw_context.get("plan"))
+
+    def _normalize_current_plan(self, raw_plan: Any) -> list[dict[str, Any]]:
+        """Normalize raw snapshot plan data into a stable API payload.
+
+        Args:
+            raw_plan: Untrusted plan payload extracted from persisted state.
+
+        Returns:
+            Sanitized current-plan entries ready for API serialization.
+        """
+        if not isinstance(raw_plan, list):
+            return []
+
+        normalized_plan: list[dict[str, Any]] = []
+        for step in raw_plan:
+            if not isinstance(step, dict):
+                continue
+
+            step_id = step.get("step_id")
+            if not isinstance(step_id, str) or not step_id:
+                continue
+
+            recursion_history: list[dict[str, Any]] = []
+            raw_history = step.get("recursion_history")
+            if isinstance(raw_history, list):
+                for history_item in raw_history:
+                    if not isinstance(history_item, dict):
+                        continue
+
+                    iteration = history_item.get("iteration")
+                    summary = history_item.get("summary", "")
+                    recursion_history.append(
+                        {
+                            "iteration": iteration
+                            if isinstance(iteration, int)
+                            else None,
+                            "summary": summary if isinstance(summary, str) else "",
+                        }
+                    )
+
+            normalized_plan.append(
+                {
+                    "step_id": step_id,
+                    "general_goal": (
+                        step.get("general_goal")
+                        if isinstance(step.get("general_goal"), str)
+                        else ""
+                    ),
+                    "specific_description": (
+                        step.get("specific_description")
+                        if isinstance(step.get("specific_description"), str)
+                        else ""
+                    ),
+                    "completion_criteria": (
+                        step.get("completion_criteria")
+                        if isinstance(step.get("completion_criteria"), str)
+                        else ""
+                    ),
+                    "status": (
+                        step.get("status")
+                        if isinstance(step.get("status"), str)
+                        else "pending"
+                    ),
+                    "recursion_history": recursion_history,
+                }
+            )
+
+        return normalized_plan

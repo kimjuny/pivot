@@ -72,6 +72,10 @@ export interface PlanStepData {
   specific_description: string;
   completion_criteria: string;
   status: string;
+  recursion_history?: Array<{
+    iteration?: number | null;
+    summary: string;
+  }>;
 }
 
 /**
@@ -175,6 +179,8 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   timestamp: string;
   task_id?: string;
+  /** Latest current-plan snapshot attached to this task, when available. */
+  currentPlan?: PlanStepData[];
   recursions?: RecursionRecord[];
   status?:
     | "running"

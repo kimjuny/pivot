@@ -86,7 +86,7 @@ export function ChatComposer({
 }: ChatComposerProps) {
   return (
     <div
-      className={`mx-auto w-full max-w-3xl bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-3 transition-transform duration-100 ease-out ${
+      className={`mx-auto w-full max-w-3xl bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-1 transition-transform duration-100 ease-out ${
         isConversationEmpty
           ? "-translate-y-[12vh] sm:-translate-y-[18vh]"
           : "translate-y-0"

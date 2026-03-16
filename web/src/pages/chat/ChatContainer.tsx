@@ -86,6 +86,9 @@ function ChatContainer({
   const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
     null,
   );
+  const [activeContextIteration, setActiveContextIteration] = useState<
+    number | null
+  >(null);
   const [contextUsage, setContextUsage] =
     useState<ReactContextUsageSummary | null>(null);
   const [isContextUsageLoading, setIsContextUsageLoading] =
@@ -142,6 +145,7 @@ function ChatContainer({
           setCurrentSessionId(autoSelectedSessionId);
           setReplyTaskId(null);
           setActiveContextTaskId(null);
+          setActiveContextIteration(null);
 
           if (autoSelectedSessionId) {
             try {
@@ -160,6 +164,7 @@ function ChatContainer({
           setCurrentSessionId(null);
           setReplyTaskId(null);
           setActiveContextTaskId(null);
+          setActiveContextIteration(null);
           setMessages([]);
         }
 
@@ -272,12 +277,13 @@ function ChatContainer({
     };
 
     runEstimate();
-    const intervalId = window.setInterval(() => {
-      runEstimate();
-    }, 1000);
-
-    return () => window.clearInterval(intervalId);
-  }, [activeContextTaskId, agentId, currentSessionId, isStreaming]);
+  }, [
+    activeContextIteration,
+    activeContextTaskId,
+    agentId,
+    currentSessionId,
+    isStreaming,
+  ]);
 
   /**
    * Enters a blank draft state and postpones session persistence until send time.
@@ -292,6 +298,7 @@ function ChatContainer({
       setMessages([]);
       setReplyTaskId(null);
       setActiveContextTaskId(null);
+      setActiveContextIteration(null);
       setContextUsage(null);
       setError(null);
     } catch (createError) {
@@ -314,6 +321,7 @@ function ChatContainer({
     setIsLoadingSession(true);
     setReplyTaskId(null);
     setActiveContextTaskId(null);
+    setActiveContextIteration(null);
     setContextUsage(null);
     prepareForProgrammaticScroll();
     await clearPendingFiles();
@@ -344,6 +352,7 @@ function ChatContainer({
       if (sessionId === currentSessionId) {
         setReplyTaskId(null);
         setActiveContextTaskId(null);
+        setActiveContextIteration(null);
         setContextUsage(null);
 
         if (remainingSessions.length > 0) {
@@ -352,6 +361,7 @@ function ChatContainer({
           await clearPendingFiles();
           setCurrentSessionId(null);
           setActiveContextTaskId(null);
+          setActiveContextIteration(null);
           setContextUsage(null);
           setMessages([]);
           setIsInitialized(false);
@@ -424,6 +434,7 @@ function ChatContainer({
       if (currentReplyTaskId) {
         setReplyTaskId(null);
       }
+      setActiveContextIteration(null);
 
       if (!isTokenValid()) {
         window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
@@ -532,6 +543,7 @@ function ChatContainer({
             if (event.type === "skill_resolution_start") {
               currentTaskId = event.task_id;
               setActiveContextTaskId(event.task_id);
+              setActiveContextIteration(null);
               setMessages((previous) =>
                 previous.map((message) =>
                   message.id === assistantMessageId
@@ -612,6 +624,7 @@ function ChatContainer({
 
               currentTaskId = event.task_id;
               setActiveContextTaskId(event.task_id);
+              setActiveContextIteration(event.iteration);
               const newRecursionSnapshot: RecursionRecord = {
                 uid: `live-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
                 iteration: event.iteration,
@@ -817,6 +830,7 @@ function ChatContainer({
                 };
               } else if (event.type === "task_complete") {
                 setActiveContextTaskId(null);
+                setActiveContextIteration(null);
                 setMessages((previous) =>
                   previous.map((message) => {
                     if (message.id !== assistantMessageId) {
@@ -899,9 +913,11 @@ function ChatContainer({
 
       setIsStreaming(false);
       setActiveContextTaskId(null);
+      setActiveContextIteration(null);
     } catch (streamError) {
       if (streamError instanceof Error && streamError.name === "AbortError") {
         setActiveContextTaskId(null);
+        setActiveContextIteration(null);
         const cancelTime = new Date().toISOString();
         setMessages((previous) =>
           previous.map((message) => {
@@ -940,6 +956,7 @@ function ChatContainer({
         );
       } else {
         setActiveContextTaskId(null);
+        setActiveContextIteration(null);
         const normalizedError =
           streamError instanceof Error
             ? streamError
@@ -1031,7 +1048,7 @@ function ChatContainer({
           className="flex-1 overflow-y-auto"
           onScroll={handleScroll}
         >
-          <div className="mx-auto max-w-3xl px-4 pb-6 pt-4">
+          <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
             <ConversationView
               messages={messages}
               agentName={agentName}
@@ -1039,7 +1056,7 @@ function ChatContainer({
               onToggleRecursion={toggleRecursion}
               onReplyTask={setReplyTaskId}
             />
-            <div className="h-4" />
+            <div className="h-1" />
           </div>
         </div>
 

@@ -944,6 +944,26 @@ export interface RecursionDetail {
 }
 
 /**
+ * Compact recursion summary nested under one current-plan step.
+ */
+export interface CurrentPlanRecursionSummary {
+  iteration?: number | null;
+  summary: string;
+}
+
+/**
+ * Latest persisted current-plan step returned with task history.
+ */
+export interface CurrentPlanStep {
+  step_id: string;
+  general_goal: string;
+  specific_description: string;
+  completion_criteria: string;
+  status: string;
+  recursion_history?: CurrentPlanRecursionSummary[];
+}
+
+/**
  * Task message from full session history API.
  */
 export interface TaskMessage {
@@ -964,6 +984,7 @@ export interface TaskMessage {
       cached_input_tokens?: number;
     };
   } | null;
+  current_plan?: CurrentPlanStep[];
   recursions: RecursionDetail[];
   created_at: string;
   updated_at: string;

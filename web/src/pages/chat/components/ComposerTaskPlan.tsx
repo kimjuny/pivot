@@ -92,7 +92,7 @@ export function ComposerTaskPlan({ taskPlan }: ComposerTaskPlanProps) {
                   className="flex items-start gap-2.5 py-[4px]"
                   title={step.description || step.completionCriteria || step.title}
                 >
-                  <div className="flex h-5 w-4 flex-shrink-0 items-center justify-center pt-[1px]">
+                  <div className="flex h-5 w-4 flex-shrink-0 items-center justify-center -translate-y-px">
                     {icon}
                   </div>
                   <div

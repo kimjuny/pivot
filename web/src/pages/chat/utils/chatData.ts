@@ -330,14 +330,19 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       content: task.agent_answer || "",
       timestamp: task.updated_at,
       task_id: task.task_id,
+      currentPlan: task.current_plan,
       recursions,
       skillSelection: buildSkillSelectionFromTask(task),
       status:
         task.status === "completed"
           ? ("completed" as const)
-          : task.status === "failed"
+          : task.status === "failed" || task.status === "cancelled"
             ? ("error" as const)
-            : ("completed" as const),
+            : task.status === "waiting_input"
+              ? ("waiting_input" as const)
+              : task.status === "running" || task.status === "pending"
+                ? ("running" as const)
+                : ("completed" as const),
       totalTokens: {
         prompt_tokens: aggregatedTaskTokens.prompt_tokens,
         completion_tokens: aggregatedTaskTokens.completion_tokens,
