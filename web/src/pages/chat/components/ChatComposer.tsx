@@ -25,8 +25,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import type { ReactContextUsageSummary } from "@/utils/api";
 
-import type { PendingUploadItem } from "../types";
+import type { PendingUploadItem, TaskPlanSnapshot } from "../types";
 import { AttachmentList } from "./AttachmentList";
+import { ComposerTaskPlan } from "./ComposerTaskPlan";
 import { ContextUsageRing } from "./ContextUsageRing";
 
 interface ChatComposerProps {
@@ -38,6 +39,7 @@ interface ChatComposerProps {
   isStreaming: boolean;
   isConversationEmpty: boolean;
   hasUploadingFiles: boolean;
+  taskPlan: TaskPlanSnapshot | null;
   contextUsage: ReactContextUsageSummary | null;
   isContextUsageLoading: boolean;
   supportsImageInput: boolean;
@@ -66,6 +68,7 @@ export function ChatComposer({
   isStreaming,
   isConversationEmpty,
   hasUploadingFiles,
+  taskPlan,
   contextUsage,
   isContextUsageLoading,
   supportsImageInput,
@@ -108,9 +111,13 @@ export function ChatComposer({
         </div>
       )}
 
+      {taskPlan && <ComposerTaskPlan taskPlan={taskPlan} />}
+
       <form
         onSubmit={onSubmit}
-        className="relative overflow-hidden rounded-2xl border bg-background shadow-lg transition-all focus-within:border-ring"
+        className={`relative overflow-hidden rounded-2xl border bg-background shadow-lg transition-all focus-within:border-ring ${
+          taskPlan ? "-mt-px rounded-t-[12px]" : ""
+        }`}
       >
         <input
           ref={imageInputRef}

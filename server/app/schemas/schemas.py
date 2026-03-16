@@ -52,6 +52,11 @@ class AgentCreate(AppBaseModel):
     skill_resolution_llm_id: int | None = Field(
         None, description="Optional LLM ID for skill selection only"
     )
+    session_idle_timeout_minutes: int = Field(
+        default=15,
+        ge=1,
+        description="Minutes of inactivity before a new chat session is created",
+    )
     is_active: bool = Field(default=True, description="Whether agent is active")
     max_iteration: int = Field(
         default=30, description="Maximum iterations for ReAct recursion"
@@ -63,6 +68,7 @@ class AgentUpdate(AppBaseModel):
     description: str | None = None
     llm_id: int | None = None
     skill_resolution_llm_id: int | None = None
+    session_idle_timeout_minutes: int | None = Field(default=None, ge=1)
     is_active: bool | None = None
     max_iteration: int | None = None
     # JSON-encoded list of tool names, or None to leave unchanged
@@ -77,6 +83,7 @@ class AgentResponse(AppBaseModel):
     description: str | None
     llm_id: int | None
     skill_resolution_llm_id: int | None
+    session_idle_timeout_minutes: int
     model_name: str | None
     is_active: bool
     max_iteration: int

@@ -1,9 +1,9 @@
-import os
 from collections.abc import Generator
 from importlib import import_module
 from pathlib import Path
 from typing import Final
 
+from app.config import get_settings
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel
@@ -34,13 +34,13 @@ _REQUIRED_TABLES: Final[set[str]] = {
 def get_engine():
     """Create and return a SQLAlchemy database engine.
 
-    The database URL is read from the DATABASE_URL environment variable,
-    with a default fallback to SQLite.
+    The database URL is read from application settings so runtime code and
+    config-file loading stay consistent across entrypoints.
 
     Returns:
         A SQLAlchemy engine instance configured for the database.
     """
-    database_url = os.getenv("DATABASE_URL", "sqlite:///./pivot.db")
+    database_url = get_settings().DATABASE_URL
 
     if database_url.startswith("sqlite"):
         # For SQLite, ensure the parent directory exists (important in containers
@@ -105,6 +105,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
         SQLModel.metadata.create_all(engine)
 
     ensure_llm_schema_compatibility()
+    ensure_agent_schema_compatibility()
     ensure_react_schema_compatibility()
     ensure_file_schema_compatibility()
 
@@ -135,6 +136,35 @@ def ensure_llm_schema_compatibility() -> None:
             conn.execute(
                 text("UPDATE llm SET thinking = 'auto' WHERE thinking IS NULL")
             )
+
+
+def ensure_agent_schema_compatibility() -> None:
+    """Apply additive schema updates for legacy agent tables.
+
+    Why: existing SQLite deployments keep their current columns after startup,
+    so newly introduced agent settings must be backfilled manually.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("agent"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("agent")}
+    with engine.begin() as conn:
+        if "session_idle_timeout_minutes" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agent "
+                    "ADD COLUMN session_idle_timeout_minutes INTEGER"
+                )
+            )
+        conn.execute(
+            text(
+                "UPDATE agent "
+                "SET session_idle_timeout_minutes = 15 "
+                "WHERE session_idle_timeout_minutes IS NULL"
+            )
+        )
 
 
 def ensure_react_schema_compatibility() -> None:

@@ -37,8 +37,14 @@ import {
   parseJson,
   parseTokenRateData,
 } from "./utils/chatData";
-import { hasSessionExceededIdleTimeout } from "./utils/sessionActivity";
-import { ZERO_RATE_STREAK_TO_RENDER } from "./utils/chatSelectors";
+import {
+  hasSessionExceededIdleTimeout,
+  resolveSessionIdleTimeoutMs,
+} from "./utils/sessionActivity";
+import {
+  ZERO_RATE_STREAK_TO_RENDER,
+  deriveComposerTaskPlan,
+} from "./utils/chatSelectors";
 
 /**
  * Convert a session creation payload into the sidebar row shape.
@@ -62,6 +68,7 @@ function ChatContainer({
   agentId,
   agentName,
   primaryLlmId,
+  sessionIdleTimeoutMinutes,
 }: ReactChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState<string>("");
@@ -102,6 +109,9 @@ function ChatContainer({
   } = useChatUploads(primaryLlmId);
   const { scrollContainerRef, handleScroll, prepareForProgrammaticScroll } =
     useChatAutoScroll(messages);
+  const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
+    sessionIdleTimeoutMinutes,
+  );
 
   /**
    * Reloads the sidebar session list so metadata stays in sync after task completion.
@@ -124,7 +134,13 @@ function ChatContainer({
 
         if (existingSessions.length > 0) {
           const latestSession = existingSessions[0];
-          if (hasSessionExceededIdleTimeout(latestSession)) {
+          if (
+            hasSessionExceededIdleTimeout(
+              latestSession,
+              Date.now(),
+              sessionIdleTimeoutMs,
+            )
+          ) {
             const freshSession = await createSession(agentId);
             const freshSessionItem = toSessionListItem(freshSession);
 
@@ -169,7 +185,13 @@ function ChatContainer({
     };
 
     void initSessions();
-  }, [agentId, isInitialized, isLoadingSession, refreshSessionList]);
+  }, [
+    agentId,
+    isInitialized,
+    isLoadingSession,
+    refreshSessionList,
+    sessionIdleTimeoutMs,
+  ]);
 
   const canSendMessage =
     !isStreaming &&
@@ -407,7 +429,14 @@ function ChatContainer({
         ? sessions.find((session) => session.session_id === activeSessionId) ?? null
         : null;
 
-      if (activeSessionId && hasSessionExceededIdleTimeout(activeSession)) {
+      if (
+        activeSessionId &&
+        hasSessionExceededIdleTimeout(
+          activeSession,
+          Date.now(),
+          sessionIdleTimeoutMs,
+        )
+      ) {
         shouldResetConversation = true;
         requestTaskId = null;
       }
@@ -1027,6 +1056,7 @@ function ChatContainer({
   };
 
   const isConversationEmpty = messages.length === 0;
+  const composerTaskPlan = deriveComposerTaskPlan(messages);
 
   return (
     <div className="flex h-full overflow-hidden bg-background text-foreground">
@@ -1069,6 +1099,7 @@ function ChatContainer({
           isStreaming={isStreaming}
           isConversationEmpty={isConversationEmpty}
           hasUploadingFiles={hasUploadingFiles}
+          taskPlan={composerTaskPlan}
           contextUsage={contextUsage}
           isContextUsageLoading={isContextUsageLoading}
           supportsImageInput={supportsImageInput}

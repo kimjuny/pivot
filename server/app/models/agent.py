@@ -37,6 +37,8 @@ class Agent(SQLModel, table=True):
         description: Optional description of the agent's purpose.
         llm_id: Foreign key to the LLM configuration to use.
         skill_resolution_llm_id: Optional LLM used only for skill selection.
+        session_idle_timeout_minutes: Minutes of inactivity before the chat UI
+            automatically starts a fresh session for this agent.
         model_name: Deprecated. Name of the LLM model to use (kept for migration).
         is_active: Whether the agent is currently active.
         max_iteration: Maximum number of iterations for ReAct recursion.
@@ -60,6 +62,12 @@ class Agent(SQLModel, table=True):
         default=None,
         foreign_key="llm.id",
         index=True,
+    )
+    session_idle_timeout_minutes: int = Field(
+        default=15,
+        description=(
+            "Minutes of inactivity before the client starts a new chat session"
+        ),
     )
     model_name: str | None = Field(
         default=None, description="Deprecated: Use llm_id instead"

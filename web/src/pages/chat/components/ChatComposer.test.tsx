@@ -1,0 +1,118 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { ChatComposer } from "./ChatComposer";
+
+describe("ChatComposer", () => {
+  it("renders the Codex-style task plan above the composer when available", () => {
+    render(
+      <ChatComposer
+        inputMessage=""
+        error={null}
+        replyTaskId={null}
+        pendingFiles={[]}
+        canSendMessage={false}
+        isStreaming={false}
+        isConversationEmpty={false}
+        hasUploadingFiles={false}
+        taskPlan={{
+          messageId: "assistant-1",
+          steps: [
+            {
+              stepId: "1",
+              title: "Inspect the repository",
+              description: "Review the current files",
+              completionCriteria: "Context is collected",
+              status: "running",
+            },
+            {
+              stepId: "2",
+              title: "Ship the fix",
+              description: "Patch the bug",
+              completionCriteria: "Change is merged",
+              status: "pending",
+            },
+          ],
+        }}
+        contextUsage={null}
+        isContextUsageLoading={false}
+        supportsImageInput={false}
+        imageInputRef={{ current: null }}
+        documentInputRef={{ current: null }}
+        onInputChange={vi.fn()}
+        onKeyDown={vi.fn()}
+        onPaste={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onCancelReply={vi.fn()}
+        onImageInputChange={vi.fn()}
+        onDocumentInputChange={vi.fn()}
+        onRemovePendingFile={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("0 out of 2 tasks completed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Inspect the repository")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask anything")).toBeInTheDocument();
+  });
+
+  it("collapses and expands the task plan from the header control", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatComposer
+        inputMessage=""
+        error={null}
+        replyTaskId={null}
+        pendingFiles={[]}
+        canSendMessage={false}
+        isStreaming={false}
+        isConversationEmpty={false}
+        hasUploadingFiles={false}
+        taskPlan={{
+          messageId: "assistant-1",
+          steps: [
+            {
+              stepId: "1",
+              title: "Inspect the repository",
+              description: "Review the current files",
+              completionCriteria: "Context is collected",
+              status: "done",
+            },
+          ],
+        }}
+        contextUsage={null}
+        isContextUsageLoading={false}
+        supportsImageInput={false}
+        imageInputRef={{ current: null }}
+        documentInputRef={{ current: null }}
+        onInputChange={vi.fn()}
+        onKeyDown={vi.fn()}
+        onPaste={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onCancelReply={vi.fn()}
+        onImageInputChange={vi.fn()}
+        onDocumentInputChange={vi.fn()}
+        onRemovePendingFile={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Collapse task plan" }));
+    expect(screen.getByRole("button", { name: "Expand task plan" })).toBeInTheDocument();
+    expect(screen.getByTestId("composer-task-plan-body")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Expand task plan" }));
+    expect(screen.getByTestId("composer-task-plan-body")).toHaveAttribute(
+      "aria-hidden",
+      "false",
+    );
+    expect(screen.getByText("Inspect the repository")).toBeInTheDocument();
+  });
+});

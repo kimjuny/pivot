@@ -17,6 +17,11 @@ export interface Agent {
   llm_id?: number;
   /** Optional LLM configuration ID for skill resolution only */
   skill_resolution_llm_id?: number | null;
+  /**
+   * Minutes of inactivity before chat should start a fresh session for this
+   * agent instead of continuing the previous one.
+   */
+  session_idle_timeout_minutes: number;
   /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
   /** Whether the agent is currently active */

@@ -84,10 +84,6 @@ export function ContextUsageRing({
                 {formatCompactTokenCount(usage.used_tokens)} /{" "}
                 {formatCompactTokenCount(usage.max_context_tokens)} tokens used
               </div>
-              <div>
-                {formatCompactTokenCount(usage.session_tokens)} tokens already in
-                session
-              </div>
               {usage.preview_tokens > 0 && (
                 <div>
                   +{formatCompactTokenCount(usage.preview_tokens)} tokens if sent

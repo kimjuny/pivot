@@ -5,6 +5,7 @@ export const mockAgent: Agent = {
   name: 'Test Agent',
   description: 'Test agent description',
   model_name: 'gpt-4',
+  session_idle_timeout_minutes: 15,
   is_active: true,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),

@@ -30,14 +30,6 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
 
-    # LLM Flags
-    LLM_DOUBAO: bool = False
-    LLM_GLM: bool = False
-
-    # LLM API Keys
-    DOUBAO_SEED_API_KEY: str | None = None
-    GLM_API_KEY: str | None = None
-
     # Sandbox manager
     SANDBOX_MANAGER_URL: str = "http://sandbox-manager:8051"
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
@@ -70,6 +62,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Load and cache runtime settings from the selected environment file."""
     env = os.getenv("ENV", "development")
 
     # server/app/config.py -> server/
@@ -78,11 +71,11 @@ def get_settings() -> Settings:
 
     # If specific env file exists, use it
     if env_file.exists():
-        return cast(Any, Settings)(_env_file=str(env_file))
+        return cast(Any, Settings)(_env_file=str(env_file), ENV=env)
 
     # Fallback to .env in server dir
     base_env = server_dir / ".env"
     if base_env.exists():
-        return cast(Any, Settings)(_env_file=str(base_env))
+        return cast(Any, Settings)(_env_file=str(base_env), ENV=env)
 
-    return Settings()
+    return Settings(ENV=env)

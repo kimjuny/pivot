@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ChevronDown, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { getLLMs } from '../utils/api';
 import type { LLM } from '../types';
@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
   SelectContent,
@@ -24,11 +25,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+/**
+ * Editable agent payload shared by the create and edit dialogs.
+ */
 export interface AgentFormData {
   name: string;
   description: string | undefined;
   llm_id: number | undefined;
   skill_resolution_llm_id?: number | null;
+  /** Minutes of inactivity before chat starts a fresh session. */
+  session_idle_timeout_minutes: number;
   is_active: boolean;
 }
 
@@ -40,19 +46,27 @@ interface AgentModalProps {
   onSave: (data: AgentFormData) => Promise<void>;
 }
 
+type AgentTabValue = 'general' | 'advanced';
+
+function createDefaultFormData(): AgentFormData {
+  return {
+    name: '',
+    description: '',
+    llm_id: undefined,
+    skill_resolution_llm_id: null,
+    session_idle_timeout_minutes: 15,
+    is_active: true,
+  };
+}
+
 /**
  * Modal for creating or editing an agent.
  * Uses shadcn Dialog with form inputs for agent properties.
  */
 function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalProps) {
   const navigate = useNavigate();
-  const [formData, setFormData] = useState<AgentFormData>({
-    name: '',
-    description: '',
-    llm_id: undefined,
-    skill_resolution_llm_id: null,
-    is_active: true
-  });
+  const [formData, setFormData] = useState<AgentFormData>(createDefaultFormData());
+  const [activeTab, setActiveTab] = useState<AgentTabValue>('general');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [availableLLMs, setAvailableLLMs] = useState<LLM[]>([]);
@@ -66,17 +80,15 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           description: initialData.description || '',
           llm_id: initialData.llm_id,
           skill_resolution_llm_id: initialData.skill_resolution_llm_id ?? null,
-          is_active: initialData.is_active !== undefined ? initialData.is_active : true
+          session_idle_timeout_minutes:
+            initialData.session_idle_timeout_minutes ?? 15,
+          is_active:
+            initialData.is_active !== undefined ? initialData.is_active : true,
         });
       } else {
-        setFormData({
-          name: '',
-          description: '',
-          llm_id: undefined,
-          skill_resolution_llm_id: null,
-          is_active: true
-        });
+        setFormData(createDefaultFormData());
       }
+      setActiveTab('general');
       setServerError(null);
       void loadLLMs();
     }
@@ -97,11 +109,21 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
+      setActiveTab('general');
       setServerError('Agent name is required');
       return;
     }
     if (!formData.llm_id) {
+      setActiveTab('general');
       setServerError('LLM selection is required');
+      return;
+    }
+    if (
+      !Number.isInteger(formData.session_idle_timeout_minutes) ||
+      formData.session_idle_timeout_minutes < 1
+    ) {
+      setActiveTab('advanced');
+      setServerError('Session idle timeout must be at least 1 minute');
       return;
     }
 
@@ -114,7 +136,8 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         description: formData.description?.trim() || undefined,
         llm_id: formData.llm_id,
         skill_resolution_llm_id: formData.skill_resolution_llm_id ?? null,
-        is_active: formData.is_active
+        session_idle_timeout_minutes: formData.session_idle_timeout_minutes,
+        is_active: formData.is_active,
       });
       onClose();
     } catch (err) {
@@ -127,7 +150,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-md overflow-hidden">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>
             {mode === 'create' ? 'New Agent' : 'Edit Agent'}
@@ -140,133 +163,184 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           </div>
         )}
 
-        <div className="min-w-0 space-y-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">
-              Agent Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              disabled={isSubmitting}
-              placeholder="Enter agent name…"
-              autoComplete="off"
-            />
-          </div>
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as AgentTabValue)}
+          className="py-2"
+        >
+          <TabsList className="grid h-auto w-full grid-cols-2">
+            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="advanced">Advanced</TabsTrigger>
+          </TabsList>
 
-          <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
-            <Textarea
-              id="description"
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              disabled={isSubmitting}
-              rows={3}
-              placeholder="Enter agent description (optional)…"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="llm">
-              Primary <span className="text-destructive">*</span>
-            </Label>
-            {loadingLLMs ? (
-              <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
-                Loading LLMs…
-              </div>
-            ) : (
-              <Select
-                value={formData.llm_id?.toString() || ''}
-                onValueChange={(value) => {
-                  if (value === '__add_new__') {
-                    // Navigate to LLMs page to create new LLM
-                    navigate('/llms');
-                    onClose();
-                  } else {
-                    setFormData({ ...formData, llm_id: value ? parseInt(value) : undefined });
-                  }
-                }}
+          <TabsContent value="general" className="min-w-0 space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">
+                Agent Name <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 disabled={isSubmitting}
-              >
-                <SelectTrigger id="llm">
-                  <SelectValue placeholder="Select an LLM…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableLLMs.length === 0 ? (
-                    <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-                      No LLMs available
-                    </div>
-                  ) : (
-                    availableLLMs.map((llm) => (
-                      <SelectItem key={llm.id} value={llm.id.toString()}>
+                placeholder="Enter agent name…"
+                autoComplete="off"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                disabled={isSubmitting}
+                rows={3}
+                placeholder="Enter agent description (optional)…"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="llm">
+                Primary <span className="text-destructive">*</span>
+              </Label>
+              {loadingLLMs ? (
+                <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
+                  Loading LLMs…
+                </div>
+              ) : (
+                <Select
+                  value={formData.llm_id?.toString() || ''}
+                  onValueChange={(value) => {
+                    if (value === '__add_new__') {
+                      // Why: creating the dependency in-place avoids forcing users to abandon the flow.
+                      navigate('/llms');
+                      onClose();
+                    } else {
+                      setFormData({
+                        ...formData,
+                        llm_id: value ? Number.parseInt(value, 10) : undefined,
+                      });
+                    }
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger id="llm">
+                    <SelectValue placeholder="Select an LLM…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableLLMs.length === 0 ? (
+                      <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                        No LLMs available
+                      </div>
+                    ) : (
+                      availableLLMs.map((llm) => (
+                        <SelectItem key={llm.id} value={llm.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{llm.name}</span>
+                            <span className="text-xs text-muted-foreground">({llm.model})</span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                    <Separator className="my-1" />
+                    <SelectItem
+                      value="__add_new__"
+                      className="text-muted-foreground hover:text-foreground focus:text-foreground"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add New LLM</span>
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="skill_resolution_llm">Skill Resolution</Label>
+              {loadingLLMs ? (
+                <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
+                  Loading LLMs…
+                </div>
+              ) : (
+                <Select
+                  value={formData.skill_resolution_llm_id?.toString() || '__none__'}
+                  onValueChange={(value) => {
+                    setFormData({
+                      ...formData,
+                      skill_resolution_llm_id:
+                        value === '__none__' ? null : Number.parseInt(value, 10),
+                    });
+                  }}
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger id="skill_resolution_llm">
+                    <SelectValue placeholder="Optional: select an LLM…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
+                    {availableLLMs.map((llm) => (
+                      <SelectItem
+                        key={`skill-resolution-${llm.id}`}
+                        value={llm.id.toString()}
+                      >
                         <div className="flex items-center gap-2">
                           <span className="font-medium">{llm.name}</span>
                           <span className="text-xs text-muted-foreground">({llm.model})</span>
                         </div>
                       </SelectItem>
-                    ))
-                  )}
-                  <Separator className="my-1" />
-                  <SelectItem 
-                    value="__add_new__"
-                    className="text-muted-foreground hover:text-foreground focus:text-foreground"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add New LLM</span>
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          </div>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="skill_resolution_llm">Skill Resolution</Label>
-            {loadingLLMs ? (
-              <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
-                Loading LLMs…
-              </div>
-            ) : (
-              <Select
-                value={formData.skill_resolution_llm_id?.toString() || '__none__'}
-                onValueChange={(value) => {
+            <div className="flex items-center space-x-3">
+              <Switch
+                id="is_active"
+                checked={formData.is_active}
+                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+                disabled={isSubmitting}
+              />
+              <Label htmlFor="is_active" className="cursor-pointer">
+                Activate Agent
+              </Label>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="advanced" className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="session_idle_timeout_minutes">
+                Session Idle Timeout
+              </Label>
+              <Input
+                id="session_idle_timeout_minutes"
+                type="number"
+                min={1}
+                step={1}
+                value={formData.session_idle_timeout_minutes}
+                onChange={(e) => {
+                  const nextValue = Number.parseInt(e.target.value, 10);
                   setFormData({
                     ...formData,
-                    skill_resolution_llm_id: value === '__none__' ? null : parseInt(value),
+                    session_idle_timeout_minutes: Number.isNaN(nextValue)
+                      ? 0
+                      : nextValue,
                   });
                 }}
                 disabled={isSubmitting}
-              >
-                <SelectTrigger id="skill_resolution_llm">
-                  <SelectValue placeholder="Optional: select an LLM…" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">None</SelectItem>
-                  {availableLLMs.map((llm) => (
-                    <SelectItem key={`skill-resolution-${llm.id}`} value={llm.id.toString()}>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{llm.name}</span>
-                        <span className="text-xs text-muted-foreground">({llm.model})</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-
-          <div className="flex items-center space-x-3">
-            <Switch
-              id="is_active"
-              checked={formData.is_active}
-              onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
-              disabled={isSubmitting}
-            />
-            <Label htmlFor="is_active" className="cursor-pointer">Activate Agent</Label>
-          </div>
-        </div>
+                placeholder="15"
+                autoComplete="off"
+              />
+              <p className="text-sm text-muted-foreground">
+                Start a new chat session after this many idle minutes. Default is
+                15.
+              </p>
+            </div>
+          </TabsContent>
+        </Tabs>
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button

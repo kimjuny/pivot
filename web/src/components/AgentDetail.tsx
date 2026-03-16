@@ -1288,6 +1288,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
           agentId={agentId}
           agentName={agent?.name}
           primaryLlmId={agent?.llm_id}
+          sessionIdleTimeoutMinutes={agent?.session_idle_timeout_minutes}
         />
       </DraggableDialog>
 

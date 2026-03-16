@@ -10,6 +10,8 @@ export interface ReactChatInterfaceProps {
   agentName?: string;
   /** Primary LLM configuration used to gate image upload affordances. */
   primaryLlmId?: number;
+  /** Minutes of inactivity before chat rolls over into a new session. */
+  sessionIdleTimeoutMinutes?: number;
 }
 
 /**
@@ -70,6 +72,31 @@ export interface PlanStepData {
   specific_description: string;
   completion_criteria: string;
   status: string;
+}
+
+/**
+ * Canonical task-plan states rendered by the composer-adjacent plan panel.
+ */
+export type TaskPlanStepStatus = "pending" | "running" | "done" | "error";
+
+/**
+ * Normalized task-plan step used by the Codex-style composer panel.
+ */
+export interface TaskPlanStep {
+  stepId: string;
+  title: string;
+  description: string;
+  completionCriteria: string;
+  status: TaskPlanStepStatus;
+}
+
+/**
+ * Snapshot of the latest visible task plan shown above the composer.
+ */
+export interface TaskPlanSnapshot {
+  messageId: string;
+  taskId?: string;
+  steps: TaskPlanStep[];
 }
 
 /**

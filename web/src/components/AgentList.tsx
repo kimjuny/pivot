@@ -163,6 +163,7 @@ function AgentList() {
     description?: string;
     llm_id: number | undefined;
     skill_resolution_llm_id?: number | null;
+    session_idle_timeout_minutes: number;
     is_active?: boolean;
   }) => {
     if (modalMode === 'create') {
@@ -172,6 +173,7 @@ function AgentList() {
         description: agentData.description,
         llm_id: agentData.llm_id,
         skill_resolution_llm_id: agentData.skill_resolution_llm_id ?? null,
+        session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
         is_active: agentData.is_active,
       });
       toast.success('Agent created');
@@ -182,6 +184,7 @@ function AgentList() {
         description: agentData.description,
         llm_id: agentData.llm_id,
         skill_resolution_llm_id: agentData.skill_resolution_llm_id ?? null,
+        session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
         is_active: agentData.is_active,
       });
       toast.success('Agent updated');
@@ -442,6 +445,8 @@ function AgentList() {
                 description: editingAgent.description,
                 llm_id: editingAgent.llm_id,
                 skill_resolution_llm_id: editingAgent.skill_resolution_llm_id ?? null,
+                session_idle_timeout_minutes:
+                  editingAgent.session_idle_timeout_minutes,
                 is_active: editingAgent.is_active,
               }
             : undefined

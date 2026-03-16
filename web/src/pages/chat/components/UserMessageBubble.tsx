@@ -21,9 +21,7 @@ export function UserMessageBubble({ message }: UserMessageBubbleProps) {
           {formatTimestamp(message.timestamp)}
         </div>
         {message.attachments && message.attachments.length > 0 && (
-          <div className="rounded-xl bg-primary-foreground/10 p-2">
-            <AttachmentList attachments={message.attachments} />
-          </div>
+          <AttachmentList attachments={message.attachments} />
         )}
         {message.content && (
           <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">

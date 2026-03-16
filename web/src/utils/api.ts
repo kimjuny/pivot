@@ -122,6 +122,7 @@ export const createAgent = async (agentData: {
   description?: string;
   llm_id: number;
   skill_resolution_llm_id?: number | null;
+  session_idle_timeout_minutes?: number;
   is_active?: boolean;
 }): Promise<Agent> => {
   return apiRequest('/agents', {
@@ -367,6 +368,7 @@ export const updateAgent = async (
     description?: string;
     llm_id?: number;
     skill_resolution_llm_id?: number | null;
+    session_idle_timeout_minutes?: number;
     is_active?: boolean;
     skill_ids?: string | null;
   }

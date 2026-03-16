@@ -130,6 +130,35 @@ export function normalizeClipboardFile(file: File, index: number): File {
 }
 
 /**
+ * Extracts clipboard files once so screenshot pastes do not duplicate the same blob.
+ */
+export function getUniqueClipboardFiles(clipboardData: DataTransfer): File[] {
+  const uniqueFiles = new Map<string, File>();
+  const fileItems = Array.from(clipboardData.items).filter(
+    (item) => item.kind === "file",
+  );
+  const rawFiles =
+    fileItems.length > 0
+      ? fileItems
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file instanceof File)
+      : Array.from(clipboardData.files);
+
+  rawFiles.forEach((file) => {
+    const dedupeKey = file.name
+      ? [file.name, file.size, file.type, file.lastModified].join(":")
+      : ["clipboard", file.size, file.type].join(":");
+    if (!uniqueFiles.has(dedupeKey)) {
+      uniqueFiles.set(dedupeKey, file);
+    }
+  });
+
+  return Array.from(uniqueFiles.values()).map((file, index) =>
+    normalizeClipboardFile(file, index),
+  );
+}
+
+/**
  * Rebuilds persisted skill matching results into the timeline UI model.
  */
 export function buildSkillSelectionFromTask(
@@ -227,7 +256,11 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         }
       }
 
-      if (recursion.action_type === "RE_PLAN" && recursion.action_output) {
+      if (
+        (recursion.action_type === "RE_PLAN" ||
+          recursion.action_type === "PLAN") &&
+        recursion.action_output
+      ) {
         const planData = parseJson(recursion.action_output);
         if (planData !== null) {
           events.push({

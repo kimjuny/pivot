@@ -16,7 +16,7 @@ import {
 } from "@/utils/api";
 
 import type { PendingUploadItem } from "../types";
-import { normalizeClipboardFile, toChatAttachment } from "../utils/chatData";
+import { getUniqueClipboardFiles, toChatAttachment } from "../utils/chatData";
 
 /**
  * Owns attachment queue state so the chat container can stay focused on conversation flow.
@@ -301,37 +301,7 @@ export function useChatUploads(primaryLlmId?: number) {
    */
   const handlePaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
-      const clipboardFiles = new Map<string, File>();
-      let clipboardIndex = 0;
-
-      const addClipboardFile = (file: File | null) => {
-        if (!file) {
-          return;
-        }
-
-        const normalizedFile = normalizeClipboardFile(file, clipboardIndex);
-        clipboardIndex += 1;
-        const dedupeKey = [
-          normalizedFile.name,
-          normalizedFile.size,
-          normalizedFile.type,
-          normalizedFile.lastModified,
-        ].join(":");
-        clipboardFiles.set(dedupeKey, normalizedFile);
-      };
-
-      for (const item of Array.from(event.clipboardData.items)) {
-        if (item.kind !== "file") {
-          continue;
-        }
-        addClipboardFile(item.getAsFile());
-      }
-
-      for (const file of Array.from(event.clipboardData.files)) {
-        addClipboardFile(file);
-      }
-
-      const filesToUpload = Array.from(clipboardFiles.values());
+      const filesToUpload = getUniqueClipboardFiles(event.clipboardData);
       if (filesToUpload.length === 0) {
         return;
       }

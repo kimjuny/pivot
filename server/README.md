@@ -16,12 +16,7 @@ This directory contains the FastAPI backend for the agent visualization system.
    pip install -r requirements.txt
    ```
 
-2. Set your DOUBAO_SEED_API_KEY environment variable:
-   ```bash
-   export DOUBAO_SEED_API_KEY=your_api_key_here
-   ```
-
-3. Run the server:
+2. Run the server:
    ```bash
    uvicorn server.main:app --reload
    ```

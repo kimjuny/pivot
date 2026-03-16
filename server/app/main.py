@@ -43,8 +43,9 @@ setup_logging()
 
 # Initialize logger for server
 logger = get_logger("server")
+settings = get_settings()
 
-app = FastAPI(title="Agent Visualization API", version="1.0.0")
+app = FastAPI(title=settings.PROJECT_NAME, version="1.0.0")
 
 
 class TimingMiddleware(BaseHTTPMiddleware):
@@ -141,6 +142,7 @@ async def startup_event():
     """
     logger.info("=" * 50)
     logger.info("Starting Pivot Agent Framework...")
+    logger.info("Environment: %s", settings.ENV)
     logger.info("=" * 50)
 
     logger.info("Initializing database...")

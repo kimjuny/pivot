@@ -7,7 +7,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-import type { PlanStepData, RecursionRecord } from "../types";
+import type { RecursionRecord } from "../types";
 import {
   calculateDuration,
   formatTokenCount,
@@ -307,37 +307,7 @@ export function RecursionCard({
             }
 
             if (event.type === "plan_update") {
-              const planData = event.data as { plan?: PlanStepData[] } | undefined;
-
-              return (
-                <div
-                  key={index}
-                  className="rounded border border-border bg-background/50 p-2"
-                >
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <Brain className="h-3.5 w-3.5 text-purple-500" />
-                    <span className="text-xs font-semibold text-foreground">
-                      PLAN UPDATE
-                    </span>
-                  </div>
-                  {planData?.plan && planData.plan.length > 0 ? (
-                    <div className="space-y-1 pl-5">
-                      {planData.plan.map((step, stepIndex) => (
-                        <div
-                          key={`${step.step_id}-${stepIndex}`}
-                          className="text-xs text-muted-foreground"
-                        >
-                          {stepIndex + 1}. {step.general_goal || "Untitled step"}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="pl-5 text-xs italic text-muted-foreground/50">
-                      No plan data available
-                    </div>
-                  )}
-                </div>
-              );
+              return null;
             }
 
             if (event.type === "reflect") {

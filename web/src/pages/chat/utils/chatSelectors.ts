@@ -1,4 +1,9 @@
-import type { ChatMessage, RecursionRecord } from "../types";
+import type {
+  ChatMessage,
+  RecursionRecord,
+  TaskPlanSnapshot,
+} from "../types";
+import { deriveComposerTaskPlan as deriveComposerTaskPlanSnapshot } from "./chatPlan";
 
 /**
  * Number of consecutive zero-rate events required before rendering a visible zero throughput.
@@ -79,4 +84,13 @@ export function isClarifyMessage(message: ChatMessage): boolean {
   return (
     message.status === "waiting_input" || getLastRecursion(message)?.action === "CLARIFY"
   );
+}
+
+/**
+ * Exposes the latest visible task plan for the composer without leaking plan-wiring details.
+ */
+export function deriveComposerTaskPlan(
+  messages: ChatMessage[],
+): TaskPlanSnapshot | null {
+  return deriveComposerTaskPlanSnapshot(messages);
 }
