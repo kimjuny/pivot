@@ -71,14 +71,9 @@ export function getAutoSelectedSessionId(
   nowMs: number = Date.now(),
   idleTimeoutMs: number = SESSION_IDLE_TIMEOUT_MS,
 ): string | null {
-  const latestSession = sessions[0];
-  if (!latestSession) {
-    return null;
-  }
+  const reusableSession = sessions.find(
+    (session) => !hasSessionExceededIdleTimeout(session, nowMs, idleTimeoutMs),
+  );
 
-  if (hasSessionExceededIdleTimeout(latestSession, nowMs, idleTimeoutMs)) {
-    return null;
-  }
-
-  return latestSession.session_id;
+  return reusableSession?.session_id ?? null;
 }

@@ -10,6 +10,7 @@ from datetime import UTC
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.models.session import Session
 from app.models.user import User
 from app.schemas.session import (
     ChatHistoryResponse,
@@ -22,15 +23,50 @@ from app.schemas.session import (
     SessionListResponse,
     SessionMemoryResponse,
     SessionResponse,
+    SessionUpdate,
     TaskMessage,
 )
-from app.services.session_memory_service import SessionMemoryService
+from app.services.session_memory_service import (
+    SESSION_METADATA_UNSET,
+    SessionMemoryService,
+)
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session as DBSession
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _extract_subject_content(subject_payload: str | None) -> str | None:
+    """Return the human-readable subject text stored in session JSON."""
+    if not subject_payload:
+        return None
+
+    try:
+        subject_data = json.loads(subject_payload)
+    except json.JSONDecodeError:
+        return None
+
+    content = subject_data.get("content")
+    return content if isinstance(content, str) and content.strip() else None
+
+
+def _build_session_response(session: Session) -> SessionResponse:
+    """Serialize one session row into the API response contract."""
+    return SessionResponse(
+        id=session.id or 0,
+        session_id=session.session_id,
+        agent_id=session.agent_id,
+        user=session.user,
+        status=session.status,
+        title=session.title or _extract_subject_content(session.subject),
+        is_pinned=session.is_pinned,
+        subject=json.loads(session.subject) if session.subject else None,
+        object=json.loads(session.object) if session.object else None,
+        created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
+        updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
+    )
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -57,17 +93,7 @@ async def create_session(
         user=current_user.username,
     )
 
-    return SessionResponse(
-        id=session.id or 0,
-        session_id=session.session_id,
-        agent_id=session.agent_id,
-        user=session.user,
-        status=session.status,
-        subject=json.loads(session.subject) if session.subject else None,
-        object=json.loads(session.object) if session.object else None,
-        created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
-        updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
-    )
+    return _build_session_response(session)
 
 
 @router.get("/sessions", response_model=SessionListResponse)
@@ -97,31 +123,15 @@ async def list_sessions(
 
     session_items = []
     for session in sessions:
-        # Get message count from chat history
-        try:
-            history = json.loads(session.chat_history or '{"messages": []}')
-            message_count = len(history.get("messages", []))
-        except json.JSONDecodeError:
-            message_count = 0
-
-        # Get subject content string
-        subject_str = None
-        if session.subject:
-            try:
-                subject_data = json.loads(session.subject)
-                subject_str = subject_data.get("content")
-            except json.JSONDecodeError:
-                pass
-
         session_items.append(
             SessionListItem(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
                 status=session.status,
-                subject=subject_str,
+                title=session.title or _extract_subject_content(session.subject),
+                is_pinned=session.is_pinned,
                 created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
                 updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
-                message_count=message_count,
             )
         )
 
@@ -159,17 +169,56 @@ async def get_session(
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return SessionResponse(
-        id=session.id or 0,
-        session_id=session.session_id,
-        agent_id=session.agent_id,
-        user=session.user,
-        status=session.status,
-        subject=json.loads(session.subject) if session.subject else None,
-        object=json.loads(session.object) if session.object else None,
-        created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
-        updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
+    return _build_session_response(session)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    request: SessionUpdate,
+    db: DBSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SessionResponse:
+    """Update user-managed session metadata such as title and pin state.
+
+    Args:
+        session_id: UUID of the session.
+        request: Partial metadata update request from the chat sidebar.
+        db: Database session dependency.
+        current_user: Authenticated user.
+
+    Returns:
+        Updated session information.
+
+    Raises:
+        HTTPException: If session not found or access denied.
+    """
+    service = SessionMemoryService(db)
+    session = service.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user != current_user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    updated_session = service.update_session_metadata(
+        session_id,
+        title=(
+            request.title
+            if "title" in request.model_fields_set
+            else SESSION_METADATA_UNSET
+        ),
+        is_pinned=(
+            request.is_pinned
+            if "is_pinned" in request.model_fields_set
+            else SESSION_METADATA_UNSET
+        ),
     )
+    if updated_session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return _build_session_response(updated_session)
 
 
 @router.get("/sessions/{session_id}/memory", response_model=SessionMemoryResponse)

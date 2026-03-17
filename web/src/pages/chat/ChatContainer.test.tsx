@@ -12,6 +12,7 @@ vi.mock("@/utils/api", () => ({
   getReactContextUsage: vi.fn(),
   listSessions: vi.fn(),
   startReactTask: vi.fn(),
+  updateSession: vi.fn(),
 }));
 
 vi.mock("@/contexts/auth-core", () => ({
@@ -84,10 +85,10 @@ describe("ChatContainer session rollover", () => {
           session_id: "expired-session",
           agent_id: 7,
           status: "active",
-          subject: "Old chat",
+          title: "Old chat",
+          is_pinned: false,
           created_at: "2026-03-16T00:00:00.000Z",
           updated_at: "2026-03-16T00:00:00.000Z",
-          message_count: 2,
         },
       ],
       total: 1,
@@ -98,6 +99,8 @@ describe("ChatContainer session rollover", () => {
       agent_id: 7,
       user: "alice",
       status: "active",
+      title: null,
+      is_pinned: false,
       subject: null,
       object: null,
       created_at: "2026-03-16T01:00:00.000Z",
@@ -131,10 +134,10 @@ describe("ChatContainer session rollover", () => {
           session_id: selectedSessionId,
           agent_id: 7,
           status: "active",
-          subject: "Focused thread",
+          title: "Focused thread",
+          is_pinned: false,
           created_at: "2026-03-16T00:00:00.000Z",
           updated_at: "2026-03-16T00:00:00.000Z",
-          message_count: 4,
         },
       ],
       total: 1,
@@ -145,6 +148,8 @@ describe("ChatContainer session rollover", () => {
       agent_id: 7,
       user: "alice",
       status: "active",
+      title: null,
+      is_pinned: false,
       subject: null,
       object: null,
       created_at: "2026-03-16T01:00:00.000Z",
@@ -209,16 +214,18 @@ describe("ChatContainer session rollover", () => {
 
   it("does not create a ghost iteration when replay reconnects into an already running recursion", async () => {
     const sessionId = "live-session";
+    const updatedAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     vi.mocked(listSessions).mockResolvedValue({
       sessions: [
         {
           session_id: sessionId,
           agent_id: 7,
           status: "active",
-          subject: "Live thread",
-          created_at: "2026-03-16T13:20:00.000Z",
-          updated_at: "2026-03-16T13:24:50.000Z",
-          message_count: 2,
+          title: "Live thread",
+          is_pinned: false,
+          created_at: createdAt,
+          updated_at: updatedAt,
         },
       ],
       total: 1,

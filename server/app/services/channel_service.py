@@ -662,6 +662,12 @@ class ChannelService:
             identity=identity,
             external_conversation_id=event.external_conversation_id,
         )
+        yield ChannelOutboundAction(
+            kind="progress",
+            text="Received, starting the task...",
+            delivery_hint="stream",
+            slot="assistant_turn",
+        )
         channel_file_ids: list[str] = []
         if event.attachments:
             linked_user = self.db.get(User, identity.pivot_user_id)
@@ -858,7 +864,21 @@ class ChannelService:
                 pending_progress_text = None
                 pending_progress_view = None
 
-            if event_type == "answer":
+            if event_type == "skill_resolution_result":
+                resolution_text = self._render_skill_resolution_result_text(
+                    event_data=event_data
+                )
+                if resolution_text and resolution_text != last_progress_text:
+                    yield ChannelOutboundAction(
+                        kind="progress",
+                        text=resolution_text,
+                        delivery_hint="stream",
+                        slot="assistant_turn",
+                        metadata=self._build_action_metadata(event_data),
+                    )
+                    last_progress_text = resolution_text
+                    last_progress_sent_at = perf_counter()
+            elif event_type == "answer":
                 answer_emitted = True
                 yield ChannelOutboundAction(
                     kind="answer",
@@ -1004,6 +1024,26 @@ class ChannelService:
         if delta:
             return str(delta)
         return "The agent returned an empty response."
+
+    def _render_skill_resolution_result_text(
+        self,
+        *,
+        event_data: dict[str, Any],
+    ) -> str:
+        """Render one skill-resolution event into channel-safe text."""
+        payload = event_data.get("data")
+        if not isinstance(payload, dict):
+            return ""
+
+        raw_selected_skills = payload.get("selected_skills", [])
+        selected_skills = [
+            item.strip()
+            for item in raw_selected_skills
+            if isinstance(item, str) and item.strip()
+        ]
+        if selected_skills:
+            return f"Matched skills: {', '.join(selected_skills)}"
+        return "Matched skills: none"
 
     def _build_channel_progress_view(
         self,

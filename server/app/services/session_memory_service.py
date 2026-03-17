@@ -25,6 +25,7 @@ from sqlmodel import Session as DBSession, col, select
 logger = logging.getLogger(__name__)
 
 SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
+SESSION_METADATA_UNSET = object()
 
 
 class SessionMemoryService:
@@ -65,6 +66,8 @@ class SessionMemoryService:
             agent_id=agent_id,
             user=user,
             status="active",
+            title=None,
+            is_pinned=False,
             chat_history=json.dumps({"version": 1, "messages": []}),
             react_llm_messages="[]",
             react_pending_action_result=None,
@@ -156,8 +159,53 @@ class SessionMemoryService:
         stmt = select(Session).where(Session.user == user)
         if agent_id is not None:
             stmt = stmt.where(Session.agent_id == agent_id)
-        stmt = stmt.order_by(col(Session.updated_at).desc()).limit(limit)
+        stmt = stmt.order_by(
+            col(Session.is_pinned).desc(),
+            col(Session.updated_at).desc(),
+        ).limit(limit)
         return list(self.db.exec(stmt).all())
+
+    def update_session_metadata(
+        self,
+        session_id: str,
+        *,
+        title: str | None | object = SESSION_METADATA_UNSET,
+        is_pinned: bool | object = SESSION_METADATA_UNSET,
+    ) -> Session | None:
+        """Update user-managed sidebar metadata for one session.
+
+        Args:
+            session_id: UUID of the session.
+            title: Optional explicit title. ``None`` clears the custom title.
+            is_pinned: Optional pin state toggle.
+
+        Returns:
+            Updated session row, or ``None`` when the session does not exist.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+
+        has_changes = False
+        if title is not SESSION_METADATA_UNSET:
+            next_title = title.strip() if isinstance(title, str) else None
+            if session.title != (next_title or None):
+                session.title = next_title or None
+                has_changes = True
+
+        if (
+            is_pinned is not SESSION_METADATA_UNSET
+            and session.is_pinned != is_pinned
+        ):
+            session.is_pinned = bool(is_pinned)
+            has_changes = True
+
+        if has_changes:
+            self.db.add(session)
+            self.db.commit()
+            self.db.refresh(session)
+
+        return session
 
     def get_full_session_memory_dict(self, session_id: str) -> dict[str, Any]:
         """Get the complete session memory as a dictionary.

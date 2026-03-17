@@ -32,6 +32,8 @@ class Session(SQLModel, table=True):
         agent_id: Foreign key to the agent handling this session.
         user: Username of the user who owns this session.
         status: Current status (active, waiting_input, closed).
+        title: Optional user-facing session label set from the sidebar.
+        is_pinned: Whether the session should stay at the top of the sidebar.
         subject: JSON string containing session subject info.
         object: JSON string containing session object (purpose) info.
         chat_history: JSON string containing the complete chat history.
@@ -52,6 +54,14 @@ class Session(SQLModel, table=True):
     status: str = Field(
         default="active",
         description="Status: active, waiting_input, closed",
+    )
+    title: str | None = Field(
+        default=None,
+        description="Optional user-defined session title",
+    )
+    is_pinned: bool = Field(
+        default=False,
+        description="Whether the session is pinned in the sidebar",
     )
     subject: str | None = Field(
         default=None,

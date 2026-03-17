@@ -166,3 +166,34 @@ class SessionMemoryServiceTestCase(unittest.TestCase):
         self.assertEqual(history[0]["current_plan"][0]["step_id"], "1")
         self.assertEqual(history[0]["current_plan"][0]["status"], "pending")
         self.assertEqual(history[0]["current_plan"][0]["recursion_history"], [])
+
+    def test_update_session_metadata_does_not_pin_when_only_renaming(self) -> None:
+        """Renaming a session should not implicitly toggle its pin state."""
+        before = self.service.get_session("session-1")
+        if before is None:
+            self.fail("Expected session-1 to exist")
+
+        original_updated_at = before.updated_at
+        updated_session = self.service.update_session_metadata(
+            "session-1",
+            title="Renamed thread",
+        )
+
+        if updated_session is None:
+            self.fail("Expected renamed session row")
+
+        self.assertEqual(updated_session.title, "Renamed thread")
+        self.assertFalse(updated_session.is_pinned)
+        self.assertEqual(updated_session.updated_at, original_updated_at)
+
+    def test_update_session_metadata_only_changes_pin_when_requested(self) -> None:
+        """Pin toggles should remain explicit so sidebar actions stay predictable."""
+        updated_session = self.service.update_session_metadata(
+            "session-1",
+            is_pinned=True,
+        )
+
+        if updated_session is None:
+            self.fail("Expected pinned session row")
+
+        self.assertTrue(updated_session.is_pinned)

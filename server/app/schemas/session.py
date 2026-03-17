@@ -22,10 +22,19 @@ class SessionResponse(AppBaseModel):
     agent_id: int
     user: str
     status: str
+    title: str | None = None
+    is_pinned: bool = False
     subject: dict[str, Any] | None = None
     object: dict[str, Any] | None = None
     created_at: str
     updated_at: str
+
+
+class SessionUpdate(AppBaseModel):
+    """Request schema for sidebar-driven session metadata updates."""
+
+    title: str | None = None
+    is_pinned: bool | None = None
 
 
 class SessionMemoryResponse(AppBaseModel):
@@ -48,10 +57,10 @@ class SessionListItem(AppBaseModel):
     session_id: str
     agent_id: int
     status: str
-    subject: str | None = None  # Just the subject content string
+    title: str | None = None
+    is_pinned: bool = False
     created_at: str
     updated_at: str
-    message_count: int = 0
 
 
 class SessionListResponse(AppBaseModel):

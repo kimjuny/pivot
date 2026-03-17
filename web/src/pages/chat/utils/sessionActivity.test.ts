@@ -60,7 +60,7 @@ describe("hasSessionExceededIdleTimeout", () => {
     ).toBe(true);
   });
 
-  it("auto-selects the latest session only while it is still fresh", () => {
+  it("auto-selects the first reusable session in the ordered list", () => {
     const nowMs = Date.parse("2026-03-12T12:00:00.000Z");
 
     expect(
@@ -74,6 +74,24 @@ describe("hasSessionExceededIdleTimeout", () => {
         nowMs,
       ),
     ).toBe("session-fresh");
+
+    expect(
+      getAutoSelectedSessionId(
+        [
+          {
+            session_id: "session-expired",
+            updated_at: new Date(
+              nowMs - (SESSION_IDLE_TIMEOUT_MS + 60_000),
+            ).toISOString(),
+          },
+          {
+            session_id: "session-still-fresh",
+            updated_at: new Date(nowMs - 60_000).toISOString(),
+          },
+        ],
+        nowMs,
+      ),
+    ).toBe("session-still-fresh");
 
     expect(
       getAutoSelectedSessionId(

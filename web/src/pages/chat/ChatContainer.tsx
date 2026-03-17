@@ -9,6 +9,7 @@ import {
   getReactContextUsage,
   listSessions,
   startReactTask,
+  updateSession,
   type ReactContextUsageSummary,
   type SessionListItem,
   type SessionResponse,
@@ -56,11 +57,54 @@ function toSessionListItem(session: SessionResponse): SessionListItem {
     session_id: session.session_id,
     agent_id: session.agent_id,
     status: session.status,
-    subject: session.subject?.content || null,
+    title: session.title,
+    is_pinned: session.is_pinned,
     created_at: session.created_at,
     updated_at: session.updated_at,
-    message_count: 0,
   };
+}
+
+/**
+ * Keep sidebar ordering consistent with the backend so optimistic updates do
+ * not jump around after the next list refresh.
+ */
+function sortSessionsForSidebar(
+  sessions: SessionListItem[],
+): SessionListItem[] {
+  return [...sessions].sort((left, right) => {
+    if (left.is_pinned !== right.is_pinned) {
+      return Number(right.is_pinned) - Number(left.is_pinned);
+    }
+
+    return Date.parse(right.updated_at) - Date.parse(left.updated_at);
+  });
+}
+
+/**
+ * Merge one updated session row into the local sidebar cache.
+ */
+function upsertSessionListItem(
+  sessions: SessionListItem[],
+  nextSession: SessionListItem,
+): SessionListItem[] {
+  return sortSessionsForSidebar([
+    nextSession,
+    ...sessions.filter(
+      (existingSession) => existingSession.session_id !== nextSession.session_id,
+    ),
+  ]);
+}
+
+/**
+ * Update one existing sidebar row without changing its relative order.
+ */
+function replaceSessionListItem(
+  sessions: SessionListItem[],
+  nextSession: SessionListItem,
+): SessionListItem[] {
+  return sessions.map((session) =>
+    session.session_id === nextSession.session_id ? nextSession : session,
+  );
 }
 
 /**
@@ -1109,6 +1153,48 @@ function ChatContainer({
   };
 
   /**
+   * Applies a user-provided sidebar title and keeps local ordering in sync.
+   */
+  const handleRenameSession = async (
+    sessionId: string,
+    title: string | null,
+  ) => {
+    try {
+      const updatedSession = await updateSession(sessionId, { title });
+      const nextSession = toSessionListItem(updatedSession);
+      setSessions((previous) =>
+        replaceSessionListItem(previous, nextSession),
+      );
+      setError(null);
+    } catch (renameError) {
+      console.error("Failed to rename session:", renameError);
+      setError("Failed to rename session");
+    }
+  };
+
+  /**
+   * Moves a session into or out of the pinned section while preserving the
+   * same ordering rules used by the server.
+   */
+  const handleTogglePinSession = async (
+    sessionId: string,
+    isPinned: boolean,
+  ) => {
+    try {
+      const updatedSession = await updateSession(sessionId, {
+        is_pinned: isPinned,
+      });
+      setSessions((previous) =>
+        upsertSessionListItem(previous, toSessionListItem(updatedSession)),
+      );
+      setError(null);
+    } catch (pinError) {
+      console.error("Failed to update session pin state:", pinError);
+      setError("Failed to update session pin state");
+    }
+  };
+
+  /**
    * Requests cancellation for the active task from the composer.
    */
   const handleStop = () => {
@@ -1160,13 +1246,7 @@ function ChatContainer({
         const sessionItem = toSessionListItem(session);
         setCurrentSessionId(activeSessionId);
         currentSessionIdRef.current = activeSessionId;
-        setSessions((previous) => [
-          sessionItem,
-          ...previous.filter(
-            (existingSession) =>
-              existingSession.session_id !== sessionItem.session_id,
-          ),
-        ]);
+        setSessions((previous) => upsertSessionListItem(previous, sessionItem));
         initialCursor = 0;
         openSessionStream(activeSessionId, initialCursor);
       }
@@ -1320,6 +1400,8 @@ function ChatContainer({
         onToggleCollapsed={() => setIsSidebarCollapsed((previous) => !previous)}
         onNewSession={handleNewSession}
         onSelectSession={handleSelectSession}
+        onRenameSession={handleRenameSession}
+        onTogglePinSession={handleTogglePinSession}
         onDeleteSession={handleDeleteSession}
       />
 

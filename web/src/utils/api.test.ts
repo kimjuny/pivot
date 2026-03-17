@@ -13,6 +13,7 @@ import {
   fetchChatImageBlob,
   uploadChatFile,
   uploadChatImage,
+  updateSession,
 } from './api';
 
 describe('chat file api helpers', () => {
@@ -159,6 +160,47 @@ describe('chat file api helpers', () => {
       expect.stringContaining('/files/file-3/content'),
       expect.objectContaining({
         method: 'GET',
+      })
+    );
+  });
+
+  it('updates session sidebar metadata with a patch request', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 1,
+          session_id: 'session-1',
+          agent_id: 7,
+          user: 'default',
+          status: 'active',
+          title: 'Pinned thread',
+          is_pinned: true,
+          subject: null,
+          object: null,
+          created_at: '2026-03-08T00:00:00Z',
+          updated_at: '2026-03-08T00:10:00Z',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+
+    const result = await updateSession('session-1', {
+      title: 'Pinned thread',
+      is_pinned: true,
+    });
+
+    expect(result.is_pinned).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/session-1'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: 'Pinned thread',
+          is_pinned: true,
+        }),
       })
     );
   });

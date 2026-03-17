@@ -3,12 +3,11 @@
 import asyncio
 import sys
 import unittest
-from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -368,83 +367,82 @@ class ChannelServiceTestCase(unittest.TestCase):
         if binding_row is None:
             self.fail("Expected binding row to exist")
 
-        class FakeReactEngine:
-            """Minimal async engine stub for channel progress tests."""
+        task_events = [
+            {
+                "event_id": 1,
+                "type": "summary",
+                "task_id": "task-1",
+                "iteration": 1,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "delta": "Reading the linked files",
+                "data": {
+                    "current_plan": [
+                        {
+                            "step_id": "1",
+                            "general_goal": "Inspect the linked files",
+                            "specific_description": "",
+                            "completion_criteria": "",
+                            "status": "running",
+                            "recursion_history": [
+                                {
+                                    "iteration": 1,
+                                    "summary": "Reading the linked files",
+                                }
+                            ],
+                        }
+                    ]
+                },
+            },
+            {
+                "event_id": 2,
+                "type": "answer",
+                "task_id": "task-1",
+                "iteration": 1,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {"answer": "Done processing."},
+            },
+            {
+                "event_id": 3,
+                "type": "task_complete",
+                "task_id": "task-1",
+                "iteration": 1,
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        ]
 
-            def __init__(self, **kwargs: object) -> None:
-                del kwargs
+        class FakeSupervisor:
+            """Minimal task supervisor stub for channel progress tests."""
 
-            async def run_task(
+            async def start_task(self, launch: object) -> SimpleNamespace:
+                del launch
+                return SimpleNamespace(
+                    task_id="task-1",
+                    session_id="pivot-session",
+                    status="running",
+                    cursor_before_start=0,
+                )
+
+            def list_events(
                 self,
-                **kwargs: object,
-            ) -> AsyncIterator[dict[str, object]]:
-                del kwargs
-                yield {
-                    "type": "summary",
-                    "task_id": "task-1",
-                    "iteration": 1,
-                    "delta": "Reading the linked files",
-                    "data": {
-                        "current_plan": [
-                            {
-                                "step_id": "1",
-                                "general_goal": "Inspect the linked files",
-                                "specific_description": "",
-                                "completion_criteria": "",
-                                "status": "running",
-                                "recursion_history": [
-                                    {
-                                        "iteration": 1,
-                                        "summary": "Reading the linked files",
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                }
-                yield {
-                    "type": "answer",
-                    "task_id": "task-1",
-                    "iteration": 1,
-                    "data": {"answer": "Done processing."},
-                }
+                *,
+                session_id: str,
+                after_id: int = 0,
+                task_id: str | None = None,
+            ) -> list[dict[str, object]]:
+                del session_id, after_id, task_id
+                return task_events
 
-        with (
-            patch.object(
-                channel_service_module.llm_crud,
-                "get",
-                return_value=SimpleNamespace(streaming=False),
-            ),
-            patch.object(
-                channel_service_module,
-                "create_llm_from_config",
-                return_value=object(),
-            ),
-            patch.object(
-                self.service,
-                "_build_request_tool_manager",
-                return_value=MagicMock(),
-            ),
-            patch.object(
-                self.service,
-                "_resolve_skills_text",
-                new=AsyncMock(return_value=""),
-            ),
-            patch.object(
-                channel_service_module,
-                "list_visible_skills",
-                return_value=[],
-            ),
-            patch.object(
-                channel_service_module,
-                "build_skill_mounts",
-                return_value=[],
-            ),
-            patch.object(
-                channel_service_module,
-                "ReactEngine",
-                FakeReactEngine,
-            ),
+            async def subscribe(self, **kwargs: object) -> object:
+                del kwargs
+                raise AssertionError("subscribe should not be reached in this test")
+
+            async def unsubscribe(self, **kwargs: object) -> None:
+                del kwargs
+
+        with patch.object(
+            channel_service_module,
+            "get_react_task_supervisor",
+            return_value=FakeSupervisor(),
         ):
             actions = asyncio.run(
                 self.service.collect_outbound_actions(
@@ -459,12 +457,152 @@ class ChannelServiceTestCase(unittest.TestCase):
                 )
             )
 
-        self.assertEqual([action.kind for action in actions], ["progress", "answer"])
-        self.assertIn("Inspect the linked files", actions[0].text)
-        self.assertIn("Reading the linked files", actions[0].text)
-        self.assertIsNotNone(actions[0].progress_view)
-        self.assertEqual(actions[1].text, "Done processing.")
-        self.assertTrue(actions[1].is_terminal)
+        self.assertEqual(
+            [action.kind for action in actions],
+            ["progress", "progress", "answer"],
+        )
+        self.assertEqual(actions[0].text, "Received, starting the task...")
+        self.assertIn("Inspect the linked files", actions[1].text)
+        self.assertIn("Reading the linked files", actions[1].text)
+        self.assertIsNotNone(actions[1].progress_view)
+        self.assertEqual(actions[2].text, "Done processing.")
+        self.assertTrue(actions[2].is_terminal)
+
+    def test_collect_outbound_actions_emit_ack_then_skill_match_progress(self) -> None:
+        """Channel turns should acknowledge receipt before skill matching completes."""
+        self.agent.llm_id = 42
+        self.session.add(self.agent)
+        self.session.commit()
+
+        binding = self.service.create_binding(
+            agent_id=self.agent.id or 0,
+            channel_key="work_wechat",
+            name="Work WeChat Support",
+            enabled=True,
+            auth_config={
+                "bot_id": "bot-123",
+                "secret": "secret",
+            },
+            runtime_config={},
+        )
+        identity = ExternalIdentityBinding(
+            channel_binding_id=binding.id,
+            provider_key="work_wechat",
+            external_user_id="user-a",
+            external_conversation_id="user-a",
+            pivot_user_id=self.user.id or 0,
+            workspace_owner=self.user.username,
+            status="linked",
+            auth_method="link_page",
+        )
+        self.session.add(identity)
+        self.session.commit()
+
+        binding_row = self.session.get(
+            import_module("app.models.channel").AgentChannelBinding,
+            binding.id,
+        )
+        if binding_row is None:
+            self.fail("Expected binding row to exist")
+
+        task_events = [
+            {
+                "event_id": 1,
+                "type": "skill_resolution_result",
+                "task_id": "task-1",
+                "iteration": 0,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {
+                    "selected_skills": ["coding", "ui-ux-pro-max"],
+                },
+            },
+            {
+                "event_id": 2,
+                "type": "summary",
+                "task_id": "task-1",
+                "iteration": 1,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "delta": "Drafting the first implementation plan",
+                "data": {"current_plan": []},
+            },
+            {
+                "event_id": 3,
+                "type": "answer",
+                "task_id": "task-1",
+                "iteration": 1,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {"answer": "All set."},
+            },
+            {
+                "event_id": 4,
+                "type": "task_complete",
+                "task_id": "task-1",
+                "iteration": 1,
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
+        ]
+
+        class FakeSupervisor:
+            """Minimal task supervisor stub for channel event-order tests."""
+
+            async def start_task(self, launch: object) -> SimpleNamespace:
+                del launch
+                return SimpleNamespace(
+                    task_id="task-1",
+                    session_id="pivot-session",
+                    status="running",
+                    cursor_before_start=0,
+                )
+
+            def list_events(
+                self,
+                *,
+                session_id: str,
+                after_id: int = 0,
+                task_id: str | None = None,
+            ) -> list[dict[str, object]]:
+                del session_id, after_id, task_id
+                return task_events
+
+            async def subscribe(self, **kwargs: object) -> object:
+                del kwargs
+                raise AssertionError("subscribe should not be reached in this test")
+
+            async def unsubscribe(self, **kwargs: object) -> None:
+                del kwargs
+
+        with patch.object(
+            channel_service_module,
+            "get_react_task_supervisor",
+            return_value=FakeSupervisor(),
+        ):
+            actions = asyncio.run(
+                self.service.collect_outbound_actions(
+                    binding=binding_row,
+                    event=ChannelInboundEvent(
+                        external_event_id="evt-4",
+                        external_user_id="user-a",
+                        external_conversation_id="user-a",
+                        message_type="text",
+                        text="Please handle this request",
+                    ),
+                )
+            )
+
+        self.assertEqual(
+            [action.text for action in actions],
+            [
+                "Received, starting the task...",
+                "Matched skills: coding, ui-ux-pro-max",
+                "Drafting the first implementation plan",
+                "All set.",
+            ],
+        )
+        self.assertEqual(
+            [action.kind for action in actions],
+            ["progress", "progress", "progress", "answer"],
+        )
+        self.assertTrue(actions[-1].is_terminal)
 
     def test_render_channel_progress_view_uses_uniform_step_layout(self) -> None:
         """Plan projections should avoid mixed bullet formatting across channels."""

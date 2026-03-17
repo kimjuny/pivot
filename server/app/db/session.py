@@ -107,6 +107,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
 
     ensure_llm_schema_compatibility()
     ensure_agent_schema_compatibility()
+    ensure_session_schema_compatibility()
     ensure_react_schema_compatibility()
     ensure_file_schema_compatibility()
 
@@ -165,6 +166,28 @@ def ensure_agent_schema_compatibility() -> None:
                 "SET session_idle_timeout_minutes = 15 "
                 "WHERE session_idle_timeout_minutes IS NULL"
             )
+        )
+
+
+def ensure_session_schema_compatibility() -> None:
+    """Apply additive schema updates for legacy session tables.
+
+    Why: chat sidebar features rely on explicit title and pin fields so the UI
+    can stay simple without reconstructing that state from derived history.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("session"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("session")}
+    with engine.begin() as conn:
+        if "title" not in columns:
+            conn.execute(text("ALTER TABLE session ADD COLUMN title VARCHAR"))
+        if "is_pinned" not in columns:
+            conn.execute(text("ALTER TABLE session ADD COLUMN is_pinned BOOLEAN"))
+        conn.execute(
+            text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL")
         )
 
 

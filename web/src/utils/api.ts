@@ -772,10 +772,10 @@ export interface SessionListItem {
   session_id: string;
   agent_id: number;
   status: string;
-  subject: string | null;
+  title: string | null;
+  is_pinned: boolean;
   created_at: string;
   updated_at: string;
-  message_count: number;
 }
 
 /**
@@ -795,6 +795,8 @@ export interface SessionResponse {
   agent_id: number;
   user: string;
   status: string;
+  title: string | null;
+  is_pinned: boolean;
   subject: {
     content: string;
     source: string;
@@ -848,6 +850,26 @@ export const listSessions = async (
  */
 export const getSession = async (sessionId: string): Promise<SessionResponse> => {
   return apiRequest(`/sessions/${sessionId}`) as Promise<SessionResponse>;
+};
+
+/**
+ * Update user-managed sidebar metadata for a session.
+ *
+ * @param sessionId - Session UUID
+ * @param sessionData - Partial sidebar metadata changes
+ * @returns Promise resolving to the updated session
+ */
+export const updateSession = async (
+  sessionId: string,
+  sessionData: {
+    title?: string | null;
+    is_pinned?: boolean;
+  },
+): Promise<SessionResponse> => {
+  return apiRequest(`/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(sessionData),
+  }) as Promise<SessionResponse>;
 };
 
 /**
