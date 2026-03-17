@@ -5,6 +5,7 @@ handling recursion cycles, tool calling, and state management.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -873,7 +874,7 @@ class ReactEngine:
                 trace_id = str(uuid.uuid4())
 
                 # Check if task was cancelled
-                if self.cancelled:
+                if self.cancelled or task.status == "cancelled":
                     logger.info(f"Task {task.task_id} cancelled, exiting loop")
                     self.state_service.mark_cancelled(task)
                     self.runtime_service.clear_task_state(task)
@@ -944,82 +945,105 @@ class ReactEngine:
                     )
                 )
 
-                if token_meter_queue is not None:
+                cancelled_during_recursion = False
+                last_meter_emit_at = perf_counter()
+                last_estimated_completion_tokens = 0
+                while True:
+                    if self.cancelled or task.status == "cancelled":
+                        recursion_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await recursion_task
+                        self.state_service.mark_cancelled(task)
+                        self.runtime_service.clear_task_state(task)
+                        cancelled_during_recursion = True
+                        break
+
+                    if token_meter_queue is None:
+                        done, _ = await asyncio.wait({recursion_task}, timeout=0.2)
+                        if done:
+                            break
+                        continue
+
+                    if recursion_task.done() and token_meter_queue.empty():
+                        break
+
+                    try:
+                        meter_data = await asyncio.wait_for(
+                            token_meter_queue.get(),
+                            timeout=0.2,
+                        )
+                    except TimeoutError:
+                        now = perf_counter()
+                        if now - last_meter_emit_at >= 1.0:
+                            # Keep UI cadence stable: when provider stream stalls,
+                            # emit a heartbeat with zero instantaneous rate.
+                            yield {
+                                "type": "token_rate",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "data": {
+                                    "tokens_per_second": 0.0,
+                                    "estimated_completion_tokens": (
+                                        last_estimated_completion_tokens
+                                    ),
+                                },
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                            last_meter_emit_at = now
+                        continue
+
+                    meter_type = meter_data.get("type")
+                    if meter_type == "reasoning":
+                        reasoning_delta = meter_data.get("delta")
+                        if isinstance(reasoning_delta, str) and reasoning_delta:
+                            yield {
+                                "type": "reasoning",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "delta": reasoning_delta,
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        continue
+
+                    raw_rate = meter_data.get("tokens_per_second")
+                    raw_estimated = meter_data.get("estimated_completion_tokens")
+                    tokens_per_second = (
+                        float(raw_rate) if isinstance(raw_rate, int | float) else 0.0
+                    )
+                    estimated_completion_tokens = (
+                        int(raw_estimated)
+                        if isinstance(raw_estimated, int | float)
+                        else last_estimated_completion_tokens
+                    )
+                    if tokens_per_second < 0:
+                        tokens_per_second = 0.0
+                    if estimated_completion_tokens < 0:
+                        estimated_completion_tokens = 0
+
+                    last_estimated_completion_tokens = estimated_completion_tokens
                     last_meter_emit_at = perf_counter()
-                    last_estimated_completion_tokens = 0
-                    while not recursion_task.done() or not token_meter_queue.empty():
-                        try:
-                            meter_data = await asyncio.wait_for(
-                                token_meter_queue.get(),
-                                timeout=0.2,
-                            )
-                        except TimeoutError:
-                            now = perf_counter()
-                            if now - last_meter_emit_at >= 1.0:
-                                # Keep UI cadence stable: when provider stream stalls,
-                                # emit a heartbeat with zero instantaneous rate.
-                                yield {
-                                    "type": "token_rate",
-                                    "task_id": task.task_id,
-                                    "trace_id": trace_id,
-                                    "iteration": task.iteration,
-                                    "data": {
-                                        "tokens_per_second": 0.0,
-                                        "estimated_completion_tokens": (
-                                            last_estimated_completion_tokens
-                                        ),
-                                    },
-                                    "timestamp": datetime.now(UTC).isoformat(),
-                                }
-                                last_meter_emit_at = now
-                            continue
+                    yield {
+                        "type": "token_rate",
+                        "task_id": task.task_id,
+                        "trace_id": trace_id,
+                        "iteration": task.iteration,
+                        "data": {
+                            "tokens_per_second": round(tokens_per_second, 2),
+                            "estimated_completion_tokens": estimated_completion_tokens,
+                        },
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
 
-                        meter_type = meter_data.get("type")
-                        if meter_type == "reasoning":
-                            reasoning_delta = meter_data.get("delta")
-                            if isinstance(reasoning_delta, str) and reasoning_delta:
-                                yield {
-                                    "type": "reasoning",
-                                    "task_id": task.task_id,
-                                    "trace_id": trace_id,
-                                    "iteration": task.iteration,
-                                    "delta": reasoning_delta,
-                                    "timestamp": datetime.now(UTC).isoformat(),
-                                }
-                            continue
-
-                        raw_rate = meter_data.get("tokens_per_second")
-                        raw_estimated = meter_data.get("estimated_completion_tokens")
-                        tokens_per_second = (
-                            float(raw_rate)
-                            if isinstance(raw_rate, int | float)
-                            else 0.0
-                        )
-                        estimated_completion_tokens = (
-                            int(raw_estimated)
-                            if isinstance(raw_estimated, int | float)
-                            else last_estimated_completion_tokens
-                        )
-                        if tokens_per_second < 0:
-                            tokens_per_second = 0.0
-                        if estimated_completion_tokens < 0:
-                            estimated_completion_tokens = 0
-
-                        last_estimated_completion_tokens = estimated_completion_tokens
-                        last_meter_emit_at = perf_counter()
-                        yield {
-                            "type": "token_rate",
-                            "task_id": task.task_id,
-                            "trace_id": trace_id,
-                            "iteration": task.iteration,
-                            "data": {
-                                "tokens_per_second": round(tokens_per_second, 2),
-                                "estimated_completion_tokens": estimated_completion_tokens,
-                            },
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        }
+                if cancelled_during_recursion:
+                    break
 
                 recursion, event_data = await recursion_task
+                if self.cancelled or task.status == "cancelled":
+                    self.state_service.mark_cancelled(task)
+                    self.runtime_service.clear_task_state(task)
+                    break
                 rollback_messages = bool(event_data.get("rollback_messages", False))
                 if rollback_messages:
                     # Parse errors should be visible to users, but must not pollute
@@ -1316,7 +1340,11 @@ class ReactEngine:
                 self.state_service.advance_iteration(task)
 
             # Max iteration reached
-            if task.iteration >= task.max_iteration and task.status == "running":
+            if (
+                task.iteration >= task.max_iteration
+                and task.status == "running"
+                and not self.cancelled
+            ):
                 self.state_service.mark_failed(task)
                 self.runtime_service.clear_task_state(task)
 
@@ -1329,6 +1357,16 @@ class ReactEngine:
                 }
 
         except Exception as e:
+            if self.cancelled or task.status == "cancelled":
+                logger.info(
+                    "Suppressed task failure after cancellation task_id=%s iteration=%s",
+                    task.task_id,
+                    task.iteration,
+                )
+                self.state_service.mark_cancelled(task)
+                self.runtime_service.clear_task_state(task)
+                return
+
             logger.exception(
                 "run_task failed unexpectedly task_id=%s iteration=%s",
                 task.task_id,

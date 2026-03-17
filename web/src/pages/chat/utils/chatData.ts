@@ -274,6 +274,17 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         }
       }
 
+      const recursionStatus =
+        task.status === "cancelled" && recursion.status === "running"
+          ? ("stopped" as const)
+          : recursion.status === "done"
+            ? ("completed" as const)
+            : recursion.status === "running"
+              ? ("running" as const)
+              : recursion.status === "error"
+                ? ("error" as const)
+                : ("completed" as const);
+
       return {
         uid: `history-${task.task_id}-${recursion.trace_id || `iter-${recursion.iteration}`}`,
         iteration: recursion.iteration,
@@ -285,18 +296,15 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         summary: recursion.summary || undefined,
         action: recursion.action_type || undefined,
         events,
-        status:
-          recursion.status === "done"
-            ? ("completed" as const)
-            : recursion.status === "running"
-              ? ("running" as const)
-            : recursion.status === "error"
-              ? ("error" as const)
-              : ("completed" as const),
+        status: recursionStatus,
         errorLog: recursion.error_log || undefined,
         startTime: recursion.created_at,
         endTime:
-          recursion.status === "running" ? undefined : recursion.updated_at,
+          recursionStatus === "running"
+            ? undefined
+            : task.status === "cancelled" && recursion.status === "running"
+              ? task.updated_at
+              : recursion.updated_at,
         tokens: {
           prompt_tokens: recursion.prompt_tokens,
           completion_tokens: recursion.completion_tokens,
@@ -339,7 +347,9 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       status:
         task.status === "completed"
           ? ("completed" as const)
-          : task.status === "failed" || task.status === "cancelled"
+          : task.status === "cancelled"
+            ? ("stopped" as const)
+            : task.status === "failed"
             ? ("error" as const)
             : task.status === "waiting_input"
               ? ("waiting_input" as const)

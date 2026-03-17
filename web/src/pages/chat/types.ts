@@ -33,6 +33,7 @@ export type ReactStreamEventType =
   | "reflect"
   | "answer"
   | "clarify"
+  | "task_cancelled"
   | "task_complete"
   | "error";
 
@@ -118,7 +119,7 @@ export interface RecursionRecord {
   summary?: string;
   action?: string;
   events: ReactStreamEvent[];
-  status: "running" | "completed" | "error";
+  status: "running" | "completed" | "error" | "stopped";
   errorLog?: string;
   startTime: string;
   endTime?: string;
@@ -187,6 +188,7 @@ export interface ChatMessage {
     | "running"
     | "skill_resolving"
     | "completed"
+    | "stopped"
     | "error"
     | "waiting_input";
   totalTokens?: TokenUsage;

@@ -56,9 +56,13 @@ export function hasFailedTools(recursion: RecursionRecord): boolean {
  */
 export function getRecursionStatus(
   recursion: RecursionRecord,
-): "running" | "completed" | "warning" | "error" {
+): "running" | "completed" | "warning" | "error" | "stopped" {
   if (recursion.status === "running") {
     return "running";
+  }
+
+  if (recursion.status === "stopped") {
+    return "stopped";
   }
 
   if (recursion.status === "error") {

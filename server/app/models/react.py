@@ -29,7 +29,7 @@ class ReactTask(SQLModel, table=True):
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
         skill_selection_result: Serialized skill resolution summary payload.
-        status: Current status (pending, running, completed, failed).
+        status: Current status (pending, running, completed, failed, cancelled).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
         cancel_requested_at: Explicit user cancellation request timestamp.
@@ -59,7 +59,7 @@ class ReactTask(SQLModel, table=True):
     )
     status: str = Field(
         default="pending",
-        description="Status: pending, running, completed, failed",
+        description="Status: pending, running, completed, failed, cancelled",
     )
     iteration: int = Field(default=0, description="Current iteration count")
     max_iteration: int = Field(default=30, description="Maximum iterations")

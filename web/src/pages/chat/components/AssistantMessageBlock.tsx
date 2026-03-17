@@ -1,7 +1,7 @@
 import {
   CheckCircle2,
-  Loader2,
   MessageSquare,
+  Square,
   XCircle,
 } from "lucide-react";
 
@@ -92,24 +92,6 @@ export function AssistantMessageBlock({
       )}
 
       <div className="flex items-center gap-2 px-3">
-        {message.status === "skill_resolving" && (
-          <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-            <span
-              className="animate-thinking-wave truncate text-xs font-semibold"
-              style={{
-                background:
-                  "linear-gradient(90deg, #9ca3af 0%, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%, #9ca3af 100%)",
-                backgroundClip: "text",
-                backgroundSize: "400% 100%",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              Matching Skills...
-            </span>
-          </>
-        )}
         {message.status === "completed" && (
           <>
             <CheckCircle2 className="h-3.5 w-3.5 text-success" />
@@ -127,6 +109,12 @@ export function AssistantMessageBlock({
           <>
             <XCircle className="h-3.5 w-3.5 text-danger" />
             <span className="text-xs text-danger">Error</span>
+          </>
+        )}
+        {message.status === "stopped" && (
+          <>
+            <Square className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">Stopped</span>
           </>
         )}
         <span className="ml-auto text-xs text-muted-foreground">

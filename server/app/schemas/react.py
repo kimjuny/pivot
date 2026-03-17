@@ -156,6 +156,7 @@ class ReactStreamEventType(str, Enum):
     REFLECT = "reflect"
     ANSWER = "answer"
     CLARIFY = "clarify"
+    TASK_CANCELLED = "task_cancelled"
     ERROR = "error"
     TASK_COMPLETE = "task_complete"
 

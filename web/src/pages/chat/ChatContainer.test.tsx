@@ -23,6 +23,7 @@ vi.mock("@/contexts/auth-core", () => ({
 }));
 
 import {
+  cancelReactTask,
   createSession,
   getFullSessionHistory,
   getLLMById,
@@ -328,5 +329,105 @@ describe("ChatContainer session rollover", () => {
 
     expect(screen.queryByText("Iteration 2")).not.toBeInTheDocument();
     expect(screen.getByText("Draft the landing page plan")).toBeInTheDocument();
+  });
+
+  it("optimistically shows stopped when the user stops a running task", async () => {
+    const sessionId = "stop-session";
+    const updatedAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: sessionId,
+          agent_id: 7,
+          status: "active",
+          title: "Stop thread",
+          is_pinned: false,
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(getFullSessionHistory).mockResolvedValue({
+      session_id: sessionId,
+      last_event_id: 0,
+      resume_from_event_id: 0,
+      tasks: [
+        {
+          task_id: "task-stop",
+          user_message: "Please stop",
+          agent_answer: null,
+          status: "running",
+          total_tokens: 0,
+          current_plan: [],
+          recursions: [
+            {
+              iteration: 0,
+              trace_id: "trace-stop",
+              observe: null,
+              thinking: "thinking",
+              thought: null,
+              abstract: "Iteration 1",
+              summary: null,
+              action_type: null,
+              action_output: null,
+              tool_call_results: null,
+              status: "running",
+              error_log: null,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+              cached_input_tokens: 0,
+              created_at: createdAt,
+              updated_at: updatedAt,
+            },
+          ],
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+    });
+    vi.mocked(cancelReactTask).mockResolvedValue({
+      task_id: "task-stop",
+      status: "cancelled",
+      cancel_requested: true,
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+    });
+
+    await user.click(screen.getByTitle("Stop execution"));
+
+    expect(await screen.findByText("Stopped")).toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(cancelReactTask).toHaveBeenCalledWith("task-stop");
+    });
   });
 });

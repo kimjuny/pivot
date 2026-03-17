@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Bot, MoreHorizontal, X } from 'lucide-react';
+import { Plus, Bot, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
@@ -354,12 +354,14 @@ function AgentList() {
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" onClick={e => e.stopPropagation()}>
                       <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
+                        <Pencil className="w-4 h-4" aria-hidden="true" />
                         Edit
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         onClick={e => handleDeleteAgent(agent, e as unknown as MouseEvent)}
                         className="text-destructive focus:text-destructive"
                       >
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
                         Delete
                       </DropdownMenuItem>
                     </DropdownMenuContent>

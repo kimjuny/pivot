@@ -173,6 +173,7 @@ function ChatContainer({
   const liveTaskIdRef = useRef<string | null>(null);
   const liveRecursionRef = useRef<RecursionRecord | null>(null);
   const contextUsageRequestIdRef = useRef(0);
+  const stoppedTaskIdsRef = useRef<Set<string>>(new Set());
 
   const {
     pendingFiles,
@@ -248,6 +249,17 @@ function ChatContainer({
    * messages, so task-local refs must be recoverable from persisted UI state.
    */
   const syncLiveRefsFromMessages = useCallback((nextMessages: ChatMessage[]) => {
+    stoppedTaskIdsRef.current = new Set(
+      nextMessages
+        .filter(
+          (message) =>
+            message.role === "assistant" &&
+            message.status === "stopped" &&
+            typeof message.task_id === "string",
+        )
+        .map((message) => message.task_id as string),
+    );
+
     const runningAssistant = [...nextMessages]
       .reverse()
       .find(
@@ -266,6 +278,55 @@ function ChatContainer({
   }, []);
 
   /**
+   * Applies a local stopped state immediately so the chat surface acknowledges
+   * the user's stop request before the backend finishes unwinding the iteration.
+   */
+  const markTaskStopped = useCallback(
+    (taskId: string, timestamp: string) => {
+      stoppedTaskIdsRef.current.add(taskId);
+      setIsStreaming(false);
+      setActiveContextTaskId(null);
+      setActiveContextIteration(null);
+      liveAssistantMessageIdRef.current = null;
+      liveTaskIdRef.current = null;
+      liveRecursionRef.current = null;
+
+      updateMessages((messagesSnapshot) =>
+        messagesSnapshot.map((message) => {
+          if (message.task_id !== taskId) {
+            return message;
+          }
+
+          return {
+            ...message,
+            status: "stopped" as const,
+            timestamp,
+            skillSelection:
+              message.skillSelection?.status === "loading"
+                ? {
+                    ...message.skillSelection,
+                    status: "done",
+                    count: 0,
+                    selectedSkills: [],
+                  }
+                : message.skillSelection,
+            recursions: (message.recursions || []).map((recursion) =>
+              recursion.status === "running"
+                ? {
+                    ...recursion,
+                    status: "stopped" as const,
+                    endTime: timestamp,
+                  }
+                : recursion,
+            ),
+          };
+        }),
+      );
+    },
+    [updateMessages],
+  );
+
+  /**
    * Applies one normalized ReAct event onto the visible conversation state.
    */
   const applyStreamEvent = useCallback(
@@ -275,6 +336,13 @@ function ChatContainer({
           sessionEventCursorRef.current,
           event.event_id,
         );
+      }
+
+      if (
+        stoppedTaskIdsRef.current.has(event.task_id) &&
+        event.type !== "task_cancelled"
+      ) {
+        return;
       }
 
       const targetTaskId = event.task_id;
@@ -533,6 +601,7 @@ function ChatContainer({
       if (
         event.type === "answer" ||
         event.type === "clarify" ||
+        event.type === "task_cancelled" ||
         event.type === "task_complete" ||
         event.type === "error"
       ) {
@@ -545,7 +614,12 @@ function ChatContainer({
             ...currentRecursion,
             trace_id: event.trace_id || currentRecursion.trace_id,
             events: [...currentRecursion.events, event],
-            status: event.type === "error" ? "error" : "completed",
+            status:
+              event.type === "error"
+                ? "error"
+                : event.type === "task_cancelled"
+                  ? "stopped"
+                  : "completed",
             endTime: event.timestamp,
             tokens: event.tokens ?? currentRecursion.tokens,
           };
@@ -557,13 +631,20 @@ function ChatContainer({
           setActiveContextIteration(null);
           liveTaskIdRef.current = event.task_id;
           liveRecursionRef.current = finalizedRecursion;
-        } else if (event.type === "task_complete" || event.type === "error") {
+        } else if (
+          event.type === "task_complete" ||
+          event.type === "task_cancelled" ||
+          event.type === "error"
+        ) {
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
           liveTaskIdRef.current = null;
           liveRecursionRef.current = null;
           liveAssistantMessageIdRef.current = null;
+          if (event.type === "task_cancelled") {
+            stoppedTaskIdsRef.current.add(event.task_id);
+          }
         } else {
           liveTaskIdRef.current = event.task_id;
           liveAssistantMessageIdRef.current = targetMessageId;
@@ -580,10 +661,14 @@ function ChatContainer({
               finalizedRecursion && recursion.uid === finalizedRecursion.uid
                 ? { ...finalizedRecursion }
                 : recursion.status === "running" &&
-                    event.type === "task_complete"
+                    (event.type === "task_complete" ||
+                      event.type === "task_cancelled")
                   ? {
                       ...recursion,
-                      status: "completed" as const,
+                      status:
+                        event.type === "task_cancelled"
+                          ? ("stopped" as const)
+                          : ("completed" as const),
                       endTime: event.timestamp,
                     }
                   : recursion
@@ -618,6 +703,24 @@ function ChatContainer({
                   (event.data as { error?: string } | undefined)?.error ??
                   message.content,
                 timestamp: event.timestamp,
+              };
+            }
+
+            if (event.type === "task_cancelled") {
+              return {
+                ...message,
+                recursions: updatedRecursions,
+                status: "stopped" as const,
+                timestamp: event.timestamp,
+                skillSelection:
+                  message.skillSelection?.status === "loading"
+                    ? {
+                        ...message.skillSelection,
+                        status: "done",
+                        count: 0,
+                        selectedSkills: [],
+                      }
+                    : message.skillSelection,
               };
             }
 
@@ -1198,11 +1301,39 @@ function ChatContainer({
    * Requests cancellation for the active task from the composer.
    */
   const handleStop = () => {
-    if (liveTaskIdRef.current) {
-      void cancelReactTask(liveTaskIdRef.current).catch((cancelError) => {
-        console.error("Failed to cancel task:", cancelError);
-        setError("Failed to stop execution");
-      });
+    const activeTaskId = liveTaskIdRef.current;
+    if (activeTaskId) {
+      markTaskStopped(activeTaskId, new Date().toISOString());
+      setError(null);
+
+      void cancelReactTask(activeTaskId)
+        .then(() =>
+          refreshSessionList().catch((refreshError) => {
+            console.error(
+              "Failed to refresh session list after stopping task:",
+              refreshError,
+            );
+          }),
+        )
+        .catch((cancelError) => {
+          console.error("Failed to cancel task:", cancelError);
+          stoppedTaskIdsRef.current.delete(activeTaskId);
+          setError("Failed to stop execution");
+          if (currentSessionIdRef.current) {
+            void getFullSessionHistory(currentSessionIdRef.current)
+              .then((history) => {
+                const nextMessages = buildMessagesFromHistory(history.tasks);
+                syncLiveRefsFromMessages(nextMessages);
+                commitMessages(nextMessages);
+              })
+              .catch((historyError) => {
+                console.error(
+                  "Failed to restore session after stop request failed:",
+                  historyError,
+                );
+              });
+          }
+        });
     }
   };
 

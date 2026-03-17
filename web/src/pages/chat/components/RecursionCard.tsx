@@ -3,6 +3,7 @@ import {
   Brain,
   CheckCircle2,
   Loader2,
+  Square,
   Wrench,
   XCircle,
 } from "lucide-react";
@@ -79,6 +80,12 @@ export function RecursionCard({
             <XCircle
               key={`${key}-error`}
               className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-danger"
+            />
+          )}
+          {effectiveStatus === "stopped" && (
+            <Square
+              key={`${key}-stopped`}
+              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
             />
           )}
           {effectiveStatus === "running" ? (

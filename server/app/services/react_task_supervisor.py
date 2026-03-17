@@ -158,16 +158,35 @@ class ReactTaskSupervisor:
         Returns:
             ``True`` when an active in-memory execution was found.
         """
+        cancel_timestamp = datetime.now(UTC)
+        session_id: str | None = None
+
         with Session(get_engine()) as db:
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             task = db.exec(statement).first()
             if task is None:
                 return False
+            if task.status in {"completed", "failed", "cancelled"}:
+                return False
 
-            task.cancel_requested_at = datetime.now(UTC)
-            task.updated_at = datetime.now(UTC)
+            task.status = "cancelled"
+            task.cancel_requested_at = cancel_timestamp
+            task.updated_at = cancel_timestamp
             db.add(task)
             db.commit()
+
+            session_id = task.session_id
+            await self._publish_event(
+                db=db,
+                session_id=session_id,
+                event_data={
+                    "type": "task_cancelled",
+                    "task_id": task_id,
+                    "iteration": task.iteration,
+                    "timestamp": cancel_timestamp.isoformat(),
+                    "data": {"reason": "user_stop"},
+                },
+            )
 
         async with self._lock:
             engine = self._active_engines.get(task_id)
@@ -508,6 +527,8 @@ class ReactTaskSupervisor:
                     task.updated_at = datetime.now(UTC)
                     db.add(task)
                     db.commit()
+                    if engine.cancelled or task.status == "cancelled":
+                        return
                     await self._publish_event(
                         db=db,
                         session_id=task.session_id,
