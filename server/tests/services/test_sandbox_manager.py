@@ -29,7 +29,9 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
             patch.object(
                 module,
                 "_get_container_mounts",
-                return_value=[{"Destination": "/workspace", "Source": "/tmp/workspace"}],
+                return_value=[
+                    {"Destination": "/workspace", "Source": "/tmp/workspace"}
+                ],
             ),
             patch.object(module, "_mounted_skill_sources", return_value={}),
             patch.object(
@@ -64,7 +66,9 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
             patch.object(
                 module,
                 "_get_container_mounts",
-                return_value=[{"Destination": "/workspace", "Source": "/tmp/workspace"}],
+                return_value=[
+                    {"Destination": "/workspace", "Source": "/tmp/workspace"}
+                ],
             ),
             patch.object(module, "_mounted_skill_sources", return_value={}),
             patch.object(

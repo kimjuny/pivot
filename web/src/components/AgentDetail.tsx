@@ -20,7 +20,7 @@ import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import DraggableDialog from './DraggableDialog';
-import ChatPage from '@/pages/chat/ChatPage';
+import ReactChatInterface from '@/components/ReactChatInterface';
 import EditPanel from './EditPanel';
 import SceneModal from './SceneModal';
 import SubsceneModal from './SubsceneModal';
@@ -1284,7 +1284,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         title={agent?.name?.trim() || 'ReAct Agent Chat'}
         size="large"
       >
-        <ChatPage
+        <ReactChatInterface
           agentId={agentId}
           agentName={agent?.name}
           primaryLlmId={agent?.llm_id}

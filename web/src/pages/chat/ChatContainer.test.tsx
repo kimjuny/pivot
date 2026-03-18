@@ -10,6 +10,7 @@ vi.mock("@/utils/api", () => ({
   getFullSessionHistory: vi.fn(),
   getLLMById: vi.fn(),
   getReactContextUsage: vi.fn(),
+  getReactSessionRuntimeDebug: vi.fn(),
   listSessions: vi.fn(),
   startReactTask: vi.fn(),
   updateSession: vi.fn(),
@@ -28,6 +29,7 @@ import {
   getFullSessionHistory,
   getLLMById,
   getReactContextUsage,
+  getReactSessionRuntimeDebug,
   listSessions,
   startReactTask,
 } from "@/utils/api";
@@ -66,6 +68,15 @@ describe("ChatContainer session rollover", () => {
       image_input: false,
     } as Awaited<ReturnType<typeof getLLMById>>);
     vi.mocked(getReactContextUsage).mockResolvedValue(buildContextUsage());
+    vi.mocked(getReactSessionRuntimeDebug).mockResolvedValue({
+      session_id: "session-1",
+      runtime_message_count: 0,
+      runtime_message_roles: [],
+      has_compact_result: false,
+      compact_result: null,
+      compact_result_raw: null,
+      updated_at: "2026-03-19T00:00:00.000Z",
+    });
     vi.mocked(getFullSessionHistory).mockResolvedValue({
       session_id: "session-1",
       last_event_id: 0,
@@ -102,8 +113,6 @@ describe("ChatContainer session rollover", () => {
       status: "active",
       title: null,
       is_pinned: false,
-      subject: null,
-      object: null,
       created_at: "2026-03-16T01:00:00.000Z",
       updated_at: "2026-03-16T01:00:00.000Z",
     });
@@ -151,8 +160,6 @@ describe("ChatContainer session rollover", () => {
       status: "active",
       title: null,
       is_pinned: false,
-      subject: null,
-      object: null,
       created_at: "2026-03-16T01:00:00.000Z",
       updated_at: "2026-03-16T01:00:00.000Z",
     });

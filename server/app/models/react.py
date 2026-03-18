@@ -32,6 +32,10 @@ class ReactTask(SQLModel, table=True):
         status: Current status (pending, running, completed, failed, cancelled).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
+        runtime_message_start_index: Index where this task's own runtime
+            messages begin inside the session prompt window.
+        stashed_messages: Serialized task-local messages temporarily removed
+            while the older session context is compacted.
         cancel_requested_at: Explicit user cancellation request timestamp.
         created_at: UTC timestamp when task was created.
         updated_at: UTC timestamp when task was last updated.
@@ -63,6 +67,18 @@ class ReactTask(SQLModel, table=True):
     )
     iteration: int = Field(default=0, description="Current iteration count")
     max_iteration: int = Field(default=30, description="Maximum iterations")
+    runtime_message_start_index: int = Field(
+        default=0,
+        description=(
+            "Start index of this task's messages within the session runtime window"
+        ),
+    )
+    stashed_messages: str | None = Field(
+        default=None,
+        description=(
+            "Serialized task-local runtime messages removed during context compaction"
+        ),
+    )
     total_prompt_tokens: int = Field(
         default=0, description="Total prompt tokens consumed by this task"
     )

@@ -31,19 +31,18 @@ def _safe_load_json(raw: str) -> dict[str, Any]:
 def build_skill_selection_prompt(
     user_intent: str,
     skill_metadata: list[dict[str, Any]],
-    session_memory: dict[str, Any],
+    session_context: dict[str, Any],
 ) -> str:
     """Render skill selection prompt from template."""
     prompt = _SKILL_SELECTION_PROMPT
     prompt = prompt.replace("{{user_intent}}", user_intent)
 
     metadata_json = json.dumps(skill_metadata, ensure_ascii=False, indent=2)
-    # Support both template spellings.
     prompt = prompt.replace("{{skills_metadata}}", metadata_json)
     prompt = prompt.replace("{{skill_metadata}}", metadata_json)
 
-    session_memory_json = json.dumps(session_memory, ensure_ascii=False, indent=2)
-    prompt = prompt.replace("{{session_memory}}", session_memory_json)
+    session_context_json = json.dumps(session_context, ensure_ascii=False, indent=2)
+    prompt = prompt.replace("{{session_context}}", session_context_json)
     return prompt
 
 
@@ -51,14 +50,14 @@ def select_skills(
     llm: AbstractLLM,
     user_intent: str,
     skill_metadata: list[dict[str, Any]],
-    session_memory: dict[str, Any],
+    session_context: dict[str, Any],
 ) -> list[str]:
     """Run LLM-based skill selection and return selected skill names."""
     selection = select_skills_with_usage(
         llm=llm,
         user_intent=user_intent,
         skill_metadata=skill_metadata,
-        session_memory=session_memory,
+        session_context=session_context,
     )
     return selection["selected_skills"]
 
@@ -67,7 +66,7 @@ def select_skills_with_usage(
     llm: AbstractLLM,
     user_intent: str,
     skill_metadata: list[dict[str, Any]],
-    session_memory: dict[str, Any],
+    session_context: dict[str, Any],
 ) -> dict[str, Any]:
     """Run LLM-based skill selection and return selected names with token usage."""
     if not skill_metadata:
@@ -76,7 +75,7 @@ def select_skills_with_usage(
     prompt = build_skill_selection_prompt(
         user_intent=user_intent,
         skill_metadata=skill_metadata,
-        session_memory=session_memory,
+        session_context=session_context,
     )
 
     response = llm.chat(

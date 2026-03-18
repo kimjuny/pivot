@@ -69,6 +69,12 @@ class Agent(SQLModel, table=True):
             "Minutes of inactivity before the client starts a new chat session"
         ),
     )
+    compact_threshold_percent: int = Field(
+        default=60,
+        description=(
+            "Context-window percentage that triggers automatic runtime compaction"
+        ),
+    )
     model_name: str | None = Field(
         default=None, description="Deprecated: Use llm_id instead"
     )

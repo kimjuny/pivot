@@ -1136,6 +1136,8 @@ function AgentDetailSidebar({
                             skill_resolution_llm_id: agent.skill_resolution_llm_id ?? null,
                             session_idle_timeout_minutes:
                                 agent.session_idle_timeout_minutes,
+                            compact_threshold_percent:
+                                agent.compact_threshold_percent,
                             is_active: agent.is_active,
                         }
                         : undefined

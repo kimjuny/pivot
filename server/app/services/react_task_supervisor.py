@@ -32,7 +32,7 @@ from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactStreamEvent, ReactStreamEventType, TokenUsage
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
-from app.services.session_memory_service import SessionMemoryService
+from app.services.session_service import SessionService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
     build_skill_mounts,
@@ -263,7 +263,7 @@ class ReactTaskSupervisor:
         if not agent.llm_id:
             raise ValueError(f"Agent {agent.name} has no LLM configured")
         if launch.session_id:
-            session = SessionMemoryService(db).get_session(launch.session_id)
+            session = SessionService(db).get_session(launch.session_id)
             if session is None:
                 raise ValueError(f"Session {launch.session_id} not found")
             if session.user != launch.username:
@@ -472,18 +472,18 @@ class ReactTaskSupervisor:
                         )
                         if resolver_llm_config is not None:
                             resolver_llm = create_llm_from_config(resolver_llm_config)
-                            session_memory = {}
+                            session_context = {}
                             if task.session_id:
-                                session_memory = SessionMemoryService(
+                                session_context = ReactRuntimeService(
                                     db
-                                ).get_full_session_memory_dict(task.session_id)
+                                ).build_session_context_payload(task.session_id)
 
                             selection_result = await run_in_threadpool(
                                 select_skills_with_usage,
                                 resolver_llm,
                                 launch.message,
                                 available_skills,
-                                session_memory,
+                                session_context,
                             )
                             raw_selected_skills = selection_result.get(
                                 "selected_skills", []
@@ -501,7 +501,9 @@ class ReactTaskSupervisor:
                                 selected_skills=selected_skills,
                             )
                     except Exception as exc:
-                        logger.warning("Skill resolution failed task_id=%s: %s", task_id, exc)
+                        logger.warning(
+                            "Skill resolution failed task_id=%s: %s", task_id, exc
+                        )
 
                     resolution_duration_ms = int(
                         (perf_counter() - resolution_started_at) * 1000
@@ -690,9 +692,7 @@ class ReactTaskSupervisor:
             timestamp=row.created_at,
             tokens=TokenUsage(**tokens) if isinstance(tokens, dict) else None,
             total_tokens=(
-                TokenUsage(**total_tokens)
-                if isinstance(total_tokens, dict)
-                else None
+                TokenUsage(**total_tokens) if isinstance(total_tokens, dict) else None
             ),
         )
         payload = event.model_dump(mode="json")

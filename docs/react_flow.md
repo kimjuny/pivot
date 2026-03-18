@@ -33,13 +33,12 @@ if_action_type_is_answer --> RECURSION: not ANSWER
 运行的skill寻找步骤，寻找合适的skill
 
 **第一轮 recursion：**
+【role = system】向LLM输入message
+
 【prepare】
 - 说明0：如果是task的第一轮，准备tools_description、session_memory、skills等数据，同时准备一个task_id（uuid）；
 - 说明1：查询基于task_id有没有持久化过的state信息，并准备注入到role = user的信息中；
 - 说明2：更新iteration轮次；
-
-【role = system】向LLM输入message
-content = `system_prompt.md`中的内容（其中`{{tools_description}}`、`{{session_memory}}`、`{{skills}}`提前注入过）
 
 【role = user】向LLM输入message
 ```json

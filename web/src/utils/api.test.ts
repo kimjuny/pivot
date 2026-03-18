@@ -175,8 +175,6 @@ describe('chat file api helpers', () => {
           status: 'active',
           title: 'Pinned thread',
           is_pinned: true,
-          subject: null,
-          object: null,
           created_at: '2026-03-08T00:00:00Z',
           updated_at: '2026-03-08T00:10:00Z',
         }),

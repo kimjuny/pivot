@@ -23,11 +23,13 @@ class TaskRuntimeState:
 
     Attributes:
         messages: Serialized chat history reused across recursion calls.
+        compact_result: Canonical compact JSON string, if one is active.
         pending_action_result: Action result injected into the next user payload.
         previous_response_id: Provider-specific previous response chain ID.
     """
 
     messages: list[dict[str, Any]]
+    compact_result: str | None
     pending_action_result: list[dict[str, Any]] | None
     previous_response_id: str | None
 
@@ -60,6 +62,7 @@ class ReactRuntimeService:
         session = self._get_session_or_raise(task)
         return TaskRuntimeState(
             messages=self._load_messages(session),
+            compact_result=self._load_compact_result(session),
             pending_action_result=self._load_pending_action_result(session),
             previous_response_id=self._load_previous_response_id(session),
         )
@@ -79,6 +82,7 @@ class ReactRuntimeService:
         session = self._get_session_by_id_or_raise(session_id)
         return TaskRuntimeState(
             messages=self._load_messages(session),
+            compact_result=self._load_compact_result(session),
             pending_action_result=self._load_pending_action_result(session),
             previous_response_id=self._load_previous_response_id(session),
         )
@@ -121,8 +125,11 @@ class ReactRuntimeService:
             The updated runtime state.
         """
         state = self.load(task)
+        if task.iteration == 0 and task.runtime_message_start_index <= 0:
+            task.runtime_message_start_index = len(state.messages)
         state.messages.append(build_runtime_task_bootstrap_message(user_prompt))
         session = self._get_session_or_raise(task)
+        self.db.add(task)
         self._persist_state(session, state)
         return state
 
@@ -254,7 +261,9 @@ class ReactRuntimeService:
         state.pending_action_result = None
         if not preserve_cache_state:
             state.previous_response_id = None
+        task.stashed_messages = None
         session = self._get_session_or_raise(task)
+        self.db.add(task)
         self._persist_state(session, state)
         return state
 
@@ -279,6 +288,123 @@ class ReactRuntimeService:
                 break
         return state.messages[last_assistant_index + 1 :]
 
+    def replace_runtime_messages(
+        self,
+        task: ReactTask,
+        messages: list[dict[str, Any]],
+        *,
+        compact_result: str | None,
+        preserve_pending_action_result: bool = True,
+        preserve_cache_state: bool = False,
+    ) -> TaskRuntimeState:
+        """Replace the persisted runtime window after a compact cycle.
+
+        Args:
+            task: Task whose session runtime state should be rebuilt.
+            messages: Canonical message list to persist.
+            compact_result: Latest compact JSON inserted into the runtime window.
+            preserve_pending_action_result: Whether to keep the pending action
+                result that feeds the next user payload.
+            preserve_cache_state: Whether previous-response chaining should
+                remain active after the rebuild.
+
+        Returns:
+            The updated runtime state.
+        """
+        state = self.load(task)
+        state.messages = [dict(message) for message in messages]
+        state.compact_result = compact_result
+        if not preserve_pending_action_result:
+            state.pending_action_result = None
+        if not preserve_cache_state:
+            state.previous_response_id = None
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
+        return state
+
+    def stash_task_messages(
+        self,
+        task: ReactTask,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Persist task-local runtime messages for mid-task compaction."""
+        task.stashed_messages = json.dumps(messages, ensure_ascii=False)
+        task.updated_at = datetime.now(UTC)
+        self.db.add(task)
+        self.db.commit()
+
+    def load_stashed_task_messages(self, task: ReactTask) -> list[dict[str, Any]]:
+        """Load previously stashed task-local runtime messages."""
+        if not task.stashed_messages:
+            return []
+
+        try:
+            payload = json.loads(task.stashed_messages)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Invalid stashed_messages JSON; dropping it. task_id=%s",
+                task.task_id,
+            )
+            return []
+        return self._normalize_messages(payload)
+
+    def clear_stashed_task_messages(self, task: ReactTask) -> None:
+        """Remove persisted stashed runtime messages from a task row."""
+        task.stashed_messages = None
+        task.updated_at = datetime.now(UTC)
+        self.db.add(task)
+        self.db.commit()
+
+    def build_session_context_payload(self, session_id: str) -> dict[str, Any]:
+        """Build compact-aware session context for skill selection."""
+        session = self._get_session_by_id_or_raise(session_id)
+        compact_result = self._load_compact_result(session)
+        runtime_messages = [
+            dict(message)
+            for message in self._load_messages(session)
+            if message.get("role") != "system"
+        ]
+        payload: dict[str, Any] = {"runtime_messages": runtime_messages}
+        if compact_result:
+            try:
+                payload["compact_result"] = json.loads(compact_result)
+            except json.JSONDecodeError:
+                payload["compact_result"] = compact_result
+        else:
+            payload["compact_result"] = None
+        return payload
+
+    def build_runtime_debug_payload(self, session_id: str) -> dict[str, Any]:
+        """Build a debug-friendly snapshot of one session runtime window.
+
+        Args:
+            session_id: Session whose persisted runtime state should be inspected.
+
+        Returns:
+            Dictionary containing runtime-message counts, roles, and compact data.
+        """
+        session = self._get_session_by_id_or_raise(session_id)
+        messages = self._load_messages(session)
+        compact_result_raw = self._load_compact_result(session)
+        compact_result: Any | None = None
+        if compact_result_raw:
+            try:
+                compact_result = json.loads(compact_result_raw)
+            except json.JSONDecodeError:
+                compact_result = compact_result_raw
+
+        return {
+            "session_id": session.session_id,
+            "runtime_message_count": len(messages),
+            "runtime_message_roles": [
+                str(message.get("role", "unknown")) for message in messages
+            ],
+            "has_compact_result": compact_result_raw is not None,
+            "compact_result": compact_result,
+            "compact_result_raw": compact_result_raw,
+            "updated_at": session.updated_at.replace(tzinfo=UTC).isoformat(),
+        }
+
     def _persist_state(self, session: Session, state: TaskRuntimeState) -> None:
         """Write a normalized runtime state back into ``Session``.
 
@@ -287,6 +413,7 @@ class ReactRuntimeService:
             state: Runtime state to serialize.
         """
         session.react_llm_messages = json.dumps(state.messages, ensure_ascii=False)
+        session.react_compact_result = state.compact_result
         session.react_pending_action_result = (
             json.dumps(state.pending_action_result, ensure_ascii=False)
             if state.pending_action_result is not None
@@ -332,25 +459,15 @@ class ReactRuntimeService:
             )
             return []
 
-        normalized: list[dict[str, Any]] = []
-        for item in raw_messages:
-            if not isinstance(item, dict):
-                continue
-            role = item.get("role")
-            content = item.get("content")
-            if (
-                isinstance(role, str)
-                and role in {"system", "user", "assistant"}
-                and (
-                    isinstance(content, str)
-                    or (
-                        isinstance(content, list)
-                        and all(isinstance(block, dict) for block in content)
-                    )
-                )
-            ):
-                normalized.append({"role": role, "content": content})
-        return normalized
+        return self._normalize_messages(raw_messages)
+
+    def _load_compact_result(self, session: Session) -> str | None:
+        """Load the latest compact JSON string from the session row."""
+        raw_value = session.react_compact_result
+        if not isinstance(raw_value, str):
+            return None
+        compact_result = raw_value.strip()
+        return compact_result or None
 
     def _load_pending_action_result(
         self,
@@ -423,6 +540,32 @@ class ReactRuntimeService:
         if isinstance(previous_response_id, str) and previous_response_id.strip():
             return previous_response_id.strip()
         return None
+
+    @staticmethod
+    def _normalize_messages(raw_messages: Any) -> list[dict[str, Any]]:
+        """Normalize serialized messages into the accepted runtime shape."""
+        if not isinstance(raw_messages, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for item in raw_messages:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if (
+                isinstance(role, str)
+                and role in {"system", "user", "assistant"}
+                and (
+                    isinstance(content, str)
+                    or (
+                        isinstance(content, list)
+                        and all(isinstance(block, dict) for block in content)
+                    )
+                )
+            ):
+                normalized.append({"role": role, "content": content})
+        return normalized
 
     def _get_session_or_raise(self, task: ReactTask) -> Session:
         """Resolve the owning session row for one task.

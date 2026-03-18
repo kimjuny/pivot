@@ -156,37 +156,6 @@
       "answer": "最终输出给用户的结论" //【必须返回】
     }
   },
-  "session_memory_delta": { //可选返回：仅当action_type = ANSWER时这段session_memory_delta才可返回并注入。
-    "add": [{
-      "type": "preference | constraint | background | capability_assumption | decision",
-      "content": "...",
-      "confidence": 0.8,
-
-      // type = decision 专属字段
-      "scope": "session | task",
-      "source": "user | joint | agent",
-      "decision": "...",
-      "rationale": "...",
-      "reversible": true
-    }],
-    "update": [{
-      "id": 3 // 与add完全一致，但是基于id = x进行内容修改
-      // 其余字段同add示例
-    }],
-    "delete": [{
-      "id": 4 // 仅输入id即可删除
-    }]
-  },
-  "session_subject": { //【条件必须】在action_type = ANSWER环节可以修改，当session-memory中没有的时候必须提供一个subject
-    "content": "对于这段对话的主题 / 话题是什么?",
-    "source": "user | agent",
-    "confidence": 0.8
-  },
-  "session_object": { //【可选返回】只在action_type = ANSWER环节可以修改
-    "content": "对于这段对话用户的目的究竟是什么?",
-    "source": "user | agent",
-    "confidence": 0.7
-  },
   "task_summary": { //【必须返回】在action_type = ANSWER环节对本次递归的task进行收尾性总结
     "narrative": "",
     "key_findings": ["..."],

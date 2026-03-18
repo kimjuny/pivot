@@ -7,10 +7,12 @@ import {
   deleteSession,
   getFullSessionHistory,
   getReactContextUsage,
+  getReactSessionRuntimeDebug,
   listSessions,
   startReactTask,
   updateSession,
   type ReactContextUsageSummary,
+  type ReactSessionRuntimeDebug,
   type SessionListItem,
   type SessionResponse,
   API_BASE_URL,
@@ -27,9 +29,9 @@ import { SessionSidebar } from "./components/SessionSidebar";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
 import { useChatUploads } from "./hooks/useChatUploads";
 import type {
+  ChatPageProps,
   ChatMessage,
   PlanStepData,
-  ReactChatInterfaceProps,
   ReactStreamEvent,
   RecursionRecord,
   TokenUsage,
@@ -48,6 +50,8 @@ import {
   ZERO_RATE_STREAK_TO_RENDER,
   deriveComposerTaskPlan,
 } from "./utils/chatSelectors";
+
+const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
 
 /**
  * Convert a session creation payload into the sidebar row shape.
@@ -139,7 +143,8 @@ function ChatContainer({
   agentName,
   primaryLlmId,
   sessionIdleTimeoutMinutes,
-}: ReactChatInterfaceProps) {
+  onRuntimeDebugChange,
+}: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -163,6 +168,14 @@ function ChatContainer({
     useState<ReactContextUsageSummary | null>(null);
   const [isContextUsageLoading, setIsContextUsageLoading] =
     useState<boolean>(false);
+  const [compactStatusMessage, setCompactStatusMessage] = useState<string | null>(
+    null,
+  );
+  const [sessionRuntimeDebug, setSessionRuntimeDebug] =
+    useState<ReactSessionRuntimeDebug | null>(null);
+  const [isRuntimeDebugLoading, setIsRuntimeDebugLoading] =
+    useState<boolean>(false);
+  const [runtimeDebugError, setRuntimeDebugError] = useState<string | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const currentSessionIdRef = useRef<string | null>(null);
   const sessionStreamAbortControllerRef = useRef<AbortController | null>(null);
@@ -173,6 +186,9 @@ function ChatContainer({
   const liveTaskIdRef = useRef<string | null>(null);
   const liveRecursionRef = useRef<RecursionRecord | null>(null);
   const contextUsageRequestIdRef = useRef(0);
+  const runtimeDebugRequestIdRef = useRef(0);
+  const compactStatusStartedAtRef = useRef<number | null>(null);
+  const compactStatusClearTimerRef = useRef<number | null>(null);
   const stoppedTaskIdsRef = useRef<Set<string>>(new Set());
 
   const {
@@ -193,6 +209,112 @@ function ChatContainer({
     useChatAutoScroll(messages);
   const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
     sessionIdleTimeoutMinutes,
+  );
+
+  /**
+   * Cancels any pending delayed compact-status clear so the latest status wins.
+   */
+  const clearCompactStatusTimer = useCallback(() => {
+    if (compactStatusClearTimerRef.current !== null) {
+      window.clearTimeout(compactStatusClearTimerRef.current);
+      compactStatusClearTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Shows compact progress and records when it became visible.
+   */
+  const showCompactStatus = useCallback(
+    (message: string) => {
+      clearCompactStatusTimer();
+      compactStatusStartedAtRef.current = Date.now();
+      setCompactStatusMessage(message);
+    },
+    [clearCompactStatusTimer],
+  );
+
+  /**
+   * Removes compact progress immediately during session resets or fatal errors.
+   */
+  const clearCompactStatusImmediately = useCallback(() => {
+    clearCompactStatusTimer();
+    compactStatusStartedAtRef.current = null;
+    setCompactStatusMessage(null);
+  }, [clearCompactStatusTimer]);
+
+  /**
+   * Keeps compact progress visible long enough for people to notice it.
+   */
+  const clearCompactStatusWithMinimumDelay = useCallback(() => {
+    clearCompactStatusTimer();
+    const startedAt = compactStatusStartedAtRef.current;
+    const clearStatus = () => {
+      compactStatusStartedAtRef.current = null;
+      compactStatusClearTimerRef.current = null;
+      setCompactStatusMessage(null);
+    };
+    if (startedAt === null) {
+      clearStatus();
+      return;
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    const remainingMs = Math.max(COMPACT_STATUS_MIN_VISIBLE_MS - elapsedMs, 0);
+    if (remainingMs === 0) {
+      clearStatus();
+      return;
+    }
+
+    compactStatusClearTimerRef.current = window.setTimeout(
+      clearStatus,
+      remainingMs,
+    );
+  }, [clearCompactStatusTimer]);
+
+  /**
+   * Loads the latest session runtime debug payload for the floating compact inspector.
+   */
+  const loadSessionRuntimeDebug = useCallback(
+    async (sessionId: string | null) => {
+      const requestId = runtimeDebugRequestIdRef.current + 1;
+      runtimeDebugRequestIdRef.current = requestId;
+
+      if (!sessionId) {
+        setSessionRuntimeDebug(null);
+        setRuntimeDebugError(null);
+        setIsRuntimeDebugLoading(false);
+        return;
+      }
+
+      setIsRuntimeDebugLoading(true);
+      setRuntimeDebugError(null);
+      try {
+        const payload = await getReactSessionRuntimeDebug(sessionId);
+        if (
+          runtimeDebugRequestIdRef.current === requestId &&
+          currentSessionIdRef.current === sessionId
+        ) {
+          setSessionRuntimeDebug(payload);
+        }
+      } catch (debugError) {
+        console.error("Failed to load session runtime debug:", debugError);
+        if (
+          runtimeDebugRequestIdRef.current === requestId &&
+          currentSessionIdRef.current === sessionId
+        ) {
+          setSessionRuntimeDebug(null);
+          setRuntimeDebugError("Failed to load compact debug data");
+        }
+      } finally {
+        if (
+          runtimeDebugRequestIdRef.current === requestId &&
+          currentSessionIdRef.current === sessionId
+        ) {
+          setIsRuntimeDebugLoading(false);
+        }
+      }
+    },
+    [],
   );
 
   /**
@@ -428,6 +550,31 @@ function ChatContainer({
           ? liveRecursionRef.current
           : null;
 
+      if (event.type === "compact_start") {
+        showCompactStatus(
+          "Compacting context. Please wait before stopping.",
+        );
+        return;
+      }
+
+      if (event.type === "compact_complete") {
+        const compactData =
+          typeof event.data === "object" && event.data !== null
+            ? (event.data as { usage_after?: ReactContextUsageSummary })
+            : undefined;
+        if (compactData?.usage_after) {
+          setContextUsage(compactData.usage_after);
+        }
+        void loadSessionRuntimeDebug(currentSessionIdRef.current);
+        clearCompactStatusWithMinimumDelay();
+        return;
+      }
+
+      if (event.type === "compact_failed") {
+        clearCompactStatusWithMinimumDelay();
+        return;
+      }
+
       if (event.type === "skill_resolution_start") {
         setIsStreaming(true);
         liveTaskIdRef.current = event.task_id;
@@ -629,6 +776,7 @@ function ChatContainer({
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
+          clearCompactStatusImmediately();
           liveTaskIdRef.current = event.task_id;
           liveRecursionRef.current = finalizedRecursion;
         } else if (
@@ -639,6 +787,7 @@ function ChatContainer({
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
+          clearCompactStatusImmediately();
           liveTaskIdRef.current = null;
           liveRecursionRef.current = null;
           liveAssistantMessageIdRef.current = null;
@@ -858,9 +1007,13 @@ function ChatContainer({
       );
     },
     [
+      clearCompactStatusImmediately,
+      clearCompactStatusWithMinimumDelay,
       commitMessages,
       currentSessionId,
+      loadSessionRuntimeDebug,
       refreshSessionList,
+      showCompactStatus,
       syncLiveRefsFromMessages,
       updateMessages,
     ],
@@ -1041,11 +1194,45 @@ function ChatContainer({
     commitMessages,
   ]);
 
-  useEffect(() => stopSessionStream, [stopSessionStream]);
+  useEffect(() => {
+    return () => {
+      stopSessionStream();
+      clearCompactStatusTimer();
+    };
+  }, [clearCompactStatusTimer, stopSessionStream]);
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
   }, [currentSessionId]);
+
+  useEffect(() => {
+    void loadSessionRuntimeDebug(currentSessionId);
+  }, [currentSessionId, loadSessionRuntimeDebug]);
+
+  useEffect(() => {
+    onRuntimeDebugChange?.({
+      currentSessionId,
+      isCompacting: compactStatusMessage !== null,
+      compactStatusMessage,
+      loadState:
+        currentSessionId === null
+          ? "idle"
+          : isRuntimeDebugLoading
+            ? "loading"
+            : runtimeDebugError
+              ? "error"
+              : "ready",
+      runtimeDebug: sessionRuntimeDebug,
+      error: runtimeDebugError,
+    });
+  }, [
+    compactStatusMessage,
+    currentSessionId,
+    isRuntimeDebugLoading,
+    onRuntimeDebugChange,
+    runtimeDebugError,
+    sessionRuntimeDebug,
+  ]);
 
   const canSendMessage =
     !isStreaming &&
@@ -1083,6 +1270,7 @@ function ChatContainer({
           console.error("Failed to estimate context usage:", contextError);
           if (contextUsageRequestIdRef.current === requestId) {
             setContextUsage(null);
+            clearCompactStatusImmediately();
           }
         })
         .finally(() => {
@@ -1095,6 +1283,7 @@ function ChatContainer({
     return () => window.clearTimeout(timer);
   }, [
     agentId,
+    clearCompactStatusImmediately,
     currentSessionId,
     inputMessage,
     isStreaming,
@@ -1128,6 +1317,7 @@ function ChatContainer({
           console.error("Failed to estimate context usage:", contextError);
           if (contextUsageRequestIdRef.current === requestId) {
             setContextUsage(null);
+            clearCompactStatusImmediately();
           }
         })
         .finally(() => {
@@ -1142,6 +1332,7 @@ function ChatContainer({
     activeContextIteration,
     activeContextTaskId,
     agentId,
+    clearCompactStatusImmediately,
     currentSessionId,
     isStreaming,
   ]);
@@ -1162,6 +1353,7 @@ function ChatContainer({
       setActiveContextTaskId(null);
       setActiveContextIteration(null);
       setContextUsage(null);
+      clearCompactStatusImmediately();
       setError(null);
       syncLiveRefsFromMessages([]);
       stopSessionStream();
@@ -1189,6 +1381,7 @@ function ChatContainer({
     setActiveContextTaskId(null);
     setActiveContextIteration(null);
     setContextUsage(null);
+    clearCompactStatusImmediately();
     prepareForProgrammaticScroll();
     await clearPendingFiles();
     stopSessionStream();
@@ -1232,6 +1425,7 @@ function ChatContainer({
         setActiveContextTaskId(null);
         setActiveContextIteration(null);
         setContextUsage(null);
+        clearCompactStatusImmediately();
 
         if (remainingSessions.length > 0) {
           await handleSelectSession(remainingSessions[0].session_id);
@@ -1242,6 +1436,7 @@ function ChatContainer({
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
           setContextUsage(null);
+          clearCompactStatusImmediately();
           syncLiveRefsFromMessages([]);
           commitMessages([]);
           setIsInitialized(false);
@@ -1418,6 +1613,7 @@ function ChatContainer({
       setInputMessage("");
       discardReadyPendingFiles();
       setError(null);
+      clearCompactStatusImmediately();
       setIsStreaming(true);
       liveAssistantMessageIdRef.current = assistantMessageId;
       liveTaskIdRef.current = null;
@@ -1458,6 +1654,7 @@ function ChatContainer({
     } catch (streamError) {
       setActiveContextTaskId(null);
       setActiveContextIteration(null);
+      clearCompactStatusImmediately();
       const normalizedError =
         streamError instanceof Error
           ? streamError
@@ -1557,6 +1754,7 @@ function ChatContainer({
         <ChatComposer
           inputMessage={inputMessage}
           error={error}
+          compactStatusMessage={compactStatusMessage}
           replyTaskId={replyTaskId}
           pendingFiles={pendingFiles}
           canSendMessage={canSendMessage}

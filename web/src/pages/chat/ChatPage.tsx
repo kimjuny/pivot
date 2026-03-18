@@ -1,10 +1,10 @@
 import ChatContainer from "./ChatContainer";
-import type { ReactChatInterfaceProps } from "./types";
+import type { ChatPageProps } from "./types";
 
 /**
  * Page-scoped entrypoint for the ReAct chat surface.
  */
-function ChatPage(props: ReactChatInterfaceProps) {
+function ChatPage(props: ChatPageProps) {
   return <ChatContainer {...props} />;
 }
 

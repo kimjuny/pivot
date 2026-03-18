@@ -32,7 +32,7 @@ class ReactChatRequest(AppBaseModel):
         default=None, description="Task ID for resuming a conversation"
     )
     session_id: str | None = Field(
-        default=None, description="Session ID for session memory persistence"
+        default=None, description="Session ID for runtime session-context persistence"
     )
     file_ids: list[str] = Field(
         default_factory=list,
@@ -46,7 +46,7 @@ class ReactContextUsageRequest(AppBaseModel):
     agent_id: int = Field(..., description="Agent ID used to build the prompt")
     session_id: str | None = Field(
         default=None,
-        description="Optional session ID used for session-memory prompt injection",
+        description="Optional session ID used for runtime session-context lookup",
     )
     task_id: str | None = Field(
         default=None,
@@ -71,7 +71,7 @@ class ReactContextUsageResponse(AppBaseModel):
     )
     session_id: str | None = Field(
         default=None,
-        description="Session ID used for session-memory lookup",
+        description="Session ID used for runtime session-context lookup",
     )
     estimation_mode: str = Field(
         ...,
@@ -137,6 +137,36 @@ class ReactContextUsageResponse(AppBaseModel):
     )
 
 
+class ReactSessionRuntimeDebugResponse(AppBaseModel):
+    """Debug snapshot of one session's persisted runtime prompt window."""
+
+    session_id: str = Field(..., description="Session UUID being inspected")
+    runtime_message_count: int = Field(
+        ...,
+        description="Number of persisted runtime messages currently stored",
+    )
+    runtime_message_roles: list[str] = Field(
+        default_factory=list,
+        description="Role sequence of the persisted runtime prompt window",
+    )
+    has_compact_result: bool = Field(
+        ...,
+        description="Whether the session currently stores a compact result",
+    )
+    compact_result: Any | None = Field(
+        default=None,
+        description="Parsed latest compact result, if one exists",
+    )
+    compact_result_raw: str | None = Field(
+        default=None,
+        description="Raw serialized compact result as stored in the session row",
+    )
+    updated_at: str = Field(
+        ...,
+        description="Session row update timestamp in ISO 8601 UTC format",
+    )
+
+
 class ReactStreamEventType(str, Enum):
     """Types of events in ReAct stream."""
 
@@ -151,6 +181,9 @@ class ReactStreamEventType(str, Enum):
     SKILL_RESOLUTION_START = "skill_resolution_start"
     SKILL_RESOLUTION_RESULT = "skill_resolution_result"
     TOKEN_RATE = "token_rate"
+    COMPACT_START = "compact_start"
+    COMPACT_COMPLETE = "compact_complete"
+    COMPACT_FAILED = "compact_failed"
     TOOL_RESULT = "tool_result"
     PLAN_UPDATE = "plan_update"
     REFLECT = "reflect"

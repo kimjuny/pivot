@@ -102,9 +102,6 @@ class ParsedReactDecision:
         abstract: Brief summary of the recursion.
         summary: Optional user-facing progress summary.
         action: Parsed action definition.
-        session_memory_delta: Optional session-memory delta from ANSWER.
-        session_subject: Optional session subject update from ANSWER.
-        session_goal: Optional session goal update from ANSWER.
         task_summary: Optional summary payload for the completed task.
         raw_payload: Canonical dictionary representation of the parsed response.
     """
@@ -114,9 +111,6 @@ class ParsedReactDecision:
     abstract: str
     summary: str
     action: ParsedAction
-    session_memory_delta: dict[str, Any]
-    session_subject: dict[str, Any]
-    session_goal: dict[str, Any]
     task_summary: dict[str, Any]
     raw_payload: dict[str, Any]
 

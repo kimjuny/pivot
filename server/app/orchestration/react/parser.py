@@ -162,18 +162,6 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         "summary",
     )
 
-    session_memory_delta = _expect_optional_dict(
-        resolved_payload.get("session_memory_delta"),
-        "session_memory_delta",
-    )
-    session_subject = _expect_optional_dict(
-        resolved_payload.get("session_subject"),
-        "session_subject",
-    )
-    session_goal = _expect_optional_dict(
-        resolved_payload.get("session_goal"),
-        "session_goal",
-    )
     task_summary = _expect_optional_dict(
         resolved_payload.get("task_summary"),
         "task_summary",
@@ -186,9 +174,6 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         abstract=abstract,
         summary=summary,
         action=action,
-        session_memory_delta=session_memory_delta,
-        session_subject=session_subject,
-        session_goal=session_goal,
         task_summary=task_summary,
         raw_payload=resolved_payload,
     )

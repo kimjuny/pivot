@@ -231,6 +231,32 @@ class ReactStateService:
         self.db.add(task)
         self.db.commit()
 
+    def record_task_usage(self, task: ReactTask, token_counter: dict[str, int]) -> None:
+        """Accumulate non-recursion token usage directly onto the task row.
+
+        Why: context compaction is a real LLM call that affects the session
+        window, but it should not appear as a synthetic recursion in the user UI.
+
+        Args:
+            task: Task receiving aggregate token increments.
+            token_counter: Usage payload returned by the compact LLM call.
+        """
+        total_tokens = int(token_counter.get("total_tokens", 0) or 0)
+        if total_tokens <= 0:
+            return
+
+        task.total_prompt_tokens += int(token_counter.get("prompt_tokens", 0) or 0)
+        task.total_completion_tokens += int(
+            token_counter.get("completion_tokens", 0) or 0
+        )
+        task.total_tokens += total_tokens
+        task.total_cached_input_tokens += int(
+            token_counter.get("cached_input_tokens", 0) or 0
+        )
+        task.updated_at = datetime.now(UTC)
+        self.db.add(task)
+        self.db.commit()
+
     def _apply_token_usage(
         self,
         task: ReactTask,

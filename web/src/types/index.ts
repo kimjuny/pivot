@@ -22,6 +22,8 @@ export interface Agent {
    * agent instead of continuing the previous one.
    */
   session_idle_timeout_minutes: number;
+  /** Context-window percentage that triggers automatic runtime compaction. */
+  compact_threshold_percent: number;
   /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
   /** Whether the agent is currently active */

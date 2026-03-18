@@ -22,7 +22,6 @@ from app.orchestration.tool.manager import ToolManager
 from app.schemas.react import ReactContextUsageResponse
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
-from app.services.session_memory_service import SessionMemoryService
 from app.services.workspace_service import (
     ensure_agent_workspace,
     load_all_user_tool_metadata,
@@ -221,7 +220,9 @@ class ReactContextUsageService:
         """Build preview messages for the next new task in a session."""
         messages: list[dict[str, Any]] = []
         if include_system_prompt:
-            messages.append({"role": "system", "content": build_runtime_system_prompt()})
+            messages.append(
+                {"role": "system", "content": build_runtime_system_prompt()}
+            )
 
         user_prompt = self._build_user_prompt(
             agent=agent,
@@ -255,14 +256,8 @@ class ReactContextUsageService:
             username=username,
             agent=agent,
         )
-        session_memory = None
-        if session_id:
-            session_memory = SessionMemoryService(self.db).get_full_session_memory_dict(
-                session_id
-            )
         return build_runtime_user_prompt(
             tool_manager=tool_manager,
-            session_memory=session_memory,
             skills="",
         )
 

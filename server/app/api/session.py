@@ -1,11 +1,5 @@
-"""API endpoints for Session management.
+"""API endpoints for session management."""
 
-This module provides REST endpoints for managing conversation sessions
-and their associated memory.
-"""
-
-import json
-import logging
 from datetime import UTC
 
 from app.api.auth import get_current_user
@@ -21,35 +15,18 @@ from app.schemas.session import (
     SessionCreate,
     SessionListItem,
     SessionListResponse,
-    SessionMemoryResponse,
     SessionResponse,
     SessionUpdate,
     TaskMessage,
 )
-from app.services.session_memory_service import (
+from app.services.session_service import (
     SESSION_METADATA_UNSET,
-    SessionMemoryService,
+    SessionService,
 )
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session as DBSession
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter()
-
-
-def _extract_subject_content(subject_payload: str | None) -> str | None:
-    """Return the human-readable subject text stored in session JSON."""
-    if not subject_payload:
-        return None
-
-    try:
-        subject_data = json.loads(subject_payload)
-    except json.JSONDecodeError:
-        return None
-
-    content = subject_data.get("content")
-    return content if isinstance(content, str) and content.strip() else None
 
 
 def _build_session_response(session: Session) -> SessionResponse:
@@ -60,10 +37,8 @@ def _build_session_response(session: Session) -> SessionResponse:
         agent_id=session.agent_id,
         user=session.user,
         status=session.status,
-        title=session.title or _extract_subject_content(session.subject),
+        title=session.title,
         is_pinned=session.is_pinned,
-        subject=json.loads(session.subject) if session.subject else None,
-        object=json.loads(session.object) if session.object else None,
         created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
         updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
     )
@@ -77,7 +52,7 @@ async def create_session(
 ) -> SessionResponse:
     """Create a new conversation session.
 
-    Creates a new session with empty memory for the specified agent.
+    Creates a new session for the specified agent.
 
     Args:
         request: Session creation request with agent_id.
@@ -87,7 +62,7 @@ async def create_session(
     Returns:
         Created session information.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     session = service.create_session(
         agent_id=request.agent_id,
         user=current_user.username,
@@ -114,7 +89,7 @@ async def list_sessions(
     Returns:
         List of sessions with brief information.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     sessions = service.get_sessions_by_user(
         user=current_user.username,
         agent_id=agent_id,
@@ -128,7 +103,7 @@ async def list_sessions(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
                 status=session.status,
-                title=session.title or _extract_subject_content(session.subject),
+                title=session.title,
                 is_pinned=session.is_pinned,
                 created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
                 updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
@@ -160,7 +135,7 @@ async def get_session(
     Raises:
         HTTPException: If session not found or access denied.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     session = service.get_session(session_id)
 
     if not session:
@@ -193,7 +168,7 @@ async def update_session(
     Raises:
         HTTPException: If session not found or access denied.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     session = service.get_session(session_id)
 
     if not session:
@@ -221,42 +196,6 @@ async def update_session(
     return _build_session_response(updated_session)
 
 
-@router.get("/sessions/{session_id}/memory", response_model=SessionMemoryResponse)
-async def get_session_memory(
-    session_id: str,
-    db: DBSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> SessionMemoryResponse:
-    """Get full session memory by session_id.
-
-    Returns the complete session memory structure as described
-    in context_template.md section 8.2.
-
-    Args:
-        session_id: UUID of the session.
-        db: Database session dependency.
-        current_user: Authenticated user.
-
-    Returns:
-        Complete session memory structure.
-
-    Raises:
-        HTTPException: If session not found or access denied.
-    """
-    service = SessionMemoryService(db)
-    session = service.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session.user != current_user.username:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    memory_dict = service.get_full_session_memory_dict(session_id)
-
-    return SessionMemoryResponse(**memory_dict)
-
-
 @router.get("/sessions/{session_id}/history", response_model=ChatHistoryResponse)
 async def get_session_history(
     session_id: str,
@@ -276,7 +215,7 @@ async def get_session_history(
     Raises:
         HTTPException: If session not found or access denied.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     session = service.get_session(session_id)
 
     if not session:
@@ -319,7 +258,7 @@ async def get_full_session_history(
     Raises:
         HTTPException: If session not found or access denied.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     session = service.get_session(session_id)
 
     if not session:
@@ -418,7 +357,7 @@ async def delete_session(
     Raises:
         HTTPException: If session not found or access denied.
     """
-    service = SessionMemoryService(db)
+    service = SessionService(db)
     session = service.get_session(session_id)
 
     if not session:

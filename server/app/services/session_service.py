@@ -1,12 +1,6 @@
-"""Session Memory Service for managing session-level memory.
-
-This service handles all CRUD operations for session memory,
-including applying deltas from LLM responses and managing
-the persistent session state.
-"""
+"""Session service for conversation threads and persisted chat history."""
 
 import json
-import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,23 +11,17 @@ from app.models.react import (
     ReactTask,
     ReactTaskEvent,
 )
-from app.models.session import Session, SessionMemory
+from app.models.session import Session
 from app.schemas.file import FileAssetListItem
 from app.services.file_service import FileService
 from sqlmodel import Session as DBSession, col, select
-
-logger = logging.getLogger(__name__)
 
 SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
 SESSION_METADATA_UNSET = object()
 
 
-class SessionMemoryService:
-    """Service class for session memory operations.
-
-    Handles creation, retrieval, updates, and delta application
-    for session memory across the ReAct agent system.
-    """
+class SessionService:
+    """Service class for session records and chat-history persistence."""
 
     def __init__(self, db: DBSession) -> None:
         """Initialize the service with a database session.
@@ -48,7 +36,7 @@ class SessionMemoryService:
         agent_id: int,
         user: str,
     ) -> Session:
-        """Create a new session with empty memory.
+        """Create a new session row.
 
         Args:
             agent_id: ID of the agent for this session.
@@ -78,18 +66,6 @@ class SessionMemoryService:
         self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
-
-        # Create associated session memory
-        memory = SessionMemory(
-            session_id=session_id,
-            session_db_id=session.id or 0,
-            memory_items="[]",
-            conversations="[]",
-            created_at=now,
-            updated_at=now,
-        )
-        self.db.add(memory)
-        self.db.commit()
 
         return session
 
@@ -127,18 +103,6 @@ class SessionMemoryService:
             else session.updated_at.replace(tzinfo=UTC)
         )
         return reference_now - updated_at > SESSION_IDLE_TIMEOUT
-
-    def get_session_memory(self, session_id: str) -> SessionMemory | None:
-        """Get session memory by session_id.
-
-        Args:
-            session_id: UUID of the session.
-
-        Returns:
-            SessionMemory instance or None if not found.
-        """
-        stmt = select(SessionMemory).where(SessionMemory.session_id == session_id)
-        return self.db.exec(stmt).first()
 
     def get_sessions_by_user(
         self,
@@ -193,10 +157,7 @@ class SessionMemoryService:
                 session.title = next_title or None
                 has_changes = True
 
-        if (
-            is_pinned is not SESSION_METADATA_UNSET
-            and session.is_pinned != is_pinned
-        ):
+        if is_pinned is not SESSION_METADATA_UNSET and session.is_pinned != is_pinned:
             session.is_pinned = bool(is_pinned)
             has_changes = True
 
@@ -206,389 +167,6 @@ class SessionMemoryService:
             self.db.refresh(session)
 
         return session
-
-    def get_full_session_memory_dict(self, session_id: str) -> dict[str, Any]:
-        """Get the complete session memory as a dictionary.
-
-        This returns the full session_memory structure as described
-        in context_template.md section 8.2.
-
-        Args:
-            session_id: UUID of the session.
-
-        Returns:
-            Dictionary containing the complete session memory structure.
-        """
-        session = self.get_session(session_id)
-        memory = self.get_session_memory(session_id)
-
-        if not session or not memory:
-            return {}
-
-        # Parse stored data
-        try:
-            memory_items = json.loads(memory.memory_items)
-        except json.JSONDecodeError:
-            memory_items = []
-
-        try:
-            conversations = json.loads(memory.conversations)
-        except json.JSONDecodeError:
-            conversations = []
-
-        # Parse subject and object from session
-        try:
-            subject = json.loads(session.subject) if session.subject else None
-        except json.JSONDecodeError:
-            subject = None
-
-        try:
-            object_data = json.loads(session.object) if session.object else None
-        except json.JSONDecodeError:
-            object_data = None
-
-        return {
-            "session_id": session.session_id,
-            "subject": subject,
-            "object": object_data,
-            "status": session.status,
-            "artifacts_metadata": {},  # Reserved for future use
-            "conversations": conversations,
-            "session_memory": memory_items,
-            "created_at": session.created_at.isoformat(),
-            "updated_at": session.updated_at.isoformat(),
-        }
-
-    def process_answer_updates(
-        self,
-        session_id: str,
-        task: ReactTask,
-        session_memory_delta: dict[str, Any] | None = None,
-        session_subject: dict[str, Any] | None = None,
-        session_goal: dict[str, Any] | None = None,
-        agent_answer: str | None = None,
-        task_summary: dict[str, Any] | None = None,
-    ) -> bool:
-        """Process all session updates from an ANSWER action in a single transaction.
-
-        This consolidates memory delta, subject/object updates, conversation logging,
-        and chat history appending into one database operation.
-
-        Args:
-            session_id: UUID of the session.
-            task: The completed ReactTask.
-            session_memory_delta: Dictionary with add/update/delete memory operations.
-            session_subject: Optional updated subject.
-            session_goal: Optional updated goal.
-            agent_answer: The final agent response content.
-            task_summary: Summary dictionary of the task execution.
-
-        Returns:
-            True if successful, False otherwise.
-        """
-        session = self.get_session(session_id)
-        memory = self.get_session_memory(session_id)
-
-        if not session or not memory:
-            logger.warning(f"Session or memory not found for session_id: {session_id}")
-            return False
-
-        now = datetime.now(UTC)
-        memory_updated = False
-        session_updated = False
-
-        # 1. Process Memory Deltas
-        if session_memory_delta:
-            try:
-                memory_items = json.loads(memory.memory_items)
-            except json.JSONDecodeError:
-                memory_items = []
-
-            max_id = 0
-            for item in memory_items:
-                if "id" in item and isinstance(item["id"], int):
-                    max_id = max(max_id, item["id"])
-
-            for add_item in session_memory_delta.get("add", []):
-                max_id += 1
-                memory_items.append(self._build_memory_item(add_item, max_id))
-
-            for update_item in session_memory_delta.get("update", []):
-                item_id = update_item.get("id")
-                if item_id is not None:
-                    for i, existing in enumerate(memory_items):
-                        if existing.get("id") == item_id:
-                            memory_items[i] = self._build_memory_item(
-                                update_item, item_id
-                            )
-                            break
-
-            delete_ids = {
-                d.get("id")
-                for d in session_memory_delta.get("delete", [])
-                if d.get("id")
-            }
-            if delete_ids:
-                memory_items = [
-                    item for item in memory_items if item.get("id") not in delete_ids
-                ]
-
-            memory.memory_items = json.dumps(memory_items, ensure_ascii=False)
-            memory_updated = True
-
-        # 2. Process Conversation Record
-        try:
-            conversations = json.loads(memory.conversations)
-        except json.JSONDecodeError:
-            conversations = []
-
-        task_index = len(conversations) + 1
-        conversations.append(
-            {
-                "task_index": task_index,
-                "task_id": task.task_id,
-                "user_input": task.user_message,
-                "final_answer": agent_answer or "",
-                "status": task.status,
-                "summary": task_summary,
-            }
-        )
-        memory.conversations = json.dumps(conversations, ensure_ascii=False)
-        memory_updated = True
-
-        if memory_updated:
-            memory.updated_at = now
-
-        # 3. Process Session Subject & Object
-        if session_subject:
-            session.subject = json.dumps(session_subject, ensure_ascii=False)
-            session_updated = True
-
-        if session_goal:
-            session.object = json.dumps(session_goal, ensure_ascii=False)
-            session_updated = True
-
-        # 4. Process Chat History
-        if agent_answer:
-            try:
-                history = json.loads(
-                    session.chat_history or '{"version": 1, "messages": []}'
-                )
-            except json.JSONDecodeError:
-                history = {"version": 1, "messages": []}
-
-            if "messages" not in history:
-                history["messages"] = []
-
-            history["messages"].append(
-                {
-                    "type": "assistant",
-                    "content": agent_answer,
-                    "timestamp": now.isoformat(),
-                }
-            )
-            session.chat_history = json.dumps(history, ensure_ascii=False)
-            session_updated = True
-
-        if session_updated:
-            session.updated_at = now
-
-        # Fast single commit for everything
-        if memory_updated or session_updated:
-            self.db.commit()
-
-        return True
-
-    def apply_memory_delta(
-        self,
-        session_id: str,
-        delta: dict[str, Any],
-    ) -> bool:
-        """Apply session memory delta from LLM ANSWER action.
-
-        This method handles the session_memory_delta structure from
-        context_template.md section 4.6, including add, update, delete
-        operations on memory items.
-
-        Args:
-            session_id: UUID of the session.
-            delta: Dictionary containing add, update, delete operations.
-
-        Returns:
-            True if successful, False otherwise.
-        """
-        memory = self.get_session_memory(session_id)
-        if not memory:
-            logger.warning(f"Session memory not found for session_id: {session_id}")
-            return False
-
-        try:
-            memory_items = json.loads(memory.memory_items)
-        except json.JSONDecodeError:
-            memory_items = []
-
-        # Get current max ID for new items
-        max_id = 0
-        for item in memory_items:
-            if "id" in item and isinstance(item["id"], int):
-                max_id = max(max_id, item["id"])
-
-        # Process additions
-        for add_item in delta.get("add", []):
-            max_id += 1
-            new_item = self._build_memory_item(add_item, max_id)
-            memory_items.append(new_item)
-
-        # Process updates
-        for update_item in delta.get("update", []):
-            item_id = update_item.get("id")
-            if item_id is None:
-                continue
-
-            for i, existing in enumerate(memory_items):
-                if existing.get("id") == item_id:
-                    updated = self._build_memory_item(update_item, item_id)
-                    memory_items[i] = updated
-                    break
-
-        # Process deletions
-        delete_ids = {d.get("id") for d in delta.get("delete", []) if d.get("id")}
-        memory_items = [
-            item for item in memory_items if item.get("id") not in delete_ids
-        ]
-
-        # Save updated memory
-        memory.memory_items = json.dumps(memory_items, ensure_ascii=False)
-        memory.updated_at = datetime.now(UTC)
-        self.db.commit()
-
-        return True
-
-    def _build_memory_item(
-        self,
-        data: dict[str, Any],
-        item_id: int,
-    ) -> dict[str, Any]:
-        """Build a memory item dictionary from delta data.
-
-        Args:
-            data: Raw data from delta.
-            item_id: ID to assign to the item.
-
-        Returns:
-            Properly formatted memory item dictionary.
-        """
-        item: dict[str, Any] = {
-            "id": item_id,
-            "type": data.get("type", "background"),
-            "content": data.get("content", ""),
-            "confidence": data.get("confidence", 0.5),
-        }
-
-        # Add type-specific fields
-        if data.get("type") == "decision":
-            item["source"] = data.get("source", "agent")
-            item["decision"] = data.get("decision", "")
-            item["rationale"] = data.get("rationale", "")
-            item["scope"] = data.get("scope", "session")
-            item["reversible"] = data.get("reversible", True)
-
-        return item
-
-    def update_subject(
-        self,
-        session_id: str,
-        subject: dict[str, Any],
-    ) -> bool:
-        """Update session subject.
-
-        Args:
-            session_id: UUID of the session.
-            subject: Dictionary with content, source, confidence.
-
-        Returns:
-            True if successful, False otherwise.
-        """
-        session = self.get_session(session_id)
-        if not session:
-            return False
-
-        session.subject = json.dumps(subject, ensure_ascii=False)
-        session.updated_at = datetime.now(UTC)
-        self.db.commit()
-        return True
-
-    def update_goal(
-        self,
-        session_id: str,
-        goal_data: dict[str, Any],
-    ) -> bool:
-        """Update session goal (purpose).
-
-        Args:
-            session_id: UUID of the session.
-            goal_data: Dictionary with content, source, confidence.
-
-        Returns:
-            True if successful, False otherwise.
-        """
-        session = self.get_session(session_id)
-        if not session:
-            return False
-
-        session.object = json.dumps(goal_data, ensure_ascii=False)
-        session.updated_at = datetime.now(UTC)
-        self.db.commit()
-        return True
-
-    def add_conversation(
-        self,
-        session_id: str,
-        task: ReactTask,
-        agent_answer: str | None = None,
-        task_summary: dict[str, Any] | None = None,
-    ) -> bool:
-        """Add a conversation entry to the session.
-
-        This is called when a task completes to record the conversation
-        summary in the session memory.
-
-        Args:
-            session_id: UUID of the session.
-            task: The completed ReactTask.
-            agent_answer: Final answer from the agent.
-            task_summary: Summary dictionary with content, key_findings, final_decisions.
-
-        Returns:
-            True if successful, False otherwise.
-        """
-        memory = self.get_session_memory(session_id)
-        if not memory:
-            return False
-
-        try:
-            conversations = json.loads(memory.conversations)
-        except json.JSONDecodeError:
-            conversations = []
-
-        # Determine task_index (1-based)
-        task_index = len(conversations) + 1
-
-        conversation: dict[str, Any] = {
-            "task_index": task_index,
-            "task_id": task.task_id,
-            "user_input": task.user_message,
-            "final_answer": agent_answer or "",
-            "status": task.status,
-            "summary": task_summary,
-        }
-
-        conversations.append(conversation)
-
-        memory.conversations = json.dumps(conversations, ensure_ascii=False)
-        memory.updated_at = datetime.now(UTC)
-        self.db.commit()
-        return True
 
     def update_chat_history(
         self,
@@ -692,12 +270,6 @@ class SessionMemoryService:
 
         FileService(self.db).clear_files_by_session_id(session_id)
 
-        # First delete the associated SessionMemory to avoid foreign key constraint
-        memory = self.get_session_memory(session_id)
-        if memory:
-            self.db.delete(memory)
-
-        # Then delete the session
         self.db.delete(session)
         self.db.commit()
         return True

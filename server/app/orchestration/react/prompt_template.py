@@ -33,8 +33,7 @@ _REACT_SYSTEM_PROMPT = _read_template(_SYSTEM_TEMPLATE_PATH)
 _REACT_USER_PROMPT = _read_template(_USER_TEMPLATE_PATH)
 
 
-def build_runtime_system_prompt(
-) -> str:
+def build_runtime_system_prompt() -> str:
     """Build the stable system prompt used once for an entire session.
 
     Returns:
@@ -45,14 +44,12 @@ def build_runtime_system_prompt(
 
 def build_runtime_user_prompt(
     tool_manager: ToolManager | None = None,
-    session_memory: dict[str, Any] | None = None,
     skills: str = "",
 ) -> str:
     """Build the task bootstrap user prompt injected once per task.
 
     Args:
         tool_manager: Optional tool manager to describe available tools.
-        session_memory: Optional session memory dictionary for prompt injection.
         skills: Selected skills full-text block for prompt injection.
 
     Returns:
@@ -62,17 +59,9 @@ def build_runtime_user_prompt(
     if tool_manager:
         tools_description = tool_manager.to_text_catalog()
 
-    session_memory_json = json.dumps(
-        session_memory or {},
-        ensure_ascii=False,
-        indent=2,
-    )
-
-    return (
-        _REACT_USER_PROMPT.replace("{{tools_description}}", tools_description)
-        .replace("{{session_memory}}", session_memory_json)
-        .replace("{{skills}}", skills)
-    )
+    return _REACT_USER_PROMPT.replace(
+        "{{tools_description}}", tools_description
+    ).replace("{{skills}}", skills)
 
 
 def build_runtime_task_bootstrap_message(user_prompt: str) -> dict[str, Any]:

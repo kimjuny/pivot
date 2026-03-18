@@ -165,6 +165,7 @@ function AgentList() {
     llm_id: number | undefined;
     skill_resolution_llm_id?: number | null;
     session_idle_timeout_minutes: number;
+    compact_threshold_percent: number;
     is_active?: boolean;
   }) => {
     if (modalMode === 'create') {
@@ -175,6 +176,7 @@ function AgentList() {
         llm_id: agentData.llm_id,
         skill_resolution_llm_id: agentData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
+        compact_threshold_percent: agentData.compact_threshold_percent,
         is_active: agentData.is_active,
       });
       toast.success('Agent created');
@@ -186,6 +188,7 @@ function AgentList() {
         llm_id: agentData.llm_id,
         skill_resolution_llm_id: agentData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
+        compact_threshold_percent: agentData.compact_threshold_percent,
         is_active: agentData.is_active,
       });
       toast.success('Agent updated');
@@ -464,6 +467,8 @@ function AgentList() {
                 skill_resolution_llm_id: editingAgent.skill_resolution_llm_id ?? null,
                 session_idle_timeout_minutes:
                   editingAgent.session_idle_timeout_minutes,
+                compact_threshold_percent:
+                  editingAgent.compact_threshold_percent,
                 is_active: editingAgent.is_active,
               }
             : undefined

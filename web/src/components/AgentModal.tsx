@@ -35,6 +35,8 @@ export interface AgentFormData {
   skill_resolution_llm_id?: number | null;
   /** Minutes of inactivity before chat starts a fresh session. */
   session_idle_timeout_minutes: number;
+  /** Context percentage that triggers automatic compaction. */
+  compact_threshold_percent: number;
   is_active: boolean;
 }
 
@@ -55,6 +57,7 @@ function createDefaultFormData(): AgentFormData {
     llm_id: undefined,
     skill_resolution_llm_id: null,
     session_idle_timeout_minutes: 15,
+    compact_threshold_percent: 60,
     is_active: true,
   };
 }
@@ -82,6 +85,8 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           skill_resolution_llm_id: initialData.skill_resolution_llm_id ?? null,
           session_idle_timeout_minutes:
             initialData.session_idle_timeout_minutes ?? 15,
+          compact_threshold_percent:
+            initialData.compact_threshold_percent ?? 60,
           is_active:
             initialData.is_active !== undefined ? initialData.is_active : true,
         });
@@ -126,6 +131,15 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
       setServerError('Session idle timeout must be at least 1 minute');
       return;
     }
+    if (
+      !Number.isInteger(formData.compact_threshold_percent) ||
+      formData.compact_threshold_percent < 1 ||
+      formData.compact_threshold_percent > 100
+    ) {
+      setActiveTab('advanced');
+      setServerError('Compact threshold must be between 1% and 100%');
+      return;
+    }
 
     setIsSubmitting(true);
     setServerError(null);
@@ -137,6 +151,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         llm_id: formData.llm_id,
         skill_resolution_llm_id: formData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: formData.session_idle_timeout_minutes,
+        compact_threshold_percent: formData.compact_threshold_percent,
         is_active: formData.is_active,
       });
       onClose();
@@ -337,6 +352,35 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
               <p className="text-sm text-muted-foreground">
                 Start a new chat session after this many idle minutes. Default is
                 15.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="compact_threshold_percent">
+                Compact Threshold (%)
+              </Label>
+              <Input
+                id="compact_threshold_percent"
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={formData.compact_threshold_percent}
+                onChange={(e) => {
+                  const nextValue = Number.parseInt(e.target.value, 10);
+                  setFormData({
+                    ...formData,
+                    compact_threshold_percent: Number.isNaN(nextValue)
+                      ? 0
+                      : nextValue,
+                  });
+                }}
+                disabled={isSubmitting}
+                placeholder="60"
+                autoComplete="off"
+              />
+              <p className="text-sm text-muted-foreground">
+                Automatically compact the runtime context when usage reaches this percentage.
               </p>
             </div>
           </TabsContent>

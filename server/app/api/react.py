@@ -11,11 +11,13 @@ from app.schemas.react import (
     ReactChatRequest,
     ReactContextUsageRequest,
     ReactContextUsageResponse,
+    ReactSessionRuntimeDebugResponse,
     ReactStreamEvent,
     ReactTaskCancelResponse,
     ReactTaskStartResponse,
 )
 from app.services.react_context_service import ReactContextUsageService
+from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
     get_react_task_supervisor,
@@ -60,7 +62,9 @@ async def _stream_supervisor_events(
                     break
 
                 try:
-                    payload = await asyncio.wait_for(subscriber.queue.get(), timeout=15.0)
+                    payload = await asyncio.wait_for(
+                        subscriber.queue.get(), timeout=15.0
+                    )
                 except TimeoutError:
                     yield ": keep-alive\n\n"
                     continue
@@ -127,7 +131,8 @@ async def cancel_react_task(
     return ReactTaskCancelResponse(
         task_id=task_id,
         status=refreshed_task.status,
-        cancel_requested=cancel_requested or refreshed_task.cancel_requested_at is not None,
+        cancel_requested=cancel_requested
+        or refreshed_task.cancel_requested_at is not None,
     )
 
 
@@ -141,9 +146,9 @@ async def stream_react_session_events(
     current_user: User = Depends(get_current_user),
 ):
     """Stream reconnectable ReAct task events for one session."""
-    from app.services.session_memory_service import SessionMemoryService
+    from app.services.session_service import SessionService
 
-    session = SessionMemoryService(db).get_session(session_id)
+    session = SessionService(db).get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.user != current_user.username:
@@ -228,6 +233,28 @@ async def estimate_react_context_usage(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/react/sessions/{session_id}/runtime-debug",
+    response_model=ReactSessionRuntimeDebugResponse,
+)
+async def get_react_session_runtime_debug(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ReactSessionRuntimeDebugResponse:
+    """Return the persisted runtime-window debug snapshot for one session."""
+    from app.services.session_service import SessionService
+
+    session = SessionService(db).get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user != current_user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    payload = ReactRuntimeService(db).build_runtime_debug_payload(session_id)
+    return ReactSessionRuntimeDebugResponse(**payload)
 
 
 @router.get("/react/tasks/{task_id}")

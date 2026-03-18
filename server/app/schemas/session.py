@@ -24,8 +24,6 @@ class SessionResponse(AppBaseModel):
     status: str
     title: str | None = None
     is_pinned: bool = False
-    subject: dict[str, Any] | None = None
-    object: dict[str, Any] | None = None
     created_at: str
     updated_at: str
 
@@ -35,20 +33,6 @@ class SessionUpdate(AppBaseModel):
 
     title: str | None = None
     is_pinned: bool | None = None
-
-
-class SessionMemoryResponse(AppBaseModel):
-    """Response schema for full session memory."""
-
-    session_id: str
-    subject: dict[str, Any] | None = None
-    object: dict[str, Any] | None = None
-    status: str
-    artifacts_metadata: dict[str, Any] = Field(default_factory=dict)
-    conversations: list[dict[str, Any]] = Field(default_factory=list)
-    session_memory: list[dict[str, Any]] = Field(default_factory=list)
-    created_at: str
-    updated_at: str
 
 
 class SessionListItem(AppBaseModel):

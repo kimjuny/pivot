@@ -18,13 +18,10 @@ ReactPlanStep = import_module("app.models.react").ReactPlanStep
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
 Session = import_module("app.models.session").Session
-SessionMemory = import_module("app.models.session").SessionMemory
-SessionMemoryService = import_module(
-    "app.services.session_memory_service"
-).SessionMemoryService
+SessionService = import_module("app.services.session_service").SessionService
 
 
-class SessionMemoryServiceTestCase(unittest.TestCase):
+class SessionServiceTestCase(unittest.TestCase):
     """Validate session history payloads that power the chat UI."""
 
     def setUp(self) -> None:
@@ -51,16 +48,7 @@ class SessionMemoryServiceTestCase(unittest.TestCase):
         self.session.commit()
         self.session.refresh(session)
 
-        memory = SessionMemory(
-            session_id=session.session_id,
-            session_db_id=session.id or 0,
-            memory_items="[]",
-            conversations="[]",
-        )
-        self.session.add(memory)
-        self.session.commit()
-
-        self.service = SessionMemoryService(self.session)
+        self.service = SessionService(self.session)
 
     def tearDown(self) -> None:
         """Close the session after each test."""

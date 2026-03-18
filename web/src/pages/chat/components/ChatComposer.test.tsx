@@ -14,6 +14,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         inputMessage=""
         error={null}
+        compactStatusMessage={null}
         replyTaskId={null}
         pendingFiles={[]}
         canSendMessage={false}
@@ -73,6 +74,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         inputMessage=""
         error={null}
+        compactStatusMessage={null}
         replyTaskId={null}
         pendingFiles={[]}
         canSendMessage={false}
@@ -133,6 +135,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         inputMessage=""
         error={null}
+        compactStatusMessage={null}
         replyTaskId={null}
         pendingFiles={[]}
         canSendMessage={false}
@@ -187,6 +190,7 @@ describe("ChatComposer", () => {
       <ChatComposer
         inputMessage=""
         error={null}
+        compactStatusMessage={null}
         replyTaskId={null}
         pendingFiles={[]}
         canSendMessage={false}
@@ -237,5 +241,41 @@ describe("ChatComposer", () => {
       "aria-hidden",
       "true",
     );
+  });
+
+  it("shows a clear compacting notice while the runtime window is rebuilding", () => {
+    render(
+      <ChatComposer
+        inputMessage=""
+        error={null}
+        compactStatusMessage="Compacting context. Please wait before stopping."
+        replyTaskId={null}
+        pendingFiles={[]}
+        canSendMessage={false}
+        isStreaming
+        isConversationEmpty={false}
+        hasUploadingFiles={false}
+        taskPlan={null}
+        contextUsage={null}
+        isContextUsageLoading={false}
+        supportsImageInput={false}
+        imageInputRef={{ current: null }}
+        documentInputRef={{ current: null }}
+        onInputChange={vi.fn()}
+        onKeyDown={vi.fn()}
+        onPaste={vi.fn()}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onCancelReply={vi.fn()}
+        onImageInputChange={vi.fn()}
+        onDocumentInputChange={vi.fn()}
+        onRemovePendingFile={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText("Compacting context. Please wait before stopping."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Compacting...")).toBeInTheDocument();
   });
 });

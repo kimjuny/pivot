@@ -123,6 +123,7 @@ export const createAgent = async (agentData: {
   llm_id: number;
   skill_resolution_llm_id?: number | null;
   session_idle_timeout_minutes?: number;
+  compact_threshold_percent?: number;
   is_active?: boolean;
 }): Promise<Agent> => {
   return apiRequest('/agents', {
@@ -369,6 +370,7 @@ export const updateAgent = async (
     llm_id?: number;
     skill_resolution_llm_id?: number | null;
     session_idle_timeout_minutes?: number;
+    compact_threshold_percent?: number;
     is_active?: boolean;
     skill_ids?: string | null;
   }
@@ -797,16 +799,6 @@ export interface SessionResponse {
   status: string;
   title: string | null;
   is_pinned: boolean;
-  subject: {
-    content: string;
-    source: string;
-    confidence: number;
-  } | null;
-  object: {
-    content: string;
-    source: string;
-    confidence: number;
-  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -1065,6 +1057,19 @@ export interface ReactContextUsageSummary {
 }
 
 /**
+ * Debug snapshot of the persisted runtime prompt window for one session.
+ */
+export interface ReactSessionRuntimeDebug {
+  session_id: string;
+  runtime_message_count: number;
+  runtime_message_roles: string[];
+  has_compact_result: boolean;
+  compact_result: Record<string, unknown> | Array<unknown> | string | null;
+  compact_result_raw: string | null;
+  updated_at: string;
+}
+
+/**
  * Get full session history with recursion details.
  *
  * @param sessionId - Session UUID
@@ -1124,6 +1129,20 @@ export const getReactContextUsage = async (payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   }) as Promise<ReactContextUsageSummary>;
+};
+
+/**
+ * Load the latest persisted runtime debug snapshot for one session.
+ *
+ * @param sessionId - Session UUID whose runtime window should be inspected
+ * @returns Promise resolving to compact-aware runtime debug data
+ */
+export const getReactSessionRuntimeDebug = async (
+  sessionId: string,
+): Promise<ReactSessionRuntimeDebug> => {
+  return apiRequest(
+    `/react/sessions/${sessionId}/runtime-debug`,
+  ) as Promise<ReactSessionRuntimeDebug>;
 };
 
 /**

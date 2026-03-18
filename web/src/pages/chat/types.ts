@@ -1,4 +1,7 @@
-import type { FileUploadSource } from "@/utils/api";
+import type {
+  FileUploadSource,
+  ReactSessionRuntimeDebug,
+} from "@/utils/api";
 
 /**
  * Props accepted by the page-scoped ReAct chat container.
@@ -15,12 +18,41 @@ export interface ReactChatInterfaceProps {
 }
 
 /**
+ * Runtime debug snapshot pushed upward from the page-scoped chat container.
+ */
+export interface ChatRuntimeDebugState {
+  /** Currently selected session UUID, if any. */
+  currentSessionId: string | null;
+  /** Whether a compact cycle is actively in progress. */
+  isCompacting: boolean;
+  /** User-visible compact progress copy, when present. */
+  compactStatusMessage: string | null;
+  /** Lifecycle state of the runtime debug payload loader. */
+  loadState: "idle" | "loading" | "ready" | "error";
+  /** Latest fetched runtime debug payload for the current session. */
+  runtimeDebug: ReactSessionRuntimeDebug | null;
+  /** Loader or fetch error for the runtime debug payload. */
+  error: string | null;
+}
+
+/**
+ * Internal props accepted by the page-scoped chat shell.
+ */
+export interface ChatPageProps extends ReactChatInterfaceProps {
+  /** Optional upward callback used by the outer shell to render debug affordances. */
+  onRuntimeDebugChange?: (state: ChatRuntimeDebugState) => void;
+}
+
+/**
  * All stream event labels emitted by the ReAct backend.
  */
 export type ReactStreamEventType =
   | "skill_resolution_start"
   | "skill_resolution_result"
   | "token_rate"
+  | "compact_start"
+  | "compact_complete"
+  | "compact_failed"
   | "recursion_start"
   | "reasoning"
   | "observe"

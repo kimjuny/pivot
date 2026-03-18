@@ -28,9 +28,7 @@ ChannelProgressView = import_module("app.channels.types").ChannelProgressView
 channel_service_module = import_module("app.services.channel_service")
 ExternalIdentityBinding = import_module("app.models.channel").ExternalIdentityBinding
 ChannelSession = import_module("app.models.channel").ChannelSession
-SessionMemoryService = import_module(
-    "app.services.session_memory_service"
-).SessionMemoryService
+SessionService = import_module("app.services.session_service").SessionService
 
 
 class ChannelServiceTestCase(unittest.TestCase):
@@ -287,7 +285,7 @@ class ChannelServiceTestCase(unittest.TestCase):
         self.session.commit()
         self.session.refresh(identity)
 
-        session_service = SessionMemoryService(self.session)
+        session_service = SessionService(self.session)
         original_session = session_service.create_session(
             agent_id=self.agent.id or 0,
             user=self.user.username,

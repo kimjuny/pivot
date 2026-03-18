@@ -16,22 +16,30 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
+from app.crud.llm import llm as llm_crud
 from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
+from app.models.agent import Agent
 from app.models.react import (
     ReactRecursion,
     ReactTask,
 )
+from app.orchestration.compact.compact_prompt import COMPACT_PROMPT
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.file import FileAssetListItem
-from app.services.react_runtime_service import ReactRuntimeService
+from app.services.react_runtime_service import ReactRuntimeService, TaskRuntimeState
 from app.services.react_state_service import ReactStateService
-from app.services.session_memory_service import SessionMemoryService
+from app.services.session_service import SessionService
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session
 
 from .context import ReactContext
-from .parser import PARSE_RETRY_INSTRUCTION, PARSE_RETRY_LIMIT, parse_react_output
+from .parser import (
+    PARSE_RETRY_INSTRUCTION,
+    PARSE_RETRY_LIMIT,
+    parse_react_output,
+    safe_load_json,
+)
 from .prompt_template import build_runtime_system_prompt, build_runtime_user_prompt
 
 if TYPE_CHECKING:
@@ -120,6 +128,233 @@ class ReactEngine:
         )
         if inferred_total > 0:
             token_counter["total_tokens"] = inferred_total
+
+    @staticmethod
+    def _to_percent(used_tokens: int, max_context_tokens: int) -> int:
+        """Convert token counts into a bounded integer percentage."""
+        if max_context_tokens <= 0:
+            return 0
+        raw_percent = round((used_tokens / max_context_tokens) * 100)
+        return max(min(int(raw_percent), 100), 0)
+
+    def _build_usage_snapshot(
+        self,
+        *,
+        task: ReactTask,
+        messages: list[dict[str, Any]],
+        max_context_tokens: int,
+    ) -> dict[str, Any]:
+        """Build a context-usage snapshot for runtime events and decisions."""
+        used_tokens = estimate_messages_tokens(messages)
+        remaining_tokens = max(max_context_tokens - used_tokens, 0)
+        used_percent = self._to_percent(used_tokens, max_context_tokens)
+        system_tokens = 0
+        if messages and messages[0].get("role") == "system":
+            system_tokens = estimate_messages_tokens([messages[0]])
+        conversation_tokens = max(used_tokens - system_tokens, 0)
+        return {
+            "task_id": task.task_id,
+            "session_id": task.session_id,
+            "estimation_mode": "active_task",
+            "message_count": len(messages),
+            "session_message_count": len(messages),
+            "used_tokens": used_tokens,
+            "remaining_tokens": remaining_tokens,
+            "max_context_tokens": max_context_tokens,
+            "used_percent": used_percent,
+            "remaining_percent": max(100 - used_percent, 0),
+            "system_tokens": system_tokens,
+            "conversation_tokens": conversation_tokens,
+            "session_tokens": used_tokens,
+            "preview_tokens": 0,
+            "bootstrap_tokens": 0,
+            "draft_tokens": 0,
+            "includes_task_bootstrap": False,
+        }
+
+    async def _execute_compaction(
+        self,
+        *,
+        task: ReactTask,
+        source_messages: list[dict[str, Any]],
+    ) -> tuple[str, dict[str, int]]:
+        """Run one compact-model call over the provided runtime messages."""
+        compact_messages = [dict(message) for message in source_messages]
+        compact_messages.append({"role": "user", "content": COMPACT_PROMPT})
+
+        response = await run_in_threadpool(
+            self.llm.chat,
+            compact_messages,
+            _pivot_task_id=task.task_id,
+        )
+        token_counter = self._new_token_counter()
+        self._accumulate_usage(token_counter, response.usage)
+        self._ensure_total_tokens(token_counter)
+
+        content = response.first().message.content or "{}"
+        compact_payload = safe_load_json(content)
+        compact_result = json.dumps(compact_payload, ensure_ascii=False)
+        return compact_result, token_counter
+
+    async def _maybe_compact_runtime_window(
+        self,
+        *,
+        task: ReactTask,
+        runtime_state: TaskRuntimeState,
+        system_prompt: str,
+        max_context_tokens: int,
+        threshold_percent: int,
+        reason: str,
+    ) -> tuple[TaskRuntimeState, list[dict[str, Any]]]:
+        """Compact the runtime prompt window when the configured threshold is hit."""
+        if max_context_tokens <= 0 or threshold_percent <= 0:
+            return runtime_state, []
+
+        usage_before = self._build_usage_snapshot(
+            task=task,
+            messages=runtime_state.messages,
+            max_context_tokens=max_context_tokens,
+        )
+        if usage_before["used_percent"] < threshold_percent:
+            return runtime_state, []
+
+        original_messages = [dict(message) for message in runtime_state.messages]
+        original_compact_result = runtime_state.compact_result
+
+        if reason == "task_start_threshold":
+            prefix_messages = runtime_state.messages
+            stashed_messages: list[dict[str, Any]] = []
+        else:
+            task_start_index = max(task.runtime_message_start_index, 0)
+            prefix_messages = runtime_state.messages[:task_start_index]
+            stashed_messages = [
+                dict(message)
+                for message in runtime_state.messages[task_start_index:]
+                if message.get("role") != "system"
+            ]
+
+        source_messages = [
+            dict(message)
+            for message in prefix_messages
+            if message.get("role") != "system"
+        ]
+        if not source_messages:
+            return runtime_state, []
+        if (
+            runtime_state.compact_result is not None
+            and len(source_messages) == 1
+            and source_messages[0].get("role") == "assistant"
+            and source_messages[0].get("content") == runtime_state.compact_result
+        ):
+            return runtime_state, []
+
+        events = [
+            {
+                "type": "compact_start",
+                "task_id": task.task_id,
+                "iteration": task.iteration,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {
+                    "reason": reason,
+                    "threshold_percent": threshold_percent,
+                    "usage_before": usage_before,
+                },
+            }
+        ]
+
+        try:
+            if stashed_messages:
+                self.runtime_service.stash_task_messages(task, stashed_messages)
+                runtime_state = self.runtime_service.replace_runtime_messages(
+                    task,
+                    prefix_messages,
+                    compact_result=original_compact_result,
+                    preserve_pending_action_result=True,
+                    preserve_cache_state=True,
+                )
+
+            compact_result, compact_usage = await self._execute_compaction(
+                task=task,
+                source_messages=source_messages,
+            )
+            self.state_service.record_task_usage(task, compact_usage)
+
+            restored_messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "assistant", "content": compact_result},
+            ]
+            if stashed_messages:
+                restored_messages.extend(
+                    self.runtime_service.load_stashed_task_messages(task)
+                )
+                task.runtime_message_start_index = 2
+            else:
+                task.runtime_message_start_index = 0
+
+            task.updated_at = datetime.now(UTC)
+            self.db.add(task)
+            runtime_state = self.runtime_service.replace_runtime_messages(
+                task,
+                restored_messages,
+                compact_result=compact_result,
+                preserve_pending_action_result=True,
+                preserve_cache_state=False,
+            )
+            if stashed_messages:
+                self.runtime_service.clear_stashed_task_messages(task)
+
+            usage_after = self._build_usage_snapshot(
+                task=task,
+                messages=runtime_state.messages,
+                max_context_tokens=max_context_tokens,
+            )
+            events.append(
+                {
+                    "type": "compact_complete",
+                    "task_id": task.task_id,
+                    "iteration": task.iteration,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "data": {
+                        "reason": reason,
+                        "threshold_percent": threshold_percent,
+                        "usage_before": usage_before,
+                        "usage_after": usage_after,
+                        "compact_tokens": compact_usage,
+                    },
+                }
+            )
+            return runtime_state, events
+        except Exception as exc:
+            logger.exception(
+                "Context compact failed task_id=%s iteration=%s reason=%s",
+                task.task_id,
+                task.iteration,
+                reason,
+            )
+            if stashed_messages:
+                runtime_state = self.runtime_service.replace_runtime_messages(
+                    task,
+                    original_messages,
+                    compact_result=original_compact_result,
+                    preserve_pending_action_result=True,
+                    preserve_cache_state=True,
+                )
+                self.runtime_service.clear_stashed_task_messages(task)
+            events.append(
+                {
+                    "type": "compact_failed",
+                    "task_id": task.task_id,
+                    "iteration": task.iteration,
+                    "timestamp": datetime.now(UTC).isoformat(),
+                    "data": {
+                        "reason": reason,
+                        "threshold_percent": threshold_percent,
+                        "usage_before": usage_before,
+                        "error": str(exc) or repr(exc),
+                    },
+                }
+            )
+            return runtime_state, events
 
     @staticmethod
     def _next_stream_chunk_or_none(
@@ -655,10 +890,6 @@ class ReactEngine:
             # missing step_id should only surface as a warning so the task can continue.
             action_step_id = action.step_id
 
-            # Extract session memory related fields (only used when action_type == ANSWER)
-            session_memory_delta = decision.session_memory_delta
-            session_subject = decision.session_subject
-            session_goal = decision.session_goal
             task_summary = decision.task_summary
 
             # Handle CALL_TOOL with native function calling
@@ -750,10 +981,6 @@ class ReactEngine:
                 "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
-                # Session memory related fields (for ANSWER action)
-                "session_memory_delta": session_memory_delta,
-                "session_subject": session_subject,
-                "session_goal": session_goal,
                 "task_summary": task_summary,
                 "step_status_update": step_status_updates_validated,
                 "current_plan": self._build_current_plan_payload(context),
@@ -825,14 +1052,22 @@ class ReactEngine:
         Raises:
             asyncio.CancelledError: If the task is cancelled by client disconnect
         """
-        # Load session memory if session_id is provided
-        session_memory_dict: dict[str, Any] | None = None
-        if task.session_id:
-            session_service = SessionMemoryService(self.db)
-            session_memory_dict = session_service.get_full_session_memory_dict(
-                task.session_id
+        agent = self.db.get(Agent, task.agent_id)
+        if agent is None:
+            raise RuntimeError(
+                f"Agent {task.agent_id} not found for task {task.task_id}."
             )
-            # Update chat history with user input
+
+        max_context_tokens = 0
+        if agent.llm_id is not None:
+            llm_config = llm_crud.get(agent.llm_id, self.db)
+            if llm_config is not None:
+                max_context_tokens = max(int(llm_config.max_context or 0), 0)
+        compact_threshold_percent = max(int(agent.compact_threshold_percent or 0), 0)
+        system_prompt = build_runtime_system_prompt()
+
+        if task.session_id:
+            session_service = SessionService(self.db)
             session_service.update_chat_history(
                 task.session_id,
                 "user",
@@ -844,17 +1079,27 @@ class ReactEngine:
 
         runtime_state = self.runtime_service.initialize(
             task,
-            build_runtime_system_prompt(),
+            system_prompt,
         )
         logged_message_count = len(runtime_state.messages)
         pending_turn_file_blocks = turn_file_blocks
 
         if task.iteration == 0:
+            runtime_state, compact_events = await self._maybe_compact_runtime_window(
+                task=task,
+                runtime_state=runtime_state,
+                system_prompt=system_prompt,
+                max_context_tokens=max_context_tokens,
+                threshold_percent=compact_threshold_percent,
+                reason="task_start_threshold",
+            )
+            for compact_event in compact_events:
+                yield compact_event
+            logged_message_count = len(runtime_state.messages)
             runtime_state = self.runtime_service.append_task_bootstrap_prompt(
                 task,
                 build_runtime_user_prompt(
                     tool_manager=self.tool_manager,
-                    session_memory=session_memory_dict,
                     skills=selected_skills_text,
                 ),
             )
@@ -871,6 +1116,23 @@ class ReactEngine:
 
         try:
             while task.iteration < task.max_iteration:
+                runtime_state = self.runtime_service.load(task)
+                (
+                    runtime_state,
+                    compact_events,
+                ) = await self._maybe_compact_runtime_window(
+                    task=task,
+                    runtime_state=runtime_state,
+                    system_prompt=system_prompt,
+                    max_context_tokens=max_context_tokens,
+                    threshold_percent=compact_threshold_percent,
+                    reason="iteration_threshold",
+                )
+                for compact_event in compact_events:
+                    yield compact_event
+                if compact_events:
+                    logged_message_count = len(runtime_state.messages)
+
                 trace_id = str(uuid.uuid4())
 
                 # Check if task was cancelled
@@ -1252,21 +1514,12 @@ class ReactEngine:
                         "timestamp": datetime.now(UTC).isoformat(),
                     }
 
-                    # Process session memory updates if session_id is provided
                     if task.session_id:
-                        session_service = SessionMemoryService(self.db)
                         answer_output = event_data.get("output", {})
-
-                        session_service.process_answer_updates(
-                            session_id=task.session_id,
-                            task=task,
-                            session_memory_delta=event_data.get(
-                                "session_memory_delta", {}
-                            ),
-                            session_subject=event_data.get("session_subject", {}),
-                            session_goal=event_data.get("session_goal", {}),
-                            agent_answer=answer_output.get("answer", ""),
-                            task_summary=event_data.get("task_summary", {}),
+                        SessionService(self.db).update_chat_history(
+                            task.session_id,
+                            "assistant",
+                            answer_output.get("answer", ""),
                         )
 
                     # Task complete

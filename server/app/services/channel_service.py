@@ -44,11 +44,12 @@ from app.schemas.channel import (
     ChannelLinkTokenStatusResponse,
 )
 from app.services.file_service import FileService
+from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
     get_react_task_supervisor,
 )
-from app.services.session_memory_service import SessionMemoryService
+from app.services.session_service import SessionService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
 )
@@ -532,7 +533,7 @@ class ChannelService:
         external_conversation_id: str,
     ) -> ChannelSession:
         """Resolve the backing Pivot session for one external conversation."""
-        session_service = SessionMemoryService(self.db)
+        session_service = SessionService(self.db)
         now = datetime.now(UTC)
         existing = self.db.exec(
             select(ChannelSession).where(
@@ -864,7 +865,49 @@ class ChannelService:
                 pending_progress_text = None
                 pending_progress_view = None
 
-            if event_type == "skill_resolution_result":
+            if event_type == "compact_start":
+                compact_text = (
+                    "Compacting context to preserve continuity. Please wait..."
+                )
+                if compact_text != last_progress_text:
+                    yield ChannelOutboundAction(
+                        kind="progress",
+                        text=compact_text,
+                        delivery_hint="stream",
+                        slot="assistant_turn",
+                        metadata=self._build_action_metadata(event_data),
+                    )
+                    last_progress_text = compact_text
+                    last_progress_sent_at = perf_counter()
+            elif event_type == "compact_complete":
+                compact_text = (
+                    "Context compacted. Continuing with a smaller prompt window."
+                )
+                if compact_text != last_progress_text:
+                    yield ChannelOutboundAction(
+                        kind="progress",
+                        text=compact_text,
+                        delivery_hint="stream",
+                        slot="assistant_turn",
+                        metadata=self._build_action_metadata(event_data),
+                    )
+                    last_progress_text = compact_text
+                    last_progress_sent_at = perf_counter()
+            elif event_type == "compact_failed":
+                compact_text = (
+                    "Context compaction failed. Continuing without compaction."
+                )
+                if compact_text != last_progress_text:
+                    yield ChannelOutboundAction(
+                        kind="progress",
+                        text=compact_text,
+                        delivery_hint="stream",
+                        slot="assistant_turn",
+                        metadata=self._build_action_metadata(event_data),
+                    )
+                    last_progress_text = compact_text
+                    last_progress_sent_at = perf_counter()
+            elif event_type == "skill_resolution_result":
                 resolution_text = self._render_skill_resolution_result_text(
                     event_data=event_data
                 )
@@ -1247,15 +1290,15 @@ class ChannelService:
 
         try:
             resolver_llm = create_llm_from_config(resolver_llm_config)
-            session_memory = SessionMemoryService(self.db).get_full_session_memory_dict(
-                session_id
-            )
+            session_context = ReactRuntimeService(
+                self.db
+            ).build_session_context_payload(session_id)
             selection_result = await run_in_threadpool(
                 select_skills_with_usage,
                 resolver_llm,
                 message,
                 available_skills,
-                session_memory,
+                session_context,
             )
             raw_selected = selection_result.get("selected_skills", [])
             selected = [

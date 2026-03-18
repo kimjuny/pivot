@@ -15,7 +15,7 @@ from app.models.react import (
     ReactTask,
     ReactTaskEvent,
 )
-from app.models.session import Session, SessionMemory
+from app.models.session import Session
 from app.models.skill import Skill
 from app.models.user import User, UserLogin, UserResponse
 
@@ -36,7 +36,6 @@ __all__ = [
     "ReactTaskEvent",
     "Scene",
     "Session",
-    "SessionMemory",
     "Skill",
     "Subscene",
     "User",

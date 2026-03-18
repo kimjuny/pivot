@@ -25,7 +25,6 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "reacttaskevent",
     "scene",
     "session",
-    "sessionmemory",
     "skill",
     "subscene",
     "user",
@@ -160,11 +159,24 @@ def ensure_agent_schema_compatibility() -> None:
                     "ADD COLUMN session_idle_timeout_minutes INTEGER"
                 )
             )
+        if "compact_threshold_percent" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agent " "ADD COLUMN compact_threshold_percent INTEGER"
+                )
+            )
         conn.execute(
             text(
                 "UPDATE agent "
                 "SET session_idle_timeout_minutes = 15 "
                 "WHERE session_idle_timeout_minutes IS NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE agent "
+                "SET compact_threshold_percent = 60 "
+                "WHERE compact_threshold_percent IS NULL"
             )
         )
 
@@ -186,9 +198,11 @@ def ensure_session_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE session ADD COLUMN title VARCHAR"))
         if "is_pinned" not in columns:
             conn.execute(text("ALTER TABLE session ADD COLUMN is_pinned BOOLEAN"))
-        conn.execute(
-            text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL")
-        )
+        if "react_compact_result" not in columns:
+            conn.execute(
+                text("ALTER TABLE session ADD COLUMN react_compact_result VARCHAR")
+            )
+        conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
 
 
 def ensure_react_schema_compatibility() -> None:
@@ -214,6 +228,24 @@ def ensure_react_schema_compatibility() -> None:
                         "ADD COLUMN cancel_requested_at DATETIME"
                     )
                 )
+            if "runtime_message_start_index" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask "
+                        "ADD COLUMN runtime_message_start_index INTEGER"
+                    )
+                )
+            if "stashed_messages" not in task_columns:
+                conn.execute(
+                    text("ALTER TABLE reacttask " "ADD COLUMN stashed_messages VARCHAR")
+                )
+            conn.execute(
+                text(
+                    "UPDATE reacttask "
+                    "SET runtime_message_start_index = 0 "
+                    "WHERE runtime_message_start_index IS NULL"
+                )
+            )
 
         if inspector.has_table("reactrecursion"):
             recursion_columns = {

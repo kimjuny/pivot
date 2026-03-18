@@ -15,6 +15,7 @@ import_module("app.models.file")
 LLM = import_module("app.models.llm").LLM
 Agent = import_module("app.models.agent").Agent
 ReactTask = import_module("app.models.react").ReactTask
+SessionModel = import_module("app.models.session").Session
 ReactRuntimeService = import_module(
     "app.services.react_runtime_service"
 ).ReactRuntimeService
@@ -50,6 +51,20 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         self.session.refresh(agent)
         self.agent = agent
 
+        session_row = SessionModel(
+            session_id="session-1",
+            agent_id=agent.id or 0,
+            user="alice",
+            status="active",
+            chat_history='{"version": 1, "messages": []}',
+            react_llm_messages="[]",
+            react_llm_cache_state="{}",
+        )
+        self.session.add(session_row)
+        self.session.commit()
+        self.session.refresh(session_row)
+        self.session_row = session_row
+
         self.runtime_service = ReactRuntimeService(self.session)
         self.service = ReactContextUsageService(self.session)
 
@@ -66,10 +81,12 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         )
 
         self.assertEqual(result.estimation_mode, "next_turn_preview")
-        self.assertEqual(result.message_count, 2)
+        self.assertEqual(result.message_count, 3)
         self.assertGreater(result.system_tokens, 0)
         self.assertGreater(result.draft_tokens, 0)
-        self.assertEqual(result.used_tokens, result.system_tokens + result.conversation_tokens)
+        self.assertEqual(
+            result.used_tokens, result.system_tokens + result.conversation_tokens
+        )
         self.assertEqual(
             result.remaining_tokens,
             self.llm.max_context - result.used_tokens,
@@ -80,6 +97,7 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         task = ReactTask(
             task_id="task-1",
             agent_id=self.agent.id or 0,
+            session_id=self.session_row.session_id,
             user="alice",
             user_message="Need help",
             user_intent="Need help",

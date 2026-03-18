@@ -1,26 +1,18 @@
-"""Session models for ReAct agent conversation sessions.
-
-This module defines database models for managing conversation sessions
-and their associated memory in the ReAct agent system.
-"""
+"""Session models for ReAct agent conversation sessions."""
 
 from datetime import UTC, datetime
-from typing import Optional
 
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, SQLModel
 
 # Current version for chat_history schema
 CHAT_HISTORY_VERSION = 1
-
-# Current version for session_memory schema
-SESSION_MEMORY_VERSION = 1
 
 
 class Session(SQLModel, table=True):
     """Session model representing a conversation session.
 
     Each session contains multiple tasks (conversations) and maintains
-    a shared memory across all tasks within the session.
+    the runtime prompt window reused across tasks.
 
     Note: Tasks are linked via session_id (UUID string) in ReactTask model,
     but there's no ORM relationship defined here to avoid complex join conditions.
@@ -34,12 +26,12 @@ class Session(SQLModel, table=True):
         status: Current status (active, waiting_input, closed).
         title: Optional user-facing session label set from the sidebar.
         is_pinned: Whether the session should stay at the top of the sidebar.
-        subject: JSON string containing session subject info.
-        object: JSON string containing session object (purpose) info.
         chat_history: JSON string containing the complete chat history.
         chat_history_version: Version number for chat_history schema.
         react_llm_messages: Serialized OpenAI-style message list reused across
             tasks in the same session.
+        react_compact_result: Canonical JSON string of the latest compact result
+            inserted into the runtime message window.
         react_pending_action_result: Serialized action result injected into the
             next recursion payload while a task is active.
         react_llm_cache_state: Serialized provider-specific cache linkage state.
@@ -63,14 +55,6 @@ class Session(SQLModel, table=True):
         default=False,
         description="Whether the session is pinned in the sidebar",
     )
-    subject: str | None = Field(
-        default=None,
-        description="JSON string of session subject",
-    )
-    object: str | None = Field(
-        default=None,
-        description="JSON string of session object (purpose)",
-    )
     chat_history: str | None = Field(
         default=None,
         description="JSON string of complete chat history",
@@ -84,6 +68,13 @@ class Session(SQLModel, table=True):
         description=(
             "Serialized list[message] reused across tasks in the same session. "
             "Messages are appended incrementally to maximize prompt cache reuse."
+        ),
+    )
+    react_compact_result: str | None = Field(
+        default=None,
+        description=(
+            "Canonical compact JSON currently representing the summarized "
+            "session context inside the runtime prompt window."
         ),
     )
     react_pending_action_result: str | None = Field(
@@ -102,54 +93,3 @@ class Session(SQLModel, table=True):
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    # Relationships
-    memory: Optional["SessionMemory"] = Relationship(back_populates="session")
-
-
-class SessionMemory(SQLModel, table=True):
-    """SessionMemory model for storing persistent session memory.
-
-    This model stores the session_memory array as described in context_template.md,
-    including preferences, constraints, background info, capability assumptions,
-    and decisions accumulated across all tasks in a session.
-
-    Attributes:
-        id: Primary key of the session memory.
-        session_id: UUID string linking to the parent session.
-        session_db_id: Foreign key to Session table (integer).
-        version: Version number for memory schema compatibility.
-        memory_items: JSON string containing the session_memory array.
-        conversations: JSON string containing conversations summary.
-        created_at: UTC timestamp when memory was created.
-        updated_at: UTC timestamp when memory was last updated.
-    """
-
-    id: int | None = Field(default=None, primary_key=True)
-    session_id: str = Field(
-        index=True,
-        unique=True,
-        description="Session UUID (one-to-one with Session)",
-    )
-    session_db_id: int = Field(foreign_key="session.id", index=True)
-    version: int = Field(
-        default=SESSION_MEMORY_VERSION,
-        description="Version of session_memory schema",
-    )
-    memory_items: str = Field(
-        default="[]",
-        description="JSON string of session_memory array",
-    )
-    conversations: str = Field(
-        default="[]",
-        description="JSON string of conversations summary array",
-    )
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-
-    # Relationships
-    session: Optional["Session"] = Relationship(back_populates="memory")
-
-
-# Import ReactTask here to avoid circular imports
-# This will be used for the relationship in ReactTask

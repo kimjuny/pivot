@@ -21,10 +21,10 @@ The actual skills metadata are as below:
 ```json
 {{skills_metadata}}
 ```
-3. **Session Memory**  
-  - Relevant conversation history, user preferences, and previously selected or executed skills within the current session.
+3. **Session Context**  
+  - Relevant conversation history, compacted context, and previously selected or executed skills within the current session.
 ```json
-{{session_memory}}
+{{session_context}}
 ```
 ## Your Task
 Analyze all inputs and output a list of **selected skills** that are most appropriate for the current user intent.
@@ -32,7 +32,7 @@ Analyze all inputs and output a list of **selected skills** that are most approp
 ## Selection Principles
 - **Relevance First**: Select only skills that directly help fulfill the user’s current intent.
 - **Minimal Sufficiency**: Prefer the smallest set of skills that can adequately solve the task.
-- **Context Awareness**: Use session memory to:
+- **Context Awareness**: Use session context to:
   - Avoid re-selecting skills that are no longer relevant.
   - Maintain continuity with previously selected skills if the task is ongoing.
 - **No Over-Selection**: Do NOT select skills “just in case.”

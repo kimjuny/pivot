@@ -33,6 +33,7 @@ import { ContextUsageRing } from "./ContextUsageRing";
 interface ChatComposerProps {
   inputMessage: string;
   error: string | null;
+  compactStatusMessage: string | null;
   replyTaskId: string | null;
   pendingFiles: PendingUploadItem[];
   canSendMessage: boolean;
@@ -62,6 +63,7 @@ interface ChatComposerProps {
 export function ChatComposer({
   inputMessage,
   error,
+  compactStatusMessage,
   replyTaskId,
   pendingFiles,
   canSendMessage,
@@ -95,6 +97,16 @@ export function ChatComposer({
       {error && (
         <div className="mb-2 rounded-lg border border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger">
           {error}
+        </div>
+      )}
+
+      {compactStatusMessage && (
+        <div
+          className="mb-2 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/10 px-4 py-2.5 text-sm text-foreground shadow-sm"
+          aria-live="polite"
+        >
+          <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          <span>{compactStatusMessage}</span>
         </div>
       )}
 
@@ -183,6 +195,12 @@ export function ChatComposer({
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 <span>Processing attachments...</span>
+              </div>
+            )}
+            {compactStatusMessage && (
+              <div className="hidden items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-foreground/80 sm:flex">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                <span>Compacting...</span>
               </div>
             )}
             <ContextUsageRing
