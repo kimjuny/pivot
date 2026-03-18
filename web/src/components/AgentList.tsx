@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
+import { getLLMBrandIconPath } from '../utils/llmBrandIcon';
 import AgentModal from './AgentModal';
 import ConfirmationModal from './ConfirmationModal';
 import { Input } from '@/components/ui/input';
@@ -313,78 +314,92 @@ function AgentList() {
         <>
           {/* Agent card grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-            {pagedAgents.map(agent => (
-              <Card
-                key={agent.id}
-                onClick={() => handleAgentClick(agent)}
-                onKeyDown={e => handleCardKeyDown(e, agent)}
-                className="cursor-pointer transition-colors duration-150 hover:bg-accent/50 relative group p-3 flex flex-col min-h-[120px]"
-                role="button"
-                tabIndex={0}
-                aria-label={`Open agent ${agent.name}`}
-              >
-                {/* Top: icon + name + menu */}
-                <div className="flex items-start gap-2">
-                  <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Bot className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1">
-                      <span className="font-medium text-sm truncate leading-tight">{agent.name}</span>
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${agent.is_active ? 'bg-primary' : 'bg-muted-foreground/40'}`}
-                        aria-hidden="true"
-                      />
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
-                      {formatTimestamp(agent.updated_at)}
-                    </div>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0 -mr-0.5 -mt-0.5"
-                        onClick={e => e.stopPropagation()}
-                        aria-label="Agent options"
-                      >
-                        <MoreHorizontal className="w-3 h-3" aria-hidden="true" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" onClick={e => e.stopPropagation()}>
-                      <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
-                        <Pencil className="w-4 h-4" aria-hidden="true" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={e => handleDeleteAgent(agent, e as unknown as MouseEvent)}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="w-4 h-4" aria-hidden="true" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+            {pagedAgents.map(agent => {
+              const brandIconPath = getLLMBrandIconPath(agent.model_name);
 
-                {/* Description */}
-                <div className="flex-1 mt-2 min-h-0">
-                  {agent.description && (
-                    <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
-                      {agent.description}
-                    </p>
-                  )}
-                </div>
+              return (
+                <Card
+                  key={agent.id}
+                  onClick={() => handleAgentClick(agent)}
+                  onKeyDown={e => handleCardKeyDown(e, agent)}
+                  className="cursor-pointer transition-colors duration-150 hover:bg-accent/50 relative group p-3 flex flex-col min-h-[120px]"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open agent ${agent.name}`}
+                >
+                  {/* Top: icon + name + menu */}
+                  <div className="flex items-start gap-2">
+                    <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      {brandIconPath ? (
+                        <img
+                          src={brandIconPath}
+                          alt=""
+                          className="w-3.5 h-3.5"
+                          loading="lazy"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Bot className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1">
+                        <span className="font-medium text-sm truncate leading-tight">{agent.name}</span>
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${agent.is_active ? 'bg-primary' : 'bg-muted-foreground/40'}`}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
+                        {formatTimestamp(agent.updated_at)}
+                      </div>
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-5 w-5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity flex-shrink-0 -mr-0.5 -mt-0.5"
+                          onClick={e => e.stopPropagation()}
+                          aria-label="Agent options"
+                        >
+                          <MoreHorizontal className="w-3 h-3" aria-hidden="true" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" onClick={e => e.stopPropagation()}>
+                        <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
+                          <Pencil className="w-4 h-4" aria-hidden="true" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={e => handleDeleteAgent(agent, e as unknown as MouseEvent)}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="w-4 h-4" aria-hidden="true" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
 
-                {/* Bottom: model badge */}
-                <div className="mt-2">
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 max-w-full truncate">
-                    {agent.model_name || 'No LLM'}
-                  </Badge>
-                </div>
-              </Card>
-            ))}
+                  {/* Description */}
+                  <div className="flex-1 mt-2 min-h-0">
+                    {agent.description && (
+                      <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                        {agent.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Bottom: model badge */}
+                  <div className="mt-2">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 max-w-full truncate">
+                      {agent.model_name || 'No LLM'}
+                    </Badge>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
 
           {/* Pagination */}

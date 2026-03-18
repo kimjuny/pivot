@@ -11,7 +11,6 @@ import {
   Trash2,
 } from "lucide-react";
 
-import ConfirmationModal from "@/components/ConfirmationModal";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -69,12 +68,7 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>("");
-  const [pendingDeleteSession, setPendingDeleteSession] =
-    useState<SessionListItem | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingDeleteTitle = pendingDeleteSession
-    ? getSessionTitle(pendingDeleteSession)
-    : "";
 
   useEffect(() => {
     if (!editingSessionId) {
@@ -288,7 +282,7 @@ export function SessionSidebar({
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onSelect={() => {
-                                  setPendingDeleteSession(session);
+                                  void onDeleteSession(session.session_id);
                                 }}
                                 className="text-destructive focus:text-destructive"
                               >
@@ -324,23 +318,6 @@ export function SessionSidebar({
           </div>
         )}
       </div>
-
-      <ConfirmationModal
-        isOpen={pendingDeleteSession !== null}
-        title="Delete session?"
-        message={`This will permanently remove "${pendingDeleteTitle}" and its conversation history.`}
-        confirmText="Delete"
-        onConfirm={() => {
-          if (!pendingDeleteSession) {
-            return;
-          }
-          void onDeleteSession(pendingDeleteSession.session_id);
-          setPendingDeleteSession(null);
-        }}
-        onCancel={() => {
-          setPendingDeleteSession(null);
-        }}
-      />
     </>
   );
 }

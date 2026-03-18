@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { getLLMBrandIconPath } from '@/utils/llmBrandIcon';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -39,32 +40,8 @@ const PROTOCOL_LABELS: Record<string, string> = {
   anthropic_compatible: 'Anthropic Compatible',
 };
 
-const LLM_BRAND_ICON_MATCHERS: Array<{ keywords: string[]; iconPath: string }> = [
-  { keywords: ['claude'], iconPath: '/llms/claude.svg' },
-  { keywords: ['deepseek'], iconPath: '/llms/deepseek.svg' },
-  { keywords: ['doubao'], iconPath: '/llms/doubao.svg' },
-  { keywords: ['gemini'], iconPath: '/llms/gemini.svg' },
-  { keywords: ['gpt'], iconPath: '/llms/gpt.svg' },
-  { keywords: ['glm'], iconPath: '/llms/glm.svg' },
-  { keywords: ['kimi'], iconPath: '/llms/kimi.svg' },
-  { keywords: ['minimax'], iconPath: '/llms/minimax.svg' },
-  { keywords: ['qwen'], iconPath: '/llms/qwen.svg' },
-];
-
 function formatProtocolLabel(protocol: string): string {
   return PROTOCOL_LABELS[protocol] ?? protocol;
-}
-
-/**
- * Resolve one brand icon from the configured model identifier.
- * Why: model names are the most stable signal users control across custom endpoints.
- */
-function getLLMBrandIconPath(model: string): string | null {
-  const normalizedModel = model.toLowerCase();
-  const match = LLM_BRAND_ICON_MATCHERS.find(({ keywords }) => (
-    keywords.some((keyword) => normalizedModel.includes(keyword))
-  ));
-  return match?.iconPath ?? null;
 }
 
 // ---------------------------------------------------------------------------
