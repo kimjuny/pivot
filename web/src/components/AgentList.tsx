@@ -5,9 +5,9 @@ import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
-import { getLLMBrandIconPath } from '../utils/llmBrandIcon';
 import AgentModal from './AgentModal';
 import ConfirmationModal from './ConfirmationModal';
+import { LLMBrandAvatar } from './LLMBrandAvatar';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -318,8 +318,6 @@ function AgentList() {
           {/* Agent card grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
             {pagedAgents.map(agent => {
-              const brandIconPath = getLLMBrandIconPath(agent.model_name);
-
               return (
                 <Card
                   key={agent.id}
@@ -332,19 +330,12 @@ function AgentList() {
                 >
                   {/* Top: icon + name + menu */}
                   <div className="flex items-start gap-2">
-                    <div className="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      {brandIconPath ? (
-                        <img
-                          src={brandIconPath}
-                          alt=""
-                          className="w-3.5 h-3.5"
-                          loading="lazy"
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <Bot className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
-                      )}
-                    </div>
+                    <LLMBrandAvatar
+                      model={agent.model_name}
+                      containerClassName="w-7 h-7 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5"
+                      imageClassName="w-3.5 h-3.5"
+                      fallback={<Bot className="w-3.5 h-3.5 text-primary" aria-hidden="true" />}
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1">
                         <span className="font-medium text-sm truncate leading-tight">{agent.name}</span>

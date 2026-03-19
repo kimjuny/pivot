@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { getLLMBrandIconPath } from '@/utils/llmBrandIcon';
+import { LLMBrandAvatar } from '@/components/LLMBrandAvatar';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -654,7 +654,6 @@ interface LLMTableRowProps {
  * Shows key fields and a compact capability badge list.
  */
 function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowProps) {
-  const brandIconPath = getLLMBrandIconPath(llm.model);
   const capabilityLabels = [
     llm.streaming ? "Stream" : null,
     llm.tool_calling === "native" ? "Tools" : null,
@@ -671,19 +670,12 @@ function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowPr
       {/* Name + icon */}
       <TableCell>
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0">
-            {brandIconPath ? (
-              <img
-                src={brandIconPath}
-                alt=""
-                className="w-3.5 h-3.5"
-                loading="lazy"
-                aria-hidden="true"
-              />
-            ) : (
-              <Server className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
-            )}
-          </div>
+          <LLMBrandAvatar
+            model={llm.model}
+            containerClassName="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0"
+            imageClassName="w-3.5 h-3.5"
+            fallback={<Server className="w-3.5 h-3.5 text-primary" aria-hidden="true" />}
+          />
           <span className="font-medium text-sm truncate max-w-[120px]">{llm.name}</span>
         </div>
       </TableCell>

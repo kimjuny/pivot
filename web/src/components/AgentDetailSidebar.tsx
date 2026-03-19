@@ -43,6 +43,7 @@ import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
 import ChannelBindingDialog from './ChannelBindingDialog';
+import { LLMBrandAvatar } from './LLMBrandAvatar';
 import type { Agent, Scene } from '../types';
 import {
     updateAgent,
@@ -578,8 +579,13 @@ function AgentDetailSidebar({
                                             aria-label="Expand sidebar"
                                             className="group/avatar relative flex size-8 items-center justify-center overflow-hidden rounded-lg"
                                         >
-                                            <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground transition-all group-hover/avatar:scale-95 group-hover/avatar:opacity-0">
-                                                <Bot className="size-4" />
+                                            <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-transparent text-sidebar-foreground transition-all group-hover/avatar:scale-95 group-hover/avatar:opacity-0">
+                                                <LLMBrandAvatar
+                                                    model={agent?.model_name}
+                                                    containerClassName="flex size-4 items-center justify-center"
+                                                    imageClassName="size-4"
+                                                    fallback={<Bot className="size-4" aria-hidden="true" />}
+                                                />
                                             </span>
                                             <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-transparent text-sidebar-foreground/60 opacity-0 transition-all group-hover/avatar:opacity-100 group-hover/avatar:bg-sidebar-accent group-hover/avatar:text-sidebar-foreground">
                                                 <PanelLeft className="size-4" />
@@ -598,8 +604,13 @@ function AgentDetailSidebar({
                                         tooltip="Edit Agent"
                                         className="min-w-0 flex-1"
                                     >
-                                        <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                                            <Bot className="size-4" />
+                                        <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-transparent text-sidebar-foreground">
+                                            <LLMBrandAvatar
+                                                model={agent?.model_name}
+                                                containerClassName="flex size-4 items-center justify-center"
+                                                imageClassName="size-4"
+                                                fallback={<Bot className="size-4" aria-hidden="true" />}
+                                            />
                                         </div>
                                         <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
                                             <span className="truncate text-sm font-semibold">
