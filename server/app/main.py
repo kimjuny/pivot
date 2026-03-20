@@ -27,6 +27,7 @@ from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
+from app.api.web_search import router as web_search_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
@@ -95,6 +96,7 @@ app.include_router(session_router, prefix="/api")
 app.include_router(channels_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
+app.include_router(web_search_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 
 # ---------- Production: serve frontend static files ----------

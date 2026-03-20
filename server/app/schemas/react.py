@@ -38,6 +38,10 @@ class ReactChatRequest(AppBaseModel):
         default_factory=list,
         description="Uploaded file IDs to attach to this user turn",
     )
+    web_search_provider: str | None = Field(
+        default=None,
+        description="Optional chat-selected provider key for abstract web search",
+    )
 
 
 class ReactContextUsageRequest(AppBaseModel):

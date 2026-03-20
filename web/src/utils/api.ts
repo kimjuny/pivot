@@ -633,6 +633,149 @@ export const completeChannelLink = async (
   }) as Promise<{ status: string; message: string; pivot_user_id: number; workspace_owner: string; linked_at: string }>;
 };
 
+// ---------------------------------------------------------------------------
+// Web Search API
+// ---------------------------------------------------------------------------
+
+/**
+ * One schema-driven field used by the web-search provider binding form.
+ */
+export interface WebSearchConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'secret' | 'textarea' | 'boolean';
+  required: boolean;
+  placeholder?: string | null;
+  description?: string | null;
+}
+
+/**
+ * Declarative manifest for one built-in web-search provider.
+ */
+export interface WebSearchProviderManifest {
+  key: string;
+  name: string;
+  description: string;
+  docs_url: string;
+  logo_url?: string | null;
+  visibility: string;
+  status: string;
+  auth_schema: WebSearchConfigField[];
+  config_schema: WebSearchConfigField[];
+  setup_steps: string[];
+  supported_parameters: string[];
+}
+
+/**
+ * Web-search provider catalog row returned by the backend.
+ */
+export interface WebSearchCatalogItem {
+  manifest: WebSearchProviderManifest;
+}
+
+/**
+ * Configured web-search binding returned for an agent.
+ */
+export interface WebSearchBinding {
+  id: number;
+  agent_id: number;
+  provider_key: string;
+  enabled: boolean;
+  auth_config: Record<string, string>;
+  runtime_config: Record<string, unknown>;
+  manifest: WebSearchProviderManifest;
+  last_health_status: string | null;
+  last_health_message: string | null;
+  last_health_check_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Fetch the built-in web-search provider catalog.
+ */
+export const getWebSearchProviders = async (): Promise<WebSearchCatalogItem[]> => {
+  return apiRequest('/web-search/providers') as Promise<WebSearchCatalogItem[]>;
+};
+
+/**
+ * Fetch all web-search bindings configured for one agent.
+ */
+export const getAgentWebSearchBindings = async (agentId: number): Promise<WebSearchBinding[]> => {
+  return apiRequest(`/agents/${agentId}/web-search`) as Promise<WebSearchBinding[]>;
+};
+
+/**
+ * Create a new web-search provider binding for an agent.
+ */
+export const createAgentWebSearchBinding = async (
+  agentId: number,
+  payload: {
+    provider_key: string;
+    enabled?: boolean;
+    auth_config: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+  }
+): Promise<WebSearchBinding> => {
+  return apiRequest(`/agents/${agentId}/web-search`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<WebSearchBinding>;
+};
+
+/**
+ * Update one configured web-search provider binding.
+ */
+export const updateAgentWebSearchBinding = async (
+  bindingId: number,
+  payload: {
+    enabled?: boolean;
+    auth_config?: Record<string, unknown>;
+    runtime_config?: Record<string, unknown>;
+  }
+): Promise<WebSearchBinding> => {
+  return apiRequest(`/agent-web-search/${bindingId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }) as Promise<WebSearchBinding>;
+};
+
+/**
+ * Delete one configured web-search provider binding.
+ */
+export const deleteAgentWebSearchBinding = async (bindingId: number): Promise<void> => {
+  await apiRequest(`/agent-web-search/${bindingId}`, {
+    method: 'DELETE',
+  });
+};
+
+/**
+ * Run one saved web-search provider health check.
+ */
+export const testAgentWebSearchBinding = async (
+  bindingId: number
+): Promise<{ result: { ok: boolean; status: string; message: string } }> => {
+  return apiRequest(`/agent-web-search/${bindingId}/test`, {
+    method: 'POST',
+  }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
+};
+
+/**
+ * Run one provider health check against unsaved web-search form values.
+ */
+export const testWebSearchProviderDraft = async (
+  providerKey: string,
+  payload: {
+    auth_config: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+  }
+): Promise<{ result: { ok: boolean; status: string; message: string } }> => {
+  return apiRequest(`/web-search/providers/${encodeURIComponent(providerKey)}/test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
+};
+
 /**
  * Get all available LLM models.
  * 
@@ -1091,6 +1234,7 @@ export const startReactTask = async (payload: {
   task_id?: string | null;
   session_id?: string | null;
   file_ids?: string[];
+  web_search_provider?: string | null;
 }): Promise<ReactTaskStartResponse> => {
   return apiRequest('/react/tasks', {
     method: 'POST',

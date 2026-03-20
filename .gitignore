@@ -87,3 +87,10 @@ server/data/
 
 # Workspace
 server/workspace
+
+# AI Coding
+.agent
+.claude
+.cursor
+.codex
+openspec

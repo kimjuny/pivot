@@ -1287,6 +1287,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         <ReactChatInterface
           agentId={agentId}
           agentName={agent?.name}
+          agentToolIds={agent?.tool_ids}
           primaryLlmId={agent?.llm_id}
           sessionIdleTimeoutMinutes={agent?.session_idle_timeout_minutes}
         />

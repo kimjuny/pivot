@@ -1,7 +1,7 @@
 """ReAct orchestration module.
 
 This package exposes the primary orchestration entry points while avoiding eager
-imports that would otherwise create circular dependencies during test startup.
+imports that would otherwise create circular dependencies during startup.
 """
 
 from typing import Any
@@ -11,7 +11,6 @@ from .prompt_template import build_runtime_system_prompt, build_runtime_user_pro
 
 __all__ = [
     "ReactContext",
-    "ReactEngine",
     "build_runtime_system_prompt",
     "build_runtime_user_prompt",
 ]

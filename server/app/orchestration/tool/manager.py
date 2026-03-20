@@ -23,6 +23,7 @@ class ToolExecutionContext:
 
     username: str
     agent_id: int
+    web_search_provider: str | None = None
     allowed_skills: tuple[dict[str, str], ...] = ()
 
 

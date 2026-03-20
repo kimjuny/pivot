@@ -22,10 +22,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
 import type { ReactContextUsageSummary } from "@/utils/api";
 
-import type { PendingUploadItem, TaskPlanSnapshot } from "../types";
+import type {
+  ChatWebSearchProviderOption,
+  PendingUploadItem,
+  TaskPlanSnapshot,
+} from "../types";
 import { AttachmentList } from "./AttachmentList";
 import { ComposerTaskPlan } from "./ComposerTaskPlan";
 import { ContextUsageRing } from "./ContextUsageRing";
@@ -44,9 +56,12 @@ interface ChatComposerProps {
   contextUsage: ReactContextUsageSummary | null;
   isContextUsageLoading: boolean;
   supportsImageInput: boolean;
+  webSearchProviders: ChatWebSearchProviderOption[];
+  selectedWebSearchProvider: string | null;
   imageInputRef: RefObject<HTMLInputElement>;
   documentInputRef: RefObject<HTMLInputElement>;
   onInputChange: (value: string) => void;
+  onWebSearchProviderChange: (providerKey: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -74,9 +89,12 @@ export function ChatComposer({
   contextUsage,
   isContextUsageLoading,
   supportsImageInput,
+  webSearchProviders,
+  selectedWebSearchProvider,
   imageInputRef,
   documentInputRef,
   onInputChange,
+  onWebSearchProviderChange,
   onKeyDown,
   onPaste,
   onSubmit,
@@ -86,6 +104,13 @@ export function ChatComposer({
   onDocumentInputChange,
   onRemovePendingFile,
 }: ChatComposerProps) {
+  const hasWebSearchSelector =
+    webSearchProviders.length > 0 && selectedWebSearchProvider !== null;
+  const selectedWebSearchProviderOption =
+    webSearchProviders.find(
+      (provider) => provider.key === selectedWebSearchProvider,
+    ) ?? null;
+
   return (
     <div
       className={`mx-auto w-full max-w-3xl bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-1 transition-transform duration-100 ease-out ${
@@ -164,31 +189,69 @@ export function ChatComposer({
           disabled={isStreaming}
         />
 
-        <div className="flex items-center justify-between px-4 pb-3">
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full">
-                <Plus className="h-4 w-4" />
-                <span className="sr-only">Attach</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="z-[60]">
-              {supportsImageInput && (
-                <DropdownMenuItem
-                  onClick={() => imageInputRef.current?.click()}
+        <div className="flex items-center justify-between gap-3 px-4 pb-3">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-full"
                 >
-                  <ImagePlus className="mr-2 h-4 w-4" />
-                  <span>Upload image</span>
+                  <Plus className="h-4 w-4" />
+                  <span className="sr-only">Attach</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="z-[60]">
+                {supportsImageInput && (
+                  <DropdownMenuItem
+                    onClick={() => imageInputRef.current?.click()}
+                  >
+                    <ImagePlus className="mr-2 h-4 w-4" />
+                    <span>Upload image</span>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem
+                  onClick={() => documentInputRef.current?.click()}
+                >
+                  <Paperclip className="mr-2 h-4 w-4" />
+                  <span>Upload file</span>
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onClick={() => documentInputRef.current?.click()}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {hasWebSearchSelector && (
+              <Select
+                value={selectedWebSearchProvider}
+                onValueChange={onWebSearchProviderChange}
               >
-                <Paperclip className="mr-2 h-4 w-4" />
-                <span>Upload file</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <SelectTrigger
+                  aria-label="Web search provider"
+                  className="h-7 w-auto min-w-[6.5rem] max-w-[7.25rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                >
+                  {selectedWebSearchProviderOption ? (
+                    <WebSearchProviderBadge
+                      name={selectedWebSearchProviderOption.name}
+                      logoUrl={selectedWebSearchProviderOption.logoUrl}
+                      textClassName="text-[11px]"
+                    />
+                  ) : (
+                    <SelectValue placeholder="Search" />
+                  )}
+                </SelectTrigger>
+                <SelectContent>
+                  {webSearchProviders.map((provider) => (
+                    <SelectItem key={provider.key} value={provider.key}>
+                      <WebSearchProviderBadge
+                        name={provider.name}
+                        logoUrl={provider.logoUrl}
+                      />
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             {hasUploadingFiles && (

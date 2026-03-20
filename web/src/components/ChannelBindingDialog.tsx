@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
 import DraggableDialog from './DraggableDialog';
+import ConfigFieldGroup from './ConfigFieldGroup';
 import {
   createAgentChannel,
   pollAgentChannel,
@@ -17,7 +17,6 @@ import {
   updateAgentChannel,
   type ChannelBinding,
   type ChannelCatalogItem,
-  type ChannelConfigField,
   type ChannelManifest,
 } from '@/utils/api';
 
@@ -267,7 +266,7 @@ function ChannelBindingDialog({
                 <Switch checked={enabled} onCheckedChange={setEnabled} />
               </div>
 
-              <FieldGroup
+              <ConfigFieldGroup
                 title="Credentials"
                 description="These fields are defined by the provider manifest and stored on the binding."
                 fields={manifest.auth_schema}
@@ -276,7 +275,7 @@ function ChannelBindingDialog({
               />
 
               {manifest.config_schema.length > 0 && (
-                <FieldGroup
+                <ConfigFieldGroup
                   title="Runtime Config"
                   description="Optional provider-specific behavior settings."
                   fields={manifest.config_schema}
@@ -371,89 +370,6 @@ function ChannelBindingDialog({
         </div>
       </div>
     </DraggableDialog>
-  );
-}
-
-interface FieldGroupProps {
-  title: string;
-  description: string;
-  fields: ChannelConfigField[];
-  values: Record<string, string>;
-  onChange: (fieldKey: string, value: string) => void;
-}
-
-/**
- * Render schema-driven channel fields.
- */
-function FieldGroup({ title, description, fields, values, onChange }: FieldGroupProps) {
-  return (
-    <div className="space-y-3">
-      <div>
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {fields.map((field) => (
-          <div key={field.key} className={field.type === 'textarea' ? 'md:col-span-2 space-y-2' : 'space-y-2'}>
-            <Label htmlFor={field.key}>
-              {field.label}
-              {field.required ? ' *' : ''}
-            </Label>
-            <FieldInput
-              field={field}
-              value={values[field.key] ?? ''}
-              onChange={(value) => onChange(field.key, value)}
-            />
-            {field.description && (
-              <div className="text-xs text-muted-foreground">{field.description}</div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Render one field based on its manifest type.
- */
-function FieldInput({
-  field,
-  value,
-  onChange,
-}: {
-  field: ChannelConfigField;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  if (field.type === 'textarea') {
-    return (
-      <Textarea
-        id={field.key}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={field.placeholder ?? undefined}
-      />
-    );
-  }
-
-  if (field.type === 'boolean') {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border border-border px-3 py-2">
-        <Switch checked={value === 'true'} onCheckedChange={(checked) => onChange(String(checked))} />
-        <span className="text-sm text-foreground">{value === 'true' ? 'Enabled' : 'Disabled'}</span>
-      </div>
-    );
-  }
-
-  return (
-    <Input
-      id={field.key}
-      type={field.type === 'secret' ? 'password' : field.type === 'number' ? 'number' : 'text'}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      placeholder={field.placeholder ?? undefined}
-    />
   );
 }
 

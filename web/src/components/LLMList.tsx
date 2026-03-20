@@ -424,7 +424,7 @@ function LLMList() {
 
           <Button size="sm" onClick={handleCreate} className="flex items-center gap-1.5">
             <Plus className="w-4 h-4" />
-            New LLM
+            New
           </Button>
         </div>
       </div>

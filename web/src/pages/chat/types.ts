@@ -11,10 +11,27 @@ export interface ReactChatInterfaceProps {
   agentId: number;
   /** Display name shown in empty state and dialog title copy. */
   agentName?: string;
+  /**
+   * Serialized tool allowlist from ``agent.tool_ids``.
+   * ``null`` means unrestricted, while a JSON array limits visible tools.
+   */
+  agentToolIds?: string | null;
   /** Primary LLM configuration used to gate image upload affordances. */
   primaryLlmId?: number;
   /** Minutes of inactivity before chat rolls over into a new session. */
   sessionIdleTimeoutMinutes?: number;
+}
+
+/**
+ * One enabled web-search provider that can be selected from the chat composer.
+ */
+export interface ChatWebSearchProviderOption {
+  /** Stable provider key sent to the backend task launch payload. */
+  key: string;
+  /** Human-readable provider name shown in the selector. */
+  name: string;
+  /** Optional provider logo served from the backend. */
+  logoUrl?: string | null;
 }
 
 /**

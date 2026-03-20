@@ -11,6 +11,7 @@ import {
     MessageSquare,
     Settings2,
     PanelLeft,
+    Globe,
 } from 'lucide-react';
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -43,6 +44,7 @@ import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
 import ChannelBindingDialog from './ChannelBindingDialog';
+import WebSearchBindingDialog from './WebSearchBindingDialog';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
 import type { Agent, Scene } from '../types';
 import {
@@ -54,12 +56,17 @@ import {
     getChannels,
     getAgentChannels,
     deleteAgentChannel,
+    getWebSearchProviders,
+    getAgentWebSearchBindings,
+    deleteAgentWebSearchBinding,
     type SharedTool,
     type PrivateTool,
     type SharedSkill,
     type UserSkill,
     type ChannelBinding,
     type ChannelCatalogItem,
+    type WebSearchBinding,
+    type WebSearchCatalogItem,
 } from '../utils/api';
 import { toast } from 'sonner';
 import { useAgentTabStore } from '../store/agentTabStore';
@@ -91,6 +98,15 @@ interface SidebarChannel {
     providerName: string;
     enabled: boolean;
     transportMode: 'webhook' | 'websocket' | 'polling';
+    lastHealthStatus: string | null;
+}
+
+/** Unified web-search binding row for sidebar display. */
+interface SidebarWebSearchBinding {
+    id: number;
+    providerKey: string;
+    providerName: string;
+    enabled: boolean;
     lastHealthStatus: string | null;
 }
 
@@ -208,18 +224,24 @@ function AgentDetailSidebar({
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isChannelsOpen, setIsChannelsOpen] = useState(false);
+    const [isWebSearchOpen, setIsWebSearchOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
+    const [isWebSearchDialogOpen, setIsWebSearchDialogOpen] = useState(false);
     const [editingChannel, setEditingChannel] = useState<ChannelBinding | null>(null);
+    const [editingWebSearchBinding, setEditingWebSearchBinding] = useState<WebSearchBinding | null>(null);
     const [tools, setTools] = useState<SidebarTool[]>([]);
     const [skills, setSkills] = useState<SidebarSkill[]>([]);
     const [channels, setChannels] = useState<SidebarChannel[]>([]);
+    const [webSearchBindings, setWebSearchBindings] = useState<SidebarWebSearchBinding[]>([]);
     const [channelCatalog, setChannelCatalog] = useState<ChannelCatalogItem[]>([]);
+    const [webSearchCatalog, setWebSearchCatalog] = useState<WebSearchCatalogItem[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const [skillsLoading, setSkillsLoading] = useState(false);
     const [channelsLoading, setChannelsLoading] = useState(false);
+    const [webSearchLoading, setWebSearchLoading] = useState(false);
     // Local copy of the agent's tool_ids so it updates without a page reload
     const [localToolIds, setLocalToolIds] = useState<string | null | undefined>(agent?.tool_ids);
     // Local copy of the agent's skill_ids so it updates without a page reload
@@ -227,6 +249,7 @@ function AgentDetailSidebar({
     const hasFetchedToolsRef = useRef(false);
     const hasFetchedSkillsRef = useRef(false);
     const hasFetchedChannelsCatalogRef = useRef(false);
+    const hasFetchedWebSearchCatalogRef = useRef(false);
     const { openTab, activeTabId } = useAgentTabStore();
 
     // Sync localToolIds when the agent prop changes
@@ -397,6 +420,28 @@ function AgentDetailSidebar({
     }, []);
 
     /**
+     * Load the built-in web-search provider catalog once because the binding
+     * dialog reuses it for schema-driven provider forms.
+     */
+    useEffect(() => {
+        if (hasFetchedWebSearchCatalogRef.current) return;
+
+        const fetchWebSearchCatalog = async () => {
+            hasFetchedWebSearchCatalogRef.current = true;
+            try {
+                const catalog = await getWebSearchProviders();
+                setWebSearchCatalog(catalog);
+            } catch (err) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                console.error('Failed to fetch web search catalog:', error);
+                toast.error('Failed to load web search providers');
+            }
+        };
+
+        void fetchWebSearchCatalog();
+    }, []);
+
+    /**
      * Channel bindings are agent-specific, so reload them whenever the current
      * agent changes or after any binding mutation.
      */
@@ -433,6 +478,41 @@ function AgentDetailSidebar({
         void loadChannels();
     }, [loadChannels]);
 
+    /**
+     * Web-search bindings are agent-specific, so reload them whenever the
+     * current agent changes or after any binding mutation.
+     */
+    const loadWebSearchBindings = useCallback(async () => {
+        if (!agent?.id) {
+            setWebSearchBindings([]);
+            return;
+        }
+
+        setWebSearchLoading(true);
+        try {
+            const bindings = await getAgentWebSearchBindings(agent.id);
+            setWebSearchBindings(
+                bindings.map((binding) => ({
+                    id: binding.id,
+                    providerKey: binding.provider_key,
+                    providerName: binding.manifest.name,
+                    enabled: binding.enabled,
+                    lastHealthStatus: binding.last_health_status,
+                }))
+            );
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch web search bindings:', error);
+            toast.error('Failed to load web search providers');
+        } finally {
+            setWebSearchLoading(false);
+        }
+    }, [agent?.id]);
+
+    useEffect(() => {
+        void loadWebSearchBindings();
+    }, [loadWebSearchBindings]);
+
     const handleEditAgent = async (data: AgentFormData) => {
         if (!agent) return;
 
@@ -453,7 +533,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'channels') => {
+    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'channels' | 'webSearch') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -463,6 +543,7 @@ function AgentDetailSidebar({
                 setIsToolsOpen(section === 'tools');
                 setIsSkillsOpen(section === 'skills');
                 setIsChannelsOpen(section === 'channels');
+                setIsWebSearchOpen(section === 'webSearch');
             }, 100);
         } else {
             // In expanded mode, toggle section immediately
@@ -470,6 +551,7 @@ function AgentDetailSidebar({
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
             setIsChannelsOpen(section === 'channels');
+            setIsWebSearchOpen(section === 'webSearch');
         }
     };
 
@@ -557,6 +639,45 @@ function AgentDetailSidebar({
             await deleteAgentChannel(bindingId);
             toast.success('Channel binding removed');
             await loadChannels();
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            toast.error(error.message);
+        }
+    };
+
+    /**
+     * Open the web-search binding dialog in create mode.
+     */
+    const handleAddWebSearchBinding = () => {
+        setEditingWebSearchBinding(null);
+        setIsWebSearchDialogOpen(true);
+    };
+
+    /**
+     * Open the web-search binding dialog with the latest binding payload.
+     */
+    const handleEditWebSearchBinding = async (bindingId: number) => {
+        if (!agent?.id) {
+            return;
+        }
+        try {
+            const bindings = await getAgentWebSearchBindings(agent.id);
+            const selectedBinding = bindings.find((binding) => binding.id === bindingId) ?? null;
+            setEditingWebSearchBinding(selectedBinding);
+            setIsWebSearchDialogOpen(true);
+        } catch {
+            toast.error('Failed to load web search provider');
+        }
+    };
+
+    /**
+     * Delete one web-search binding from the current agent.
+     */
+    const handleDeleteWebSearchBinding = async (bindingId: number) => {
+        try {
+            await deleteAgentWebSearchBinding(bindingId);
+            toast.success('Web search provider removed');
+            await loadWebSearchBindings();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(error.message);
@@ -1104,6 +1225,114 @@ function AgentDetailSidebar({
                             </CollapsibleContent>
                         </SidebarGroup>
                     </Collapsible>
+
+                    {/* Web Search Section */}
+                    <Collapsible
+                        open={isWebSearchOpen}
+                        onOpenChange={setIsWebSearchOpen}
+                        className="group/collapsible"
+                    >
+                        <SidebarGroup className="py-0">
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('webSearch')}
+                                        tooltip="Web Search"
+                                        isActive={isWebSearchOpen}
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Globe className="size-4" />
+                                        <span>Web Search</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('webSearch')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
+                                    <Globe className="size-4" />
+                                    <span className="flex-1 text-left">Web Search</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+                                        {webSearchLoading ? '…' : webSearchBindings.length}
+                                    </span>
+                                    {agent?.id && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(e) => { e.stopPropagation(); handleAddWebSearchBinding(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddWebSearchBinding(); } }}
+                                                    className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                    aria-label="Add web search provider"
+                                                >
+                                                    <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right">Add web search provider</TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                </CollapsibleTrigger>
+                            </SidebarGroupLabel>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
+                                <SidebarGroupContent>
+                                    {webSearchLoading ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            Loading web search providers…
+                                        </div>
+                                    ) : webSearchBindings.length === 0 ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            No web search providers configured for this agent
+                                        </div>
+                                    ) : (
+                                        <SidebarMenu>
+                                            {webSearchBindings.map((binding) => (
+                                                <SidebarMenuItem key={binding.id} className="group/item">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <SidebarMenuButton
+                                                                size="sm"
+                                                                onClick={() => void handleEditWebSearchBinding(binding.id)}
+                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                            >
+                                                                <span className="w-4 shrink-0" />
+                                                                <span className="truncate flex-1">{binding.providerName}</span>
+                                                                <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                    {binding.enabled ? 'on' : 'off'}
+                                                                </span>
+                                                            </SidebarMenuButton>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-xs">
+                                                            <div className="space-y-1">
+                                                                <p className="font-semibold">{binding.providerName}</p>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {binding.providerKey} · {formatChannelStatus(binding.lastHealthStatus)}
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <SidebarMenuAction
+                                                        showOnHover
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void handleDeleteWebSearchBinding(binding.id);
+                                                        }}
+                                                        className="hover:bg-destructive/10 hover:text-destructive"
+                                                    >
+                                                        <X className="size-3.5" />
+                                                        <span className="sr-only">Delete web search provider</span>
+                                                    </SidebarMenuAction>
+                                                </SidebarMenuItem>
+                                            ))}
+                                        </SidebarMenu>
+                                    )}
+                                </SidebarGroupContent>
+                            </CollapsibleContent>
+                        </SidebarGroup>
+                    </Collapsible>
                 </SidebarContent>
 
                 <SidebarSeparator />
@@ -1199,6 +1428,21 @@ function AgentDetailSidebar({
                     initialBinding={editingChannel}
                     onSaved={async () => {
                         await loadChannels();
+                    }}
+                />
+            )}
+
+            {/* Web Search Binding Dialog */}
+            {agent?.id && (
+                <WebSearchBindingDialog
+                    open={isWebSearchDialogOpen}
+                    onOpenChange={setIsWebSearchDialogOpen}
+                    agentId={agent.id}
+                    catalog={webSearchCatalog}
+                    configuredProviderKeys={webSearchBindings.map((binding) => binding.providerKey)}
+                    initialBinding={editingWebSearchBinding}
+                    onSaved={async () => {
+                        await loadWebSearchBindings();
                     }}
                 />
             )}

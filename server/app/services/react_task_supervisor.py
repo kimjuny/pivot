@@ -22,7 +22,7 @@ from app.db.session import get_engine
 from app.llm.llm_factory import create_llm_from_config
 from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
-from app.orchestration.react import ReactEngine
+from app.orchestration.react.engine import ReactEngine
 from app.orchestration.skills import select_skills_with_usage
 from app.orchestration.tool import get_tool_manager
 from app.orchestration.tool.builtin.programmatic_tool_call import (
@@ -57,6 +57,7 @@ class ReactTaskLaunchRequest:
     username: str
     session_id: str | None
     file_ids: list[str]
+    web_search_provider: str | None = None
     task_id: str | None = None
 
 
@@ -440,6 +441,7 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         username=launch.username,
                         agent_id=agent.id or 0,
+                        web_search_provider=launch.web_search_provider,
                         allowed_skills=tuple(allowed_skill_mounts),
                     ),
                     stream_llm_responses=bool(llm_config.streaming),

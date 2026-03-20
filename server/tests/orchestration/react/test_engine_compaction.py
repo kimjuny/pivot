@@ -7,6 +7,7 @@ import unittest
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -41,7 +42,7 @@ class _CompactionHarnessEngine(ReactEngine):
     async def _execute_compaction(
         self,
         *,
-        task: ReactTask,
+        task: Any,
         source_messages: list[dict[str, object]],
     ) -> tuple[str, dict[str, int]]:
         """Capture the exact compaction inputs instead of calling a real LLM."""

@@ -5,6 +5,7 @@ import {
   cancelReactTask,
   createSession,
   deleteSession,
+  getAgentWebSearchBindings,
   getFullSessionHistory,
   getReactContextUsage,
   getReactSessionRuntimeDebug,
@@ -15,6 +16,7 @@ import {
   type ReactSessionRuntimeDebug,
   type SessionListItem,
   type SessionResponse,
+  type WebSearchBinding,
   API_BASE_URL,
 } from "@/utils/api";
 import {
@@ -29,6 +31,7 @@ import { SessionSidebar } from "./components/SessionSidebar";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
 import { useChatUploads } from "./hooks/useChatUploads";
 import type {
+  ChatWebSearchProviderOption,
   ChatPageProps,
   ChatMessage,
   PlanStepData,
@@ -52,6 +55,50 @@ import {
 } from "./utils/chatSelectors";
 
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
+
+/**
+ * Parse the serialized tool allowlist and determine whether ``web_search`` is
+ * available to the chat surface.
+ */
+function canAccessWebSearchTool(
+  toolIds: string | null | undefined,
+): boolean {
+  if (toolIds === undefined) {
+    return false;
+  }
+  if (toolIds === null) {
+    return true;
+  }
+
+  try {
+    const parsed = JSON.parse(toolIds) as unknown;
+    if (!Array.isArray(parsed)) {
+      return false;
+    }
+
+    return parsed.some(
+      (item) => typeof item === "string" && item.trim() === "web_search",
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Convert enabled web-search bindings into lightweight selector options while
+ * preserving backend ordering for deterministic defaults.
+ */
+function toWebSearchProviderOptions(
+  bindings: WebSearchBinding[],
+): ChatWebSearchProviderOption[] {
+  return bindings
+    .filter((binding) => binding.enabled)
+    .map((binding) => ({
+      key: binding.provider_key,
+      name: binding.manifest.name,
+      logoUrl: binding.manifest.logo_url ?? null,
+    }));
+}
 
 /**
  * Convert a session creation payload into the sidebar row shape.
@@ -141,6 +188,7 @@ function extractLiveCurrentPlan(event: ReactStreamEvent): PlanStepData[] | undef
 function ChatContainer({
   agentId,
   agentName,
+  agentToolIds,
   primaryLlmId,
   sessionIdleTimeoutMinutes,
   onRuntimeDebugChange,
@@ -176,6 +224,12 @@ function ChatContainer({
   const [isRuntimeDebugLoading, setIsRuntimeDebugLoading] =
     useState<boolean>(false);
   const [runtimeDebugError, setRuntimeDebugError] = useState<string | null>(null);
+  const [webSearchProviders, setWebSearchProviders] = useState<
+    ChatWebSearchProviderOption[]
+  >([]);
+  const [selectedWebSearchProvider, setSelectedWebSearchProvider] = useState<
+    string | null
+  >(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const currentSessionIdRef = useRef<string | null>(null);
   const sessionStreamAbortControllerRef = useRef<AbortController | null>(null);
@@ -210,6 +264,7 @@ function ChatContainer({
   const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
     sessionIdleTimeoutMinutes,
   );
+  const canUseWebSearch = canAccessWebSearchTool(agentToolIds);
 
   /**
    * Cancels any pending delayed compact-status clear so the latest status wins.
@@ -1242,6 +1297,56 @@ function ChatContainer({
   const readyPendingFileIdsKey = readyPendingFileIds.join(",");
 
   useEffect(() => {
+    if (!canUseWebSearch) {
+      setWebSearchProviders([]);
+      setSelectedWebSearchProvider(null);
+      return;
+    }
+
+    let isCancelled = false;
+
+    const loadWebSearchProviders = async () => {
+      try {
+        const bindings = await getAgentWebSearchBindings(agentId);
+        if (isCancelled) {
+          return;
+        }
+
+        setWebSearchProviders(toWebSearchProviderOptions(bindings));
+      } catch (loadError) {
+        if (isCancelled) {
+          return;
+        }
+
+        console.error("Failed to load chat web search providers:", loadError);
+        setWebSearchProviders([]);
+      }
+    };
+
+    void loadWebSearchProviders();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [agentId, canUseWebSearch]);
+
+  useEffect(() => {
+    if (webSearchProviders.length === 0) {
+      if (selectedWebSearchProvider !== null) {
+        setSelectedWebSearchProvider(null);
+      }
+      return;
+    }
+
+    const hasCurrentSelection = webSearchProviders.some(
+      (provider) => provider.key === selectedWebSearchProvider,
+    );
+    if (!hasCurrentSelection) {
+      setSelectedWebSearchProvider(webSearchProviders[0]?.key ?? null);
+    }
+  }, [selectedWebSearchProvider, webSearchProviders]);
+
+  useEffect(() => {
     if (isStreaming) {
       return;
     }
@@ -1625,6 +1730,7 @@ function ChatContainer({
         task_id: requestTaskId,
         session_id: activeSessionId,
         file_ids: filesToSend.map((file) => file.fileId),
+        web_search_provider: selectedWebSearchProvider,
       });
 
       if (!sessionStreamAbortControllerRef.current && activeSessionId) {
@@ -1765,9 +1871,12 @@ function ChatContainer({
           contextUsage={contextUsage}
           isContextUsageLoading={isContextUsageLoading}
           supportsImageInput={supportsImageInput}
+          webSearchProviders={webSearchProviders}
+          selectedWebSearchProvider={selectedWebSearchProvider}
           imageInputRef={imageInputRef}
           documentInputRef={documentInputRef}
           onInputChange={setInputMessage}
+          onWebSearchProviderChange={setSelectedWebSearchProvider}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onSubmit={handleSubmit}

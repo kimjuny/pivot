@@ -11,6 +11,7 @@ from sqlmodel import Session, SQLModel
 _REQUIRED_TABLES: Final[set[str]] = {
     "agent",
     "agentchannelbinding",
+    "agentwebsearchbinding",
     "channeleventlog",
     "channellinktoken",
     "channelsession",

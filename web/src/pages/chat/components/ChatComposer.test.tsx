@@ -1,10 +1,74 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatComposer } from "./ChatComposer";
 
+function buildComposerProps(
+  overrides: Partial<ComponentProps<typeof ChatComposer>> = {},
+): ComponentProps<typeof ChatComposer> {
+  return {
+    inputMessage: "",
+    error: null,
+    compactStatusMessage: null,
+    replyTaskId: null,
+    pendingFiles: [],
+    canSendMessage: false,
+    isStreaming: false,
+    isConversationEmpty: false,
+    hasUploadingFiles: false,
+    taskPlan: null,
+    contextUsage: null,
+    isContextUsageLoading: false,
+    supportsImageInput: false,
+    webSearchProviders: [],
+    selectedWebSearchProvider: null,
+    imageInputRef: { current: null },
+    documentInputRef: { current: null },
+    onInputChange: vi.fn(),
+    onWebSearchProviderChange: vi.fn(),
+    onKeyDown: vi.fn(),
+    onPaste: vi.fn(),
+    onSubmit: vi.fn(),
+    onStop: vi.fn(),
+    onCancelReply: vi.fn(),
+    onImageInputChange: vi.fn(),
+    onDocumentInputChange: vi.fn(),
+    onRemovePendingFile: vi.fn(),
+    ...overrides,
+  };
+}
+
+/**
+ * Radix Select expects pointer-capture helpers that happy-dom does not ship.
+ */
+function applyPointerCapturePolyfill() {
+  if (!("hasPointerCapture" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "hasPointerCapture", {
+      value: () => false,
+      configurable: true,
+    });
+  }
+  if (!("setPointerCapture" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "setPointerCapture", {
+      value: () => {},
+      configurable: true,
+    });
+  }
+  if (!("releasePointerCapture" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "releasePointerCapture", {
+      value: () => {},
+      configurable: true,
+    });
+  }
+}
+
 describe("ChatComposer", () => {
+  beforeEach(() => {
+    applyPointerCapturePolyfill();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -12,48 +76,27 @@ describe("ChatComposer", () => {
   it("renders the Codex-style task plan above the composer when available", async () => {
     render(
       <ChatComposer
-        inputMessage=""
-        error={null}
-        compactStatusMessage={null}
-        replyTaskId={null}
-        pendingFiles={[]}
-        canSendMessage={false}
-        isStreaming={false}
-        isConversationEmpty={false}
-        hasUploadingFiles={false}
-        taskPlan={{
-          messageId: "assistant-1",
-          steps: [
-            {
-              stepId: "1",
-              title: "Inspect the repository",
-              description: "Review the current files",
-              completionCriteria: "Context is collected",
-              status: "running",
-            },
-            {
-              stepId: "2",
-              title: "Ship the fix",
-              description: "Patch the bug",
-              completionCriteria: "Change is merged",
-              status: "pending",
-            },
-          ],
-        }}
-        contextUsage={null}
-        isContextUsageLoading={false}
-        supportsImageInput={false}
-        imageInputRef={{ current: null }}
-        documentInputRef={{ current: null }}
-        onInputChange={vi.fn()}
-        onKeyDown={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onStop={vi.fn()}
-        onCancelReply={vi.fn()}
-        onImageInputChange={vi.fn()}
-        onDocumentInputChange={vi.fn()}
-        onRemovePendingFile={vi.fn()}
+        {...buildComposerProps({
+          taskPlan: {
+            messageId: "assistant-1",
+            steps: [
+              {
+                stepId: "1",
+                title: "Inspect the repository",
+                description: "Review the current files",
+                completionCriteria: "Context is collected",
+                status: "running",
+              },
+              {
+                stepId: "2",
+                title: "Ship the fix",
+                description: "Patch the bug",
+                completionCriteria: "Change is merged",
+                status: "pending",
+              },
+            ],
+          },
+        })}
       />,
     );
 
@@ -72,41 +115,20 @@ describe("ChatComposer", () => {
 
     render(
       <ChatComposer
-        inputMessage=""
-        error={null}
-        compactStatusMessage={null}
-        replyTaskId={null}
-        pendingFiles={[]}
-        canSendMessage={false}
-        isStreaming={false}
-        isConversationEmpty={false}
-        hasUploadingFiles={false}
-        taskPlan={{
-          messageId: "assistant-1",
-          steps: [
-            {
-              stepId: "1",
-              title: "Inspect the repository",
-              description: "Review the current files",
-              completionCriteria: "Context is collected",
-              status: "done",
-            },
-          ],
-        }}
-        contextUsage={null}
-        isContextUsageLoading={false}
-        supportsImageInput={false}
-        imageInputRef={{ current: null }}
-        documentInputRef={{ current: null }}
-        onInputChange={vi.fn()}
-        onKeyDown={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onStop={vi.fn()}
-        onCancelReply={vi.fn()}
-        onImageInputChange={vi.fn()}
-        onDocumentInputChange={vi.fn()}
-        onRemovePendingFile={vi.fn()}
+        {...buildComposerProps({
+          taskPlan: {
+            messageId: "assistant-1",
+            steps: [
+              {
+                stepId: "1",
+                title: "Inspect the repository",
+                description: "Review the current files",
+                completionCriteria: "Context is collected",
+                status: "done",
+              },
+            ],
+          },
+        })}
       />,
     );
 
@@ -133,49 +155,28 @@ describe("ChatComposer", () => {
 
     const { rerender } = render(
       <ChatComposer
-        inputMessage=""
-        error={null}
-        compactStatusMessage={null}
-        replyTaskId={null}
-        pendingFiles={[]}
-        canSendMessage={false}
-        isStreaming={false}
-        isConversationEmpty={false}
-        hasUploadingFiles={false}
-        taskPlan={{
-          messageId: "assistant-1",
-          taskId: "task-1",
-          steps: [
-            {
-              stepId: "1",
-              title: "Inspect the repository",
-              description: "Review the current files",
-              completionCriteria: "Context is collected",
-              status: "running",
-            },
-            {
-              stepId: "2",
-              title: "Ship the fix",
-              description: "Patch the bug",
-              completionCriteria: "Change is merged",
-              status: "pending",
-            },
-          ],
-        }}
-        contextUsage={null}
-        isContextUsageLoading={false}
-        supportsImageInput={false}
-        imageInputRef={{ current: null }}
-        documentInputRef={{ current: null }}
-        onInputChange={vi.fn()}
-        onKeyDown={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onStop={vi.fn()}
-        onCancelReply={vi.fn()}
-        onImageInputChange={vi.fn()}
-        onDocumentInputChange={vi.fn()}
-        onRemovePendingFile={vi.fn()}
+        {...buildComposerProps({
+          taskPlan: {
+            messageId: "assistant-1",
+            taskId: "task-1",
+            steps: [
+              {
+                stepId: "1",
+                title: "Inspect the repository",
+                description: "Review the current files",
+                completionCriteria: "Context is collected",
+                status: "running",
+              },
+              {
+                stepId: "2",
+                title: "Ship the fix",
+                description: "Patch the bug",
+                completionCriteria: "Change is merged",
+                status: "pending",
+              },
+            ],
+          },
+        })}
       />,
     );
 
@@ -188,49 +189,28 @@ describe("ChatComposer", () => {
 
     rerender(
       <ChatComposer
-        inputMessage=""
-        error={null}
-        compactStatusMessage={null}
-        replyTaskId={null}
-        pendingFiles={[]}
-        canSendMessage={false}
-        isStreaming={false}
-        isConversationEmpty={false}
-        hasUploadingFiles={false}
-        taskPlan={{
-          messageId: "assistant-1",
-          taskId: "task-1",
-          steps: [
-            {
-              stepId: "1",
-              title: "Inspect the repository",
-              description: "Review the current files",
-              completionCriteria: "Context is collected",
-              status: "done",
-            },
-            {
-              stepId: "2",
-              title: "Ship the fix",
-              description: "Patch the bug",
-              completionCriteria: "Change is merged",
-              status: "done",
-            },
-          ],
-        }}
-        contextUsage={null}
-        isContextUsageLoading={false}
-        supportsImageInput={false}
-        imageInputRef={{ current: null }}
-        documentInputRef={{ current: null }}
-        onInputChange={vi.fn()}
-        onKeyDown={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onStop={vi.fn()}
-        onCancelReply={vi.fn()}
-        onImageInputChange={vi.fn()}
-        onDocumentInputChange={vi.fn()}
-        onRemovePendingFile={vi.fn()}
+        {...buildComposerProps({
+          taskPlan: {
+            messageId: "assistant-1",
+            taskId: "task-1",
+            steps: [
+              {
+                stepId: "1",
+                title: "Inspect the repository",
+                description: "Review the current files",
+                completionCriteria: "Context is collected",
+                status: "done",
+              },
+              {
+                stepId: "2",
+                title: "Ship the fix",
+                description: "Patch the bug",
+                completionCriteria: "Change is merged",
+                status: "done",
+              },
+            ],
+          },
+        })}
       />,
     );
 
@@ -246,30 +226,11 @@ describe("ChatComposer", () => {
   it("shows a clear compacting notice while the runtime window is rebuilding", () => {
     render(
       <ChatComposer
-        inputMessage=""
-        error={null}
-        compactStatusMessage="Compacting context. Please wait before stopping."
-        replyTaskId={null}
-        pendingFiles={[]}
-        canSendMessage={false}
-        isStreaming
-        isConversationEmpty={false}
-        hasUploadingFiles={false}
-        taskPlan={null}
-        contextUsage={null}
-        isContextUsageLoading={false}
-        supportsImageInput={false}
-        imageInputRef={{ current: null }}
-        documentInputRef={{ current: null }}
-        onInputChange={vi.fn()}
-        onKeyDown={vi.fn()}
-        onPaste={vi.fn()}
-        onSubmit={vi.fn()}
-        onStop={vi.fn()}
-        onCancelReply={vi.fn()}
-        onImageInputChange={vi.fn()}
-        onDocumentInputChange={vi.fn()}
-        onRemovePendingFile={vi.fn()}
+        {...buildComposerProps({
+          compactStatusMessage:
+            "Compacting context. Please wait before stopping.",
+          isStreaming: true,
+        })}
       />,
     );
 
@@ -277,5 +238,30 @@ describe("ChatComposer", () => {
       screen.getByText("Compacting context. Please wait before stopping."),
     ).toBeInTheDocument();
     expect(screen.getByText("Compacting...")).toBeInTheDocument();
+  });
+
+  it("renders and updates the web search provider selector when options exist", async () => {
+    const user = userEvent.setup();
+    const handleProviderChange = vi.fn();
+
+    render(
+      <ChatComposer
+        {...buildComposerProps({
+          webSearchProviders: [
+            { key: "tavily", name: "Tavily" },
+            { key: "baidu", name: "Baidu AI Search" },
+          ],
+          selectedWebSearchProvider: "tavily",
+          onWebSearchProviderChange: handleProviderChange,
+        })}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("combobox", { name: "Web search provider" }),
+    );
+    await user.click(screen.getByRole("option", { name: "Baidu AI Search" }));
+
+    expect(handleProviderChange).toHaveBeenCalledWith("baidu");
   });
 });

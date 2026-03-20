@@ -96,6 +96,7 @@ async def start_react_task(
                 username=current_user.username,
                 session_id=request.session_id,
                 file_ids=request.file_ids,
+                web_search_provider=request.web_search_provider,
                 task_id=request.task_id,
             )
         )
@@ -185,6 +186,7 @@ async def react_chat_stream(
                 username=current_user.username,
                 session_id=session_id,
                 file_ids=request.file_ids,
+                web_search_provider=request.web_search_provider,
                 task_id=request.task_id,
             )
         )

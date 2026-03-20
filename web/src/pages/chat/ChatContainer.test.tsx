@@ -7,6 +7,7 @@ vi.mock("@/utils/api", () => ({
   cancelReactTask: vi.fn(),
   createSession: vi.fn(),
   deleteSession: vi.fn(),
+  getAgentWebSearchBindings: vi.fn(),
   getFullSessionHistory: vi.fn(),
   getLLMById: vi.fn(),
   getReactContextUsage: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/contexts/auth-core", () => ({
 import {
   cancelReactTask,
   createSession,
+  getAgentWebSearchBindings,
   getFullSessionHistory,
   getLLMById,
   getReactContextUsage,
@@ -61,12 +63,39 @@ function buildContextUsage(sessionId: string | null = null) {
   };
 }
 
+/**
+ * Radix Select expects pointer-capture helpers that happy-dom does not ship.
+ */
+function applyPointerCapturePolyfill() {
+  if (!("hasPointerCapture" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "hasPointerCapture", {
+      value: () => false,
+      configurable: true,
+    });
+  }
+  if (!("setPointerCapture" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "setPointerCapture", {
+      value: () => {},
+      configurable: true,
+    });
+  }
+  if (!("releasePointerCapture" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "releasePointerCapture", {
+      value: () => {},
+      configurable: true,
+    });
+  }
+}
+
 describe("ChatContainer session rollover", () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     vi.stubGlobal("fetch", vi.fn());
+    applyPointerCapturePolyfill();
     vi.mocked(getLLMById).mockResolvedValue({
       image_input: false,
     } as Awaited<ReturnType<typeof getLLMById>>);
+    vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(getReactContextUsage).mockResolvedValue(buildContextUsage());
     vi.mocked(getReactSessionRuntimeDebug).mockResolvedValue({
       session_id: "session-1",
@@ -217,7 +246,183 @@ describe("ChatContainer session rollover", () => {
       session_id: selectedSessionId,
       task_id: null,
       file_ids: [],
+      web_search_provider: null,
     });
+  });
+
+  it("includes the selected web search provider in the launch payload", async () => {
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 2,
+      session_id: "fresh-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(getAgentWebSearchBindings).mockResolvedValue([
+      {
+        id: 11,
+        agent_id: 7,
+        provider_key: "tavily",
+        enabled: true,
+        auth_config: {},
+        runtime_config: {},
+        manifest: {
+          key: "tavily",
+          name: "Tavily",
+          description: "Search the web",
+          docs_url: "https://example.com/tavily",
+          visibility: "builtin",
+          status: "active",
+          auth_schema: [],
+          config_schema: [],
+          setup_steps: [],
+          supported_parameters: [],
+        },
+        last_health_status: "ok",
+        last_health_message: null,
+        last_health_check_at: null,
+        created_at: "2026-03-19T00:00:00.000Z",
+        updated_at: "2026-03-19T00:00:00.000Z",
+      },
+      {
+        id: 12,
+        agent_id: 7,
+        provider_key: "baidu",
+        enabled: true,
+        auth_config: {},
+        runtime_config: {},
+        manifest: {
+          key: "baidu",
+          name: "Baidu AI Search",
+          description: "Search the web",
+          docs_url: "https://example.com/baidu",
+          visibility: "builtin",
+          status: "active",
+          auth_schema: [],
+          config_schema: [],
+          setup_steps: [],
+          supported_parameters: [],
+        },
+        last_health_status: "ok",
+        last_health_message: null,
+        last_health_check_at: null,
+        created_at: "2026-03-19T00:01:00.000Z",
+        updated_at: "2026-03-19T00:01:00.000Z",
+      },
+    ]);
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-2",
+      session_id: "fresh-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        Promise.resolve(
+          new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        agentToolIds={null}
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getAgentWebSearchBindings).toHaveBeenCalledWith(7);
+    });
+
+    await user.click(
+      screen.getByRole("combobox", { name: "Web search provider" }),
+    );
+    await user.click(screen.getByRole("option", { name: "Baidu AI Search" }));
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Search it");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(startReactTask).toHaveBeenCalledWith({
+        agent_id: 7,
+        message: "Search it",
+        session_id: "fresh-session",
+        task_id: null,
+        file_ids: [],
+        web_search_provider: "baidu",
+      });
+    });
+  });
+
+  it("hides the provider selector when the agent cannot use web_search", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(getAgentWebSearchBindings).mockResolvedValue([
+      {
+        id: 11,
+        agent_id: 7,
+        provider_key: "tavily",
+        enabled: true,
+        auth_config: {},
+        runtime_config: {},
+        manifest: {
+          key: "tavily",
+          name: "Tavily",
+          description: "Search the web",
+          docs_url: "https://example.com/tavily",
+          visibility: "builtin",
+          status: "active",
+          auth_schema: [],
+          config_schema: [],
+          setup_steps: [],
+          supported_parameters: [],
+        },
+        last_health_status: "ok",
+        last_health_message: null,
+        last_health_check_at: null,
+        created_at: "2026-03-19T00:00:00.000Z",
+        updated_at: "2026-03-19T00:00:00.000Z",
+      },
+    ]);
+
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        agentToolIds='["run_bash"]'
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(listSessions).toHaveBeenCalledWith(7);
+    });
+
+    expect(
+      screen.queryByRole("combobox", { name: "Web search provider" }),
+    ).not.toBeInTheDocument();
+    expect(getAgentWebSearchBindings).not.toHaveBeenCalled();
   });
 
   it("does not create a ghost iteration when replay reconnects into an already running recursion", async () => {

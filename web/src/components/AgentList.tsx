@@ -241,7 +241,7 @@ function AgentList() {
         </div>
         <Button size="sm" onClick={handleCreateAgent} className="flex items-center gap-1.5">
           <Plus className="w-4 h-4" />
-          New Agent
+          New
         </Button>
       </div>
 
