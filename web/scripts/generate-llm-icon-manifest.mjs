@@ -4,22 +4,19 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const projectRoot = path.resolve(__dirname, "..");
-const llmIconsDirectory = path.join(projectRoot, "public", "llms");
-const generatedDirectory = path.join(projectRoot, "src", "generated");
-const generatedFilePath = path.join(generatedDirectory, "llmIconManifest.ts");
+const defaultProjectRoot = path.resolve(__dirname, "..");
 
 /**
  * Return the sorted list of icon key names derived from `public/llms/*.svg`.
  *
- * Why: the icon file name is the source of truth that contributors control when
- * they add a new brand asset, so the runtime matching logic should consume the
- * same list instead of duplicating it in handwritten code.
+ * Why: the icon filename is the contributor-controlled keyword that should
+ * drive fuzzy matching against LLM model identifiers.
  *
- * @returns {Promise<string[]>} Icon keys sorted by descending length so more
- *   specific names match before shorter substrings.
+ * @param {string} projectRoot Absolute path to the web project root.
+ * @returns {Promise<string[]>} Sorted icon keys, longest first.
  */
-async function getLlmIconKeys() {
+export async function getLlmIconKeys(projectRoot = defaultProjectRoot) {
+  const llmIconsDirectory = path.join(projectRoot, "public", "llms");
   const entries = await readdir(llmIconsDirectory, { withFileTypes: true });
 
   return entries
@@ -31,10 +28,16 @@ async function getLlmIconKeys() {
 /**
  * Persist the generated TypeScript module consumed by frontend code.
  *
- * @param {string[]} iconKeys The icon file names without their `.svg` suffix.
+ * @param {string[]} iconKeys Icon filenames without the `.svg` suffix.
+ * @param {string} projectRoot Absolute path to the web project root.
  * @returns {Promise<void>}
  */
-async function writeManifest(iconKeys) {
+export async function writeManifest(
+  iconKeys,
+  projectRoot = defaultProjectRoot,
+) {
+  const generatedDirectory = path.join(projectRoot, "src", "generated");
+  const generatedFilePath = path.join(generatedDirectory, "llmIconManifest.ts");
   const fileContent = `/**
  * Auto-generated from \`public/llms/*.svg\`.
  * Do not edit manually; update the icon files and rerun the generator instead.
@@ -46,5 +49,20 @@ export const LLM_ICON_KEYS = ${JSON.stringify(iconKeys, null, 2)} as const;
   await writeFile(generatedFilePath, fileContent, "utf8");
 }
 
-const iconKeys = await getLlmIconKeys();
-await writeManifest(iconKeys);
+/**
+ * Regenerate the icon manifest from current `public/llms` contents.
+ *
+ * @param {string} projectRoot Absolute path to the web project root.
+ * @returns {Promise<string[]>} The keys written into the manifest.
+ */
+export async function generateLlmIconManifest(
+  projectRoot = defaultProjectRoot,
+) {
+  const iconKeys = await getLlmIconKeys(projectRoot);
+  await writeManifest(iconKeys, projectRoot);
+  return iconKeys;
+}
+
+if (process.argv[1] === __filename) {
+  await generateLlmIconManifest();
+}

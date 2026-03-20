@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.crud.llm import llm as llm_crud
 from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
+from app.llm.usage_accumulator import StreamingUsageAccumulator, usage_to_token_counter
 from app.models.agent import Agent
 from app.models.react import (
     ReactRecursion,
@@ -100,7 +101,7 @@ class ReactEngine:
     def _accumulate_usage(
         self, token_counter: dict[str, int], usage: Any | None
     ) -> None:
-        """Accumulate usage fields into ``token_counter``.
+        """Accumulate one finalized usage payload into ``token_counter``.
 
         Args:
             token_counter: Mutable token tally shared by one recursion.
@@ -109,13 +110,29 @@ class ReactEngine:
         if usage is None:
             return
 
-        token_counter["prompt_tokens"] += int(getattr(usage, "prompt_tokens", 0) or 0)
-        token_counter["completion_tokens"] += int(
-            getattr(usage, "completion_tokens", 0) or 0
+        self._accumulate_token_counter(
+            token_counter,
+            usage_to_token_counter(usage),
         )
-        token_counter["total_tokens"] += int(getattr(usage, "total_tokens", 0) or 0)
+
+    def _accumulate_token_counter(
+        self,
+        token_counter: dict[str, int],
+        usage_counter: dict[str, int],
+    ) -> None:
+        """Accumulate normalized token counts into ``token_counter``.
+
+        Args:
+            token_counter: Mutable token tally shared by one recursion.
+            usage_counter: Normalized token counts from one completed request.
+        """
+        token_counter["prompt_tokens"] += int(usage_counter.get("prompt_tokens", 0) or 0)
+        token_counter["completion_tokens"] += int(
+            usage_counter.get("completion_tokens", 0) or 0
+        )
+        token_counter["total_tokens"] += int(usage_counter.get("total_tokens", 0) or 0)
         token_counter["cached_input_tokens"] += int(
-            getattr(usage, "cached_input_tokens", 0) or 0
+            usage_counter.get("cached_input_tokens", 0) or 0
         )
 
     def _ensure_total_tokens(self, token_counter: dict[str, int]) -> None:
@@ -374,10 +391,6 @@ class ReactEngine:
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> Response:
         """Collect full model output via ``chat_stream`` while emitting live updates."""
-        attempt_start_prompt = token_counter["prompt_tokens"]
-        attempt_start_completion = token_counter["completion_tokens"]
-        attempt_start_total = token_counter["total_tokens"]
-
         stream_iterator = self.llm.chat_stream(
             messages=messages,
             **llm_chat_kwargs,
@@ -394,6 +407,7 @@ class ReactEngine:
         last_report_at = stream_started_at
         last_report_tokens = 0
         estimated_completion_tokens = 0
+        usage_accumulator = StreamingUsageAccumulator()
 
         while True:
             stream_chunk = await run_in_threadpool(
@@ -408,7 +422,7 @@ class ReactEngine:
             if isinstance(stream_chunk.model, str) and stream_chunk.model:
                 response_model = stream_chunk.model
 
-            self._accumulate_usage(token_counter, stream_chunk.usage)
+            usage_accumulator.observe(stream_chunk.usage)
 
             for chunk_choice in stream_chunk.choices:
                 chunk_message = chunk_choice.message
@@ -463,43 +477,43 @@ class ReactEngine:
                 }
             )
 
-        # Usage fallback: estimate prompt/completion when provider does not return usage.
-        attempt_prompt_delta = token_counter["prompt_tokens"] - attempt_start_prompt
-        attempt_completion_delta = (
-            token_counter["completion_tokens"] - attempt_start_completion
-        )
-        attempt_total_delta = token_counter["total_tokens"] - attempt_start_total
+        attempt_usage_counter = usage_accumulator.build_token_counter()
 
+        # Usage fallback: estimate prompt/completion when provider does not return usage.
         if (
-            attempt_prompt_delta == 0
-            and attempt_completion_delta == 0
-            and attempt_total_delta == 0
+            attempt_usage_counter["prompt_tokens"] == 0
+            and attempt_usage_counter["completion_tokens"] == 0
+            and attempt_usage_counter["total_tokens"] == 0
         ):
             estimated_prompt_tokens = estimate_messages_tokens(messages)
-            token_counter["prompt_tokens"] += estimated_prompt_tokens
-            token_counter["completion_tokens"] += estimated_completion_tokens
-            token_counter["total_tokens"] += (
+            attempt_usage_counter["prompt_tokens"] = estimated_prompt_tokens
+            attempt_usage_counter["completion_tokens"] = estimated_completion_tokens
+            attempt_usage_counter["total_tokens"] = (
                 estimated_prompt_tokens + estimated_completion_tokens
             )
-        elif attempt_total_delta <= 0 and (
-            attempt_prompt_delta > 0 or attempt_completion_delta > 0
+        elif attempt_usage_counter["total_tokens"] <= 0 and (
+            attempt_usage_counter["prompt_tokens"] > 0
+            or attempt_usage_counter["completion_tokens"] > 0
         ):
-            token_counter["total_tokens"] += (
-                attempt_prompt_delta + attempt_completion_delta
+            attempt_usage_counter["total_tokens"] = (
+                attempt_usage_counter["prompt_tokens"]
+                + attempt_usage_counter["completion_tokens"]
             )
 
+        self._accumulate_token_counter(token_counter, attempt_usage_counter)
+        self._ensure_total_tokens(attempt_usage_counter)
         self._ensure_total_tokens(token_counter)
 
         full_content = "".join(content_parts)
         full_reasoning = "".join(reasoning_parts) or None
         usage_info = (
             UsageInfo(
-                prompt_tokens=token_counter["prompt_tokens"],
-                completion_tokens=token_counter["completion_tokens"],
-                total_tokens=token_counter["total_tokens"],
-                cached_input_tokens=token_counter["cached_input_tokens"],
+                prompt_tokens=attempt_usage_counter["prompt_tokens"],
+                completion_tokens=attempt_usage_counter["completion_tokens"],
+                total_tokens=attempt_usage_counter["total_tokens"],
+                cached_input_tokens=attempt_usage_counter["cached_input_tokens"],
             )
-            if token_counter["total_tokens"] > 0
+            if attempt_usage_counter["total_tokens"] > 0
             else None
         )
         return Response(

@@ -11,6 +11,7 @@ export const LLM_ICON_KEYS = [
   "gemini",
   "grok",
   "kimi",
+  "mimo",
   "qwen",
   "step",
   "glm",

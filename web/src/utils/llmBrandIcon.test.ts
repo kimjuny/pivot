@@ -7,6 +7,7 @@ import {
 
 describe("llm brand icon helpers", () => {
   it("matches icon file names against model identifiers", () => {
+    expect(getLLMBrandIconPath("mimo-v2-pro")).toBe("/llms/mimo.svg");
     expect(getLLMBrandIconCandidates("step-2-16k")).toEqual([
       "/llms/step.svg",
     ]);
