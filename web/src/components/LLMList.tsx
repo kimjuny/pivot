@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Plus, Pencil, Trash2, Server, X, Download, Upload, Copy } from 'lucide-react';
+import { Plus, Pencil, Trash2, Server, X, Download, Upload, Copy } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { getLLMs, deleteLLM, updateLLM, createLLM } from '../utils/api';
 import type { LLM } from '../types';
@@ -35,13 +35,39 @@ import { LLMBrandAvatar } from '@/components/LLMBrandAvatar';
 const PAGE_SIZE = 10;
 
 const PROTOCOL_LABELS: Record<string, string> = {
-  openai_completion_llm: 'OpenAI Completion LLM',
-  openai_response_llm: 'OpenAI Response LLM',
-  anthropic_compatible: 'Anthropic Compatible',
+  openai_completion_llm: 'Completion',
+  openai_response_llm: 'Response',
+  anthropic_compatible: 'Anthropic',
 };
 
 function formatProtocolLabel(protocol: string): string {
   return PROTOCOL_LABELS[protocol] ?? protocol;
+}
+
+function formatMaxContext(maxContext: number): string {
+  if (maxContext >= 1_000_000) {
+    return `${Math.round(maxContext / 1_000_000)}M`;
+  }
+  if (maxContext >= 1024 && maxContext % 1024 === 0) {
+    return `${Math.round(maxContext / 1024)}K`;
+  }
+  if (maxContext >= 1000) {
+    return `${Math.round(maxContext / 1000)}K`;
+  }
+  return `${maxContext}`;
+}
+
+function formatCachePolicyLabel(cachePolicy: string): string {
+  const cachePolicyLabels: Record<string, string> = {
+    'qwen-completion-block-cache': 'Cache Control',
+    'kimi-completion-prompt-cache-key': 'Cache Control',
+    'openai-response-prompt-cache-key': 'Cache Control',
+    'doubao-response-previous-id': 'Cache Control',
+    'anthropic-auto-cache': 'Cache Control',
+    'anthropic-block-cache': 'Cache Control',
+  };
+
+  return cachePolicyLabels[cachePolicy] ?? cachePolicy;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,11 +221,6 @@ function LLMList() {
         api_key: llm.api_key,
         protocol: llm.protocol,
         cache_policy: llm.cache_policy,
-        chat: llm.chat,
-        system_role: llm.system_role,
-        tool_calling: llm.tool_calling,
-        json_schema: llm.json_schema,
-        thinking: llm.thinking,
         streaming: llm.streaming,
         image_input: llm.image_input,
         image_output: llm.image_output,
@@ -295,16 +316,11 @@ function LLMList() {
           api_key: (item.api_key as string) ?? '',
           protocol: (item.protocol as string) ?? 'openai_completion_llm',
           cache_policy: (item.cache_policy as string) ?? 'none',
-          chat: (item.chat as boolean) ?? true,
-          system_role: (item.system_role as boolean) ?? false,
-          tool_calling: (item.tool_calling as string) ?? 'none',
-          json_schema: (item.json_schema as string) ?? 'none',
-          thinking: (item.thinking as string) ?? 'auto',
-          streaming: (item.streaming as boolean) ?? false,
+          streaming: (item.streaming as boolean) ?? true,
           image_input: (item.image_input as boolean) ?? false,
           image_output: (item.image_output as boolean) ?? false,
-          max_context: (item.max_context as number) ?? 8192,
-          extra_config: (item.extra_config as string) ?? '{}',
+          max_context: (item.max_context as number) ?? 128000,
+          extra_config: (item.extra_config as string) ?? '',
         });
         created++;
       } catch {
@@ -332,11 +348,6 @@ function LLMList() {
     api_key: string;
     protocol: string;
     cache_policy: string;
-    chat: boolean;
-    system_role: boolean;
-    tool_calling: string;
-    json_schema: string;
-    thinking: string;
     streaming: boolean;
     image_input: boolean;
     image_output: boolean;
@@ -439,7 +450,9 @@ function LLMList() {
           >
             <Badge
               variant={protocolFilter === 'all' ? 'default' : 'outline'}
-              className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+              className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                protocolFilter === 'all' ? 'list-filter-badge-active' : ''
+              }`}
             >
               All
               <span className={protocolFilter === 'all' ? 'opacity-70' : 'text-muted-foreground'}>
@@ -457,7 +470,9 @@ function LLMList() {
               >
                 <Badge
                   variant={protocolFilter === proto ? 'default' : 'outline'}
-                  className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+                  className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                    protocolFilter === proto ? 'list-filter-badge-active' : ''
+                  }`}
                 >
                     {formatProtocolLabel(proto)}
                   <span className={protocolFilter === proto ? 'opacity-70' : 'text-muted-foreground'}>
@@ -481,7 +496,7 @@ function LLMList() {
         {/* Search */}
         <ButtonGroup className="list-search-group">
           <Input
-            placeholder="Search by name, model, endpoint or protocol…"
+            placeholder="Search by name, model or protocol…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             aria-label="Search LLMs"
@@ -510,15 +525,15 @@ function LLMList() {
         </div>
       ) : (
         <>
-          <Table>
+          <Table className="w-full table-fixed" containerClassName="overflow-hidden">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[180px]">Name</TableHead>
-                <TableHead className="w-[180px]">Model</TableHead>
-                <TableHead>Endpoint</TableHead>
-                <TableHead className="w-[130px]">Protocol</TableHead>
-                <TableHead className="w-[120px]">Capabilities</TableHead>
-                <TableHead className="w-[130px] text-right">Actions</TableHead>
+                <TableHead className="w-[148px] whitespace-nowrap">Name</TableHead>
+                <TableHead className="w-[188px] whitespace-nowrap">Model</TableHead>
+                <TableHead className="w-[92px] whitespace-nowrap">Max Context</TableHead>
+                <TableHead className="w-[96px] whitespace-nowrap">Protocol</TableHead>
+                <TableHead className="w-[252px] whitespace-nowrap">Capabilities</TableHead>
+                <TableHead className="w-[96px] whitespace-nowrap text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -608,11 +623,6 @@ function LLMList() {
                 api_key: editingLLM.api_key,
                 protocol: editingLLM.protocol,
                 cache_policy: editingLLM.cache_policy,
-                chat: editingLLM.chat,
-                system_role: editingLLM.system_role,
-                tool_calling: editingLLM.tool_calling,
-                json_schema: editingLLM.json_schema,
-                thinking: editingLLM.thinking,
                 streaming: editingLLM.streaming,
                 image_input: editingLLM.image_input,
                 image_output: editingLLM.image_output,
@@ -655,56 +665,72 @@ interface LLMTableRowProps {
  */
 function LLMTableRow({ llm, isCopying, onEdit, onCopy, onDelete }: LLMTableRowProps) {
   const capabilityLabels = [
-    llm.streaming ? "Stream" : null,
-    llm.tool_calling === "native" ? "Tools" : null,
-    llm.json_schema === "strong" ? "JSON" : null,
-    llm.chat ? "Chat" : null,
-    llm.image_input ? "Img In" : null,
-    llm.image_output ? "Img Out" : null,
+    llm.cache_policy !== 'none' ? formatCachePolicyLabel(llm.cache_policy) : null,
+    llm.streaming ? 'Streaming' : null,
+    llm.image_input ? 'Image Input' : null,
+    llm.image_output ? 'Image Output' : null,
   ].filter((label): label is string => Boolean(label));
 
-  const capabilityText = capabilityLabels.join(" · ");
-
   return (
-    <TableRow>
+    <TableRow className="whitespace-nowrap">
       {/* Name + icon */}
-      <TableCell>
-        <div className="flex items-center gap-2">
+      <TableCell className="overflow-hidden">
+        <div className="flex items-center gap-2 overflow-hidden">
           <LLMBrandAvatar
             model={llm.model}
             containerClassName="w-6 h-6 rounded-md bg-primary/10 flex items-center justify-center flex-shrink-0"
             imageClassName="w-3.5 h-3.5"
             fallback={<Server className="w-3.5 h-3.5 text-primary" aria-hidden="true" />}
           />
-          <span className="font-medium text-sm truncate max-w-[120px]">{llm.name}</span>
+          <span className="truncate text-sm font-medium" title={llm.name}>
+            {llm.name}
+          </span>
         </div>
       </TableCell>
 
       {/* Model */}
-      <TableCell className="font-mono text-xs text-muted-foreground truncate max-w-[160px]">
+      <TableCell
+        className="truncate font-mono text-xs text-muted-foreground"
+        title={llm.model}
+      >
         {llm.model}
       </TableCell>
 
-      {/* Endpoint */}
-      <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
-        {llm.endpoint}
+      {/* Max Context */}
+      <TableCell className="text-xs text-muted-foreground">
+        <Badge
+          variant="secondary"
+          className="shrink-0 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
+        >
+          {formatMaxContext(llm.max_context)}
+        </Badge>
       </TableCell>
 
       {/* Protocol */}
-      <TableCell className="text-xs text-muted-foreground">
-        {formatProtocolLabel(llm.protocol)}
-        {llm.cache_policy !== 'none' && ` · ${llm.cache_policy}`}
+      <TableCell className="truncate text-xs text-muted-foreground">
+        <span title={formatProtocolLabel(llm.protocol)}>
+          {formatProtocolLabel(llm.protocol)}
+        </span>
       </TableCell>
 
-      {/* Capabilities: keep one line to preserve consistent row heights */}
-      <TableCell>
-        <Badge
-          variant="outline"
-          title={capabilityText || "None"}
-          className="block max-w-[120px] truncate text-[10px] px-1.5 py-0.5 font-normal"
-        >
-          {capabilityText || "None"}
-        </Badge>
+      {/* Capabilities */}
+      <TableCell className="overflow-hidden">
+        <div className="flex flex-nowrap items-center gap-1.5 overflow-hidden">
+          {capabilityLabels.length > 0 ? (
+            capabilityLabels.map((label) => (
+              <Badge
+                key={`${llm.id}-${label}`}
+                variant="secondary"
+                title={label}
+                className="shrink-0 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
+              >
+                {label}
+              </Badge>
+            ))
+          ) : (
+            <span className="truncate text-xs text-muted-foreground">None</span>
+          )}
+        </div>
       </TableCell>
 
       {/* Actions */}

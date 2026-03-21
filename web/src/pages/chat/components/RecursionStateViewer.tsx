@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "@/lib/lucide";
 
 import {
   Tooltip,

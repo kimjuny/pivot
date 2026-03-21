@@ -9,7 +9,7 @@ import {
   Lock,
   User as UserIcon,
   X,
-} from 'lucide-react';
+} from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getSharedTools,
@@ -356,7 +356,9 @@ function ToolsPage() {
             >
               <Badge
                 variant={kindFilter === value ? 'default' : 'outline'}
-                className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                  kindFilter === value ? 'list-filter-badge-active' : ''
+                }`}
               >
                 {label}
                 <span className={kindFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
@@ -539,12 +541,18 @@ function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
 
       <TableCell>
         {isShared ? (
-          <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
+          <Badge
+            variant="secondary"
+            className="flex w-fit shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
+          >
             <Lock className="w-2.5 h-2.5" />
             Shared
           </Badge>
         ) : (
-          <Badge variant="outline" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
+          <Badge
+            variant="secondary"
+            className="flex w-fit shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
+          >
             <UserIcon className="w-2.5 h-2.5" />
             Private
           </Badge>
@@ -553,8 +561,8 @@ function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
 
       <TableCell>
         <Badge
-          variant={isSandboxTool ? 'default' : 'outline'}
-          className="w-fit text-[11px] px-1.5"
+          variant="secondary"
+          className="w-fit shrink-0 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
         >
           {isSandboxTool ? 'Yes' : 'No'}
         </Badge>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, Eye, EyeOff } from 'lucide-react';
+import { LogIn, Eye, EyeOff } from "@/lib/lucide";
 import { useAuth, isTokenValid } from '../contexts/auth-core';
 import Navigation from './Navigation';
 import { Button } from '@/components/ui/button';

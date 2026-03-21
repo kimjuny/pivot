@@ -12,7 +12,7 @@ import {
     Settings2,
     PanelLeft,
     Globe,
-} from 'lucide-react';
+} from "@/lib/lucide";
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
     Sidebar,

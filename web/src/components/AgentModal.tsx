@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus } from "@/lib/lucide";
 import { useNavigate } from 'react-router-dom';
 import { getLLMs } from '../utils/api';
 import type { LLM } from '../types';

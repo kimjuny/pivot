@@ -4,7 +4,6 @@ This module provides CRUD operations for LLMs (Large Language Models).
 All endpoints require authentication.
 """
 
-import logging
 from datetime import UTC
 from typing import Any
 
@@ -16,9 +15,6 @@ from app.models.user import User
 from app.schemas.schemas import LLMCreate, LLMResponse, LLMUpdate
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
-
-# Get logger for this module
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,11 +46,6 @@ async def get_llms(
             "api_key": llm.api_key,
             "protocol": llm.protocol,
             "cache_policy": llm.cache_policy,
-            "chat": llm.chat,
-            "system_role": llm.system_role,
-            "tool_calling": llm.tool_calling,
-            "json_schema": llm.json_schema,
-            "thinking": llm.thinking,
             "streaming": llm.streaming,
             "image_input": llm.image_input,
             "image_output": llm.image_output,
@@ -105,11 +96,6 @@ async def create_llm(
         api_key=llm_data.api_key,
         protocol=llm_data.protocol,
         cache_policy=normalized_cache_policy,
-        chat=llm_data.chat,
-        system_role=llm_data.system_role,
-        tool_calling=llm_data.tool_calling,
-        json_schema=llm_data.json_schema,
-        thinking=llm_data.thinking,
         streaming=llm_data.streaming,
         image_input=llm_data.image_input,
         image_output=llm_data.image_output,
@@ -124,11 +110,6 @@ async def create_llm(
         "api_key": llm.api_key,
         "protocol": llm.protocol,
         "cache_policy": llm.cache_policy,
-        "chat": llm.chat,
-        "system_role": llm.system_role,
-        "tool_calling": llm.tool_calling,
-        "json_schema": llm.json_schema,
-        "thinking": llm.thinking,
         "streaming": llm.streaming,
         "image_input": llm.image_input,
         "image_output": llm.image_output,
@@ -169,11 +150,6 @@ async def get_llm(
         "api_key": llm.api_key,
         "protocol": llm.protocol,
         "cache_policy": llm.cache_policy,
-        "chat": llm.chat,
-        "system_role": llm.system_role,
-        "tool_calling": llm.tool_calling,
-        "json_schema": llm.json_schema,
-        "thinking": llm.thinking,
         "streaming": llm.streaming,
         "image_input": llm.image_input,
         "image_output": llm.image_output,
@@ -241,16 +217,6 @@ async def update_llm(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if llm_data.chat is not None:
-        update_data["chat"] = llm_data.chat
-    if llm_data.system_role is not None:
-        update_data["system_role"] = llm_data.system_role
-    if llm_data.tool_calling is not None:
-        update_data["tool_calling"] = llm_data.tool_calling
-    if llm_data.json_schema is not None:
-        update_data["json_schema"] = llm_data.json_schema
-    if llm_data.thinking is not None:
-        update_data["thinking"] = llm_data.thinking
     if llm_data.streaming is not None:
         update_data["streaming"] = llm_data.streaming
     if llm_data.image_input is not None:
@@ -276,11 +242,6 @@ async def update_llm(
         "api_key": updated_llm.api_key,
         "protocol": updated_llm.protocol,
         "cache_policy": updated_llm.cache_policy,
-        "chat": updated_llm.chat,
-        "system_role": updated_llm.system_role,
-        "tool_calling": updated_llm.tool_calling,
-        "json_schema": updated_llm.json_schema,
-        "thinking": updated_llm.thinking,
         "streaming": updated_llm.streaming,
         "image_input": updated_llm.image_input,
         "image_output": updated_llm.image_output,

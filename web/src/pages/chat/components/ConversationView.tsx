@@ -1,4 +1,4 @@
-import { MessageSquare } from "lucide-react";
+import { MessageSquare } from "@/lib/lucide";
 
 import type { ChatMessage } from "../types";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";

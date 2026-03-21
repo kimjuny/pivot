@@ -10,7 +10,7 @@ import {
   Trash2,
   User as UserIcon,
   X,
-} from 'lucide-react';
+} from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getSharedSkills,
@@ -319,7 +319,9 @@ function SkillsPage() {
             >
               <Badge
                 variant={kindFilter === value ? 'default' : 'outline'}
-                className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                  kindFilter === value ? 'list-filter-badge-active' : ''
+                }`}
               >
                 {label}
                 <span className={kindFilter === value ? 'opacity-70' : 'text-muted-foreground'}>{count}</span>

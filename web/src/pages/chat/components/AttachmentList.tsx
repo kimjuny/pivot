@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, Trash2, XCircle } from "lucide-react";
+import { Loader2, Trash2, XCircle } from "@/lib/lucide";
 
 import {
   Tooltip,

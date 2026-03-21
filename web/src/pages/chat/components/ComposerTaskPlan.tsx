@@ -6,7 +6,7 @@ import {
   ListTodo,
   Loader2,
   XCircle,
-} from "lucide-react";
+} from "@/lib/lucide";
 import { useEffect, useRef, useState } from "react";
 
 import type { TaskPlanSnapshot } from "../types";
@@ -144,7 +144,7 @@ export function ComposerTaskPlan({ taskPlan }: ComposerTaskPlanProps) {
                       <Loader2 className="h-[14px] w-[14px] animate-spin text-foreground/85" />
                     ) : step.status === "done" ? (
                       <span className="flex h-[14px] w-[14px] items-center justify-center rounded-full border border-muted-foreground/80 text-muted-foreground">
-                        <Check className="h-[10px] w-[10px]" strokeWidth={3} />
+                        <Check className="h-[10px] w-[10px]" />
                       </span>
                     ) : step.status === "error" ? (
                       <XCircle className="h-[14px] w-[14px] text-danger" />

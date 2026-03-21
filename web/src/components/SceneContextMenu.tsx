@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from "@/lib/lucide";
 
 export type ContextMenuContext = 'pane' | 'node' | 'edge';
 

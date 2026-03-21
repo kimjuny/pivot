@@ -14,7 +14,7 @@ import {
   ReactFlowInstance
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { X, Layers, Wrench, Zap } from 'lucide-react';
+import { X, Layers, Wrench, Zap } from "@/lib/lucide";
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';

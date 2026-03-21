@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Bot, MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
+import { Plus, Bot, MoreHorizontal, Pencil, Trash2, X } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
@@ -263,7 +263,9 @@ function AgentList() {
             >
               <Badge
                 variant={statusFilter === value ? 'default' : 'outline'}
-                className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                  statusFilter === value ? 'list-filter-badge-active' : ''
+                }`}
               >
                 {label}
                 <span className={statusFilter === value ? 'opacity-70' : 'text-muted-foreground'}>

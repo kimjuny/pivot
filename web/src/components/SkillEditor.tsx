@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
-import { Loader2 } from 'lucide-react';
+import { Loader2 } from "@/lib/lucide";
 import { useTheme } from '@/lib/use-theme';
 import { Button } from '@/components/ui/button';
 

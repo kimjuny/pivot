@@ -6,7 +6,7 @@ import {
   Square,
   Wrench,
   XCircle,
-} from "lucide-react";
+} from "@/lib/lucide";
 
 import type { RecursionRecord } from "../types";
 import {

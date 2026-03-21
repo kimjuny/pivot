@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, ReactNode } from 'react';
-import { X, Minus, Maximize2 } from 'lucide-react';
+import { X, Minus, Maximize2 } from "@/lib/lucide";
 
 /**
  * Dialog size preset.

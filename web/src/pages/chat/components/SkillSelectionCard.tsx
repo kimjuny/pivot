@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "@/lib/lucide";
 
 import type { SkillSelectionState } from "../types";
 import { formatTokenCount } from "../utils/chatSelectors";

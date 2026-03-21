@@ -833,11 +833,6 @@ export const createLLM = async (llmData: {
   api_key: string;
   protocol?: string;
   cache_policy?: string;
-  chat?: boolean;
-  system_role?: boolean;
-  tool_calling?: string;
-  json_schema?: string;
-  thinking?: string;
   streaming?: boolean;
   image_input?: boolean;
   image_output?: boolean;
@@ -876,11 +871,6 @@ export const updateLLM = async (
     api_key?: string;
     protocol?: string;
     cache_policy?: string;
-    chat?: boolean;
-    system_role?: boolean;
-    tool_calling?: string;
-    json_schema?: string;
-    thinking?: string;
     streaming?: boolean;
     image_input?: boolean;
     image_output?: boolean;

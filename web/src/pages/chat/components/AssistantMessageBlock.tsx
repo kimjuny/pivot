@@ -3,7 +3,7 @@ import {
   MessageSquare,
   Square,
   XCircle,
-} from "lucide-react";
+} from "@/lib/lucide";
 
 import { formatTimestamp } from "@/utils/timestamp";
 

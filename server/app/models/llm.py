@@ -15,11 +15,7 @@ class LLM(SQLModel, table=True):
         api_key: Authentication credential for the LLM (encrypted storage recommended).
         protocol: Protocol specification
             (e.g., 'openai_completion_llm', 'openai_response_llm').
-        chat: Whether the model supports multi-turn conversation with message roles.
-        system_role: Whether the model truly distinguishes system role with higher priority.
-        tool_calling: Tool calling support level ('native', 'prompt', 'none').
-        json_schema: JSON output reliability ('strong', 'weak', 'none').
-        thinking: Thinking mode control ('auto', 'enabled', 'disabled').
+        cache_policy: Protocol-specific cache strategy.
         streaming: Whether the model supports streaming responses.
         image_input: Whether the model accepts user-supplied image inputs.
         image_output: Whether the model can produce image outputs.
@@ -45,24 +41,6 @@ class LLM(SQLModel, table=True):
     cache_policy: str = Field(
         default="none",
         description="Cache policy selected for this protocol",
-    )
-    chat: bool = Field(
-        default=True, description="Supports multi-turn conversation with message roles"
-    )
-    system_role: bool = Field(
-        default=True, description="Distinguishes system role with higher priority"
-    )
-    tool_calling: str = Field(
-        default="native",
-        description="Tool calling support: 'native', 'prompt', or 'none'",
-    )
-    json_schema: str = Field(
-        default="strong",
-        description="JSON output reliability: 'strong', 'weak', or 'none'",
-    )
-    thinking: str = Field(
-        default="auto",
-        description="Thinking mode: 'auto', 'enabled', or 'disabled'",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     image_input: bool = Field(

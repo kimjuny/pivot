@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Link2, Loader2 } from 'lucide-react';
+import { Link2, Loader2 } from "@/lib/lucide";
 import { toast } from 'sonner';
 import Navigation from './Navigation';
 import { useAuth } from '@/contexts/auth-core';

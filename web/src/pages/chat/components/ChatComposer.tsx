@@ -13,7 +13,7 @@ import {
   Plus,
   Square,
   XCircle,
-} from "lucide-react";
+} from "@/lib/lucide";
 
 import { Button } from "@/components/ui/button";
 import {

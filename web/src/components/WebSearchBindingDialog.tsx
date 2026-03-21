@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader2, RefreshCcw } from 'lucide-react';
+import { ExternalLink, Loader2, RefreshCcw } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';

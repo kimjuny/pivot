@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Info, Plus, Trash2 } from 'lucide-react';
+import { Info, Plus, Trash2 } from "@/lib/lucide";
 import {
   Dialog,
   DialogContent,
@@ -36,14 +36,6 @@ export interface LLMFormData {
   api_key: string;
   protocol: string;
   cache_policy: string;
-  chat: boolean;
-  system_role: boolean;
-  /** Describes how the provider exposes tool invocation. */
-  tool_calling: string;
-  /** Describes how reliably the provider enforces JSON schema output. */
-  json_schema: string;
-  /** Controls provider-specific reasoning/thinking flags when supported. */
-  thinking: string;
   streaming: boolean;
   image_input: boolean;
   image_output: boolean;
@@ -66,7 +58,7 @@ interface ExtraConfigEntry {
   value: string;
 }
 
-type LLMTabValue = 'general' | 'advanced' | 'others';
+type LLMTabValue = 'general' | 'advanced';
 
 interface FormLabelProps {
   htmlFor?: string;
@@ -249,11 +241,6 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     api_key: '',
     protocol: 'openai_completion_llm',
     cache_policy: 'none',
-    chat: true,
-    system_role: true,
-    tool_calling: 'native',
-    json_schema: 'strong',
-    thinking: 'auto',
     streaming: true,
     image_input: false,
     image_output: false,
@@ -282,11 +269,6 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
         api_key: initialData.api_key ?? '',
         protocol: initialData.protocol ?? 'openai_completion_llm',
         cache_policy: initialData.cache_policy ?? 'none',
-        chat: initialData.chat ?? true,
-        system_role: initialData.system_role ?? true,
-        tool_calling: initialData.tool_calling ?? 'native',
-        json_schema: initialData.json_schema ?? 'strong',
-        thinking: initialData.thinking ?? 'auto',
         streaming: initialData.streaming ?? true,
         image_input: initialData.image_input ?? false,
         image_output: initialData.image_output ?? false,
@@ -302,11 +284,6 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
         api_key: '',
         protocol: 'openai_completion_llm',
         cache_policy: 'none',
-        chat: true,
-        system_role: true,
-        tool_calling: 'native',
-        json_schema: 'strong',
-        thinking: 'auto',
         streaming: true,
         image_input: false,
         image_output: false,
@@ -420,10 +397,9 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
             onValueChange={(value) => setActiveTab(value as LLMTabValue)}
             className="py-2"
           >
-            <TabsList className="grid h-auto w-full grid-cols-3">
+            <TabsList className="grid h-auto w-full grid-cols-2">
               <TabsTrigger value="general">General</TabsTrigger>
               <TabsTrigger value="advanced">Advanced</TabsTrigger>
-              <TabsTrigger value="others">Others</TabsTrigger>
             </TabsList>
 
             <TabsContent value="general" className="space-y-4 pt-4">
@@ -671,101 +647,6 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
               </div>
             </TabsContent>
 
-            <TabsContent value="others" className="space-y-4 pt-4">
-              <div className="rounded-lg border border-dashed border-border/70 bg-muted/20 px-4 py-3">
-                <p className="text-sm text-muted-foreground">
-                  Temporary home for legacy capability flags. We can remove these
-                  later after we confirm which ones still matter.
-                </p>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <FormLabel
-                    htmlFor="tool_calling"
-                    label="Tool Calling"
-                    tooltip="Tool calling support level. Native means structured tool calls, Prompt means simulated via prompt, None means unsupported."
-                  />
-                  <Select
-                    value={formData.tool_calling}
-                    onValueChange={(value) => updateFormField('tool_calling', value)}
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger id="tool_calling">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="native">Native</SelectItem>
-                      <SelectItem value="prompt">Prompt-based</SelectItem>
-                      <SelectItem value="none">None</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <FormLabel
-                    htmlFor="json_schema"
-                    label="JSON Schema"
-                    tooltip="Structured JSON output reliability. Strong means native schema constraints, Weak means prompt guidance, None means unreliable."
-                  />
-                  <Select
-                    value={formData.json_schema}
-                    onValueChange={(value) => updateFormField('json_schema', value)}
-                    disabled={isSubmitting}
-                  >
-                    <SelectTrigger id="json_schema">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="strong">Strong</SelectItem>
-                      <SelectItem value="weak">Weak</SelectItem>
-                      <SelectItem value="none">None</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <FormLabel
-                  htmlFor="thinking"
-                  label="Thinking"
-                  tooltip="Controls protocol-level thinking or reasoning flags. Auto sends nothing explicit, while Enabled and Disabled force a provider-specific mode."
-                />
-                <Select
-                  value={formData.thinking}
-                  onValueChange={(value) => updateFormField('thinking', value)}
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger id="thinking">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">Auto</SelectItem>
-                    <SelectItem value="enabled">Enabled</SelectItem>
-                    <SelectItem value="disabled">Disabled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-3">
-                <CapabilityToggle
-                  id="chat"
-                  label="Multi-turn Chat"
-                  checked={formData.chat}
-                  tooltip="Whether the model supports multi-turn conversation with role-aware message arrays."
-                  disabled={isSubmitting}
-                  onCheckedChange={(checked) => updateFormField('chat', checked)}
-                />
-                <CapabilityToggle
-                  id="system_role"
-                  label="System Role"
-                  checked={formData.system_role}
-                  tooltip="Whether the model honors a distinct system role instead of flattening all instructions into user content."
-                  disabled={isSubmitting}
-                  onCheckedChange={(checked) => updateFormField('system_role', checked)}
-                />
-              </div>
-            </TabsContent>
           </Tabs>
         </TooltipProvider>
 

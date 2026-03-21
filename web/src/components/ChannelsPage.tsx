@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Search, X } from 'lucide-react';
+import { ExternalLink, Search, X } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -171,7 +171,9 @@ function ChannelsPage() {
             >
               <Badge
                 variant={transportFilter === value ? 'default' : 'outline'}
-                className="cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors"
+                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                  transportFilter === value ? 'list-filter-badge-active' : ''
+                }`}
               >
                 {label}
                 <span className={transportFilter === value ? 'opacity-70' : 'text-muted-foreground'}>

@@ -21,6 +21,14 @@
     --accent-foreground: 0.205 0 0;
     --destructive: 0.58 0.22 27;
     --destructive-foreground: 0.97 0 0;
+    --badge-default: 0.145 0 0;
+    --badge-default-foreground: 0.985 0 0;
+    --badge-secondary: 0.967 0.001 286.375;
+    --badge-secondary-foreground: 0.21 0.006 285.885;
+    --badge-destructive: 0.93 0.03 17;
+    --badge-destructive-foreground: 0.58 0.22 27;
+    --badge-outline-background: 1 0 0;
+    --badge-outline-border: 0.87 0 0;
     --border: 0.922 0 0;
     --input: 0.922 0 0;
     --ring: 0.708 0 0;
@@ -57,6 +65,14 @@
     --accent-foreground: 0.985 0 0;
     --destructive: 0.704 0.191 22.216;
     --destructive-foreground: 0.985 0 0;
+    --badge-default: 0.985 0 0;
+    --badge-default-foreground: 0.145 0 0;
+    --badge-secondary: 0.274 0.006 286.033;
+    --badge-secondary-foreground: 0.985 0 0;
+    --badge-destructive: 0.31 0.07 20;
+    --badge-destructive-foreground: 0.704 0.191 22.216;
+    --badge-outline-background: 0.145 0 0;
+    --badge-outline-border: 1 0 0 / 12%;
     --border: 1 0 0 / 10%;
     --input: 1 0 0 / 15%;
     --ring: 0.556 0 0;
@@ -76,10 +92,71 @@
   }
 }
 
+@layer components {
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"] {
+    @apply rounded-full px-3 py-0.5 leading-none shadow-none;
+    letter-spacing: -0.01em;
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-primary"][class*="text-primary-foreground"] {
+    background-color: oklch(var(--badge-default));
+    border-color: transparent;
+    color: oklch(var(--badge-default-foreground));
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-primary"][class*="text-primary-foreground"]:hover {
+    background-color: oklch(var(--badge-default));
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-secondary"][class*="text-secondary-foreground"] {
+    background-color: oklch(var(--badge-secondary));
+    border-color: transparent;
+    color: oklch(var(--badge-secondary-foreground));
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-secondary"][class*="text-secondary-foreground"]:hover {
+    background-color: oklch(var(--badge-secondary));
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-destructive"][class*="text-destructive-foreground"] {
+    background-color: oklch(var(--badge-destructive));
+    border-color: transparent;
+    color: oklch(var(--badge-destructive-foreground));
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-destructive"][class*="text-destructive-foreground"]:hover {
+    background-color: oklch(var(--badge-destructive));
+  }
+
+  .inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"]:not([class*="bg-primary"]):not([class*="bg-secondary"]):not([class*="bg-destructive"]) {
+    background-color: oklch(var(--badge-outline-background));
+    border-color: oklch(var(--badge-outline-border));
+    color: oklch(var(--foreground));
+  }
+
+  .list-filter-badge-active.inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-primary"][class*="text-primary-foreground"] {
+    background-color: oklch(var(--primary));
+    border-color: transparent;
+    color: oklch(var(--primary-foreground));
+  }
+
+  .list-filter-badge-active.inline-flex.items-center.rounded-md.border.text-xs.font-semibold[class*="px-2.5"][class*="py-0.5"][class*="border-transparent"][class*="bg-primary"][class*="text-primary-foreground"]:hover {
+    background-color: oklch(var(--primary));
+  }
+}
+
 @layer base {
   * {
     @apply border-border;
     outline-color: oklch(var(--ring) / 0.5);
+  }
+
+  /*
+   * Keep Lucide line weight consistent across the app so shared UI patterns
+   * do not drift as new icons are introduced in different screens.
+   */
+  .lucide {
+    stroke-width: 1.5;
   }
 
   body {

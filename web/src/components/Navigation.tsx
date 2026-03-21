@@ -1,4 +1,4 @@
-import { Github, Inbox, ChevronDown, Bot, ArrowLeft, LogOut, User } from 'lucide-react';
+import { Github, Inbox, ChevronDown, Bot, ArrowLeft, LogOut, User } from "@/lib/lucide";
 import { useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { getAgents } from '../utils/api';

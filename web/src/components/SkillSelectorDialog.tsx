@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Lock, User as UserIcon, Search, Loader2, Globe2 } from 'lucide-react';
+import { Lock, User as UserIcon, Search, Loader2, Globe2 } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getSharedSkills,

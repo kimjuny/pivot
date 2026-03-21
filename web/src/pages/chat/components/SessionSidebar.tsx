@@ -9,7 +9,7 @@ import {
   PinOff,
   SquarePen,
   Trash2,
-} from "lucide-react";
+} from "@/lib/lucide";
 
 import { Button } from "@/components/ui/button";
 import {

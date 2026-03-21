@@ -42,6 +42,16 @@ export default {
           DEFAULT: "oklch(var(--card))",
           foreground: "oklch(var(--card-foreground))",
         },
+        badge: {
+          DEFAULT: "oklch(var(--badge-default))",
+          foreground: "oklch(var(--badge-default-foreground))",
+          secondary: "oklch(var(--badge-secondary))",
+          "secondary-foreground": "oklch(var(--badge-secondary-foreground))",
+          destructive: "oklch(var(--badge-destructive))",
+          "destructive-foreground": "oklch(var(--badge-destructive-foreground))",
+          outline: "oklch(var(--badge-outline-background))",
+          border: "oklch(var(--badge-outline-border))",
+        },
         sidebar: {
           DEFAULT: "oklch(var(--sidebar-background))",
           foreground: "oklch(var(--sidebar-foreground))",

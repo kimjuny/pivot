@@ -206,16 +206,6 @@ export interface LLM {
   protocol: string;
   /** Protocol-specific cache strategy */
   cache_policy: string;
-  /** Whether the model supports multi-turn conversation with message roles */
-  chat: boolean;
-  /** Whether the model truly distinguishes system role with higher priority */
-  system_role: boolean;
-  /** Tool calling support level ('native', 'prompt', 'none') */
-  tool_calling: string;
-  /** JSON output reliability ('strong', 'weak', 'none') */
-  json_schema: string;
-  /** Thinking mode control ('auto', 'enabled', 'disabled') */
-  thinking: string;
   /** Whether the model supports streaming responses */
   streaming: boolean;
   /** Whether the model accepts user-supplied image inputs */

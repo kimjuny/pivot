@@ -33,18 +33,6 @@ def _normalize_extra_config(extra_config: str | None) -> str | None:
     return json.dumps(parsed, separators=(",", ":"))
 
 
-def _normalize_thinking_mode(thinking: str | None) -> str | None:
-    """Normalize and validate LLM thinking mode."""
-    if thinking is None:
-        return None
-    normalized = thinking.strip().lower()
-    if not normalized:
-        return "auto"
-    if normalized not in {"auto", "enabled", "disabled"}:
-        raise ValueError("thinking must be one of: auto, enabled, disabled")
-    return normalized
-
-
 class AgentCreate(AppBaseModel):
     name: str = Field(..., description="Agent name")
     description: str | None = Field(None, description="Agent description")
@@ -292,24 +280,6 @@ class LLMCreate(AppBaseModel):
         default="none",
         description="Cache policy selected for this protocol",
     )
-    chat: bool = Field(
-        default=True, description="Supports multi-turn conversation with message roles"
-    )
-    system_role: bool = Field(
-        default=True, description="Distinguishes system role with higher priority"
-    )
-    tool_calling: str = Field(
-        default="native",
-        description="Tool calling support: 'native', 'prompt', or 'none'",
-    )
-    json_schema: str = Field(
-        default="strong",
-        description="JSON output reliability: 'strong', 'weak', or 'none'",
-    )
-    thinking: str = Field(
-        default="auto",
-        description="Thinking mode: 'auto', 'enabled', or 'disabled'",
-    )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     image_input: bool = Field(
         default=False,
@@ -334,17 +304,6 @@ class LLMCreate(AppBaseModel):
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
-    @field_validator("thinking")
-    @classmethod
-    def validate_thinking(
-        cls,
-        thinking: str,
-    ) -> str:
-        """Validate and normalize thinking mode."""
-        normalized = _normalize_thinking_mode(thinking)
-        return normalized if normalized is not None else "auto"
-
-
 class LLMUpdate(AppBaseModel):
     """Schema for updating an existing LLM."""
 
@@ -354,11 +313,6 @@ class LLMUpdate(AppBaseModel):
     api_key: str | None = None
     protocol: str | None = None
     cache_policy: str | None = None
-    chat: bool | None = None
-    system_role: bool | None = None
-    tool_calling: str | None = None
-    json_schema: str | None = None
-    thinking: str | None = None
     streaming: bool | None = None
     image_input: bool | None = None
     image_output: bool | None = None
@@ -374,16 +328,6 @@ class LLMUpdate(AppBaseModel):
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
-    @field_validator("thinking")
-    @classmethod
-    def validate_thinking(
-        cls,
-        thinking: str | None,
-    ) -> str | None:
-        """Validate and normalize thinking mode when provided."""
-        return _normalize_thinking_mode(thinking)
-
-
 class LLMResponse(AppBaseModel):
     """Schema for LLM response."""
 
@@ -394,11 +338,6 @@ class LLMResponse(AppBaseModel):
     api_key: str
     protocol: str
     cache_policy: str
-    chat: bool
-    system_role: bool
-    tool_calling: str
-    json_schema: str
-    thinking: str
     streaming: bool
     image_input: bool
     image_output: bool

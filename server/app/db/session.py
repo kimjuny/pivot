@@ -105,7 +105,6 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     if not _REQUIRED_TABLES.issubset(existing_tables):
         SQLModel.metadata.create_all(engine)
 
-    ensure_llm_schema_compatibility()
     ensure_agent_schema_compatibility()
     ensure_session_schema_compatibility()
     ensure_react_schema_compatibility()
@@ -117,27 +116,6 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     with Session(engine) as session:
         init_default_user(session)
         sync_skill_registry(session)
-
-
-def ensure_llm_schema_compatibility() -> None:
-    """Apply additive schema updates for legacy LLM tables.
-
-    Why: SQLModel's ``create_all`` does not add newly introduced columns
-    to existing tables. We backfill additive LLM columns in-place so
-    upgrades remain non-breaking for existing deployments.
-    """
-    engine = get_engine()
-    inspector = inspect(engine)
-    if not inspector.has_table("llm"):
-        return
-
-    columns = {column["name"] for column in inspector.get_columns("llm")}
-    with engine.begin() as conn:
-        if "thinking" not in columns:
-            conn.execute(text("ALTER TABLE llm ADD COLUMN thinking VARCHAR"))
-            conn.execute(
-                text("UPDATE llm SET thinking = 'auto' WHERE thinking IS NULL")
-            )
 
 
 def ensure_agent_schema_compatibility() -> None:

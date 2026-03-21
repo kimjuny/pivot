@@ -4,7 +4,7 @@ import {
   FileText,
   Loader2,
   Presentation,
-} from "lucide-react";
+} from "@/lib/lucide";
 
 import { fetchChatFileBlob } from "@/utils/api";
 
