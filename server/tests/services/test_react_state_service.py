@@ -66,8 +66,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             context=context,
             observe="observe",
             thinking="provider thinking",
-            thought="thought",
-            abstract="abstract",
+            reason="reason",
             action_type="RE_PLAN",
             action_output={
                 "plan": [
@@ -136,8 +135,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             context=context,
             observe="observe",
             thinking=None,
-            thought="thought",
-            abstract="abstract",
+            reason="reason",
             action_type="CALL_TOOL",
             action_output={
                 "tool_calls": [

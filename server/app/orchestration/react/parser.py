@@ -155,11 +155,14 @@ def parse_react_output(content: str) -> ParsedReactDecision:
     action = _parse_action(resolved_payload)
 
     observe = _expect_optional_string(resolved_payload.get("observe"), "observe")
-    thought = _expect_optional_string(resolved_payload.get("thought"), "thought")
-    abstract = _expect_optional_string(resolved_payload.get("abstract"), "abstract")
+    reason = _expect_optional_string(resolved_payload.get("reason"), "reason")
     summary = _expect_optional_string(
         resolved_payload.get("summary"),
         "summary",
+    )
+    session_title = _expect_optional_string(
+        resolved_payload.get("session_title"),
+        "session_title",
     )
 
     task_summary = _expect_optional_dict(
@@ -170,9 +173,9 @@ def parse_react_output(content: str) -> ParsedReactDecision:
     resolved_payload["action"] = action.to_dict()
     return ParsedReactDecision(
         observe=observe,
-        thought=thought,
-        abstract=abstract,
+        reason=reason,
         summary=summary,
+        session_title=session_title,
         action=action,
         task_summary=task_summary,
         raw_payload=resolved_payload,

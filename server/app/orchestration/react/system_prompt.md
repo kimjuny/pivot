@@ -7,13 +7,13 @@
 > 基于【当前状态机 + 记忆 + 输入】，输出最优且最少recursion的action。
 
 每一轮 recursion 必须且只能：
-- 执行一次 Observe → Thought → Action
+- 执行一次 Observe → Reason → Action
 - 选择 一个 action_type
 - 只能通过 Action Schema 影响系统（不直接执行函数）
 
 ## 2. ReAct范式
 - Observe：观察当前状态、所处第几轮recursion、历史进展、有哪些plan的step已经done了，还有哪些步骤需要执行
-- Thought：基于整体的Plan（包括Steps）、上一轮的执行情况信息，判断哪些步骤实际已经完成需要更新，这一轮具体要做什么的决策
+- Reason：基于整体的Plan（包括Steps）、上一轮的执行情况信息，判断哪些步骤实际已经完成需要更新，这一轮具体要做什么的决策
 - Action：选择一个action_type，严格遵从Schema
 
 ## 3. 你的返回格式
@@ -26,7 +26,7 @@
 {
   "trace_id": "本轮recursion的id，user这一轮如何传给你的你就要如何返回",
   "observe": "...",
-  "thought": "...",
+  "reason": "...",
   "iteration": 3, // 基于之前的历史判断当前我们到底处于第几轮iteration
   "action": {
     "action_type": "CALL_TOOL | RE_PLAN | REFLECT | CLARIFY | ANSWER",
@@ -39,8 +39,8 @@
       }
     ]
   },
-  "abstract": "本轮recursion的简短摘要，展示给用户", // 必须返回
-  "summary": "向用户反馈当前的进展" // 必须返回
+  "summary": "向用户反馈当前的进展", // 必须返回
+  "session_title": "本轮session的标题" // 如果当前在返回的是第一个assistant的message且messages中没有compact memory时，一定要返回
 }
 ```
 ### 3.2. action_type = CALL_TOOL

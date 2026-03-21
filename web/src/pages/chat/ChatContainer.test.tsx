@@ -356,9 +356,13 @@ describe("ChatContainer session rollover", () => {
       expect(getAgentWebSearchBindings).toHaveBeenCalledWith(7);
     });
 
-    await user.click(
-      screen.getByRole("combobox", { name: "Web search provider" }),
-    );
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Web search provider" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("combobox", { name: "Web search provider" }));
     await user.click(screen.getByRole("option", { name: "Baidu AI Search" }));
     await user.type(screen.getByPlaceholderText("Ask anything"), "Search it");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -461,8 +465,7 @@ describe("ChatContainer session rollover", () => {
               trace_id: "trace-live-1",
               observe: "Reading the requirements",
               thinking: null,
-              thought: null,
-              abstract: "Draft the landing page plan",
+              reason: null,
               summary: "Planning the sections",
               action_type: null,
               action_output: null,
@@ -540,7 +543,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     expect(screen.queryByText("Iteration 2")).not.toBeInTheDocument();
-    expect(screen.getByText("Draft the landing page plan")).toBeInTheDocument();
+    expect(screen.getByText("Planning the sections")).toBeInTheDocument();
   });
 
   it("optimistically shows stopped when the user stops a running task", async () => {
@@ -580,8 +583,7 @@ describe("ChatContainer session rollover", () => {
               trace_id: "trace-stop",
               observe: null,
               thinking: "thinking",
-              thought: null,
-              abstract: "Iteration 1",
+              reason: null,
               summary: null,
               action_type: null,
               action_output: null,
@@ -640,6 +642,113 @@ describe("ChatContainer session rollover", () => {
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(cancelReactTask).toHaveBeenCalledWith("task-stop");
+    });
+  });
+
+  it("updates the sidebar title when a streamed summary carries session_title", async () => {
+    const sessionId = "session-title-live";
+    const updatedAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: sessionId,
+          agent_id: 7,
+          status: "active",
+          title: null,
+          is_pinned: false,
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(getFullSessionHistory).mockResolvedValue({
+      session_id: sessionId,
+      last_event_id: 0,
+      resume_from_event_id: 0,
+      tasks: [
+        {
+          task_id: "task-title",
+          user_message: "Help me plan a launch",
+          agent_answer: null,
+          status: "running",
+          total_tokens: 0,
+          current_plan: [],
+          recursions: [
+            {
+              iteration: 0,
+              trace_id: "trace-title",
+              observe: null,
+              thinking: null,
+              reason: null,
+              summary: null,
+              action_type: null,
+              action_output: null,
+              tool_call_results: null,
+              status: "running",
+              error_log: null,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+              cached_input_tokens: 0,
+              created_at: createdAt,
+              updated_at: updatedAt,
+            },
+          ],
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+    });
+
+    const encoder = new TextEncoder();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  event_id: 1,
+                  type: "summary",
+                  task_id: "task-title",
+                  trace_id: "trace-title",
+                  iteration: 0,
+                  delta: "I have organized the launch plan.",
+                  data: {
+                    current_plan: [],
+                    session_title: "Launch planning thread",
+                  },
+                  timestamp: "2026-03-16T13:24:46.000Z",
+                })}\n\n`,
+              ),
+            );
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Launch planning thread")).toBeInTheDocument();
     });
   });
 });

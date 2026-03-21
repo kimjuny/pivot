@@ -159,6 +159,35 @@ function replaceSessionListItem(
 }
 
 /**
+ * Applies one streamed session-title update onto the local sidebar cache.
+ */
+function applyStreamedSessionTitle(
+  sessions: SessionListItem[],
+  sessionId: string,
+  title: string,
+  updatedAt: string,
+): SessionListItem[] {
+  const existingSession = sessions.find((session) => session.session_id === sessionId);
+  const nextTitle = title.trim();
+  if (!existingSession || nextTitle.length === 0) {
+    return sessions;
+  }
+
+  if (
+    existingSession.title === nextTitle &&
+    existingSession.updated_at === updatedAt
+  ) {
+    return sessions;
+  }
+
+  return upsertSessionListItem(sessions, {
+    ...existingSession,
+    title: nextTitle,
+    updated_at: updatedAt,
+  });
+}
+
+/**
  * Narrows live plan payloads so the composer task panel can keep following the
  * active task after a history-based reconnect.
  */
@@ -180,6 +209,20 @@ function extractLiveCurrentPlan(event: ReactStreamEvent): PlanStepData[] | undef
   }
 
   return undefined;
+}
+
+/**
+ * Reads a streamed assistant-proposed session title when one is present.
+ */
+function extractSessionTitle(event: ReactStreamEvent): string | undefined {
+  if (typeof event.data !== "object" || event.data === null || Array.isArray(event.data)) {
+    return undefined;
+  }
+
+  const sessionTitle = (event.data as { session_title?: unknown }).session_title;
+  return typeof sessionTitle === "string" && sessionTitle.trim().length > 0
+    ? sessionTitle.trim()
+    : undefined;
 }
 
 /**
@@ -630,6 +673,19 @@ function ChatContainer({
         return;
       }
 
+      const sessionTitle = extractSessionTitle(event);
+      const streamedSessionId = currentSessionIdRef.current;
+      if (sessionTitle && streamedSessionId) {
+        setSessions((previousSessions) =>
+          applyStreamedSessionTitle(
+            previousSessions,
+            streamedSessionId,
+            sessionTitle,
+            event.timestamp,
+          ),
+        );
+      }
+
       if (event.type === "skill_resolution_start") {
         setIsStreaming(true);
         liveTaskIdRef.current = event.task_id;
@@ -1013,16 +1069,10 @@ function ChatContainer({
           thinking: `${currentRecursion.thinking ?? ""}${event.delta ?? ""}`,
           tokens: event.tokens ?? currentRecursion.tokens,
         };
-      } else if (event.type === "thought") {
+      } else if (event.type === "reason") {
         nextRecursion = {
           ...nextRecursion,
-          thought: event.delta ?? "",
-          tokens: event.tokens ?? currentRecursion.tokens,
-        };
-      } else if (event.type === "abstract") {
-        nextRecursion = {
-          ...nextRecursion,
-          abstract: event.delta ?? "",
+          reason: event.delta ?? "",
           tokens: event.tokens ?? currentRecursion.tokens,
         };
       } else if (event.type === "summary") {
@@ -1186,6 +1236,7 @@ function ChatContainer({
           );
 
           setCurrentSessionId(autoSelectedSessionId);
+          currentSessionIdRef.current = autoSelectedSessionId;
           setReplyTaskId(null);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
@@ -1218,6 +1269,7 @@ function ChatContainer({
           }
         } else {
           setCurrentSessionId(null);
+          currentSessionIdRef.current = null;
           setReplyTaskId(null);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);

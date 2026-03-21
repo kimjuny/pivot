@@ -98,18 +98,18 @@ class ParsedReactDecision:
 
     Attributes:
         observe: Assistant observation text.
-        thought: Assistant reasoning text.
-        abstract: Brief summary of the recursion.
+        reason: Assistant reasoning text.
         summary: Optional user-facing progress summary.
+        session_title: Optional session title proposed by the assistant.
         action: Parsed action definition.
         task_summary: Optional summary payload for the completed task.
         raw_payload: Canonical dictionary representation of the parsed response.
     """
 
     observe: str
-    thought: str
-    abstract: str
+    reason: str
     summary: str
+    session_title: str
     action: ParsedAction
     task_summary: dict[str, Any]
     raw_payload: dict[str, Any]

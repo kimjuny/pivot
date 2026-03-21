@@ -136,7 +136,7 @@ class SessionService:
         title: str | None | object = SESSION_METADATA_UNSET,
         is_pinned: bool | object = SESSION_METADATA_UNSET,
     ) -> Session | None:
-        """Update user-managed sidebar metadata for one session.
+        """Update sidebar-visible metadata for one session.
 
         Args:
             session_id: UUID of the session.
@@ -162,6 +162,7 @@ class SessionService:
             has_changes = True
 
         if has_changes:
+            session.updated_at = datetime.now(UTC)
             self.db.add(session)
             self.db.commit()
             self.db.refresh(session)
@@ -328,8 +329,7 @@ class SessionService:
                         "trace_id": recursion.trace_id,
                         "observe": recursion.observe,
                         "thinking": recursion.thinking,
-                        "thought": recursion.thought,
-                        "abstract": recursion.abstract,
+                        "reason": recursion.reason,
                         "summary": recursion.summary,
                         "action_type": recursion.action_type,
                         "action_output": recursion.action_output,
@@ -396,7 +396,7 @@ class SessionService:
         """Return the reconnect cursor that safely replays active task events.
 
         Why: full-history cannot include in-flight recursion fields such as
-        ``abstract`` or ``summary`` until that recursion is finalized, so a
+        ``summary`` until that recursion is finalized, so a
         reconnecting observer must replay active-task events from the event log.
 
         Args:

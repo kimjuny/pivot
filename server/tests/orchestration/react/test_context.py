@@ -63,8 +63,7 @@ class ReactContextTestCase(unittest.TestCase):
             context=context,
             observe="observe",
             thinking=None,
-            thought="thought",
-            abstract="abstract",
+            reason="reason",
             action_type="RE_PLAN",
             action_output={
                 "plan": [

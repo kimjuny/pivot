@@ -73,8 +73,7 @@ export type ReactStreamEventType =
   | "recursion_start"
   | "reasoning"
   | "observe"
-  | "thought"
-  | "abstract"
+  | "reason"
   | "summary"
   | "action"
   | "tool_call"
@@ -163,8 +162,7 @@ export interface RecursionRecord {
   trace_id: string | null;
   thinking?: string;
   observe?: string;
-  thought?: string;
-  abstract?: string;
+  reason?: string;
   summary?: string;
   action?: string;
   events: ReactStreamEvent[];

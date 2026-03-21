@@ -77,8 +77,7 @@ class RecursionDetail(AppBaseModel):
     trace_id: str
     observe: str | None = None
     thinking: str | None = None
-    thought: str | None = None
-    abstract: str | None = None
+    reason: str | None = None
     summary: str | None = None
     action_type: str | None = None
     action_output: str | None = None

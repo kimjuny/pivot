@@ -41,8 +41,7 @@ export function RecursionCard({
   const hasStartedGenerating =
     Boolean(
       recursion.observe ||
-        recursion.thought ||
-        recursion.abstract ||
+        recursion.reason ||
         recursion.summary ||
         recursion.action,
     ) ||
@@ -105,9 +104,9 @@ export function RecursionCard({
           ) : (
             <span
               className="truncate text-xs font-semibold text-foreground"
-              title={recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+              title={recursion.summary || `Iteration ${recursion.iteration + 1}`}
             >
-              {recursion.abstract || `Iteration ${recursion.iteration + 1}`}
+              {recursion.summary || `Iteration ${recursion.iteration + 1}`}
             </span>
           )}
           {toolCallEvents.length > 0 && (
@@ -177,16 +176,16 @@ export function RecursionCard({
             </div>
           )}
 
-          {recursion.thought && (
+          {recursion.reason && (
             <div className="rounded border border-border bg-background/50 p-2">
               <div className="mb-1 flex items-center gap-1.5">
                 <Brain className="h-3.5 w-3.5 text-purple-500" />
                 <span className="text-xs font-semibold text-foreground">
-                  THOUGHT
+                  REASON
                 </span>
               </div>
               <p className="pl-5 text-xs leading-relaxed text-muted-foreground">
-                {recursion.thought}
+                {recursion.reason}
               </p>
             </div>
           )}

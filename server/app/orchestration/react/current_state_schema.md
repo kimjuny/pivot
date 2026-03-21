@@ -71,7 +71,7 @@
   "iteration": 0,
   "trace_id": "上一轮recursion的trace_id",
   "observe": "你对当前状态机和输入的客观观察",
-  "thought": "你的分析与决策理由",
+  "reason": "你的分析与决策理由",
   "summary": "本轮向用户暴露的阶段性进展",
   "action": {
     "action_type": "CALL_TOOL | RE_PLAN | REFLECT | ANSWER | CLARIFY",

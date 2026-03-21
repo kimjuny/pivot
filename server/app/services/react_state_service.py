@@ -82,8 +82,7 @@ class ReactStateService:
         context: ReactContext,
         observe: str,
         thinking: str | None,
-        thought: str,
-        abstract: str,
+        reason: str,
         action_type: str,
         action_output: dict[str, Any],
         action_step_id: str | None,
@@ -100,8 +99,7 @@ class ReactStateService:
             context: Mutable in-memory context snapshot for this cycle.
             observe: Assistant observe content.
             thinking: Raw provider reasoning content, if available.
-            thought: Assistant thought content.
-            abstract: Assistant abstract content.
+            reason: Assistant reason content.
             action_type: Final normalized action type.
             action_output: Mutable action output payload. Tool results may be
                 merged into it for snapshot/event consistency.
@@ -118,8 +116,7 @@ class ReactStateService:
 
         recursion.observe = observe
         recursion.thinking = thinking
-        recursion.thought = thought
-        recursion.abstract = abstract
+        recursion.reason = reason
         recursion.action_type = action_type
         recursion.action_output = json.dumps(raw_action_output, ensure_ascii=False)
         recursion.plan_step_id = self._resolve_plan_step_id(
@@ -541,7 +538,7 @@ class ReactStateService:
             "iteration": task.iteration,
             "trace_id": recursion.trace_id,
             "observe": recursion.observe or "",
-            "thought": recursion.thought or "",
+            "reason": recursion.reason or "",
             "summary": summary,
             "action": {
                 "action_type": action_type,

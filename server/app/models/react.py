@@ -112,7 +112,8 @@ class ReactTask(SQLModel, table=True):
 class ReactRecursion(SQLModel, table=True):
     """Recursion model representing a single ReAct recursion cycle.
 
-    Each recursion corresponds to one observe-think-act cycle in the ReAct state machine.
+    Each recursion corresponds to one observe-reason-act cycle in the ReAct state
+    machine.
 
     Attributes:
         id: Primary key of the recursion.
@@ -122,7 +123,7 @@ class ReactRecursion(SQLModel, table=True):
         iteration_index: Index of this recursion in the task (0-based).
         observe: LLM's observation of current state.
         thinking: Raw protocol-level reasoning text returned by the provider.
-        thought: LLM's reasoning/analysis.
+        reason: LLM's reasoning/analysis.
         action_type: Type of action (CALL_TOOL, RE_PLAN, ANSWER, REFLECT).
         action_output: JSON string of action output.
         tool_call_results: JSON string of tool execution results.
@@ -144,11 +145,7 @@ class ReactRecursion(SQLModel, table=True):
         default=None,
         description="Provider reasoning/thinking text for this recursion",
     )
-    thought: str | None = Field(default=None, description="LLM reasoning")
-    abstract: str | None = Field(
-        default=None,
-        description="Brief summary of this recursion cycle",
-    )
+    reason: str | None = Field(default=None, description="LLM reasoning")
     action_type: str | None = Field(
         default=None,
         description="Action type: CALL_TOOL, RE_PLAN, ANSWER, REFLECT",

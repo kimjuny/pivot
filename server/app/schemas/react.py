@@ -177,8 +177,7 @@ class ReactStreamEventType(str, Enum):
     RECURSION_START = "recursion_start"
     REASONING = "reasoning"
     OBSERVE = "observe"
-    THOUGHT = "thought"
-    ABSTRACT = "abstract"
+    REASON = "reason"
     SUMMARY = "summary"
     ACTION = "action"
     TOOL_CALL = "tool_call"
@@ -279,8 +278,7 @@ class ReactRecursionResponse(AppBaseModel):
     iteration_index: int
     observe: str | None
     thinking: str | None
-    thought: str | None
-    abstract: str | None
+    reason: str | None
     summary: str | None
     action_type: str | None
     action_output: str | None

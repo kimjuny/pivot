@@ -172,7 +172,7 @@ class SessionServiceTestCase(unittest.TestCase):
 
         self.assertEqual(updated_session.title, "Renamed thread")
         self.assertFalse(updated_session.is_pinned)
-        self.assertEqual(updated_session.updated_at, original_updated_at)
+        self.assertGreater(updated_session.updated_at, original_updated_at)
 
     def test_update_session_metadata_only_changes_pin_when_requested(self) -> None:
         """Pin toggles should remain explicit so sidebar actions stay predictable."""

@@ -41,13 +41,16 @@ function ConfigFieldGroup({
   values,
   onChange,
 }: ConfigFieldGroupProps) {
+  const fieldGridClassName =
+    fields.length > 1 ? 'grid gap-3 md:grid-cols-2' : 'grid gap-3';
+
   return (
     <div className="space-y-3">
       <div>
         <div className="text-sm font-medium text-foreground">{title}</div>
         <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className={fieldGridClassName}>
         {fields.map((field) => (
           <div key={field.key} className={field.type === 'textarea' ? 'space-y-2 md:col-span-2' : 'space-y-2'}>
             <Label htmlFor={field.key}>

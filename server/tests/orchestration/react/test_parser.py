@@ -22,9 +22,9 @@ class ReactParserTestCase(unittest.TestCase):
         content = """
 {
   "observe": "Need file content",
-  "thought": "Call the file tool",
-  "abstract": "Read a file",
+  "reason": "Call the file tool",
   "summary": "Reading the requested file",
+  "session_title": "Read demo file",
   "action": {
     "action_type": "CALL_TOOL",
     "step_id": "1",
@@ -57,6 +57,7 @@ class ReactParserTestCase(unittest.TestCase):
 
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
         self.assertEqual(decision.summary, "Reading the requested file")
+        self.assertEqual(decision.session_title, "Read demo file")
         self.assertEqual(decision.action.step_id, "1")
         self.assertEqual(len(decision.action.tool_calls), 1)
         self.assertEqual(

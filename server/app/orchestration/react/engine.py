@@ -710,6 +710,32 @@ class ReactEngine:
             )
         return current_plan
 
+    def _persist_session_title(
+        self,
+        task: ReactTask,
+        session_title: str,
+    ) -> str:
+        """Persist one assistant-proposed session title when available.
+
+        Args:
+            task: Current running task.
+            session_title: Raw session title from the parsed model decision.
+
+        Returns:
+            The normalized persisted title, or ``""`` when no update happened.
+        """
+        normalized_title = session_title.strip()
+        if not normalized_title or not task.session_id:
+            return ""
+
+        updated_session = SessionService(self.db).update_session_metadata(
+            task.session_id,
+            title=normalized_title,
+        )
+        if updated_session is None or updated_session.title is None:
+            return ""
+        return updated_session.title
+
     def _build_recursion_user_payload(
         self,
         task: ReactTask,
@@ -838,7 +864,7 @@ class ReactEngine:
                 choice = response.first()
                 message = choice.message
 
-                # Parse JSON from content to get observe, thought, abstract, action_type
+                # Parse JSON from content to get observe, reason, summary, action_type
                 content = message.content or "{}"
                 assistant_message_raw = content
 
@@ -891,9 +917,9 @@ class ReactEngine:
 
             observe = decision.observe
             thinking = message.reasoning_content
-            thought = decision.thought
-            abstract = decision.abstract
+            reason = decision.reason
             summary = decision.summary
+            session_title = decision.session_title
             action = decision.action
             action_type = action.action_type
             action_output = dict(action.output)
@@ -970,8 +996,7 @@ class ReactEngine:
                 context=context,
                 observe=observe,
                 thinking=thinking,
-                thought=thought,
-                abstract=abstract,
+                reason=reason,
                 action_type=action_type,
                 action_output=action_output,
                 action_step_id=action_step_id,
@@ -980,6 +1005,7 @@ class ReactEngine:
                 tool_results=tool_results,
                 token_counter=token_counter,
             )
+            persisted_session_title = self._persist_session_title(task, session_title)
 
             # Prepare event data
             event_data = {
@@ -988,9 +1014,9 @@ class ReactEngine:
                 "llm_response_id": response.id,
                 "observe": observe,
                 "thinking": thinking,
-                "thought": thought,
-                "abstract": abstract,
+                "reason": reason,
                 "summary": summary,
+                "session_title": persisted_session_title,
                 "output": action_output,
                 "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
@@ -1378,7 +1404,7 @@ class ReactEngine:
                         None,
                     )
 
-                # Yield Observe, Thought, Action events with token info
+                # Yield Observe, Reason, Action events with token info
                 if recursion.thinking and not self.stream_llm_responses:
                     yield {
                         "type": "reasoning",
@@ -1405,26 +1431,13 @@ class ReactEngine:
                         "tokens": event_data.get("tokens"),
                     }
 
-                if recursion.thought:
+                if recursion.reason:
                     yield {
-                        "type": "thought",
+                        "type": "reason",
                         "task_id": task.task_id,
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
-                        "delta": recursion.thought,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "created_at": recursion.created_at.isoformat(),
-                        "updated_at": recursion.updated_at.isoformat(),
-                        "tokens": event_data.get("tokens"),
-                    }
-
-                if recursion.abstract:
-                    yield {
-                        "type": "abstract",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "delta": recursion.abstract,
+                        "delta": recursion.reason,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),
@@ -1444,6 +1457,7 @@ class ReactEngine:
                         "tokens": event_data.get("tokens"),
                         "data": {
                             "current_plan": event_data.get("current_plan", []),
+                            "session_title": event_data.get("session_title", ""),
                         },
                     }
 

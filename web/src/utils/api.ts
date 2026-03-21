@@ -1074,8 +1074,7 @@ export interface RecursionDetail {
   trace_id: string;
   observe: string | null;
   thinking: string | null;
-  thought: string | null;
-  abstract: string | null;
+  reason: string | null;
   summary: string | null;
   action_type: string | null;
   action_output: string | null;
