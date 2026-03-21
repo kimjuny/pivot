@@ -380,7 +380,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[480px]">
         <DialogHeader>
           <DialogTitle>{mode === 'create' ? 'New LLM' : 'Edit LLM'}</DialogTitle>
         </DialogHeader>

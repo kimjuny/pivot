@@ -362,7 +362,11 @@ function AgentList() {
                           <MoreHorizontal className="w-3 h-3" aria-hidden="true" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" onClick={e => e.stopPropagation()}>
+                      <DropdownMenuContent
+                        align="end"
+                        size="medium"
+                        onClick={e => e.stopPropagation()}
+                      >
                         <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
                           <Pencil className="w-4 h-4" aria-hidden="true" />
                           Edit

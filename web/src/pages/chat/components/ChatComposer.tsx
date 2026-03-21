@@ -202,7 +202,7 @@ export function ChatComposer({
                   <span className="sr-only">Attach</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="z-[60]">
+              <DropdownMenuContent align="start" size="medium" className="z-[60]">
                 {supportsImageInput && (
                   <DropdownMenuItem
                     onClick={() => imageInputRef.current?.click()}
@@ -226,6 +226,7 @@ export function ChatComposer({
                 onValueChange={onWebSearchProviderChange}
               >
                 <SelectTrigger
+                  size="medium"
                   aria-label="Web search provider"
                   className="h-7 w-auto min-w-[6.5rem] max-w-[7.25rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
                 >
@@ -239,7 +240,7 @@ export function ChatComposer({
                     <SelectValue placeholder="Search" />
                   )}
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent size="medium">
                   {webSearchProviders.map((provider) => (
                     <SelectItem key={provider.key} value={provider.key}>
                       <WebSearchProviderBadge
