@@ -16,6 +16,10 @@ class LLM(SQLModel, table=True):
         protocol: Protocol specification
             (e.g., 'openai_completion_llm', 'openai_response_llm').
         cache_policy: Protocol-specific cache strategy.
+        thinking_policy: Protocol-specific thinking strategy used for the
+            chat-level Thinking mode toggle.
+        thinking_effort: Optional effort tier for effort-based thinking policies.
+        thinking_budget_tokens: Optional token budget for extended thinking.
         streaming: Whether the model supports streaming responses.
         image_input: Whether the model accepts user-supplied image inputs.
         image_output: Whether the model can produce image outputs.
@@ -41,6 +45,18 @@ class LLM(SQLModel, table=True):
     cache_policy: str = Field(
         default="none",
         description="Cache policy selected for this protocol",
+    )
+    thinking_policy: str = Field(
+        default="auto",
+        description="Thinking policy selected for this protocol",
+    )
+    thinking_effort: str | None = Field(
+        default=None,
+        description="Optional effort tier for effort-based thinking policies",
+    )
+    thinking_budget_tokens: int | None = Field(
+        default=None,
+        description="Optional budget token count for extended thinking policies",
     )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     image_input: bool = Field(

@@ -97,6 +97,7 @@ async def start_react_task(
                 session_id=request.session_id,
                 file_ids=request.file_ids,
                 web_search_provider=request.web_search_provider,
+                thinking_mode=request.thinking_mode,
                 task_id=request.task_id,
             )
         )
@@ -187,6 +188,7 @@ async def react_chat_stream(
                 session_id=session_id,
                 file_ids=request.file_ids,
                 web_search_provider=request.web_search_provider,
+                thinking_mode=request.thinking_mode,
                 task_id=request.task_id,
             )
         )

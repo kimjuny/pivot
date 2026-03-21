@@ -25,6 +25,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  THINKING_PROVIDER_OPTIONS,
+  buildThinkingPolicyFromEditorState,
+  getDefaultThinkingEditorState,
+  getThinkingEditorStateFromPolicy,
+  providerNeedsThinkingDetail,
+  type ThinkingProvider,
+} from '@/utils/llmThinking';
 
 /**
  * Editable LLM payload shared by the create and edit dialogs.
@@ -36,6 +44,9 @@ export interface LLMFormData {
   api_key: string;
   protocol: string;
   cache_policy: string;
+  thinking_policy: string;
+  thinking_effort: string;
+  thinking_budget_tokens: number | null;
   streaming: boolean;
   image_input: boolean;
   image_output: boolean;
@@ -241,6 +252,9 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     api_key: '',
     protocol: 'openai_completion_llm',
     cache_policy: 'none',
+    thinking_policy: 'auto',
+    thinking_effort: '',
+    thinking_budget_tokens: null,
     streaming: true,
     image_input: false,
     image_output: false,
@@ -269,6 +283,9 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
         api_key: initialData.api_key ?? '',
         protocol: initialData.protocol ?? 'openai_completion_llm',
         cache_policy: initialData.cache_policy ?? 'none',
+        thinking_policy: initialData.thinking_policy ?? 'auto',
+        thinking_effort: initialData.thinking_effort ?? '',
+        thinking_budget_tokens: initialData.thinking_budget_tokens ?? null,
         streaming: initialData.streaming ?? true,
         image_input: initialData.image_input ?? false,
         image_output: initialData.image_output ?? false,
@@ -284,6 +301,9 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
         api_key: '',
         protocol: 'openai_completion_llm',
         cache_policy: 'none',
+        thinking_policy: 'auto',
+        thinking_effort: '',
+        thinking_budget_tokens: null,
         streaming: true,
         image_input: false,
         image_output: false,
@@ -304,12 +324,84 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     }
   }, [formData.protocol, formData.cache_policy]);
 
+  useEffect(() => {
+    const currentState = getThinkingEditorStateFromPolicy(
+      formData.protocol,
+      formData.thinking_policy,
+      formData.thinking_effort,
+      formData.thinking_budget_tokens,
+    );
+    const options = THINKING_PROVIDER_OPTIONS[formData.protocol] ?? [
+      { value: 'auto', label: 'Auto' },
+    ];
+    const isCurrentValid = options.some(
+      (option) => option.value === currentState.provider,
+    );
+    if (isCurrentValid) {
+      return;
+    }
+
+    const defaultState = getDefaultThinkingEditorState(formData.protocol, 'auto');
+    const normalizedThinking = buildThinkingPolicyFromEditorState(
+      formData.protocol,
+      defaultState.provider,
+      defaultState.detailValue,
+      defaultState.effortValue,
+      defaultState.budgetTokens,
+    );
+    setFormData((prev) => ({
+      ...prev,
+      ...normalizedThinking,
+    }));
+  }, [
+    formData.protocol,
+    formData.thinking_policy,
+    formData.thinking_effort,
+    formData.thinking_budget_tokens,
+  ]);
+
   const updateFormField = <K extends keyof LLMFormData>(
     field: K,
     value: LLMFormData[K],
   ) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
+
+  const applyThinkingEditorState = (
+    provider: ThinkingProvider,
+    detailValue: string,
+    effortValue: string,
+    budgetTokens: number | null,
+  ) => {
+    const normalizedThinking = buildThinkingPolicyFromEditorState(
+      formData.protocol,
+      provider,
+      detailValue,
+      effortValue,
+      budgetTokens,
+    );
+    setFormData((prev) => ({
+      ...prev,
+      ...normalizedThinking,
+    }));
+  };
+
+  const handleThinkingProviderChange = (provider: ThinkingProvider) => {
+    const defaultState = getDefaultThinkingEditorState(formData.protocol, provider);
+    applyThinkingEditorState(
+      defaultState.provider,
+      defaultState.detailValue,
+      defaultState.effortValue,
+      defaultState.budgetTokens,
+    );
+  };
+
+  const currentThinkingState = getThinkingEditorStateFromPolicy(
+    formData.protocol,
+    formData.thinking_policy,
+    formData.thinking_effort,
+    formData.thinking_budget_tokens,
+  );
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
@@ -551,6 +643,227 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                     autoComplete="off"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-4 rounded-lg border border-border/60 p-4">
+                <div className="space-y-2">
+                  <FormLabel
+                    htmlFor="thinking_provider"
+                    label="Thinking"
+                    tooltip="Choose a provider-specific thinking configuration. Auto means Pivot sends no thinking override for this LLM."
+                  />
+                  <Select
+                    value={currentThinkingState.provider}
+                    onValueChange={(value) =>
+                      handleThinkingProviderChange(value as ThinkingProvider)
+                    }
+                    disabled={isSubmitting}
+                  >
+                    <SelectTrigger id="thinking_provider">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(THINKING_PROVIDER_OPTIONS[formData.protocol] ?? []).map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {providerNeedsThinkingDetail(currentThinkingState.provider) && (
+                  <>
+                    {currentThinkingState.provider === 'qwen' && (
+                      <div className="space-y-2">
+                        <FormLabel
+                          htmlFor="thinking_qwen_enabled"
+                          label="Enable Thinking"
+                          tooltip="Qwen controls thinking through a boolean enable_thinking field."
+                        />
+                        <Select
+                          value={currentThinkingState.detailValue}
+                          onValueChange={(value) =>
+                            applyThinkingEditorState(
+                              currentThinkingState.provider,
+                              value,
+                              currentThinkingState.effortValue,
+                              currentThinkingState.budgetTokens,
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          <SelectTrigger id="thinking_qwen_enabled">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="true">true</SelectItem>
+                            <SelectItem value="false">false</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {['doubao', 'glm', 'mimo', 'kimi', 'minimax'].includes(
+                      currentThinkingState.provider,
+                    ) && (
+                      <div className="space-y-2">
+                        <FormLabel
+                          htmlFor="thinking_type"
+                          label="Thinking Type"
+                          tooltip="Most provider-compatible thinking APIs use enabled or disabled as the protocol value."
+                        />
+                        <Select
+                          value={currentThinkingState.detailValue}
+                          onValueChange={(value) =>
+                            applyThinkingEditorState(
+                              currentThinkingState.provider,
+                              value,
+                              currentThinkingState.effortValue,
+                              currentThinkingState.budgetTokens,
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          <SelectTrigger id="thinking_type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="enabled">enabled</SelectItem>
+                            <SelectItem value="disabled">disabled</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {currentThinkingState.provider === 'chatgpt' && (
+                      <div className="space-y-2">
+                        <FormLabel
+                          htmlFor="thinking_effort"
+                          label="Reasoning Effort"
+                          tooltip="ChatGPT Responses reasoning is controlled through the reasoning.effort field."
+                        />
+                        <Select
+                          value={currentThinkingState.effortValue}
+                          onValueChange={(value) =>
+                            applyThinkingEditorState(
+                              currentThinkingState.provider,
+                              currentThinkingState.detailValue,
+                              value,
+                              currentThinkingState.budgetTokens,
+                            )
+                          }
+                          disabled={isSubmitting}
+                        >
+                          <SelectTrigger id="thinking_effort">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">none</SelectItem>
+                            <SelectItem value="low">low</SelectItem>
+                            <SelectItem value="medium">medium</SelectItem>
+                            <SelectItem value="high">high</SelectItem>
+                            <SelectItem value="xhigh">xhigh</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {currentThinkingState.provider === 'claude' && (
+                      <>
+                        <div className="space-y-2">
+                          <FormLabel
+                            htmlFor="thinking_claude_mode"
+                            label="Thinking Mode"
+                            tooltip="Claude supports extended thinking with budget tokens, or adaptive thinking with an effort level."
+                          />
+                          <Select
+                            value={currentThinkingState.detailValue}
+                            onValueChange={(value) =>
+                              applyThinkingEditorState(
+                                currentThinkingState.provider,
+                                value,
+                                value === 'adaptive'
+                                  ? currentThinkingState.effortValue || 'high'
+                                  : '',
+                                value === 'enabled'
+                                  ? currentThinkingState.budgetTokens ?? 10000
+                                  : null,
+                              )
+                            }
+                            disabled={isSubmitting}
+                          >
+                            <SelectTrigger id="thinking_claude_mode">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="enabled">enabled</SelectItem>
+                              <SelectItem value="adaptive">adaptive</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {currentThinkingState.detailValue === 'enabled' && (
+                          <div className="space-y-2">
+                            <FormLabel
+                              htmlFor="thinking_budget_tokens"
+                              label="Budget Tokens"
+                              tooltip="Claude extended thinking requires an explicit budget_tokens value."
+                            />
+                            <Input
+                              id="thinking_budget_tokens"
+                              type="number"
+                              value={currentThinkingState.budgetTokens ?? ''}
+                              onChange={(e) =>
+                                applyThinkingEditorState(
+                                  currentThinkingState.provider,
+                                  currentThinkingState.detailValue,
+                                  currentThinkingState.effortValue,
+                                  Number.parseInt(e.target.value, 10) || 10000,
+                                )
+                              }
+                              disabled={isSubmitting}
+                              placeholder="10000"
+                              autoComplete="off"
+                            />
+                          </div>
+                        )}
+
+                        {currentThinkingState.detailValue === 'adaptive' && (
+                          <div className="space-y-2">
+                            <FormLabel
+                              htmlFor="thinking_adaptive_effort"
+                              label="Effort"
+                              tooltip="Claude adaptive thinking uses output_config.effort."
+                            />
+                            <Select
+                              value={currentThinkingState.effortValue}
+                              onValueChange={(value) =>
+                                applyThinkingEditorState(
+                                  currentThinkingState.provider,
+                                  currentThinkingState.detailValue,
+                                  value,
+                                  null,
+                                )
+                              }
+                              disabled={isSubmitting}
+                            >
+                              <SelectTrigger id="thinking_adaptive_effort">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="max">max</SelectItem>
+                                <SelectItem value="high">high</SelectItem>
+                                <SelectItem value="medium">medium</SelectItem>
+                                <SelectItem value="low">low</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="space-y-3">

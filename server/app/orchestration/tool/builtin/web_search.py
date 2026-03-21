@@ -155,9 +155,7 @@ def web_search(
     return result.model_dump()
 
 
-_PROVIDER_ENUM = [
-    provider.manifest.key for provider in list_web_search_providers()
-]
+_PROVIDER_ENUM = [provider.manifest.key for provider in list_web_search_providers()]
 
 cast(Any, web_search).__tool_metadata__.parameters = {
     "type": "object",

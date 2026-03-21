@@ -249,7 +249,9 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
             ],
         )
         self.assertEqual(updated_state.messages, original_messages)
-        self.assertEqual(self.runtime_service.load(self.task).messages, original_messages)
+        self.assertEqual(
+            self.runtime_service.load(self.task).messages, original_messages
+        )
         self.assertIsNone(self.task.stashed_messages)
 
 

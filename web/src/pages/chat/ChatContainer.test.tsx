@@ -94,6 +94,8 @@ describe("ChatContainer session rollover", () => {
     applyPointerCapturePolyfill();
     vi.mocked(getLLMById).mockResolvedValue({
       image_input: false,
+      thinking_policy: "auto",
+      thinking_effort: null,
     } as Awaited<ReturnType<typeof getLLMById>>);
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(getReactContextUsage).mockResolvedValue(buildContextUsage());
@@ -247,6 +249,7 @@ describe("ChatContainer session rollover", () => {
       task_id: null,
       file_ids: [],
       web_search_provider: null,
+      thinking_mode: null,
     });
   });
 
@@ -375,8 +378,182 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: "baidu",
+        thinking_mode: null,
       });
     });
+  });
+
+  it("defaults to Thinking mode when the primary LLM exposes a non-fast thinking tier", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(getLLMById).mockResolvedValue({
+      image_input: false,
+      thinking_policy: "openai-response-reasoning-effort",
+      thinking_effort: "high",
+    } as Awaited<ReturnType<typeof getLLMById>>);
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-thinking",
+      session_id: "fresh-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 3,
+      session_id: "fresh-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Thinking mode" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Think first");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(startReactTask).toHaveBeenCalledWith({
+        agent_id: 7,
+        message: "Think first",
+        session_id: "fresh-session",
+        task_id: null,
+        file_ids: [],
+        web_search_provider: null,
+        thinking_mode: "thinking",
+      });
+    });
+  });
+
+  it("lets the user switch the chat payload to Fast mode", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(getLLMById).mockResolvedValue({
+      image_input: false,
+      thinking_policy: "openai-response-reasoning-effort",
+      thinking_effort: "high",
+    } as Awaited<ReturnType<typeof getLLMById>>);
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-fast",
+      session_id: "fresh-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 4,
+      session_id: "fresh-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Thinking mode" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("combobox", { name: "Thinking mode" }));
+    await user.click(screen.getByRole("option", { name: "Fast" }));
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Be quick");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(startReactTask).toHaveBeenCalledWith({
+        agent_id: 7,
+        message: "Be quick",
+        session_id: "fresh-session",
+        task_id: null,
+        file_ids: [],
+        web_search_provider: null,
+        thinking_mode: "fast",
+      });
+    });
+  });
+
+  it("shows only Fast when the stored thinking tier is already disabled", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(getLLMById).mockResolvedValue({
+      image_input: false,
+      thinking_policy: "qwen-disable-thinking",
+      thinking_effort: null,
+    } as Awaited<ReturnType<typeof getLLMById>>);
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("combobox", { name: "Thinking mode" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("combobox", { name: "Thinking mode" }));
+    expect(screen.getByRole("option", { name: "Fast" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Thinking" }),
+    ).not.toBeInTheDocument();
   });
 
   it("hides the provider selector when the agent cannot use web_search", async () => {

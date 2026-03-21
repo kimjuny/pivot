@@ -280,6 +280,18 @@ class LLMCreate(AppBaseModel):
         default="none",
         description="Cache policy selected for this protocol",
     )
+    thinking_policy: str = Field(
+        default="auto",
+        description="Thinking policy selected for this protocol",
+    )
+    thinking_effort: str | None = Field(
+        default=None,
+        description="Optional effort tier for effort-based thinking policies",
+    )
+    thinking_budget_tokens: int | None = Field(
+        default=None,
+        description="Optional budget token count for extended thinking policies",
+    )
     streaming: bool = Field(default=True, description="Supports streaming responses")
     image_input: bool = Field(
         default=False,
@@ -304,6 +316,7 @@ class LLMCreate(AppBaseModel):
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
+
 class LLMUpdate(AppBaseModel):
     """Schema for updating an existing LLM."""
 
@@ -313,6 +326,9 @@ class LLMUpdate(AppBaseModel):
     api_key: str | None = None
     protocol: str | None = None
     cache_policy: str | None = None
+    thinking_policy: str | None = None
+    thinking_effort: str | None = None
+    thinking_budget_tokens: int | None = None
     streaming: bool | None = None
     image_input: bool | None = None
     image_output: bool | None = None
@@ -328,6 +344,7 @@ class LLMUpdate(AppBaseModel):
         """Validate that extra_config is a JSON object string."""
         return _normalize_extra_config(extra_config)
 
+
 class LLMResponse(AppBaseModel):
     """Schema for LLM response."""
 
@@ -338,6 +355,9 @@ class LLMResponse(AppBaseModel):
     api_key: str
     protocol: str
     cache_policy: str
+    thinking_policy: str
+    thinking_effort: str | None
+    thinking_budget_tokens: int | None
     streaming: bool
     image_input: bool
     image_output: bool

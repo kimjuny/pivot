@@ -39,6 +39,7 @@ import type {
   RecursionRecord,
   TokenUsage,
 } from "./types";
+import type { ChatThinkingMode } from "@/utils/llmThinking";
 import {
   buildMessagesFromHistory,
   isReactStreamEvent,
@@ -273,6 +274,8 @@ function ChatContainer({
   const [selectedWebSearchProvider, setSelectedWebSearchProvider] = useState<
     string | null
   >(null);
+  const [selectedThinkingMode, setSelectedThinkingMode] =
+    useState<ChatThinkingMode | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
   const currentSessionIdRef = useRef<string | null>(null);
   const sessionStreamAbortControllerRef = useRef<AbortController | null>(null);
@@ -293,6 +296,9 @@ function ChatContainer({
     readyPendingFiles,
     hasUploadingFiles,
     supportsImageInput,
+    supportsThinkingSelector,
+    thinkingModes,
+    defaultThinkingMode,
     imageInputRef,
     documentInputRef,
     removePendingFile,
@@ -308,6 +314,23 @@ function ChatContainer({
     sessionIdleTimeoutMinutes,
   );
   const canUseWebSearch = canAccessWebSearchTool(agentToolIds);
+
+  /**
+   * Keep the selected thinking mode aligned with the primary LLM capability set.
+   */
+  useEffect(() => {
+    if (!supportsThinkingSelector || thinkingModes.length === 0) {
+      setSelectedThinkingMode(null);
+      return;
+    }
+
+    setSelectedThinkingMode((previous) => {
+      if (previous && thinkingModes.includes(previous)) {
+        return previous;
+      }
+      return defaultThinkingMode;
+    });
+  }, [defaultThinkingMode, supportsThinkingSelector, thinkingModes]);
 
   /**
    * Cancels any pending delayed compact-status clear so the latest status wins.
@@ -1783,6 +1806,7 @@ function ChatContainer({
         session_id: activeSessionId,
         file_ids: filesToSend.map((file) => file.fileId),
         web_search_provider: selectedWebSearchProvider,
+        thinking_mode: selectedThinkingMode,
       });
 
       if (!sessionStreamAbortControllerRef.current && activeSessionId) {
@@ -1923,11 +1947,14 @@ function ChatContainer({
           contextUsage={contextUsage}
           isContextUsageLoading={isContextUsageLoading}
           supportsImageInput={supportsImageInput}
+          thinkingModes={thinkingModes}
+          selectedThinkingMode={selectedThinkingMode}
           webSearchProviders={webSearchProviders}
           selectedWebSearchProvider={selectedWebSearchProvider}
           imageInputRef={imageInputRef}
           documentInputRef={documentInputRef}
           onInputChange={setInputMessage}
+          onThinkingModeChange={setSelectedThinkingMode}
           onWebSearchProviderChange={setSelectedWebSearchProvider}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}

@@ -34,7 +34,9 @@ async def get_web_search_provider_logo(provider_key: str) -> FileResponse:
 
     logo_path = provider.get_logo_path()
     if logo_path is None:
-        raise HTTPException(status_code=404, detail="Web search provider logo not found")
+        raise HTTPException(
+            status_code=404, detail="Web search provider logo not found"
+        )
 
     return FileResponse(str(logo_path), media_type="image/svg+xml")
 

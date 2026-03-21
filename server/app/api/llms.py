@@ -11,12 +11,36 @@ from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.crud.llm import llm as llm_crud
 from app.llm.cache_policy import validate_cache_policy
+from app.llm.thinking_policy import validate_thinking_policy
 from app.models.user import User
 from app.schemas.schemas import LLMCreate, LLMResponse, LLMUpdate
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 router = APIRouter()
+
+
+def _serialize_llm(llm: Any) -> dict[str, Any]:
+    """Convert one LLM row into the public API payload shape."""
+    return {
+        "id": llm.id,
+        "name": llm.name,
+        "endpoint": llm.endpoint,
+        "model": llm.model,
+        "api_key": llm.api_key,
+        "protocol": llm.protocol,
+        "cache_policy": llm.cache_policy,
+        "thinking_policy": llm.thinking_policy,
+        "thinking_effort": llm.thinking_effort,
+        "thinking_budget_tokens": llm.thinking_budget_tokens,
+        "streaming": llm.streaming,
+        "image_input": llm.image_input,
+        "image_output": llm.image_output,
+        "max_context": llm.max_context,
+        "extra_config": llm.extra_config,
+        "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
+    }
 
 
 @router.get("/llms", response_model=list[LLMResponse])
@@ -37,25 +61,7 @@ async def get_llms(
         A list of LLMs.
     """
     llms = llm_crud.get_all(db, skip=skip, limit=limit)
-    return [
-        {
-            "id": llm.id,
-            "name": llm.name,
-            "endpoint": llm.endpoint,
-            "model": llm.model,
-            "api_key": llm.api_key,
-            "protocol": llm.protocol,
-            "cache_policy": llm.cache_policy,
-            "streaming": llm.streaming,
-            "image_input": llm.image_input,
-            "image_output": llm.image_output,
-            "max_context": llm.max_context,
-            "extra_config": llm.extra_config,
-            "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
-            "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
-        }
-        for llm in llms
-    ]
+    return [_serialize_llm(llm) for llm in llms]
 
 
 @router.post("/llms", response_model=LLMResponse, status_code=201)
@@ -85,6 +91,16 @@ async def create_llm(
             llm_data.protocol,
             llm_data.cache_policy,
         )
+        (
+            normalized_thinking_policy,
+            normalized_thinking_effort,
+            normalized_thinking_budget_tokens,
+        ) = validate_thinking_policy(
+            llm_data.protocol,
+            llm_data.thinking_policy,
+            llm_data.thinking_effort,
+            llm_data.thinking_budget_tokens,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -96,28 +112,16 @@ async def create_llm(
         api_key=llm_data.api_key,
         protocol=llm_data.protocol,
         cache_policy=normalized_cache_policy,
+        thinking_policy=normalized_thinking_policy,
+        thinking_effort=normalized_thinking_effort,
+        thinking_budget_tokens=normalized_thinking_budget_tokens,
         streaming=llm_data.streaming,
         image_input=llm_data.image_input,
         image_output=llm_data.image_output,
         max_context=llm_data.max_context,
         extra_config=llm_data.extra_config,
     )
-    return {
-        "id": llm.id,
-        "name": llm.name,
-        "endpoint": llm.endpoint,
-        "model": llm.model,
-        "api_key": llm.api_key,
-        "protocol": llm.protocol,
-        "cache_policy": llm.cache_policy,
-        "streaming": llm.streaming,
-        "image_input": llm.image_input,
-        "image_output": llm.image_output,
-        "max_context": llm.max_context,
-        "extra_config": llm.extra_config,
-        "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
-        "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
-    }
+    return _serialize_llm(llm)
 
 
 @router.get("/llms/{llm_id}", response_model=LLMResponse)
@@ -142,22 +146,7 @@ async def get_llm(
     if not llm:
         raise HTTPException(status_code=404, detail="LLM not found")
 
-    return {
-        "id": llm.id,
-        "name": llm.name,
-        "endpoint": llm.endpoint,
-        "model": llm.model,
-        "api_key": llm.api_key,
-        "protocol": llm.protocol,
-        "cache_policy": llm.cache_policy,
-        "streaming": llm.streaming,
-        "image_input": llm.image_input,
-        "image_output": llm.image_output,
-        "max_context": llm.max_context,
-        "extra_config": llm.extra_config,
-        "created_at": llm.created_at.replace(tzinfo=UTC).isoformat(),
-        "updated_at": llm.updated_at.replace(tzinfo=UTC).isoformat(),
-    }
+    return _serialize_llm(llm)
 
 
 @router.put("/llms/{llm_id}", response_model=LLMResponse)
@@ -206,14 +195,36 @@ async def update_llm(
         update_data["protocol"] = llm_data.protocol
     if llm_data.cache_policy is not None:
         update_data["cache_policy"] = llm_data.cache_policy
+    if llm_data.thinking_policy is not None:
+        update_data["thinking_policy"] = llm_data.thinking_policy
+    if "thinking_effort" in llm_data.__fields_set__:
+        update_data["thinking_effort"] = llm_data.thinking_effort
+    if "thinking_budget_tokens" in llm_data.__fields_set__:
+        update_data["thinking_budget_tokens"] = llm_data.thinking_budget_tokens
 
-    # Ensure protocol/cache_policy pair remains valid after partial update.
+    # Ensure protocol/thinking/cache combinations remain valid after partial update.
     target_protocol = update_data.get("protocol", llm.protocol)
     target_cache_policy = update_data.get("cache_policy", llm.cache_policy)
+    target_thinking_policy = update_data.get("thinking_policy", llm.thinking_policy)
+    target_thinking_effort = update_data.get("thinking_effort", llm.thinking_effort)
+    target_thinking_budget_tokens = update_data.get(
+        "thinking_budget_tokens",
+        llm.thinking_budget_tokens,
+    )
     try:
         update_data["cache_policy"] = validate_cache_policy(
             target_protocol,
             target_cache_policy,
+        )
+        (
+            update_data["thinking_policy"],
+            update_data["thinking_effort"],
+            update_data["thinking_budget_tokens"],
+        ) = validate_thinking_policy(
+            target_protocol,
+            target_thinking_policy,
+            target_thinking_effort,
+            target_thinking_budget_tokens,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -234,22 +245,7 @@ async def update_llm(
     if not updated_llm:
         raise HTTPException(status_code=404, detail="LLM not found")
 
-    return {
-        "id": updated_llm.id,
-        "name": updated_llm.name,
-        "endpoint": updated_llm.endpoint,
-        "model": updated_llm.model,
-        "api_key": updated_llm.api_key,
-        "protocol": updated_llm.protocol,
-        "cache_policy": updated_llm.cache_policy,
-        "streaming": updated_llm.streaming,
-        "image_input": updated_llm.image_input,
-        "image_output": updated_llm.image_output,
-        "max_context": updated_llm.max_context,
-        "extra_config": updated_llm.extra_config,
-        "created_at": updated_llm.created_at.replace(tzinfo=UTC).isoformat(),
-        "updated_at": updated_llm.updated_at.replace(tzinfo=UTC).isoformat(),
-    }
+    return _serialize_llm(updated_llm)
 
 
 @router.delete("/llms/{llm_id}", status_code=204)

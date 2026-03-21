@@ -182,9 +182,7 @@ class TavilyProvider(BaseWebSearchProvider):
             timeout=20,
         )
         if not response.ok:
-            raise ValueError(
-                f"Tavily search failed: {_read_error_detail(response)}"
-            )
+            raise ValueError(f"Tavily search failed: {_read_error_detail(response)}")
 
         response_payload = response.json()
         if not isinstance(response_payload, dict):

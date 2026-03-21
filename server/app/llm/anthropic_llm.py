@@ -21,6 +21,7 @@ from .abstract_llm import (
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_anthropic_content
+from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 
 class AnthropicLLM(AbstractLLM):
@@ -40,6 +41,9 @@ class AnthropicLLM(AbstractLLM):
         model: str,
         api_key: str,
         cache_policy: str = DEFAULT_CACHE_POLICY,
+        thinking_policy: str = DEFAULT_THINKING_POLICY,
+        thinking_effort: str | None = None,
+        thinking_budget_tokens: int | None = None,
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -67,6 +71,16 @@ class AnthropicLLM(AbstractLLM):
         self.model = model
         self.api_key = api_key
         self.cache_policy = validate_cache_policy("anthropic_compatible", cache_policy)
+        (
+            self.thinking_policy,
+            self.thinking_effort,
+            self.thinking_budget_tokens,
+        ) = validate_thinking_policy(
+            "anthropic_compatible",
+            thinking_policy,
+            thinking_effort,
+            thinking_budget_tokens,
+        )
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 

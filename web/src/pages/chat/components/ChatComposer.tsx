@@ -7,12 +7,14 @@ import type {
 } from "react";
 import {
   ArrowUp,
+  Brain,
   ImagePlus,
   Loader2,
   Paperclip,
   Plus,
   Square,
   XCircle,
+  Zap,
 } from "@/lib/lucide";
 
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
 import type { ReactContextUsageSummary } from "@/utils/api";
+import type { ChatThinkingMode } from "@/utils/llmThinking";
 
 import type {
   ChatWebSearchProviderOption,
@@ -56,11 +59,14 @@ interface ChatComposerProps {
   contextUsage: ReactContextUsageSummary | null;
   isContextUsageLoading: boolean;
   supportsImageInput: boolean;
+  thinkingModes: ChatThinkingMode[];
+  selectedThinkingMode: ChatThinkingMode | null;
   webSearchProviders: ChatWebSearchProviderOption[];
   selectedWebSearchProvider: string | null;
   imageInputRef: RefObject<HTMLInputElement>;
   documentInputRef: RefObject<HTMLInputElement>;
   onInputChange: (value: string) => void;
+  onThinkingModeChange: (mode: ChatThinkingMode) => void;
   onWebSearchProviderChange: (providerKey: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
@@ -89,11 +95,14 @@ export function ChatComposer({
   contextUsage,
   isContextUsageLoading,
   supportsImageInput,
+  thinkingModes,
+  selectedThinkingMode,
   webSearchProviders,
   selectedWebSearchProvider,
   imageInputRef,
   documentInputRef,
   onInputChange,
+  onThinkingModeChange,
   onWebSearchProviderChange,
   onKeyDown,
   onPaste,
@@ -106,10 +115,16 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const hasWebSearchSelector =
     webSearchProviders.length > 0 && selectedWebSearchProvider !== null;
+  const hasThinkingSelector =
+    thinkingModes.length > 0 && selectedThinkingMode !== null;
   const selectedWebSearchProviderOption =
     webSearchProviders.find(
       (provider) => provider.key === selectedWebSearchProvider,
     ) ?? null;
+  const selectedThinkingModeLabel =
+    selectedThinkingMode === "thinking" ? "Thinking" : "Fast";
+  const SelectedThinkingModeIcon =
+    selectedThinkingMode === "thinking" ? Brain : Zap;
 
   return (
     <div
@@ -219,6 +234,44 @@ export function ChatComposer({
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {hasThinkingSelector && (
+              <Select
+                value={selectedThinkingMode}
+                onValueChange={(value) =>
+                  onThinkingModeChange(value as ChatThinkingMode)
+                }
+              >
+                <SelectTrigger
+                  size="medium"
+                  aria-label="Thinking mode"
+                  className="h-7 w-auto min-w-[5.75rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <SelectedThinkingModeIcon className="h-3.5 w-3.5" />
+                    <span>{selectedThinkingModeLabel}</span>
+                  </span>
+                </SelectTrigger>
+                <SelectContent size="medium">
+                  {thinkingModes.includes("fast") && (
+                    <SelectItem value="fast">
+                      <div className="flex items-center gap-2">
+                        <Zap className="h-3.5 w-3.5" />
+                        <span>Fast</span>
+                      </div>
+                    </SelectItem>
+                  )}
+                  {thinkingModes.includes("thinking") && (
+                    <SelectItem value="thinking">
+                      <div className="flex items-center gap-2">
+                        <Brain className="h-3.5 w-3.5" />
+                        <span>Thinking</span>
+                      </div>
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            )}
 
             {hasWebSearchSelector && (
               <Select

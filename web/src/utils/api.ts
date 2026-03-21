@@ -833,6 +833,9 @@ export const createLLM = async (llmData: {
   api_key: string;
   protocol?: string;
   cache_policy?: string;
+  thinking_policy?: string;
+  thinking_effort?: string | null;
+  thinking_budget_tokens?: number | null;
   streaming?: boolean;
   image_input?: boolean;
   image_output?: boolean;
@@ -871,6 +874,9 @@ export const updateLLM = async (
     api_key?: string;
     protocol?: string;
     cache_policy?: string;
+    thinking_policy?: string;
+    thinking_effort?: string | null;
+    thinking_budget_tokens?: number | null;
     streaming?: boolean;
     image_input?: boolean;
     image_output?: boolean;
@@ -1224,6 +1230,7 @@ export const startReactTask = async (payload: {
   session_id?: string | null;
   file_ids?: string[];
   web_search_provider?: string | null;
+  thinking_mode?: "fast" | "thinking" | null;
 }): Promise<ReactTaskStartResponse> => {
   return apiRequest('/react/tasks', {
     method: 'POST',

@@ -206,6 +206,12 @@ export interface LLM {
   protocol: string;
   /** Protocol-specific cache strategy */
   cache_policy: string;
+  /** Protocol-specific thinking strategy */
+  thinking_policy: string;
+  /** Optional effort tier for effort-based thinking strategies */
+  thinking_effort?: string | null;
+  /** Optional token budget for extended thinking strategies */
+  thinking_budget_tokens?: number | null;
   /** Whether the model supports streaming responses */
   streaming: boolean;
   /** Whether the model accepts user-supplied image inputs */

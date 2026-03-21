@@ -269,7 +269,9 @@ class WebSearchService:
             provider_key=request.provider,
         )
         provider = get_web_search_provider(binding.provider_key)
-        effective_request = request.model_copy(update={"provider": binding.provider_key})
+        effective_request = request.model_copy(
+            update={"provider": binding.provider_key}
+        )
         return provider.search(
             binding=self._to_provider_binding(binding),
             request=effective_request,

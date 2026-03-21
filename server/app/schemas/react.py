@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from app.schemas.base import AppBaseModel
 from pydantic import Field
@@ -41,6 +41,10 @@ class ReactChatRequest(AppBaseModel):
     web_search_provider: str | None = Field(
         default=None,
         description="Optional chat-selected provider key for abstract web search",
+    )
+    thinking_mode: Literal["fast", "thinking"] | None = Field(
+        default=None,
+        description="Optional chat-selected thinking mode for the primary LLM",
     )
 
 

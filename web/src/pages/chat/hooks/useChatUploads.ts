@@ -14,6 +14,12 @@ import {
   type FileUploadSource,
   uploadChatFile,
 } from "@/utils/api";
+import {
+  getChatThinkingModes,
+  getDefaultChatThinkingMode,
+  llmHasThinkingSelector,
+  type ChatThinkingMode,
+} from "@/utils/llmThinking";
 
 import type { PendingUploadItem } from "../types";
 import { getUniqueClipboardFiles, toChatAttachment } from "../utils/chatData";
@@ -24,6 +30,11 @@ import { getUniqueClipboardFiles, toChatAttachment } from "../utils/chatData";
 export function useChatUploads(primaryLlmId?: number) {
   const [pendingFiles, setPendingFiles] = useState<PendingUploadItem[]>([]);
   const [supportsImageInput, setSupportsImageInput] = useState<boolean>(false);
+  const [supportsThinkingSelector, setSupportsThinkingSelector] =
+    useState<boolean>(false);
+  const [thinkingModes, setThinkingModes] = useState<ChatThinkingMode[]>([]);
+  const [defaultThinkingMode, setDefaultThinkingMode] =
+    useState<ChatThinkingMode>("fast");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -37,23 +48,35 @@ export function useChatUploads(primaryLlmId?: number) {
 
     if (!primaryLlmId) {
       setSupportsImageInput(false);
+      setSupportsThinkingSelector(false);
+      setThinkingModes([]);
+      setDefaultThinkingMode("fast");
       return () => {
         isCancelled = true;
       };
     }
 
     setSupportsImageInput(false);
+    setSupportsThinkingSelector(false);
+    setThinkingModes([]);
+    setDefaultThinkingMode("fast");
 
     const loadPrimaryLlm = async () => {
       try {
         const llm = await getLLMById(primaryLlmId);
         if (!isCancelled) {
           setSupportsImageInput(llm.image_input);
+          setSupportsThinkingSelector(llmHasThinkingSelector(llm));
+          setThinkingModes(getChatThinkingModes(llm));
+          setDefaultThinkingMode(getDefaultChatThinkingMode(llm));
         }
       } catch (error) {
         if (!isCancelled) {
           console.error("Failed to load primary LLM capabilities:", error);
           setSupportsImageInput(false);
+          setSupportsThinkingSelector(false);
+          setThinkingModes([]);
+          setDefaultThinkingMode("fast");
         }
       }
     };
@@ -336,6 +359,9 @@ export function useChatUploads(primaryLlmId?: number) {
     readyPendingFiles,
     hasUploadingFiles,
     supportsImageInput,
+    supportsThinkingSelector,
+    thinkingModes,
+    defaultThinkingMode,
     imageInputRef,
     documentInputRef,
     removePendingFile,

@@ -44,7 +44,9 @@ class WebSearchToolTestCase(unittest.TestCase):
                 "get_current_tool_execution_context",
                 return_value=SimpleNamespace(agent_id=7),
             ),
-            patch.object(tool_module, "get_engine", return_value=create_engine("sqlite://")),
+            patch.object(
+                tool_module, "get_engine", return_value=create_engine("sqlite://")
+            ),
             patch.object(
                 tool_module.WebSearchService,
                 "execute_search",
@@ -62,7 +64,9 @@ class WebSearchToolTestCase(unittest.TestCase):
         self.assertEqual(result["provider"]["key"], "tavily")
         self.assertIsNotNone(captured_request)
         request = cast(Any, captured_request)
-        self.assertEqual(request.query, "2026 deep learning breakthrough research papers")
+        self.assertEqual(
+            request.query, "2026 deep learning breakthrough research papers"
+        )
         self.assertEqual(request.topic, "general")
         self.assertEqual(request.time_range, "month")
         self.assertEqual(request.start_date, "2026-01-01")
@@ -88,7 +92,9 @@ class WebSearchToolTestCase(unittest.TestCase):
                 "get_current_tool_execution_context",
                 return_value=SimpleNamespace(agent_id=7, web_search_provider="baidu"),
             ),
-            patch.object(tool_module, "get_engine", return_value=create_engine("sqlite://")),
+            patch.object(
+                tool_module, "get_engine", return_value=create_engine("sqlite://")
+            ),
             patch.object(
                 tool_module.WebSearchService,
                 "execute_search",
@@ -123,7 +129,9 @@ class WebSearchToolTestCase(unittest.TestCase):
                 "get_current_tool_execution_context",
                 return_value=SimpleNamespace(agent_id=7, web_search_provider="missing"),
             ),
-            patch.object(tool_module, "get_engine", return_value=create_engine("sqlite://")),
+            patch.object(
+                tool_module, "get_engine", return_value=create_engine("sqlite://")
+            ),
             patch.object(
                 tool_module.WebSearchService,
                 "execute_search",

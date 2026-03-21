@@ -23,6 +23,7 @@ from .abstract_llm import (
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_openai_response_content
+from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 logger = get_logger("llm.openai_response")
 
@@ -38,6 +39,9 @@ class OpenAIResponseLLM(AbstractLLM):
         model: str,
         api_key: str,
         cache_policy: str = DEFAULT_CACHE_POLICY,
+        thinking_policy: str = DEFAULT_THINKING_POLICY,
+        thinking_effort: str | None = None,
+        thinking_budget_tokens: int | None = None,
         timeout: int | None = None,
         extra_config: dict[str, Any] | None = None,
     ):
@@ -61,6 +65,16 @@ class OpenAIResponseLLM(AbstractLLM):
         self.model = model
         self.api_key = api_key
         self.cache_policy = validate_cache_policy("openai_response_llm", cache_policy)
+        (
+            self.thinking_policy,
+            self.thinking_effort,
+            self.thinking_budget_tokens,
+        ) = validate_thinking_policy(
+            "openai_response_llm",
+            thinking_policy,
+            thinking_effort,
+            thinking_budget_tokens,
+        )
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 

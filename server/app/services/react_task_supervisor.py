@@ -15,11 +15,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal
 
 from app.crud.llm import llm as llm_crud
 from app.db.session import get_engine
 from app.llm.llm_factory import create_llm_from_config
+from app.llm.thinking_policy import build_runtime_thinking_kwargs
 from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
 from app.orchestration.react.engine import ReactEngine
@@ -58,6 +59,7 @@ class ReactTaskLaunchRequest:
     session_id: str | None
     file_ids: list[str]
     web_search_provider: str | None = None
+    thinking_mode: Literal["fast", "thinking"] | None = None
     task_id: str | None = None
 
 
@@ -377,6 +379,13 @@ class ReactTaskSupervisor:
                     raise ValueError(
                         f"LLM configuration with ID {agent.llm_id} not found"
                     )
+                llm_runtime_kwargs = build_runtime_thinking_kwargs(
+                    protocol=llm_config.protocol,
+                    thinking_policy=llm_config.thinking_policy,
+                    thinking_effort=llm_config.thinking_effort,
+                    thinking_budget_tokens=llm_config.thinking_budget_tokens,
+                    thinking_mode=launch.thinking_mode,
+                )
 
                 llm = create_llm_from_config(llm_config)
 
@@ -445,6 +454,7 @@ class ReactTaskSupervisor:
                         allowed_skills=tuple(allowed_skill_mounts),
                     ),
                     stream_llm_responses=bool(llm_config.streaming),
+                    llm_runtime_kwargs=llm_runtime_kwargs,
                 )
 
                 async with self._lock:

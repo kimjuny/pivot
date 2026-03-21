@@ -67,6 +67,7 @@ class ReactEngine:
         db: Session,
         tool_execution_context: ToolExecutionContext | None = None,
         stream_llm_responses: bool = True,
+        llm_runtime_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize ReAct engine.
@@ -81,6 +82,7 @@ class ReactEngine:
         self.db = db
         self.tool_execution_context = tool_execution_context
         self.stream_llm_responses = stream_llm_responses
+        self.llm_runtime_kwargs = llm_runtime_kwargs or {}
         self.runtime_service = ReactRuntimeService(db)
         self.state_service = ReactStateService(db)
         self.cancelled = False  # Flag to signal cancellation
@@ -126,7 +128,9 @@ class ReactEngine:
             token_counter: Mutable token tally shared by one recursion.
             usage_counter: Normalized token counts from one completed request.
         """
-        token_counter["prompt_tokens"] += int(usage_counter.get("prompt_tokens", 0) or 0)
+        token_counter["prompt_tokens"] += int(
+            usage_counter.get("prompt_tokens", 0) or 0
+        )
         token_counter["completion_tokens"] += int(
             usage_counter.get("completion_tokens", 0) or 0
         )
@@ -1219,7 +1223,10 @@ class ReactEngine:
                 logged_message_count = len(runtime_state.messages)
 
                 messages_for_llm = runtime_state.messages
-                llm_chat_kwargs: dict[str, Any] = {"_pivot_task_id": task.task_id}
+                llm_chat_kwargs: dict[str, Any] = {
+                    **self.llm_runtime_kwargs,
+                    "_pivot_task_id": task.task_id,
+                }
                 if (
                     self._uses_incremental_request_messages()
                     and runtime_state.previous_response_id
