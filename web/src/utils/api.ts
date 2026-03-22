@@ -1528,13 +1528,26 @@ export interface ToolDiagnostic {
 /**
  * Shared skill metadata returned by the server.
  */
+export type SkillSource = 'builtin' | 'manual' | 'network' | 'bundle';
+
+/**
+ * One file entry selected from a local skill bundle.
+ */
+export interface BundleSkillImportFile {
+  file: File;
+  relativePath: string;
+}
+
+/**
+ * Shared skill metadata returned by the server.
+ */
 export interface SharedSkill {
   name: string;
   description: string;
   location: string;
   filename: string;
   kind: 'shared';
-  source: 'builtin' | 'user';
+  source: SkillSource;
   creator: string | null;
   builtin: boolean;
   read_only: boolean;
@@ -1557,7 +1570,7 @@ export interface UserSkill {
   location: string;
   filename: string;
   kind: 'private' | 'shared';
-  source: 'user';
+  source: Exclude<SkillSource, 'builtin'>;
   creator: string | null;
   builtin: boolean;
   read_only: boolean;
@@ -1706,6 +1719,51 @@ export const importGitHubSkill = async (payload: {
     method: 'POST',
     body: JSON.stringify(payload),
   }) as Promise<{ status: string; metadata: SharedSkill | UserSkill }>;
+};
+
+/**
+ * Import one skill bundle selected from the local machine.
+ */
+export const importBundleSkill = async (payload: {
+  bundleName: string;
+  kind: 'private' | 'shared';
+  skillName: string;
+  files: BundleSkillImportFile[];
+}): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
+  const url = `${API_BASE_URL}/skills/import/bundle`;
+  const headers = getAuthorizedHeaders();
+  const formData = new FormData();
+
+  formData.append('bundle_name', payload.bundleName);
+  formData.append('kind', payload.kind);
+  formData.append('skill_name', payload.skillName);
+  payload.files.forEach((entry) => {
+    formData.append('files', entry.file);
+    formData.append('relative_paths', entry.relativePath);
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+      throw new AuthError('Authentication expired. Please log in again.');
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json() as { detail?: string };
+      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json() as { status: string; metadata: SharedSkill | UserSkill };
+  } catch (error) {
+    console.error(`Bundle import failed for ${payload.bundleName}:`, error);
+    throw error;
+  }
 };
 
 /**

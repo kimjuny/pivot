@@ -6,7 +6,9 @@ from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.models.user import User
 from app.services.skill_service import (
+    BundleImportFile,
     delete_user_skill,
+    install_bundle_skill,
     install_github_skill,
     list_private_skills,
     list_shared_skills,
@@ -15,7 +17,7 @@ from app.services.skill_service import (
     read_user_skill,
     upsert_user_skill,
 )
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -79,6 +81,48 @@ async def get_shared_skill_source(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/skills/import/bundle")
+async def import_bundle_skill_endpoint(
+    files: list[UploadFile] = File(...),
+    relative_paths: list[str] = Form(...),
+    bundle_name: str = Form(...),
+    kind: Literal["private", "shared"] = Form(...),
+    skill_name: str = Form(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Install one skill bundle uploaded from the local machine."""
+    if len(files) != len(relative_paths):
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded files and relative paths must have the same length.",
+        )
+
+    bundle_files = [
+        BundleImportFile(
+            relative_path=relative_paths[index],
+            content=await upload.read(),
+        )
+        for index, upload in enumerate(files)
+    ]
+
+    try:
+        metadata = install_bundle_skill(
+            db,
+            current_user,
+            bundle_name=bundle_name,
+            kind=kind,
+            skill_name=skill_name,
+            files=bundle_files,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"status": "imported", "metadata": metadata}
 
 
 @router.get("/skills/{kind}/{skill_name}")

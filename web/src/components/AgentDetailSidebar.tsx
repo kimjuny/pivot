@@ -63,6 +63,7 @@ import {
     deleteAgentWebSearchBinding,
     type SharedTool,
     type PrivateTool,
+    type SkillSource,
     type SharedSkill,
     type UserSkill,
     type ChannelBinding,
@@ -87,7 +88,7 @@ interface SidebarSkill {
     name: string;
     description: string;
     kind: 'shared' | 'private';
-    source: 'builtin' | 'user';
+    source: SkillSource;
     creator: string | null;
     readOnly: boolean;
 }
@@ -395,7 +396,7 @@ function AgentDetailSidebar({
                         name: s.name,
                         description: s.description,
                         kind: 'private' as const,
-                        source: 'user' as const,
+                        source: s.source,
                         creator: s.creator,
                         readOnly: s.read_only,
                     })),

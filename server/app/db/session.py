@@ -302,6 +302,8 @@ def ensure_skill_schema_compatibility() -> None:
 
     columns = {column["name"] for column in inspector.get_columns("skill")}
     with engine.begin() as conn:
+        if "source" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN source VARCHAR"))
         if "github_repo_url" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN github_repo_url VARCHAR"))
         if "github_ref" not in columns:
@@ -310,3 +312,13 @@ def ensure_skill_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE skill ADD COLUMN github_ref_type VARCHAR"))
         if "github_skill_path" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN github_skill_path VARCHAR"))
+        conn.execute(
+            text(
+                "UPDATE skill "
+                "SET source = CASE "
+                "WHEN builtin = 1 THEN 'builtin' "
+                "WHEN source IS NULL OR source = '' OR source = 'user' THEN 'manual' "
+                "ELSE source "
+                "END"
+            )
+        )

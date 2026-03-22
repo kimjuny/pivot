@@ -18,7 +18,8 @@ class Skill(SQLModel, table=True):
         name: Globally unique skill identifier used by agents and sandbox mounts.
         description: Short summary extracted from markdown front matter.
         kind: Visibility scope, either ``private`` or ``shared``.
-        source: Origin of the skill, either ``builtin`` or ``user``.
+        source: Origin of the skill, one of ``builtin``, ``manual``,
+            ``network``, or ``bundle``.
         builtin: Whether the skill ships with the application.
         creator_id: Owning user ID for user-created skills.
         location: Absolute directory path that contains the markdown skill assets.

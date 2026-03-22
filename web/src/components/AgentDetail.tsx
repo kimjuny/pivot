@@ -39,6 +39,7 @@ import {
   getSharedSkillSource,
   getUserSkillSource,
   upsertUserSkill,
+  type SkillSource,
 } from '../utils/api';
 import { deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
 import { toast } from 'sonner';
@@ -81,7 +82,7 @@ interface ToolTabDescriptor {
 
 interface SkillTabDescriptor {
   kind: 'private' | 'shared';
-  source: 'builtin' | 'user';
+  source: SkillSource;
   readOnly: boolean;
   skillName: string;
 }
@@ -106,7 +107,12 @@ function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
   const normalizedKind: 'private' | 'shared' =
     parsedKind === 'shared' ? 'shared' : 'private';
   const readOnly = tab.meta?.readOnly ?? normalizedKind === 'shared';
-  const source = tab.meta?.source ?? (normalizedKind === 'shared' ? 'builtin' : 'user');
+  const source: 'builtin' | 'user' =
+    tab.meta?.source === 'builtin' || tab.meta?.source === 'user'
+      ? tab.meta.source
+      : normalizedKind === 'shared'
+        ? 'builtin'
+        : 'user';
 
   return {
     kind: tab.meta?.kind ?? normalizedKind,
@@ -134,17 +140,26 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
       : undefined;
   const normalizedKind: 'private' | 'shared' =
     parsedKind === 'private' ? 'private' : 'shared';
-  const normalizedSource: 'builtin' | 'user' =
-    parsedSource === 'user'
-      ? 'user'
+  const normalizedSource: SkillSource =
+    parsedSource === 'manual' ||
+    parsedSource === 'network' ||
+    parsedSource === 'bundle' ||
+    parsedSource === 'builtin'
+      ? parsedSource
       : normalizedKind === 'private'
-        ? 'user'
+        ? 'manual'
         : 'builtin';
   const readOnly = tab.meta?.readOnly ?? normalizedSource === 'builtin';
 
   return {
     kind: tab.meta?.kind ?? normalizedKind,
-    source: tab.meta?.source ?? normalizedSource,
+    source:
+      tab.meta?.source === 'manual' ||
+      tab.meta?.source === 'network' ||
+      tab.meta?.source === 'bundle' ||
+      tab.meta?.source === 'builtin'
+        ? tab.meta.source
+        : normalizedSource,
     readOnly,
     skillName: tab.name,
   };
@@ -322,7 +337,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             const result =
               descriptor.kind === 'private'
                 ? await getUserSkillSource('private', descriptor.skillName)
-                : !descriptor.readOnly && descriptor.source === 'user'
+                : !descriptor.readOnly && descriptor.source !== 'builtin'
                   ? await getUserSkillSource('shared', descriptor.skillName)
                   : await getSharedSkillSource(descriptor.skillName);
             setSkillEditors((prev) => ({

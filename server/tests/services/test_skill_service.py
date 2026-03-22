@@ -22,6 +22,7 @@ github_skill_module = import_module("app.orchestration.skills.github")
 GitHubSkillCandidate = github_skill_module.GitHubSkillCandidate
 GitHubSkillProbeResult = github_skill_module.GitHubSkillProbeResult
 skill_service = import_module("app.services.skill_service")
+BundleImportFile = skill_service.BundleImportFile
 
 
 class SkillServiceTestCase(unittest.TestCase):
@@ -156,6 +157,8 @@ class SkillServiceTestCase(unittest.TestCase):
         self.assertEqual(visible["team-writer"]["creator"], "alice")
         self.assertEqual(visible["team-writer"]["read_only"], False)
         self.assertEqual(visible["coding"]["source"], "builtin")
+        self.assertEqual(visible["research-notes"]["source"], "manual")
+        self.assertEqual(visible["team-writer"]["source"], "manual")
         self.assertTrue(visible["coding"]["created_at"].endswith("+00:00"))
         self.assertTrue(visible["coding"]["updated_at"].endswith("+00:00"))
 
@@ -312,6 +315,7 @@ class SkillServiceTestCase(unittest.TestCase):
 
         self.assertEqual(metadata["github_ref_type"], "branch")
         self.assertEqual(metadata["github_skill_path"], "skills/research-kit")
+        self.assertEqual(metadata["source"], "network")
         self.assertEqual(metadata["imported"], True)
 
         imported_dir = (
@@ -422,6 +426,65 @@ class SkillServiceTestCase(unittest.TestCase):
             "team-handbook",
         )
         self.assertIn("Shared import body.", shared_payload["source"])
+        self.assertEqual(bob_shared["team-handbook"]["source"], "network")
+
+    def test_bundle_import_installs_local_skill_immediately(self) -> None:
+        """Bundle imports should keep the directory tree and mark the source."""
+        metadata = skill_service.install_bundle_skill(
+            self.session,
+            self.alice,
+            bundle_name="local-research-kit",
+            kind="private",
+            skill_name="local-research-kit",
+            files=[
+                BundleImportFile(
+                    relative_path="SKILL.md",
+                    content=(
+                        b"---\n"
+                        b"name: local-research-kit\n"
+                        b"description: Local workflow\n"
+                        b"---\n\n"
+                        b"# local-research-kit\n\n"
+                        b"Local guidance.\n"
+                    ),
+                ),
+                BundleImportFile(
+                    relative_path="scripts/setup.sh",
+                    content=b"#!/bin/sh\necho setup\n",
+                ),
+            ],
+        )
+
+        self.assertEqual(metadata["source"], "bundle")
+
+        imported_dir = (
+            self.workspace_root / "alice" / "skills" / "private" / "local-research-kit"
+        )
+        self.assertTrue((imported_dir / "scripts" / "setup.sh").exists())
+        imported_source = skill_service.read_user_skill(
+            self.session,
+            "alice",
+            "private",
+            "local-research-kit",
+        )["source"]
+        self.assertIn("name: local-research-kit", imported_source)
+
+    def test_bundle_import_requires_top_level_skill_markdown(self) -> None:
+        """Bundle imports should fail fast when the folder lacks SKILL.md."""
+        with self.assertRaises(ValueError):
+            skill_service.install_bundle_skill(
+                self.session,
+                self.alice,
+                bundle_name="broken-skill",
+                kind="private",
+                skill_name="broken-skill",
+                files=[
+                    BundleImportFile(
+                        relative_path="notes/readme.md",
+                        content=b"# missing skill entry\n",
+                    )
+                ],
+            )
 
     def test_probe_github_import_marks_conflicting_names(self) -> None:
         """Probe results should flag globally conflicting suggested skill names."""

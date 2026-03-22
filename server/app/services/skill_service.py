@@ -35,6 +35,7 @@ logger = get_logger("skill_service")
 
 _SKILLS_DIRNAME = "skills"
 _ALLOWED_KINDS = {"private", "shared"}
+_ALLOWED_USER_SOURCES = {"manual", "network", "bundle"}
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,14 @@ class SkillMount:
 
     name: str
     location: str
+
+
+@dataclass(frozen=True)
+class BundleImportFile:
+    """One uploaded file that belongs to a local skill bundle."""
+
+    relative_path: str
+    content: bytes
 
 
 @dataclass(frozen=True)
@@ -241,12 +250,19 @@ def _discover_user_skills(users: Sequence[User]) -> list[_DiscoveredSkill]:
                         base_dir=base_dir,
                         skill_path=skill_path,
                         kind=kind,
-                        source="user",
+                        source="manual",
                         builtin=False,
                         creator=user,
                     )
                 )
     return discovered
+
+
+def _normalize_user_skill_source(source: str | None) -> str:
+    """Normalize persisted user skill source values to the supported enum."""
+    if source in _ALLOWED_USER_SOURCES:
+        return source
+    return "manual"
 
 
 def _assert_unique_discovered_names(discovered: list[_DiscoveredSkill]) -> None:
@@ -375,11 +391,16 @@ def _upsert_skill_row(
         return True
 
     changed = False
+    next_source = (
+        discovered.source
+        if discovered.builtin
+        else _normalize_user_skill_source(skill.source)
+    )
     new_values = {
         "name": discovered.name,
         "description": discovered.description,
         "kind": discovered.kind,
-        "source": discovered.source,
+        "source": next_source,
         "builtin": discovered.builtin,
         "creator_id": discovered.creator_id,
         "location": discovered.location,
@@ -761,11 +782,6 @@ def install_github_skill(
         )
 
     archive_bytes = download_github_repository_archive(github_url, ref)
-    base_dir = _user_skills_dir(current_user.username, kind, create=True)
-    target_dir = base_dir / skill_name
-    if target_dir.exists():
-        raise ValueError(f"Skill directory '{skill_name}' already exists.")
-
     with TemporaryDirectory(prefix="pivot-skill-import-") as tmp_root:
         extracted_dir = Path(tmp_root) / skill_name
         _extract_skill_directory_from_archive(
@@ -773,49 +789,19 @@ def install_github_skill(
             remote_directory_name=remote_directory_name,
             destination=extracted_dir,
         )
-
-        skill_markdown_path = extracted_dir / selected_candidate.entry_filename
-        if not skill_markdown_path.exists():
-            raise ValueError(
-                "Imported skill archive is missing its skill markdown file."
-            )
-
-        rewritten_source = rewrite_skill_name(
-            skill_markdown_path.read_text(encoding="utf-8"),
-            skill_name,
+        metadata = _install_skill_from_directory(
+            session,
+            current_user,
+            kind=kind,
+            skill_name=skill_name,
+            source="network",
+            extracted_dir=extracted_dir,
+            entry_filename=selected_candidate.entry_filename,
+            github_repo_url=github_url,
+            github_ref=ref,
+            github_ref_type=ref_type,
+            github_skill_path=f"skills/{remote_directory_name}",
         )
-        skill_markdown_path.write_text(rewritten_source, encoding="utf-8")
-        shutil.copytree(extracted_dir, target_dir)
-
-    discovered = _discover_skill(
-        base_dir=base_dir,
-        skill_path=target_dir / selected_candidate.entry_filename,
-        kind=kind,
-        source="user",
-        builtin=False,
-        creator=current_user,
-    )
-    timestamp = datetime.now(UTC)
-    row = Skill(
-        name=discovered.name,
-        description=discovered.description,
-        kind=kind,
-        source="user",
-        builtin=False,
-        creator_id=current_user.id,
-        location=discovered.location,
-        filename=discovered.filename,
-        md5=discovered.md5,
-        github_repo_url=github_url,
-        github_ref=ref,
-        github_ref_type=ref_type,
-        github_skill_path=f"skills/{remote_directory_name}",
-        created_at=timestamp,
-        updated_at=timestamp,
-    )
-    session.add(row)
-    session.commit()
-    session.refresh(row)
 
     logger.info(
         "Imported %s skill '%s' from %s@%s for user '%s'",
@@ -825,12 +811,55 @@ def install_github_skill(
         ref,
         current_user.username,
     )
-    creator_lookup = _creator_name_map(session)
-    return _serialize_skill(
-        row,
-        creator_lookup=creator_lookup,
-        current_username=current_user.username,
+    return metadata
+
+
+def install_bundle_skill(
+    session: Session,
+    current_user: User,
+    *,
+    bundle_name: str,
+    kind: str,
+    skill_name: str,
+    files: Sequence[BundleImportFile],
+) -> dict[str, Any]:
+    """Install one skill bundle uploaded from the user's local machine."""
+    _validate_skill_name(skill_name)
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError(f"Invalid skill kind: {kind}")
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before importing skills.")
+
+    sync_skill_registry(session)
+    existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if existing is not None:
+        raise ValueError(f"Skill name '{skill_name}' already exists.")
+
+    with TemporaryDirectory(prefix="pivot-skill-bundle-") as tmp_root:
+        extracted_dir = Path(tmp_root) / skill_name
+        entry_filename = _extract_bundle_skill_directory(
+            bundle_name=bundle_name,
+            files=files,
+            destination=extracted_dir,
+        )
+        metadata = _install_skill_from_directory(
+            session,
+            current_user,
+            kind=kind,
+            skill_name=skill_name,
+            source="bundle",
+            extracted_dir=extracted_dir,
+            entry_filename=entry_filename,
+        )
+
+    logger.info(
+        "Imported %s skill '%s' from local bundle '%s' for user '%s'",
+        kind,
+        skill_name,
+        bundle_name,
+        current_user.username,
     )
+    return metadata
 
 
 def _extract_skill_directory_from_archive(
@@ -876,6 +905,162 @@ def _extract_skill_directory_from_archive(
         raise ValueError(
             f"Repository archive does not contain skills/{remote_directory_name}/."
         )
+
+
+def _extract_bundle_skill_directory(
+    *,
+    bundle_name: str,
+    files: Sequence[BundleImportFile],
+    destination: Path,
+) -> str:
+    """Write uploaded bundle files into a temporary skill directory.
+
+    Args:
+        bundle_name: Root folder name selected by the user.
+        files: Uploaded files with browser-provided relative paths.
+        destination: Temporary directory that receives the extracted bundle.
+
+    Returns:
+        The detected top-level skill markdown filename.
+
+    Raises:
+        ValueError: If the bundle is empty, malformed, or missing a skill entry file.
+    """
+    if not files:
+        raise ValueError("Choose a local skill folder before importing.")
+
+    destination.mkdir(parents=True, exist_ok=True)
+    seen_paths: set[PurePosixPath] = set()
+
+    for item in files:
+        normalized = item.relative_path.strip().replace("\\", "/")
+        if not normalized:
+            raise ValueError("Imported bundle contains a file without a relative path.")
+
+        path_parts = list(PurePosixPath(normalized).parts)
+        if path_parts and path_parts[0] == bundle_name:
+            path_parts = path_parts[1:]
+        if not path_parts:
+            raise ValueError("Imported bundle contains an invalid file path.")
+        if any(part in {"", ".", ".."} for part in path_parts):
+            raise ValueError("Imported bundle contains an unsafe file path.")
+
+        relative_path = PurePosixPath(*path_parts)
+        if relative_path in seen_paths:
+            raise ValueError(
+                f"Imported bundle contains duplicate file '{relative_path.as_posix()}'."
+            )
+        seen_paths.add(relative_path)
+
+        target_path = destination.joinpath(*relative_path.parts)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(item.content)
+
+    for filename in SKILL_MARKDOWN_FILENAMES:
+        entry_path = destination / filename
+        if entry_path.exists():
+            return filename
+
+    expected_names = ", ".join(SKILL_MARKDOWN_FILENAMES)
+    raise ValueError(
+        f"Folder '{bundle_name}' must contain one of {expected_names} at its top level."
+    )
+
+
+def _create_skill_row(
+    *,
+    discovered: _DiscoveredSkill,
+    creator_id: int,
+    source: str,
+    created_at: datetime,
+    github_repo_url: str | None = None,
+    github_ref: str | None = None,
+    github_ref_type: str | None = None,
+    github_skill_path: str | None = None,
+) -> Skill:
+    """Create a persisted skill row for a newly installed user skill."""
+    return Skill(
+        name=discovered.name,
+        description=discovered.description,
+        kind=discovered.kind,
+        source=source,
+        builtin=False,
+        creator_id=creator_id,
+        location=discovered.location,
+        filename=discovered.filename,
+        md5=discovered.md5,
+        github_repo_url=github_repo_url,
+        github_ref=github_ref,
+        github_ref_type=github_ref_type,
+        github_skill_path=github_skill_path,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+
+def _install_skill_from_directory(
+    session: Session,
+    current_user: User,
+    *,
+    kind: str,
+    skill_name: str,
+    source: str,
+    extracted_dir: Path,
+    entry_filename: str,
+    github_repo_url: str | None = None,
+    github_ref: str | None = None,
+    github_ref_type: str | None = None,
+    github_skill_path: str | None = None,
+) -> dict[str, Any]:
+    """Install a prepared skill directory into the user's workspace."""
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before importing skills.")
+
+    base_dir = _user_skills_dir(current_user.username, kind, create=True)
+    target_dir = base_dir / skill_name
+    if target_dir.exists():
+        raise ValueError(f"Skill directory '{skill_name}' already exists.")
+
+    skill_markdown_path = extracted_dir / entry_filename
+    if not skill_markdown_path.exists():
+        raise ValueError("Imported skill bundle is missing its skill markdown file.")
+
+    rewritten_source = rewrite_skill_name(
+        skill_markdown_path.read_text(encoding="utf-8"),
+        skill_name,
+    )
+    skill_markdown_path.write_text(rewritten_source, encoding="utf-8")
+    shutil.copytree(extracted_dir, target_dir)
+
+    discovered = _discover_skill(
+        base_dir=base_dir,
+        skill_path=target_dir / entry_filename,
+        kind=kind,
+        source=source,
+        builtin=False,
+        creator=current_user,
+    )
+    timestamp = datetime.now(UTC)
+    row = _create_skill_row(
+        discovered=discovered,
+        creator_id=current_user.id,
+        source=source,
+        created_at=timestamp,
+        github_repo_url=github_repo_url,
+        github_ref=github_ref,
+        github_ref_type=github_ref_type,
+        github_skill_path=github_skill_path,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        row,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+    )
 
 
 def upsert_user_skill(
@@ -934,29 +1119,18 @@ def upsert_user_skill(
         base_dir=base_dir,
         skill_path=canonical_path,
         kind=kind,
-        source="user",
+        source="manual",
         builtin=False,
         creator=current_user,
     )
 
     if existing is None:
         created_at = discovered.updated_at
-        row = Skill(
-            name=discovered.name,
-            description=discovered.description,
-            kind=kind,
-            source="user",
-            builtin=False,
+        row = _create_skill_row(
+            discovered=discovered,
             creator_id=current_user.id,
-            location=discovered.location,
-            filename=discovered.filename,
-            md5=discovered.md5,
-            github_repo_url=None,
-            github_ref=None,
-            github_ref_type=None,
-            github_skill_path=None,
+            source="manual",
             created_at=created_at,
-            updated_at=discovered.updated_at,
         )
     else:
         row = existing
@@ -965,6 +1139,7 @@ def upsert_user_skill(
         row.filename = discovered.filename
         row.md5 = discovered.md5
         row.updated_at = discovered.updated_at
+        row.source = _normalize_user_skill_source(row.source)
 
     session.add(row)
     session.commit()

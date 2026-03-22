@@ -20,6 +20,7 @@ import {
   getSharedSkillSource,
   upsertUserSkill,
   deleteUserSkill,
+  type SkillSource,
   type SharedSkill,
   type UserSkill,
 } from '../utils/api';
@@ -68,8 +69,8 @@ Describe reusable guidance or process here.
 `;
 
 type SkillRow =
-  | { kind: 'shared'; source: 'builtin' | 'user'; skill: SharedSkill }
-  | { kind: 'private'; source: 'user'; skill: UserSkill };
+  | { kind: 'shared'; source: SkillSource; skill: SharedSkill }
+  | { kind: 'private'; source: Exclude<SkillSource, 'builtin'>; skill: UserSkill };
 
 function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -145,7 +146,7 @@ function SkillsPage() {
   const allRows: SkillRow[] = useMemo(
     () => [
       ...sharedSkills.map((s): SkillRow => ({ kind: 'shared', source: s.source, skill: s })),
-      ...privateSkills.map((s): SkillRow => ({ kind: 'private', source: 'user', skill: s })),
+      ...privateSkills.map((s): SkillRow => ({ kind: 'private', source: s.source, skill: s })),
     ],
     [sharedSkills, privateSkills]
   );

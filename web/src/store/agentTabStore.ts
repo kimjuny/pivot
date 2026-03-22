@@ -12,7 +12,7 @@ export type AgentTabType = 'scene' | 'tool' | 'skill' | 'function';
  */
 export interface AgentTabMeta {
     kind?: 'private' | 'shared';
-    source?: 'builtin' | 'user';
+    source?: 'builtin' | 'user' | 'manual' | 'network' | 'bundle';
     readOnly?: boolean;
 }
 

@@ -5,6 +5,7 @@ import {
   getSharedSkills,
   getPrivateSkills,
   updateAgentSkillIds,
+  type SkillSource,
   type SharedSkill,
   type UserSkill,
 } from '../utils/api';
@@ -22,7 +23,7 @@ interface SkillEntry {
   name: string;
   summary: string;
   kind: 'shared' | 'private';
-  source: 'builtin' | 'user';
+  source: SkillSource;
   creator: string | null;
   readOnly: boolean;
 }
@@ -75,7 +76,7 @@ function SkillSelectorDialog({
           name: s.name,
           summary: s.description,
           kind: 'private',
-          source: 'user',
+          source: s.source,
           creator: s.creator,
           readOnly: s.read_only,
         })),
