@@ -35,14 +35,20 @@ class SandboxService:
             "Content-Type": "application/json",
         }
 
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        timeout_seconds: int | None = None,
+    ) -> dict[str, Any]:
         """POST one JSON request to sandbox-manager and return JSON body."""
+        request_timeout = timeout_seconds or self._timeout
         try:
             response = requests.post(
                 f"{self._base_url}{path}",
                 json=payload,
                 headers=self._headers,
-                timeout=self._timeout,
+                timeout=request_timeout,
             )
         except requests.RequestException as exc:
             raise RuntimeError(f"Sandbox manager request failed: {exc}") from exc
@@ -64,6 +70,7 @@ class SandboxService:
         agent_id: int,
         cmd: list[str],
         skills: list[dict[str, str]] | None = None,
+        timeout_seconds: int | None = None,
     ) -> SandboxExecResult:
         """Execute one non-interactive command inside an agent sandbox."""
         if skills is None:
@@ -71,6 +78,7 @@ class SandboxService:
         data = self._post(
             "/sandboxes/exec",
             {"username": username, "agent_id": agent_id, "cmd": cmd, "skills": skills},
+            timeout_seconds=timeout_seconds,
         )
         return SandboxExecResult(
             exit_code=int(data.get("exit_code", -1)),
@@ -83,6 +91,7 @@ class SandboxService:
         username: str,
         agent_id: int,
         skills: list[dict[str, str]] | None = None,
+        timeout_seconds: int | None = None,
     ) -> None:
         """Ensure sandbox exists and is configured with current skill mounts."""
         if skills is None:
@@ -90,6 +99,7 @@ class SandboxService:
         self._post(
             "/sandboxes/create",
             {"username": username, "agent_id": agent_id, "skills": skills},
+            timeout_seconds=timeout_seconds,
         )
 
 

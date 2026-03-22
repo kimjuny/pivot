@@ -4,8 +4,10 @@ import sys
 import tempfile
 import unittest
 from importlib import import_module
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -16,6 +18,9 @@ if str(SERVER_ROOT) not in sys.path:
 import_module("app.models")
 Skill = import_module("app.models.skill").Skill
 User = import_module("app.models.user").User
+github_skill_module = import_module("app.orchestration.skills.github")
+GitHubSkillCandidate = github_skill_module.GitHubSkillCandidate
+GitHubSkillProbeResult = github_skill_module.GitHubSkillProbeResult
 skill_service = import_module("app.services.skill_service")
 
 
@@ -80,6 +85,20 @@ class SkillServiceTestCase(unittest.TestCase):
             encoding="utf-8",
         )
         return skill_path
+
+    def _build_skill_archive(self, directory_name: str, source: str) -> bytes:
+        """Create a GitHub-like repository zipball for one skill folder."""
+        buffer = BytesIO()
+        with ZipFile(buffer, "w") as archive:
+            archive.writestr(
+                f"example-repo-abcdef/skills/{directory_name}/SKILL.md",
+                source,
+            )
+            archive.writestr(
+                f"example-repo-abcdef/skills/{directory_name}/scripts/install.sh",
+                "#!/bin/sh\necho install\n",
+            )
+        return buffer.getvalue()
 
     def test_sync_registry_and_visible_metadata(self) -> None:
         """Visible skill listings should come from persisted registry metadata."""
@@ -234,3 +253,221 @@ class SkillServiceTestCase(unittest.TestCase):
                 "shared-docs",
                 owner_source,
             )
+
+    def test_imported_private_skill_is_available_immediately(self) -> None:
+        """Imported private skills should become runtime-visible immediately."""
+        probe_result = GitHubSkillProbeResult(
+            owner="acme",
+            repo="pivot-skills",
+            html_url="https://github.com/acme/pivot-skills",
+            description="Imported skill catalog",
+            default_ref="main",
+            selected_ref="main",
+            branches=("main",),
+            tags=("v1.0.0",),
+            has_skills_dir=True,
+            candidates=(
+                GitHubSkillCandidate(
+                    directory_name="research-kit",
+                    entry_filename="SKILL.md",
+                    suggested_name="research-kit",
+                    description="Imported research workflow",
+                ),
+            ),
+        )
+        archive_bytes = self._build_skill_archive(
+            "research-kit",
+            (
+                "---\n"
+                "name: research-kit\n"
+                "description: Imported research workflow\n"
+                "---\n\n"
+                "# research-kit\n\n"
+                "Use imported guidance.\n"
+            ),
+        )
+
+        with (
+            patch.object(
+                skill_service,
+                "probe_github_skill_repository",
+                return_value=probe_result,
+            ),
+            patch.object(
+                skill_service,
+                "download_github_repository_archive",
+                return_value=archive_bytes,
+            ),
+        ):
+            metadata = skill_service.install_github_skill(
+                self.session,
+                self.alice,
+                github_url="https://github.com/acme/pivot-skills",
+                ref="main",
+                ref_type="branch",
+                kind="private",
+                remote_directory_name="research-kit",
+                skill_name="research-kit-imported",
+            )
+
+        self.assertEqual(metadata["github_ref_type"], "branch")
+        self.assertEqual(metadata["github_skill_path"], "skills/research-kit")
+        self.assertEqual(metadata["imported"], True)
+
+        imported_dir = (
+            self.workspace_root
+            / "alice"
+            / "skills"
+            / "private"
+            / "research-kit-imported"
+        )
+        self.assertTrue((imported_dir / "scripts" / "install.sh").exists())
+
+        imported_source = skill_service.read_user_skill(
+            self.session,
+            "alice",
+            "private",
+            "research-kit-imported",
+        )["source"]
+        self.assertIn("name: research-kit-imported", imported_source)
+
+        visible_skill_names = {
+            item["name"]
+            for item in skill_service.list_visible_skills(self.session, "alice")
+        }
+        self.assertIn("research-kit-imported", visible_skill_names)
+        mounts = skill_service.build_skill_mounts(
+            self.session,
+            "alice",
+            ["research-kit-imported"],
+        )
+        self.assertEqual(mounts[0]["name"], "research-kit-imported")
+        prompt_block = skill_service.build_selected_skills_prompt_block(
+            self.session,
+            "alice",
+            ["research-kit-imported"],
+        )
+        self.assertIn("### Skill 1: research-kit-imported", prompt_block)
+        self.assertIn("Use imported guidance.", prompt_block)
+
+    def test_shared_import_is_visible_immediately(self) -> None:
+        """Imported shared skills should be visible to other users immediately."""
+        probe_result = GitHubSkillProbeResult(
+            owner="acme",
+            repo="pivot-skills",
+            html_url="https://github.com/acme/pivot-skills",
+            description="Imported skill catalog",
+            default_ref="main",
+            selected_ref="main",
+            branches=("main",),
+            tags=(),
+            has_skills_dir=True,
+            candidates=(
+                GitHubSkillCandidate(
+                    directory_name="team-handbook",
+                    entry_filename="SKILL.md",
+                    suggested_name="team-handbook",
+                    description="Shared onboarding guide",
+                ),
+            ),
+        )
+        archive_bytes = self._build_skill_archive(
+            "team-handbook",
+            (
+                "---\n"
+                "name: team-handbook\n"
+                "description: Shared onboarding guide\n"
+                "---\n\n"
+                "# team-handbook\n\n"
+                "Shared import body.\n"
+            ),
+        )
+
+        with (
+            patch.object(
+                skill_service,
+                "probe_github_skill_repository",
+                return_value=probe_result,
+            ),
+            patch.object(
+                skill_service,
+                "download_github_repository_archive",
+                return_value=archive_bytes,
+            ),
+        ):
+            skill_service.install_github_skill(
+                self.session,
+                self.alice,
+                github_url="https://github.com/acme/pivot-skills",
+                ref="main",
+                ref_type="branch",
+                kind="shared",
+                remote_directory_name="team-handbook",
+                skill_name="team-handbook",
+            )
+
+        alice_shared = {
+            item["name"]: item
+            for item in skill_service.list_shared_skills(self.session, "alice")
+        }
+        bob_shared = {
+            item["name"]: item
+            for item in skill_service.list_shared_skills(self.session, "bob")
+        }
+        self.assertIn("team-handbook", alice_shared)
+        self.assertIn("team-handbook", bob_shared)
+        shared_payload = skill_service.read_shared_skill(
+            self.session,
+            "bob",
+            "team-handbook",
+        )
+        self.assertIn("Shared import body.", shared_payload["source"])
+
+    def test_probe_github_import_marks_conflicting_names(self) -> None:
+        """Probe results should flag globally conflicting suggested skill names."""
+        skill_service.upsert_user_skill(
+            self.session,
+            self.alice,
+            "private",
+            "research",
+            (
+                "---\n"
+                "name: research\n"
+                "description: Existing workflow\n"
+                "---\n\n"
+                "# research\n"
+            ),
+        )
+        probe_result = GitHubSkillProbeResult(
+            owner="acme",
+            repo="pivot-skills",
+            html_url="https://github.com/acme/pivot-skills",
+            description="Imported skill catalog",
+            default_ref="main",
+            selected_ref="main",
+            branches=("main",),
+            tags=(),
+            has_skills_dir=True,
+            candidates=(
+                GitHubSkillCandidate(
+                    directory_name="research-folder",
+                    entry_filename="SKILL.md",
+                    suggested_name="research",
+                    description="Would conflict with an existing name",
+                ),
+            ),
+        )
+
+        with patch.object(
+            skill_service,
+            "probe_github_skill_repository",
+            return_value=probe_result,
+        ):
+            payload = skill_service.probe_github_skill_import(
+                self.session,
+                self.alice,
+                "https://github.com/acme/pivot-skills",
+            )
+
+        self.assertEqual(payload["candidates"][0]["suggested_name"], "research")
+        self.assertEqual(payload["candidates"][0]["name_conflict"], True)

@@ -165,6 +165,7 @@ function AgentList() {
     llm_id: number | undefined;
     skill_resolution_llm_id?: number | null;
     session_idle_timeout_minutes: number;
+    sandbox_timeout_seconds: number;
     compact_threshold_percent: number;
     is_active?: boolean;
   }) => {
@@ -176,6 +177,7 @@ function AgentList() {
         llm_id: agentData.llm_id,
         skill_resolution_llm_id: agentData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
+        sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
         is_active: agentData.is_active,
       });
@@ -188,6 +190,7 @@ function AgentList() {
         llm_id: agentData.llm_id,
         skill_resolution_llm_id: agentData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
+        sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
         is_active: agentData.is_active,
       });
@@ -464,6 +467,8 @@ function AgentList() {
                 skill_resolution_llm_id: editingAgent.skill_resolution_llm_id ?? null,
                 session_idle_timeout_minutes:
                   editingAgent.session_idle_timeout_minutes,
+                sandbox_timeout_seconds:
+                  editingAgent.sandbox_timeout_seconds,
                 compact_threshold_percent:
                   editingAgent.compact_threshold_percent,
                 is_active: editingAgent.is_active,

@@ -66,6 +66,7 @@ services:
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
       - SANDBOX_PODMAN_BASE_URL=unix:///run/podman/podman.sock
       - SANDBOX_BASE_IMAGE=localhost/pivot-sandbox-base:py311-rg
+      - SANDBOX_NETWORK_MODE=bridge
       - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
       - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
       - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30

@@ -24,6 +24,10 @@ class Skill(SQLModel, table=True):
         location: Absolute directory path that contains the markdown skill assets.
         filename: Markdown filename inside ``location``.
         md5: Content digest of the markdown source for quick change detection.
+        github_repo_url: Upstream GitHub repository URL for imported skills.
+        github_ref: Imported Git ref, usually a branch or tag name.
+        github_ref_type: Imported ref classification, either ``branch`` or ``tag``.
+        github_skill_path: Original repository path for the imported skill folder.
         created_at: UTC timestamp when the skill was first registered.
         updated_at: UTC timestamp when the markdown source last changed.
     """
@@ -38,5 +42,9 @@ class Skill(SQLModel, table=True):
     location: str = Field(unique=True, max_length=1024)
     filename: str = Field(max_length=255)
     md5: str = Field(max_length=32)
+    github_repo_url: str | None = Field(default=None, max_length=1024)
+    github_ref: str | None = Field(default=None, max_length=255)
+    github_ref_type: str | None = Field(default=None, max_length=32)
+    github_skill_path: str | None = Field(default=None, max_length=1024)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

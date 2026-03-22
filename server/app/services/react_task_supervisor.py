@@ -450,6 +450,7 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         username=launch.username,
                         agent_id=agent.id or 0,
+                        sandbox_timeout_seconds=agent.sandbox_timeout_seconds,
                         web_search_provider=launch.web_search_provider,
                         allowed_skills=tuple(allowed_skill_mounts),
                     ),

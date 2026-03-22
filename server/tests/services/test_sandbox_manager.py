@@ -34,6 +34,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 ],
             ),
             patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(module, "_container_network_mode", return_value="bridge"),
             patch.object(
                 module,
                 "_container_image_ref",
@@ -47,7 +48,10 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 return_value=type(
                     "Settings",
                     (),
-                    {"SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg"},
+                    {
+                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
+                        "SANDBOX_NETWORK_MODE": "bridge",
+                    },
                 )(),
             ),
         ):
@@ -71,6 +75,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 ],
             ),
             patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(module, "_container_network_mode", return_value="bridge"),
             patch.object(
                 module,
                 "_container_image_ref",
@@ -84,7 +89,10 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 return_value=type(
                     "Settings",
                     (),
-                    {"SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg"},
+                    {
+                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
+                        "SANDBOX_NETWORK_MODE": "bridge",
+                    },
                 )(),
             ),
         ):
@@ -92,3 +100,44 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
 
         self.assertFalse(should_recreate)
         self.assertEqual(reason, "ok")
+
+    def test_recreates_container_when_network_mode_changes(self) -> None:
+        """Changing sandbox network policy should refresh warm containers."""
+        module = cast(Any, sandbox_manager)
+        container = object()
+
+        with (
+            patch.object(module, "_container_working_dir", return_value="/workspace"),
+            patch.object(
+                module,
+                "_get_container_mounts",
+                return_value=[
+                    {"Destination": "/workspace", "Source": "/tmp/workspace"}
+                ],
+            ),
+            patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(module, "_container_network_mode", return_value="none"),
+            patch.object(
+                module,
+                "_container_image_ref",
+                return_value="localhost/pivot-sandbox-base:py311-rg",
+            ),
+            patch.object(module, "_resolve_image_id", return_value="sha256:current"),
+            patch.object(module, "_container_image_id", return_value="sha256:current"),
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
+                        "SANDBOX_NETWORK_MODE": "bridge",
+                    },
+                )(),
+            ),
+        ):
+            should_recreate, reason = module._should_recreate_container(container, {})
+
+        self.assertTrue(should_recreate)
+        self.assertEqual(reason, "network_mode_mismatch")

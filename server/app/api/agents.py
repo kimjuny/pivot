@@ -72,6 +72,7 @@ async def get_agents(
                 "llm_id": agent.llm_id,
                 "skill_resolution_llm_id": agent.skill_resolution_llm_id,
                 "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
+                "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
                 "compact_threshold_percent": agent.compact_threshold_percent,
                 "model_name": model_display,
                 "is_active": agent.is_active,
@@ -134,6 +135,7 @@ async def create_agent(
         llm_id=agent_data.llm_id,
         skill_resolution_llm_id=agent_data.skill_resolution_llm_id,
         session_idle_timeout_minutes=agent_data.session_idle_timeout_minutes,
+        sandbox_timeout_seconds=agent_data.sandbox_timeout_seconds,
         compact_threshold_percent=agent_data.compact_threshold_percent,
         is_active=agent_data.is_active,
         max_iteration=agent_data.max_iteration,
@@ -153,6 +155,7 @@ async def create_agent(
         "llm_id": agent.llm_id,
         "skill_resolution_llm_id": agent.skill_resolution_llm_id,
         "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
+        "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
         "compact_threshold_percent": agent.compact_threshold_percent,
         "model_name": model_display,
         "is_active": agent.is_active,
@@ -229,6 +232,8 @@ async def update_agent(
         update_data["session_idle_timeout_minutes"] = (
             agent_data.session_idle_timeout_minutes
         )
+    if agent_data.sandbox_timeout_seconds is not None:
+        update_data["sandbox_timeout_seconds"] = agent_data.sandbox_timeout_seconds
     if agent_data.compact_threshold_percent is not None:
         update_data["compact_threshold_percent"] = agent_data.compact_threshold_percent
     if agent_data.is_active is not None:
@@ -261,6 +266,7 @@ async def update_agent(
         "llm_id": updated_agent.llm_id,
         "skill_resolution_llm_id": updated_agent.skill_resolution_llm_id,
         "session_idle_timeout_minutes": updated_agent.session_idle_timeout_minutes,
+        "sandbox_timeout_seconds": updated_agent.sandbox_timeout_seconds,
         "compact_threshold_percent": updated_agent.compact_threshold_percent,
         "model_name": model_display,
         "is_active": updated_agent.is_active,
@@ -357,6 +363,7 @@ async def get_agent(
         "llm_id": agent.llm_id,
         "skill_resolution_llm_id": agent.skill_resolution_llm_id,
         "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
+        "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
         "compact_threshold_percent": agent.compact_threshold_percent,
         "model_name": model_display,
         "is_active": agent.is_active,

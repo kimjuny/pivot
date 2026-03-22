@@ -123,6 +123,7 @@ export const createAgent = async (agentData: {
   llm_id: number;
   skill_resolution_llm_id?: number | null;
   session_idle_timeout_minutes?: number;
+  sandbox_timeout_seconds?: number;
   compact_threshold_percent?: number;
   is_active?: boolean;
 }): Promise<Agent> => {
@@ -370,6 +371,7 @@ export const updateAgent = async (
     llm_id?: number;
     skill_resolution_llm_id?: number | null;
     session_idle_timeout_minutes?: number;
+    sandbox_timeout_seconds?: number;
     compact_threshold_percent?: number;
     is_active?: boolean;
     skill_ids?: string | null;
@@ -1537,6 +1539,11 @@ export interface SharedSkill {
   builtin: boolean;
   read_only: boolean;
   md5: string;
+  github_repo_url: string | null;
+  github_ref: string | null;
+  github_ref_type: 'branch' | 'tag' | null;
+  github_skill_path: string | null;
+  imported: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -1555,8 +1562,47 @@ export interface UserSkill {
   builtin: boolean;
   read_only: boolean;
   md5: string;
+  github_repo_url: string | null;
+  github_ref: string | null;
+  github_ref_type: 'branch' | 'tag' | null;
+  github_skill_path: string | null;
+  imported: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * One valid skill folder discovered in a GitHub repository.
+ */
+export interface GitHubSkillCandidate {
+  directory_name: string;
+  entry_filename: string;
+  suggested_name: string;
+  description: string;
+  name_conflict: boolean;
+}
+
+/**
+ * Repository metadata returned by GitHub skill probing.
+ */
+export interface GitHubSkillRepository {
+  owner: string;
+  repo: string;
+  html_url: string;
+  description: string | null;
+}
+
+/**
+ * Result payload for probing a GitHub repository for importable skills.
+ */
+export interface GitHubSkillProbeResponse {
+  repository: GitHubSkillRepository;
+  default_ref: string;
+  selected_ref: string;
+  branches: string[];
+  tags: string[];
+  has_skills_dir: boolean;
+  candidates: GitHubSkillCandidate[];
 }
 
 /**
@@ -1627,6 +1673,39 @@ export const deleteUserSkill = async (
   await apiRequest(`/skills/${kind}/${encodedSkillName}`, {
     method: 'DELETE',
   });
+};
+
+/**
+ * Probe a public GitHub repository for importable skills.
+ */
+export const probeGitHubSkills = async (
+  githubUrl: string,
+  ref?: string | null
+): Promise<GitHubSkillProbeResponse> => {
+  return apiRequest('/skills/import/github/probe', {
+    method: 'POST',
+    body: JSON.stringify({
+      github_url: githubUrl,
+      ref: ref ?? null,
+    }),
+  }) as Promise<GitHubSkillProbeResponse>;
+};
+
+/**
+ * Import one skill folder from a public GitHub repository.
+ */
+export const importGitHubSkill = async (payload: {
+  github_url: string;
+  ref: string;
+  ref_type: 'branch' | 'tag';
+  kind: 'private' | 'shared';
+  remote_directory_name: string;
+  skill_name: string;
+}): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
+  return apiRequest('/skills/import/github', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<{ status: string; metadata: SharedSkill | UserSkill }>;
 };
 
 /**

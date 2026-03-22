@@ -7,11 +7,23 @@ import re
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from io import BytesIO
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
+from zipfile import ZipFile
 
 from app.models.skill import Skill
 from app.models.user import User
+from app.orchestration.skills.github import (
+    download_github_repository_archive,
+    probe_github_skill_repository,
+)
+from app.orchestration.skills.skill_files import (
+    SKILL_MARKDOWN_FILENAMES,
+    parse_front_matter,
+    rewrite_skill_name,
+)
 from app.services.workspace_service import workspace_root
 from app.utils.logging_config import get_logger
 from sqlmodel import Session, select
@@ -23,7 +35,6 @@ logger = get_logger("skill_service")
 
 _SKILLS_DIRNAME = "skills"
 _ALLOWED_KINDS = {"private", "shared"}
-_SKILL_VARIANT_FILENAMES = ("SKILL.md", "skill.md", "Skill.md")
 
 
 @dataclass(frozen=True)
@@ -80,7 +91,7 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
         canonical = _canonical_skill_path(base_dir, skill_name)
         if canonical.exists():
             return canonical
-        for filename in _SKILL_VARIANT_FILENAMES:
+        for filename in SKILL_MARKDOWN_FILENAMES:
             candidate = skill_dir / filename
             if candidate.exists():
                 return candidate
@@ -154,30 +165,6 @@ def _file_md5(path: Path) -> str:
     return hashlib.md5(path.read_bytes(), usedforsecurity=False).hexdigest()
 
 
-def _parse_front_matter(source: str) -> dict[str, str]:
-    """Parse a minimal YAML-like front matter block from markdown."""
-    lines = source.splitlines()
-    if len(lines) < 3 or lines[0].strip() != "---":
-        return {}
-
-    end_idx = -1
-    for idx in range(1, len(lines)):
-        if lines[idx].strip() == "---":
-            end_idx = idx
-            break
-    if end_idx == -1:
-        return {}
-
-    meta: dict[str, str] = {}
-    for raw_line in lines[1:end_idx]:
-        line = raw_line.strip()
-        if not line or ":" not in line or line.startswith("#"):
-            continue
-        key, value = line.split(":", 1)
-        meta[key.strip().lower()] = value.strip().strip('"').strip("'")
-    return meta
-
-
 def _validate_skill_name(skill_name: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", skill_name):
         raise ValueError("Skill name can only contain letters, numbers, '_', '-', '.'")
@@ -195,7 +182,7 @@ def _discover_skill(
     """Build one discovered skill record from markdown on disk."""
     fallback_name = _fallback_skill_name(base_dir, skill_path)
     source_text = _read_markdown(skill_path)
-    parsed = _parse_front_matter(source_text)
+    parsed = parse_front_matter(source_text)
     name = parsed.get("name") or fallback_name
     _validate_skill_name(name)
 
@@ -322,6 +309,11 @@ def _serialize_skill(
         "builtin": skill.builtin,
         "read_only": read_only,
         "md5": skill.md5,
+        "github_repo_url": skill.github_repo_url,
+        "github_ref": skill.github_ref,
+        "github_ref_type": skill.github_ref_type,
+        "github_skill_path": skill.github_skill_path,
+        "imported": skill.github_repo_url is not None,
         "created_at": _serialize_utc_timestamp(skill.created_at),
         "updated_at": _serialize_utc_timestamp(skill.updated_at),
     }
@@ -457,8 +449,12 @@ def list_shared_skills(session: Session, username: str) -> list[dict[str, Any]]:
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
+    user = session.exec(select(User).where(User.username == username)).first()
+    if user is None or user.id is None:
+        raise ValueError(f"User '{username}' not found.")
+
     statement = select(Skill).where(Skill.kind == "shared").order_by(Skill.name)
-    skills = session.exec(statement).all()
+    skills = list(session.exec(statement).all())
     return [
         _serialize_skill(
             skill,
@@ -603,6 +599,9 @@ def read_shared_skill(
     """
     _validate_skill_name(skill_name)
     sync_skill_registry(session)
+    user = session.exec(select(User).where(User.username == username)).first()
+    if user is None or user.id is None:
+        raise ValueError(f"User '{username}' not found.")
 
     skill = session.exec(
         select(Skill).where(Skill.name == skill_name, Skill.kind == "shared")
@@ -681,6 +680,204 @@ def build_skill_mounts(
     return mounts
 
 
+def probe_github_skill_import(
+    session: Session,
+    current_user: User,
+    github_url: str,
+    *,
+    ref: str | None = None,
+) -> dict[str, Any]:
+    """Probe a public GitHub repository for importable skills.
+
+    Args:
+        session: Active database session.
+        current_user: Authenticated user requesting the probe.
+        github_url: GitHub repository URL.
+        ref: Optional branch or tag to inspect.
+
+    Returns:
+        Serialized repository probe result with name-conflict hints.
+    """
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before probing skills.")
+
+    sync_skill_registry(session)
+    existing_names = {skill.name for skill in _all_skills_query(session)}
+    probe = probe_github_skill_repository(github_url, selected_ref=ref)
+    payload = probe.to_dict()
+    candidates = payload["candidates"]
+    for candidate in candidates:
+        suggested_name = candidate["suggested_name"]
+        candidate["name_conflict"] = suggested_name in existing_names
+    return payload
+
+
+def install_github_skill(
+    session: Session,
+    current_user: User,
+    *,
+    github_url: str,
+    ref: str,
+    ref_type: str,
+    kind: str,
+    remote_directory_name: str,
+    skill_name: str,
+) -> dict[str, Any]:
+    """Install one skill folder from a public GitHub repository.
+
+    Args:
+        session: Active database session.
+        current_user: Authenticated user who owns the installation target.
+        github_url: GitHub repository URL.
+        ref: Selected branch or tag.
+        kind: Installation scope, either ``private`` or ``shared``.
+        remote_directory_name: Chosen folder directly under ``skills/`` in the repo.
+        skill_name: Final globally unique skill name stored locally.
+
+    Returns:
+        Serialized metadata for the installed skill.
+    """
+    _validate_skill_name(skill_name)
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError(f"Invalid skill kind: {kind}")
+    if ref_type not in {"branch", "tag"}:
+        raise ValueError(f"Invalid GitHub ref type: {ref_type}")
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before importing skills.")
+
+    sync_skill_registry(session)
+    existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if existing is not None:
+        raise ValueError(f"Skill name '{skill_name}' already exists.")
+
+    probe = probe_github_skill_repository(github_url, selected_ref=ref)
+    candidate_by_directory = {
+        candidate.directory_name: candidate for candidate in probe.candidates
+    }
+    selected_candidate = candidate_by_directory.get(remote_directory_name)
+    if selected_candidate is None:
+        raise ValueError(
+            f"Directory '{remote_directory_name}' is not an importable skill for ref '{ref}'."
+        )
+
+    archive_bytes = download_github_repository_archive(github_url, ref)
+    base_dir = _user_skills_dir(current_user.username, kind, create=True)
+    target_dir = base_dir / skill_name
+    if target_dir.exists():
+        raise ValueError(f"Skill directory '{skill_name}' already exists.")
+
+    with TemporaryDirectory(prefix="pivot-skill-import-") as tmp_root:
+        extracted_dir = Path(tmp_root) / skill_name
+        _extract_skill_directory_from_archive(
+            archive_bytes=archive_bytes,
+            remote_directory_name=remote_directory_name,
+            destination=extracted_dir,
+        )
+
+        skill_markdown_path = extracted_dir / selected_candidate.entry_filename
+        if not skill_markdown_path.exists():
+            raise ValueError(
+                "Imported skill archive is missing its skill markdown file."
+            )
+
+        rewritten_source = rewrite_skill_name(
+            skill_markdown_path.read_text(encoding="utf-8"),
+            skill_name,
+        )
+        skill_markdown_path.write_text(rewritten_source, encoding="utf-8")
+        shutil.copytree(extracted_dir, target_dir)
+
+    discovered = _discover_skill(
+        base_dir=base_dir,
+        skill_path=target_dir / selected_candidate.entry_filename,
+        kind=kind,
+        source="user",
+        builtin=False,
+        creator=current_user,
+    )
+    timestamp = datetime.now(UTC)
+    row = Skill(
+        name=discovered.name,
+        description=discovered.description,
+        kind=kind,
+        source="user",
+        builtin=False,
+        creator_id=current_user.id,
+        location=discovered.location,
+        filename=discovered.filename,
+        md5=discovered.md5,
+        github_repo_url=github_url,
+        github_ref=ref,
+        github_ref_type=ref_type,
+        github_skill_path=f"skills/{remote_directory_name}",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    logger.info(
+        "Imported %s skill '%s' from %s@%s for user '%s'",
+        kind,
+        skill_name,
+        github_url,
+        ref,
+        current_user.username,
+    )
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        row,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+    )
+
+
+def _extract_skill_directory_from_archive(
+    *,
+    archive_bytes: bytes,
+    remote_directory_name: str,
+    destination: Path,
+) -> None:
+    """Extract one ``skills/<dir>/`` subtree from a GitHub zip archive.
+
+    Args:
+        archive_bytes: Raw repository archive bytes.
+        remote_directory_name: Folder selected under the repository ``skills/`` root.
+        destination: Local destination directory.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    matched_files = 0
+    with ZipFile(BytesIO(archive_bytes)) as archive:
+        for member in archive.infolist():
+            parts = PurePosixPath(member.filename).parts
+            if (
+                len(parts) < 3
+                or parts[1] != "skills"
+                or parts[2] != remote_directory_name
+            ):
+                continue
+
+            relative_parts = parts[3:]
+            if not relative_parts:
+                continue
+
+            target_path = destination.joinpath(*relative_parts)
+            if member.is_dir():
+                target_path.mkdir(parents=True, exist_ok=True)
+                continue
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target_path.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            matched_files += 1
+
+    if matched_files == 0:
+        raise ValueError(
+            f"Repository archive does not contain skills/{remote_directory_name}/."
+        )
+
+
 def upsert_user_skill(
     session: Session,
     current_user: User,
@@ -724,11 +921,12 @@ def upsert_user_skill(
                 f"Skill '{skill_name}' already exists as a {existing.kind} skill."
             )
 
+    normalized_source = rewrite_skill_name(source, skill_name)
     base_dir = _user_skills_dir(current_user.username, kind, create=True)
     legacy_path = _legacy_skill_path(base_dir, skill_name)
     canonical_path = _canonical_skill_path(base_dir, skill_name)
     canonical_path.parent.mkdir(parents=True, exist_ok=True)
-    canonical_path.write_text(source, encoding="utf-8")
+    canonical_path.write_text(normalized_source, encoding="utf-8")
     if legacy_path.exists():
         legacy_path.unlink()
 
@@ -753,6 +951,10 @@ def upsert_user_skill(
             location=discovered.location,
             filename=discovered.filename,
             md5=discovered.md5,
+            github_repo_url=None,
+            github_ref=None,
+            github_ref_type=None,
+            github_skill_path=None,
             created_at=created_at,
             updated_at=discovered.updated_at,
         )

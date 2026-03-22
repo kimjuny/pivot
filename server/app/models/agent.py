@@ -39,6 +39,8 @@ class Agent(SQLModel, table=True):
         skill_resolution_llm_id: Optional LLM used only for skill selection.
         session_idle_timeout_minutes: Minutes of inactivity before the chat UI
             automatically starts a fresh session for this agent.
+        sandbox_timeout_seconds: Maximum seconds the backend will wait for one
+            sandbox-manager request before surfacing an error to the user.
         model_name: Deprecated. Name of the LLM model to use (kept for migration).
         is_active: Whether the agent is currently active.
         max_iteration: Maximum number of iterations for ReAct recursion.
@@ -67,6 +69,12 @@ class Agent(SQLModel, table=True):
         default=15,
         description=(
             "Minutes of inactivity before the client starts a new chat session"
+        ),
+    )
+    sandbox_timeout_seconds: int = Field(
+        default=60,
+        description=(
+            "Maximum seconds to wait for sandbox-manager responses for this agent"
         ),
     )
     compact_threshold_percent: int = Field(

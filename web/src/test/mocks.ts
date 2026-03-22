@@ -6,6 +6,7 @@ export const mockAgent: Agent = {
   description: 'Test agent description',
   model_name: 'gpt-4',
   session_idle_timeout_minutes: 15,
+  sandbox_timeout_seconds: 60,
   compact_threshold_percent: 60,
   is_active: true,
   created_at: new Date().toISOString(),

@@ -22,6 +22,8 @@ export interface Agent {
    * agent instead of continuing the previous one.
    */
   session_idle_timeout_minutes: number;
+  /** Maximum seconds to wait for sandbox-backed tool execution requests. */
+  sandbox_timeout_seconds: number;
   /** Context-window percentage that triggers automatic runtime compaction. */
   compact_threshold_percent: number;
   /** Deprecated: Name of the LLM model used by this agent */

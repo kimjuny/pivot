@@ -41,6 +41,7 @@ class ManagerSettings(BaseSettings):
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
     SANDBOX_PODMAN_BASE_URL: str = "unix:///run/podman/podman.sock"
     SANDBOX_BASE_IMAGE: str = "docker.io/library/python:3.11-slim"
+    SANDBOX_NETWORK_MODE: str = "bridge"
     SANDBOX_BACKEND_CONTAINER_NAME: str = "pivot-backend"
     SANDBOX_CONTAINER_PREFIX: str = "pivot-sandbox"
     SANDBOX_DEFAULT_TIMEOUT_SECONDS: int = 30
@@ -550,6 +551,34 @@ def _container_image_id(container: Any) -> str | None:
     return None
 
 
+def _container_network_mode(container: Any) -> str | None:
+    """Read configured network mode from an existing sandbox container."""
+    labels = _container_labels(container)
+    labeled_mode = labels.get("pivot.sandbox.network_mode")
+    if labeled_mode:
+        return labeled_mode
+
+    attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        host_config = attrs.get("HostConfig")
+        if isinstance(host_config, dict):
+            network_mode = host_config.get("NetworkMode")
+            if isinstance(network_mode, str):
+                return network_mode
+
+    inspect_func = getattr(container, "inspect", None)
+    if callable(inspect_func):
+        inspected = inspect_func()
+        if isinstance(inspected, dict):
+            host_config = inspected.get("HostConfig")
+            if isinstance(host_config, dict):
+                network_mode = host_config.get("NetworkMode")
+                if isinstance(network_mode, str):
+                    return network_mode
+
+    return None
+
+
 def _resolve_image_id(image_ref: str) -> str | None:
     """Resolve the current local image ID for a configured image reference."""
     try:
@@ -587,6 +616,7 @@ def _should_recreate_container(
     - ``/workspace`` mount is missing
     - mounted ``/workspace/skills/*`` sources differ from expected
     - current container image differs from ``SANDBOX_BASE_IMAGE``
+    - current container network mode differs from ``SANDBOX_NETWORK_MODE``
     """
     settings = get_settings()
     workdir = _container_working_dir(container)
@@ -621,6 +651,10 @@ def _should_recreate_container(
         and configured_image_id != container_image_id
     ):
         return True, "base_image_id_mismatch"
+    configured_network_mode = settings.SANDBOX_NETWORK_MODE
+    container_network_mode = _container_network_mode(container)
+    if container_network_mode != configured_network_mode:
+        return True, "network_mode_mismatch"
     return False, "ok"
 
 
@@ -722,6 +756,7 @@ def _ensure_sandbox(
     base_image_id = _resolve_image_id(settings.SANDBOX_BASE_IMAGE)
     labels = {
         "pivot.sandbox.base_image_ref": settings.SANDBOX_BASE_IMAGE,
+        "pivot.sandbox.network_mode": settings.SANDBOX_NETWORK_MODE,
     }
     if base_image_id is not None:
         labels["pivot.sandbox.base_image_id"] = base_image_id
@@ -736,6 +771,7 @@ def _ensure_sandbox(
             tty=False,
             stdin_open=False,
             working_dir="/workspace",
+            network_mode=settings.SANDBOX_NETWORK_MODE,
             # Mount only the current agent workspace; never mount full project tree.
             volumes=volumes,
             environment={"PYTHONUNBUFFERED": "1"},

@@ -35,6 +35,8 @@ export interface AgentFormData {
   skill_resolution_llm_id?: number | null;
   /** Minutes of inactivity before chat starts a fresh session. */
   session_idle_timeout_minutes: number;
+  /** Seconds to wait for sandbox-manager before surfacing a timeout. */
+  sandbox_timeout_seconds: number;
   /** Context percentage that triggers automatic compaction. */
   compact_threshold_percent: number;
   is_active: boolean;
@@ -57,6 +59,7 @@ function createDefaultFormData(): AgentFormData {
     llm_id: undefined,
     skill_resolution_llm_id: null,
     session_idle_timeout_minutes: 15,
+    sandbox_timeout_seconds: 60,
     compact_threshold_percent: 60,
     is_active: true,
   };
@@ -85,6 +88,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           skill_resolution_llm_id: initialData.skill_resolution_llm_id ?? null,
           session_idle_timeout_minutes:
             initialData.session_idle_timeout_minutes ?? 15,
+          sandbox_timeout_seconds: initialData.sandbox_timeout_seconds ?? 60,
           compact_threshold_percent:
             initialData.compact_threshold_percent ?? 60,
           is_active:
@@ -132,6 +136,14 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
       return;
     }
     if (
+      !Number.isInteger(formData.sandbox_timeout_seconds) ||
+      formData.sandbox_timeout_seconds < 1
+    ) {
+      setActiveTab('advanced');
+      setServerError('Sandbox timeout must be at least 1 second');
+      return;
+    }
+    if (
       !Number.isInteger(formData.compact_threshold_percent) ||
       formData.compact_threshold_percent < 1 ||
       formData.compact_threshold_percent > 100
@@ -151,6 +163,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         llm_id: formData.llm_id,
         skill_resolution_llm_id: formData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: formData.session_idle_timeout_minutes,
+        sandbox_timeout_seconds: formData.sandbox_timeout_seconds,
         compact_threshold_percent: formData.compact_threshold_percent,
         is_active: formData.is_active,
       });
@@ -352,6 +365,35 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
               <p className="text-sm text-muted-foreground">
                 Start a new chat session after this many idle minutes. Default is
                 15.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="sandbox_timeout_seconds">
+                Sandbox Timeout (seconds)
+              </Label>
+              <Input
+                id="sandbox_timeout_seconds"
+                type="number"
+                min={1}
+                step={1}
+                value={formData.sandbox_timeout_seconds}
+                onChange={(e) => {
+                  const nextValue = Number.parseInt(e.target.value, 10);
+                  setFormData({
+                    ...formData,
+                    sandbox_timeout_seconds: Number.isNaN(nextValue)
+                      ? 0
+                      : nextValue,
+                  });
+                }}
+                disabled={isSubmitting}
+                placeholder="60"
+                autoComplete="off"
+              />
+              <p className="text-sm text-muted-foreground">
+                Wait this many seconds for sandbox-backed function calls before
+                surfacing a timeout error. Default is 60.
               </p>
             </div>
 

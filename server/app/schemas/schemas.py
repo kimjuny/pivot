@@ -45,6 +45,11 @@ class AgentCreate(AppBaseModel):
         ge=1,
         description="Minutes of inactivity before a new chat session is created",
     )
+    sandbox_timeout_seconds: int = Field(
+        default=60,
+        ge=1,
+        description="Maximum seconds to wait for sandbox-manager responses",
+    )
     compact_threshold_percent: int = Field(
         default=60,
         ge=1,
@@ -63,6 +68,7 @@ class AgentUpdate(AppBaseModel):
     llm_id: int | None = None
     skill_resolution_llm_id: int | None = None
     session_idle_timeout_minutes: int | None = Field(default=None, ge=1)
+    sandbox_timeout_seconds: int | None = Field(default=None, ge=1)
     compact_threshold_percent: int | None = Field(default=None, ge=1, le=100)
     is_active: bool | None = None
     max_iteration: int | None = None
@@ -79,6 +85,7 @@ class AgentResponse(AppBaseModel):
     llm_id: int | None
     skill_resolution_llm_id: int | None
     session_idle_timeout_minutes: int
+    sandbox_timeout_seconds: int
     compact_threshold_percent: int
     model_name: str | None
     is_active: bool

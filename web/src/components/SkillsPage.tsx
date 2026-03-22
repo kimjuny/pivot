@@ -8,6 +8,7 @@ import {
   Plus,
   Share2,
   Trash2,
+  Upload,
   User as UserIcon,
   X,
 } from "@/lib/lucide";
@@ -52,6 +53,7 @@ import {
 import { formatTimestamp } from '@/utils/timestamp';
 import DraggableDialog from './DraggableDialog';
 import SkillEditor from './SkillEditor';
+import SkillImportDialog from './SkillImportDialog';
 
 const PAGE_SIZE = 10;
 
@@ -121,6 +123,7 @@ function SkillsPage() {
   const [editorReadOnly, setEditorReadOnly] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const loadSkills = useCallback(async () => {
     setIsLoading(true);
@@ -250,6 +253,10 @@ function SkillsPage() {
 
   const sharedCount = allRows.filter((r) => r.kind === 'shared').length;
   const privateCount = allRows.filter((r) => r.kind === 'private').length;
+  const existingSkillNames = useMemo(
+    () => new Set(allRows.map((row) => row.skill.name)),
+    [allRows]
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -260,46 +267,57 @@ function SkillsPage() {
             Shared skills are visible to everyone, but only the creator can edit them.
           </p>
         </div>
-        <div
-          onMouseEnter={() => setIsCreateMenuOpen(true)}
-          onMouseLeave={() => setIsCreateMenuOpen(false)}
-        >
-          <DropdownMenu open={isCreateMenuOpen} onOpenChange={setIsCreateMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" className="flex items-center gap-1.5">
-                <Plus className="w-4 h-4" />
-                New
-                <ChevronDown className="w-3.5 h-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-44"
-              onMouseEnter={() => setIsCreateMenuOpen(true)}
-              onMouseLeave={() => setIsCreateMenuOpen(false)}
-            >
-              <DropdownMenuItem
-                onClick={() => {
-                  openCreateDialog('shared');
-                  setIsCreateMenuOpen(false);
-                }}
-                className="gap-2"
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setImportDialogOpen(true)}
+            className="flex items-center gap-1.5"
+          >
+            <Upload className="w-4 h-4" />
+            Import
+          </Button>
+          <div
+            onMouseEnter={() => setIsCreateMenuOpen(true)}
+            onMouseLeave={() => setIsCreateMenuOpen(false)}
+          >
+            <DropdownMenu open={isCreateMenuOpen} onOpenChange={setIsCreateMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" className="flex items-center gap-1.5">
+                  <Plus className="w-4 h-4" />
+                  New
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-44"
+                onMouseEnter={() => setIsCreateMenuOpen(true)}
+                onMouseLeave={() => setIsCreateMenuOpen(false)}
               >
-                <Share2 className="w-4 h-4" />
-                Shared
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  openCreateDialog('private');
-                  setIsCreateMenuOpen(false);
-                }}
-                className="gap-2"
-              >
-                <KeyRound className="w-4 h-4" />
-                Private
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuItem
+                  onClick={() => {
+                    openCreateDialog('shared');
+                    setIsCreateMenuOpen(false);
+                  }}
+                  className="gap-2"
+                >
+                  <Share2 className="w-4 h-4" />
+                  Shared
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => {
+                    openCreateDialog('private');
+                    setIsCreateMenuOpen(false);
+                  }}
+                  className="gap-2"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  Private
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       </div>
 
@@ -378,7 +396,7 @@ function SkillsPage() {
                 <TableHead className="w-[120px]">Kind</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="w-[170px]">Updated</TableHead>
-                <TableHead className="w-[100px] text-right">Actions</TableHead>
+                <TableHead className="w-[120px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -415,7 +433,7 @@ function SkillsPage() {
                     {formatTimestamp(row.skill.updated_at)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-1 flex-wrap">
                       <Button
                         variant="ghost"
                         size="icon"
@@ -518,6 +536,13 @@ function SkillsPage() {
           readOnly={editorReadOnly}
         />
       </DraggableDialog>
+
+      <SkillImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        existingSkillNames={existingSkillNames}
+        onImported={loadSkills}
+      />
     </div>
   );
 }

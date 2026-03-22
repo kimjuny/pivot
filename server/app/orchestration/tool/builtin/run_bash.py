@@ -23,12 +23,13 @@ def run_bash(command: str, fail_on_nonzero: bool = False) -> dict[str, Any]:
     Raises:
         RuntimeError: If ``fail_on_nonzero`` is true and command fails.
     """
-    username, agent_id, allowed_skills = require_context()
+    username, agent_id, sandbox_timeout_seconds, allowed_skills = require_context()
     result = get_sandbox_service().exec(
         username=username,
         agent_id=agent_id,
         cmd=["bash", "-lc", command],
         skills=list(allowed_skills),
+        timeout_seconds=sandbox_timeout_seconds,
     )
     if result.exit_code != 0 and fail_on_nonzero:
         message = result.stderr.strip() or result.stdout.strip()

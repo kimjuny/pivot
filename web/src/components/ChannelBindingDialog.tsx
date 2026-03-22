@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import DraggableDialog from './DraggableDialog';
+import { ChannelProviderBadge } from './ChannelProviderBadge';
 import ConfigFieldGroup from './ConfigFieldGroup';
 import {
   createAgentChannel,
@@ -223,12 +224,22 @@ function ChannelBindingDialog({
               <Label htmlFor="channel-provider">Provider</Label>
               <Select value={channelKey} onValueChange={setChannelKey}>
                 <SelectTrigger id="channel-provider">
-                  <SelectValue placeholder="Select a provider" />
+                  {manifest ? (
+                    <ChannelProviderBadge
+                      channelKey={manifest.key}
+                      name={manifest.name}
+                    />
+                  ) : (
+                    <SelectValue placeholder="Select a provider" />
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   {catalog.map((item) => (
                     <SelectItem key={item.manifest.key} value={item.manifest.key}>
-                      {item.manifest.name}
+                      <ChannelProviderBadge
+                        channelKey={item.manifest.key}
+                        name={item.manifest.name}
+                      />
                     </SelectItem>
                   ))}
                 </SelectContent>

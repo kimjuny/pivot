@@ -109,6 +109,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_session_schema_compatibility()
     ensure_react_schema_compatibility()
     ensure_file_schema_compatibility()
+    ensure_skill_schema_compatibility()
 
     from app.api.auth import init_default_user
     from app.services.skill_service import sync_skill_registry
@@ -138,6 +139,10 @@ def ensure_agent_schema_compatibility() -> None:
                     "ADD COLUMN session_idle_timeout_minutes INTEGER"
                 )
             )
+        if "sandbox_timeout_seconds" not in columns:
+            conn.execute(
+                text("ALTER TABLE agent ADD COLUMN sandbox_timeout_seconds INTEGER")
+            )
         if "compact_threshold_percent" not in columns:
             conn.execute(
                 text(
@@ -149,6 +154,13 @@ def ensure_agent_schema_compatibility() -> None:
                 "UPDATE agent "
                 "SET session_idle_timeout_minutes = 15 "
                 "WHERE session_idle_timeout_minutes IS NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE agent "
+                "SET sandbox_timeout_seconds = 60 "
+                "WHERE sandbox_timeout_seconds IS NULL"
             )
         )
         conn.execute(
@@ -274,3 +286,27 @@ def ensure_file_schema_compatibility() -> None:
             )
         if "text_encoding" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN text_encoding VARCHAR"))
+
+
+def ensure_skill_schema_compatibility() -> None:
+    """Apply additive schema updates for the evolving skill registry table.
+
+    Why: skill import metadata is still moving quickly pre-launch, so
+    startup should keep developer SQLite files usable without hand-written
+    migrations every time the skill model grows.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("skill"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("skill")}
+    with engine.begin() as conn:
+        if "github_repo_url" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN github_repo_url VARCHAR"))
+        if "github_ref" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN github_ref VARCHAR"))
+        if "github_ref_type" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN github_ref_type VARCHAR"))
+        if "github_skill_path" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN github_skill_path VARCHAR"))

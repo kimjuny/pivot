@@ -45,7 +45,9 @@ import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
 import ChannelBindingDialog from './ChannelBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
+import { ChannelProviderBadge } from './ChannelProviderBadge';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
+import { WebSearchProviderBadge } from './WebSearchProviderBadge';
 import type { Agent, Scene } from '../types';
 import {
     updateAgent,
@@ -306,6 +308,20 @@ function AgentDetailSidebar({
         }
         return displayedSkills.length;
     }, [skills.length, displayedSkills.length, enabledSkillNameSet]);
+
+    /**
+     * Sidebar rows only carry compact provider metadata, so keep a local lookup
+     * of catalog logos to avoid refetching richer binding payloads just for icons.
+     */
+    const webSearchLogoUrlByKey = useMemo<Record<string, string | null>>(
+        () => Object.fromEntries(
+            webSearchCatalog.map((item) => [
+                item.manifest.key,
+                item.manifest.logo_url ?? null,
+            ])
+        ),
+        [webSearchCatalog]
+    );
 
     /**
      * Fetch both shared (built-in) and private (user-workspace) tools in parallel.
@@ -1190,7 +1206,12 @@ function AgentDetailSidebar({
                                                                 onClick={() => void handleEditChannel(channel.id)}
                                                                 className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                                                             >
-                                                                <span className="w-4 shrink-0" />
+                                                                <ChannelProviderBadge
+                                                                    channelKey={channel.channelKey}
+                                                                    name={channel.providerName}
+                                                                    className="w-4 shrink-0 justify-center"
+                                                                    textClassName="hidden"
+                                                                />
                                                                 <span className="truncate flex-1">{channel.name}</span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                     {channel.enabled ? 'on' : 'off'}
@@ -1298,7 +1319,12 @@ function AgentDetailSidebar({
                                                                 onClick={() => void handleEditWebSearchBinding(binding.id)}
                                                                 className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                                                             >
-                                                                <span className="w-4 shrink-0" />
+                                                                <WebSearchProviderBadge
+                                                                    name={binding.providerName}
+                                                                    logoUrl={webSearchLogoUrlByKey[binding.providerKey] ?? null}
+                                                                    className="w-4 shrink-0 justify-center"
+                                                                    textClassName="hidden"
+                                                                />
                                                                 <span className="truncate flex-1">{binding.providerName}</span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                     {binding.enabled ? 'on' : 'off'}
@@ -1376,6 +1402,8 @@ function AgentDetailSidebar({
                             skill_resolution_llm_id: agent.skill_resolution_llm_id ?? null,
                             session_idle_timeout_minutes:
                                 agent.session_idle_timeout_minutes,
+                            sandbox_timeout_seconds:
+                                agent.sandbox_timeout_seconds,
                             compact_threshold_percent:
                                 agent.compact_threshold_percent,
                             is_active: agent.is_active,

@@ -31,10 +31,13 @@ EXPOSE 3000
 # ---- Sandbox base target ----------------------------------------------------
 FROM docker.io/library/python:3.11-slim AS sandbox-base
 
-# Keep the sandbox image minimal while providing rg for higher-level search
-# tooling. Installing it in the image avoids per-container bootstrap latency.
+# Provide the default runtime utilities needed by sandboxed function execution.
+# We keep them in the image so every sidecar can start immediately without a
+# bootstrap step. Node/npm are installed here because some skills and sandboxed
+# tasks need a JavaScript runtime in addition to Python, and Chromium is
+# included for browser-driven workflows inside the sandbox.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ripgrep && \
+    apt-get install -y --no-install-recommends chromium nodejs npm ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

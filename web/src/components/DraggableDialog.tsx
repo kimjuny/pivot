@@ -11,6 +11,8 @@ type DialogSize = 'default' | 'large';
  * management to mimic desktop-window behavior.
  */
 const BASE_DIALOG_Z_INDEX = 50;
+const DIALOG_HEADER_HEIGHT = 40;
+const MINIMIZE_TRANSITION_MS = 150;
 let topDialogZIndex = BASE_DIALOG_Z_INDEX;
 
 /** Allocates the next top-most z-index for a dialog instance. */
@@ -79,8 +81,6 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
         };
     }, [size]);
 
-    const dimensions = getDimensions();
-
     // Initialize position to center on first render
     useEffect(() => {
         if (open && dialogRef.current) {
@@ -137,7 +137,9 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
             // Get current dimensions
             const dims = getDimensions();
             const dialogWidth = dims.width;
-            const dialogHeight = isMinimized ? 40 : dims.height;
+            const dialogHeight = isMinimized
+                ? DIALOG_HEADER_HEIGHT
+                : dims.height;
 
             const boundedX = Math.max(0, Math.min(newX, window.innerWidth - dialogWidth));
             const boundedY = Math.max(0, Math.min(newY, window.innerHeight - dialogHeight));
@@ -187,23 +189,27 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
     if (!open) return null;
 
     const dims = getDimensions();
+    const contentHeight = Math.max(dims.height - DIALOG_HEADER_HEIGHT, 0);
 
     return (
         <div
             ref={dialogRef}
-            className="fixed left-0 top-0"
+            className="fixed left-0 top-0 transition-[height] ease-in-out"
             onMouseDownCapture={bringToFront}
             style={{
                 zIndex,
                 width: `${dims.width}px`,
-                height: isMinimized ? '40px' : `${dims.height}px`,
+                height: isMinimized
+                    ? `${DIALOG_HEADER_HEIGHT}px`
+                    : `${dims.height}px`,
+                transitionDuration: `${MINIMIZE_TRANSITION_MS}ms`,
                 willChange: 'transform'
             }}
         >
             <div className="bg-background border border-border rounded-lg shadow-2xl flex flex-col h-full overflow-hidden">
                 {/* Draggable Header */}
                 <div
-                    className="px-3 py-2 border-b border-border bg-background flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
+                    className="h-10 px-3 border-b border-border bg-background flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
                     onMouseDown={handleMouseDown}
                 >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -226,16 +232,24 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
                         >
                             <div className="relative w-3.5 h-3.5">
                                 <Minus
-                                    className={`absolute inset-0 w-3.5 h-3.5 text-foreground transition-all duration-150 ${isMinimized
+                                    className={`absolute inset-0 w-3.5 h-3.5 text-foreground transition-all ${isMinimized
                                         ? 'opacity-0 scale-0 rotate-90'
                                         : 'opacity-100 scale-100 rotate-0'
                                         }`}
+                                    style={{
+                                        transitionDuration:
+                                            `${MINIMIZE_TRANSITION_MS}ms`
+                                    }}
                                 />
                                 <Maximize2
-                                    className={`absolute inset-0 w-3.5 h-3.5 text-foreground transition-all duration-150 ${isMinimized
+                                    className={`absolute inset-0 w-3.5 h-3.5 text-foreground transition-all ${isMinimized
                                         ? 'opacity-100 scale-100 rotate-0'
                                         : 'opacity-0 scale-0 -rotate-90'
                                         }`}
+                                    style={{
+                                        transitionDuration:
+                                            `${MINIMIZE_TRANSITION_MS}ms`
+                                    }}
                                 />
                             </div>
                         </button>
@@ -249,10 +263,20 @@ function DraggableDialog({ open, onOpenChange, title, headerAction, children, si
                     </div>
                 </div>
 
-                {/* Content Area - Hidden with CSS when minimized to preserve state */}
-                <div 
-                    className="flex-1 overflow-hidden"
-                    style={{ display: isMinimized ? 'none' : 'block' }}
+                {/* Keeping the content mounted avoids form/editor resets while the
+                   container animates between desktop-window states. */}
+                <div
+                    aria-hidden={isMinimized}
+                    className="flex-1 overflow-hidden transition-[max-height,opacity,transform] ease-in-out"
+                    style={{
+                        maxHeight: isMinimized ? '0px' : `${contentHeight}px`,
+                        opacity: isMinimized ? 0 : 1,
+                        transform: isMinimized
+                            ? 'translateY(-12px)'
+                            : 'translateY(0px)',
+                        transitionDuration: `${MINIMIZE_TRANSITION_MS}ms`,
+                        pointerEvents: isMinimized ? 'none' : 'auto'
+                    }}
                 >
                     {children}
                 </div>
