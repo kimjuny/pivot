@@ -7,36 +7,7 @@ trigger: always_on
 ## Project Overview
 
 **Name**: Pivot
-**简介**: 这是一款Agent开发框架，与传统workflow式僵硬地一问一答Agent不同，Pivot的目的是让Agent在一些对话场景中围绕目的而展开更具策略性的对话方式（主动、被动），让Agent更像一个会自主思考的真人。
-
-## Directory Structure
-
-### Server Module
-- **Purpose**: Backend service providing agent orchestration and conversational agent instances
-- **Key Features**:
-  - Agent orchestration capabilities
-  - Conversational agent instances (users can interact directly with agents)
-
-```
-server/
-└── app/api/     # All core server API endpoints
-```
-
-### Web Module
-- **Purpose**: Frontend user interface for agent development
-- **Key Features**:
-  - Visual agent orchestration capabilities
-  - Visual agent conversation interface
-
-```
-web/
-├── src/                    # All core frontend application source code
-│   ├── components/        # Core UI logic and components
-│   └── utils/            # Utility functions
-│       ├── api.js         # Server communication API
-│       └── timestamp.js   # Timestamp rendering standardization
-└── tailwind.config.js      # Tailwind CSS core configuration
-```
+**重要**: !!!本项目还没有上线，所以请你更多着眼于长远，不要写那些对过往逻辑需要兼容的冗余代码，而是着手写简洁、易读、逻辑清晰、可扩展性强的逻辑。如果你有一些拿不准的问题，请你先与我互动探讨解答，而不是着急上手写代码。!!!
 
 ## Technology Stack
 
@@ -56,7 +27,24 @@ web/
 - **Styling**: Tailwind CSS
 - **Graph Visualization**: XyFlow
 
----
+## Development Workflow
+
+**Required Before Committing**: Execute lint/type-check commands with Podman
+using the existing services defined in `compose.yaml` (not on the host machine).
+
+Use these service targets:
+- Backend Python checks: `backend`
+- Frontend TypeScript/ESLint checks: `frontend`
+
+Preferred command style (when services are already running):
+
+1. `podman compose exec backend poetry run ruff check server --fix` - Resolve backend lint/import issues
+2. `podman compose exec backend poetry run ruff format server` - Ensure backend formatting consistency
+3. `podman compose exec backend poetry run pyright server` - Verify backend type integrity
+4. `podman compose exec frontend npm run lint` - Run frontend lint
+5. `podman compose exec frontend npm run type-check` - Run frontend type check
+
+Fallback (if services are not running): use `podman compose run --rm <service> <command>`.
 
 ## TypeScript & React Code Standards
 
@@ -88,8 +76,6 @@ web/
 - **Format**: `// TODO: [name/AI] description of pending task`
 - **Usage**: For incomplete edge cases or planned features
 
----
-
 ## Python Development Rules
 
 ### Code Quality Standards
@@ -120,30 +106,11 @@ web/
 | Setting | Value | Description |
 |----------|---------|-------------|
 | **Type Checking Mode** | `standard` | Type checking strictness |
-| **Python Version** | 3.10 | Target Python version |
+| **Python Version** | 3.11 | Target Python version |
 | **reportOptionalMemberAccess** | **Error** | Explicit None-checks mandatory |
 | **reportGeneralTypeIssues** | **Error** | Catch general type issues |
 | **reportUnusedImport** | **Warning** | Flag unused imports |
 | **reportUnusedVariable** | **Warning** | Flag unused variables |
-
-### Development Workflow
-
-**Required Before Committing**: Execute lint/type-check commands with Podman
-using the existing services defined in `compose.yaml` (not on the host machine).
-
-Use these service targets:
-- Backend Python checks: `backend`
-- Frontend TypeScript/ESLint checks: `frontend`
-
-Preferred command style (when services are already running):
-
-1. `podman compose exec backend poetry run ruff check server --fix` - Resolve backend lint/import issues
-2. `podman compose exec backend poetry run ruff format server` - Ensure backend formatting consistency
-3. `podman compose exec backend poetry run pyright server` - Verify backend type integrity
-4. `podman compose exec frontend npm run lint` - Run frontend lint
-5. `podman compose exec frontend npm run type-check` - Run frontend type check
-
-Fallback (if services are not running): use `podman compose run --rm <service> <command>`.
 
 ### Strategic Coding Requirements
 

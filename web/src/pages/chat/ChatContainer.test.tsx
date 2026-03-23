@@ -723,6 +723,278 @@ describe("ChatContainer session rollover", () => {
     expect(screen.getByText("Planning the sections")).toBeInTheDocument();
   });
 
+  it("auto-enters reply mode when a clarify event arrives", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 5,
+      session_id: "clarify-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-clarify",
+      session_id: "clarify-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+
+    const encoder = new TextEncoder();
+    vi.mocked(fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 1,
+                      type: "clarify",
+                      task_id: "task-clarify",
+                      iteration: 0,
+                      timestamp: "2026-03-20T00:00:05.000Z",
+                      data: {
+                        question:
+                          "Which export format do you prefer, PDF or PowerPoint?",
+                      },
+                    })}\n\n`,
+                  ),
+                );
+                controller.close();
+              }, 0);
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Help me export");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(startReactTask).toHaveBeenCalledWith({
+        agent_id: 7,
+        message: "Help me export",
+        session_id: "clarify-session",
+        task_id: null,
+        file_ids: [],
+        web_search_provider: null,
+        thinking_mode: null,
+      });
+    });
+
+    const replyComposer = await screen.findByPlaceholderText("Write your answer...");
+    expect(screen.getByText("Replying")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "Which export format do you prefer, PDF or PowerPoint?",
+      ),
+    ).toHaveLength(2);
+    expect(replyComposer).toHaveFocus();
+  });
+
+  it("restores reply mode when session history is already waiting for clarify input", async () => {
+    const sessionId = "clarify-history-session";
+    const updatedAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: sessionId,
+          agent_id: 7,
+          status: "active",
+          title: "Clarify thread",
+          is_pinned: false,
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(getFullSessionHistory).mockResolvedValue({
+      session_id: sessionId,
+      last_event_id: 0,
+      resume_from_event_id: 0,
+      tasks: [
+        {
+          task_id: "task-clarify-history",
+          user_message: "Help me export",
+          agent_answer: null,
+          status: "waiting_input",
+          total_tokens: 0,
+          current_plan: [],
+          recursions: [
+            {
+              iteration: 0,
+              trace_id: "trace-clarify-history",
+              observe: null,
+              thinking: null,
+              reason: null,
+              summary: null,
+              action_type: "CLARIFY",
+              action_output:
+                '{"question":"Which export format do you prefer, PDF or PowerPoint?"}',
+              tool_call_results: null,
+              status: "done",
+              error_log: null,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+              cached_input_tokens: 0,
+              created_at: createdAt,
+              updated_at: updatedAt,
+            },
+          ],
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+    });
+
+    expect(await screen.findByPlaceholderText("Write your answer...")).toBeInTheDocument();
+    expect(screen.getByText("Replying")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(
+        "Which export format do you prefer, PDF or PowerPoint?",
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("moves a newly active session to the top of the sidebar immediately", async () => {
+    const olderUpdatedAt = new Date(Date.now() - 30_000).toISOString();
+    const olderCreatedAt = new Date(Date.now() - 60_000).toISOString();
+    const createdSessionAt = new Date(Date.now() - 120_000).toISOString();
+
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: "older-session",
+          agent_id: 7,
+          status: "active",
+          title: "Older thread",
+          is_pinned: false,
+          created_at: olderCreatedAt,
+          updated_at: olderUpdatedAt,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 6,
+      session_id: "fresh-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: createdSessionAt,
+      updated_at: createdSessionAt,
+    });
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-fresh-session",
+      session_id: "fresh-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+    vi.mocked(fetch).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.close();
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(listSessions).toHaveBeenCalledWith(7);
+    });
+
+    await user.click(screen.getByRole("button", { name: "New Session" }));
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Start fresh");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(startReactTask).toHaveBeenCalledWith({
+        agent_id: 7,
+        message: "Start fresh",
+        session_id: "fresh-session",
+        task_id: null,
+        file_ids: [],
+        web_search_provider: null,
+        thinking_mode: null,
+      });
+    });
+
+    const newSessionLabel = screen.getByText("New conversation");
+    const oldSessionLabel = screen.getByText("Older thread");
+    expect(
+      newSessionLabel.compareDocumentPosition(oldSessionLabel) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("optimistically shows stopped when the user stops a running task", async () => {
     const sessionId = "stop-session";
     const updatedAt = new Date().toISOString();

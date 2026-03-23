@@ -12,7 +12,7 @@ function buildComposerProps(
     inputMessage: "",
     error: null,
     compactStatusMessage: null,
-    replyTaskId: null,
+    replyTarget: null,
     pendingFiles: [],
     canSendMessage: false,
     isStreaming: false,
@@ -111,6 +111,30 @@ describe("ChatComposer", () => {
       await screen.findByRole("button", { name: "Collapse task plan" }),
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Ask anything")).toBeInTheDocument();
+  });
+
+  it("renders an inline reply context card and focuses the composer", async () => {
+    render(
+      <ChatComposer
+        {...buildComposerProps({
+          replyTarget: {
+            taskId: "task-clarify-1",
+            question:
+              "Which export format do you prefer, PDF or PowerPoint?",
+          },
+        })}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Write your answer...");
+    expect(screen.getByText("Replying")).toBeInTheDocument();
+    expect(
+      screen.getByText("Which export format do you prefer, PDF or PowerPoint?"),
+    ).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(textarea).toHaveFocus();
   });
 
   it("collapses and expands the task plan from the header control", async () => {

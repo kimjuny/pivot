@@ -107,6 +107,19 @@ def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
     return result
 
 
+def _should_run_skill_resolution(*, task: ReactTask, agent: Agent) -> bool:
+    """Return whether this launch should execute pre-task skill matching.
+
+    Why: when a task resumes from a persisted CLARIFY pause, the runtime window
+    already contains the selected-skill bootstrap context. Re-running skill
+    resolution adds latency and duplicate UI events without changing the task.
+    """
+    if agent.skill_resolution_llm_id is None:
+        return False
+
+    return task.iteration == 0 and task.status in {"pending", "running"}
+
+
 class ReactTaskSupervisor:
     """Owns background task execution and reconnectable event fan-out."""
 
@@ -466,7 +479,11 @@ class ReactTaskSupervisor:
                 selected_skills_text = ""
                 resolution_duration_ms = 0
 
-                if agent.skill_resolution_llm_id:
+                resolver_llm_id = agent.skill_resolution_llm_id
+                if (
+                    resolver_llm_id is not None
+                    and _should_run_skill_resolution(task=task, agent=agent)
+                ):
                     await self._publish_event(
                         db=db,
                         session_id=task.session_id,
@@ -480,9 +497,7 @@ class ReactTaskSupervisor:
 
                     resolution_started_at = perf_counter()
                     try:
-                        resolver_llm_config = llm_crud.get(
-                            agent.skill_resolution_llm_id, db
-                        )
+                        resolver_llm_config = llm_crud.get(resolver_llm_id, db)
                         if resolver_llm_config is not None:
                             resolver_llm = create_llm_from_config(resolver_llm_config)
                             session_context = {}

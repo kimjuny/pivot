@@ -141,4 +141,47 @@ describe("buildMessagesFromHistory", () => {
       "2026-03-16T00:00:03.000Z",
     );
   });
+
+  it("restores clarify prompts from recursion output when the task is waiting for input", () => {
+    const messages = buildMessagesFromHistory([
+      {
+        task_id: "task-clarify",
+        user_message: "Help me export",
+        agent_answer: null,
+        status: "waiting_input",
+        total_tokens: 0,
+        current_plan: [],
+        recursions: [
+          {
+            iteration: 0,
+            trace_id: "trace-clarify",
+            observe: null,
+            thinking: null,
+            reason: null,
+            summary: null,
+            action_type: "CLARIFY",
+            action_output:
+              '{"question":"Which export format do you prefer, PDF or PowerPoint?"}',
+            tool_call_results: null,
+            status: "done",
+            error_log: null,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cached_input_tokens: 0,
+            created_at: "2026-03-16T00:00:00.000Z",
+            updated_at: "2026-03-16T00:00:01.000Z",
+          },
+        ],
+        created_at: "2026-03-16T00:00:00.000Z",
+        updated_at: "2026-03-16T00:00:01.000Z",
+      },
+    ]);
+
+    const assistantMessage = messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.status).toBe("waiting_input");
+    expect(assistantMessage?.content).toBe(
+      "Which export format do you prefer, PDF or PowerPoint?",
+    );
+  });
 });

@@ -5,11 +5,13 @@ import type {
   KeyboardEvent,
   RefObject,
 } from "react";
+import { useEffect, useRef } from "react";
 import {
   ArrowUp,
   Brain,
   ImagePlus,
   Loader2,
+  MessageSquare,
   Paperclip,
   Plus,
   Square,
@@ -37,6 +39,7 @@ import type { ReactContextUsageSummary } from "@/utils/api";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
 
 import type {
+  ChatReplyTarget,
   ChatWebSearchProviderOption,
   PendingUploadItem,
   TaskPlanSnapshot,
@@ -49,7 +52,7 @@ interface ChatComposerProps {
   inputMessage: string;
   error: string | null;
   compactStatusMessage: string | null;
-  replyTaskId: string | null;
+  replyTarget: ChatReplyTarget | null;
   pendingFiles: PendingUploadItem[];
   canSendMessage: boolean;
   isStreaming: boolean;
@@ -85,7 +88,7 @@ export function ChatComposer({
   inputMessage,
   error,
   compactStatusMessage,
-  replyTaskId,
+  replyTarget,
   pendingFiles,
   canSendMessage,
   isStreaming,
@@ -125,6 +128,32 @@ export function ChatComposer({
     selectedThinkingMode === "thinking" ? "Thinking" : "Fast";
   const SelectedThinkingModeIcon =
     selectedThinkingMode === "thinking" ? Brain : Zap;
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const replyPreview = replyTarget?.question.replace(/\s+/g, " ").trim() ?? "";
+
+  /**
+   * When the assistant asks a clarify question, move focus into the composer
+   * immediately so the next user action is answering rather than hunting for
+   * an extra reply affordance.
+   */
+  useEffect(() => {
+    if (!replyTarget) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const nextTextarea = textareaRef.current;
+      if (!nextTextarea || nextTextarea.disabled) {
+        return;
+      }
+
+      nextTextarea.focus();
+      const cursorPosition = nextTextarea.value.length;
+      nextTextarea.setSelectionRange(cursorPosition, cursorPosition);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [replyTarget]);
 
   return (
     <div
@@ -147,19 +176,6 @@ export function ChatComposer({
         >
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
           <span>{compactStatusMessage}</span>
-        </div>
-      )}
-
-      {replyTaskId && (
-        <div className="mb-2 flex items-center justify-between rounded-lg border border-border/50 bg-muted/50 px-3 py-1.5 text-xs">
-          <span className="text-foreground/70">↳ Replying to question</span>
-          <button
-            onClick={onCancelReply}
-            className="text-muted-foreground transition-colors hover:text-foreground"
-            title="Cancel reply"
-          >
-            <XCircle className="h-3.5 w-3.5" />
-          </button>
         </div>
       )}
 
@@ -194,13 +210,39 @@ export function ChatComposer({
           onRemovePendingFile={onRemovePendingFile}
         />
 
+        {replyTarget && (
+          <div className="px-3 pt-3">
+            <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <MessageSquare className="h-3.5 w-3.5 shrink-0 text-primary/75" />
+              <span className="shrink-0 text-[11px] font-medium text-foreground/75">
+                Replying
+              </span>
+              <p className="min-w-0 flex-1 truncate text-[12px] text-foreground/65">
+                {replyPreview}
+              </p>
+              <button
+                type="button"
+                onClick={onCancelReply}
+                className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                title="Clear reply context"
+                aria-label="Clear reply context"
+              >
+                <XCircle className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <Textarea
+          ref={textareaRef}
           value={inputMessage}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={replyTaskId ? "Reply to question..." : "Ask anything"}
-          className="min-h-[60px] w-full resize-none border-0 p-4 shadow-none focus:shadow-none focus:outline-none focus-visible:ring-0 focus-visible:shadow-none"
+          placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
+          className={`min-h-[60px] w-full resize-none border-0 shadow-none focus:shadow-none focus:outline-none focus-visible:ring-0 focus-visible:shadow-none ${
+            replyTarget ? "px-4 pb-3 pt-2.5" : "p-4"
+          }`}
           disabled={isStreaming}
         />
 

@@ -36,6 +36,7 @@ logger = get_logger("skill_service")
 _SKILLS_DIRNAME = "skills"
 _ALLOWED_KINDS = {"private", "shared"}
 _ALLOWED_USER_SOURCES = {"manual", "network", "bundle"}
+_LEGACY_USER_SKILL_DIRS = frozenset(_ALLOWED_KINDS)
 
 
 @dataclass(frozen=True)
@@ -77,10 +78,24 @@ def _builtin_skills_dir() -> Path:
     )
 
 
-def _user_skills_dir(username: str, kind: str, *, create: bool) -> Path:
+def _user_skills_dir(username: str, *, create: bool) -> Path:
+    """Return the unified user skill root.
+
+    Why: the filesystem now stores all creator-owned skills under one directory.
+    Visibility and sharing rules live in persistent metadata instead of the
+    on-disk path shape, which keeps future ACL changes out of storage layout.
+    """
+    base = workspace_root() / username / _SKILLS_DIRNAME
+    if create:
+        base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def _legacy_user_skills_dir(username: str, kind: str, *, create: bool) -> Path:
+    """Return the legacy kind-scoped directory used by older installations."""
     if kind not in _ALLOWED_KINDS:
         raise ValueError(f"Invalid skill kind: {kind}")
-    base = workspace_root() / username / _SKILLS_DIRNAME / kind
+    base = _user_skills_dir(username, create=create) / kind
     if create:
         base.mkdir(parents=True, exist_ok=True)
     return base
@@ -114,16 +129,23 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
     return None
 
 
-def _list_skill_paths(base_dir: Path) -> list[Path]:
+def _list_skill_paths(
+    base_dir: Path,
+    *,
+    ignored_dir_names: set[str] | None = None,
+) -> list[Path]:
     """List markdown skill files under one base directory."""
     if not base_dir.exists():
         return []
 
     paths: list[Path] = []
     directory_skill_names: set[str] = set()
+    ignored = ignored_dir_names or set()
 
     for item in sorted(base_dir.iterdir()):
         if not item.is_dir() or item.name.startswith("_"):
+            continue
+        if item.name in ignored:
             continue
         matched = _resolve_skill_path(base_dir, item.name)
         if matched is not None:
@@ -164,6 +186,43 @@ def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
     legacy.replace(canonical)
     logger.info("Migrated legacy skill layout: %s -> %s", legacy, canonical)
     return canonical
+
+
+def _migrate_legacy_user_skill_to_unified_root(
+    *,
+    unified_root: Path,
+    legacy_root: Path,
+    skill_name: str,
+) -> Path:
+    """Move one legacy kind-scoped skill into the unified user skill root."""
+    legacy_path = _resolve_skill_path(legacy_root, skill_name)
+    if legacy_path is None:
+        raise FileNotFoundError(f"Legacy skill '{skill_name}' not found in {legacy_root}.")
+
+    if legacy_path == _legacy_skill_path(legacy_root, skill_name):
+        legacy_path = _migrate_legacy_user_skill(legacy_root, skill_name)
+
+    legacy_dir = _skill_location_for_path(legacy_root, legacy_path)
+    target_dir = unified_root / skill_name
+    if target_dir.exists() and target_dir != legacy_dir:
+        raise ValueError(
+            "Cannot migrate legacy skill because unified destination already exists: "
+            f"'{target_dir}'."
+        )
+
+    unified_root.mkdir(parents=True, exist_ok=True)
+    if target_dir != legacy_dir:
+        shutil.move(str(legacy_dir), str(target_dir))
+        logger.info("Migrated legacy skill directory: %s -> %s", legacy_dir, target_dir)
+
+    canonical_path = target_dir / f"{skill_name}.md"
+    if not canonical_path.exists():
+        for filename in SKILL_MARKDOWN_FILENAMES:
+            candidate = target_dir / filename
+            if candidate.exists():
+                candidate.replace(canonical_path)
+                break
+    return canonical_path
 
 
 def _read_markdown(path: Path) -> str:
@@ -232,23 +291,74 @@ def _discover_builtin_skills() -> list[_DiscoveredSkill]:
     ]
 
 
-def _discover_user_skills(users: Sequence[User]) -> list[_DiscoveredSkill]:
+def _kind_for_unified_skill(
+    *,
+    user: User,
+    skill_name: str,
+    skill_path: Path,
+    existing_by_name: dict[str, Skill],
+    existing_by_location: dict[str, Skill],
+) -> tuple[str, str]:
+    """Resolve persisted kind/source for a unified user skill directory."""
+    location = str(_skill_location_for_path(_user_skills_dir(user.username, create=False), skill_path).resolve())
+    existing = existing_by_location.get(location) or existing_by_name.get(skill_name)
+    if existing is not None and existing.creator_id == user.id:
+        return existing.kind, _normalize_user_skill_source(existing.source)
+    return "private", "manual"
+
+
+def _discover_user_skills(
+    users: Sequence[User],
+    *,
+    existing_by_name: dict[str, Skill],
+    existing_by_location: dict[str, Skill],
+) -> list[_DiscoveredSkill]:
     discovered: list[_DiscoveredSkill] = []
     for user in users:
-        for kind in ("private", "shared"):
-            base_dir = _user_skills_dir(user.username, kind, create=False)
-            if not base_dir.exists():
-                continue
-            for skill_path in _list_skill_paths(base_dir):
-                fallback_name = _fallback_skill_name(base_dir, skill_path)
-                if skill_path == _legacy_skill_path(base_dir, fallback_name):
-                    skill_path = _migrate_legacy_user_skill(base_dir, fallback_name)
+        unified_root = _user_skills_dir(user.username, create=False)
+        if unified_root.exists():
+            for skill_path in _list_skill_paths(
+                unified_root,
+                ignored_dir_names=set(_LEGACY_USER_SKILL_DIRS),
+            ):
+                fallback_name = _fallback_skill_name(unified_root, skill_path)
+                if skill_path == _legacy_skill_path(unified_root, fallback_name):
+                    skill_path = _migrate_legacy_user_skill(unified_root, fallback_name)
                 if not skill_path.exists():
                     continue
+                kind, source = _kind_for_unified_skill(
+                    user=user,
+                    skill_name=fallback_name,
+                    skill_path=skill_path,
+                    existing_by_name=existing_by_name,
+                    existing_by_location=existing_by_location,
+                )
                 discovered.append(
                     _discover_skill(
-                        base_dir=base_dir,
+                        base_dir=unified_root,
                         skill_path=skill_path,
+                        kind=kind,
+                        source=source,
+                        builtin=False,
+                        creator=user,
+                    )
+                )
+
+        for kind in ("private", "shared"):
+            legacy_root = _legacy_user_skills_dir(user.username, kind, create=False)
+            if not legacy_root.exists():
+                continue
+            for skill_path in _list_skill_paths(legacy_root):
+                fallback_name = _fallback_skill_name(legacy_root, skill_path)
+                migrated_path = _migrate_legacy_user_skill_to_unified_root(
+                    unified_root=unified_root,
+                    legacy_root=legacy_root,
+                    skill_name=fallback_name,
+                )
+                discovered.append(
+                    _discover_skill(
+                        base_dir=unified_root,
+                        skill_path=migrated_path,
                         kind=kind,
                         source="manual",
                         builtin=False,
@@ -428,12 +538,18 @@ def sync_skill_registry(session: Session) -> None:
         ValueError: If duplicate skill names exist across visible skill sources.
     """
     users = session.exec(select(User).order_by(User.username)).all()
-    discovered = [*_discover_builtin_skills(), *_discover_user_skills(users)]
-    _assert_unique_discovered_names(discovered)
-
     existing_rows = _all_skills_query(session)
     existing_by_location = {item.location: item for item in existing_rows}
     existing_by_name = {item.name: item for item in existing_rows}
+    discovered = [
+        *_discover_builtin_skills(),
+        *_discover_user_skills(
+            users,
+            existing_by_name=existing_by_name,
+            existing_by_location=existing_by_location,
+        ),
+    ]
+    _assert_unique_discovered_names(discovered)
     desired_locations = {item.location for item in discovered}
 
     changed = False
@@ -1016,7 +1132,7 @@ def _install_skill_from_directory(
     if current_user.id is None:
         raise ValueError("Current user must be persisted before importing skills.")
 
-    base_dir = _user_skills_dir(current_user.username, kind, create=True)
+    base_dir = _user_skills_dir(current_user.username, create=True)
     target_dir = base_dir / skill_name
     if target_dir.exists():
         raise ValueError(f"Skill directory '{skill_name}' already exists.")
@@ -1107,13 +1223,19 @@ def upsert_user_skill(
             )
 
     normalized_source = rewrite_skill_name(source, skill_name)
-    base_dir = _user_skills_dir(current_user.username, kind, create=True)
-    legacy_path = _legacy_skill_path(base_dir, skill_name)
+    base_dir = _user_skills_dir(current_user.username, create=True)
     canonical_path = _canonical_skill_path(base_dir, skill_name)
     canonical_path.parent.mkdir(parents=True, exist_ok=True)
     canonical_path.write_text(normalized_source, encoding="utf-8")
-    if legacy_path.exists():
-        legacy_path.unlink()
+    for legacy_kind in _ALLOWED_KINDS:
+        legacy_root = _legacy_user_skills_dir(
+            current_user.username,
+            legacy_kind,
+            create=False,
+        )
+        legacy_path = _legacy_skill_path(legacy_root, skill_name)
+        if legacy_path.exists():
+            legacy_path.unlink()
 
     discovered = _discover_skill(
         base_dir=base_dir,
@@ -1194,7 +1316,7 @@ def delete_user_skill(
     skill_dir = Path(skill.location)
     canonical_path = skill_dir / skill.filename
     legacy_path = _legacy_skill_path(
-        _user_skills_dir(current_user.username, kind, create=True),
+        _user_skills_dir(current_user.username, create=True),
         skill_name,
     )
 
@@ -1202,6 +1324,18 @@ def delete_user_skill(
         shutil.rmtree(skill_dir, ignore_errors=True)
     if legacy_path.exists():
         legacy_path.unlink()
+    for legacy_kind in _ALLOWED_KINDS:
+        legacy_root = _legacy_user_skills_dir(
+            current_user.username,
+            legacy_kind,
+            create=False,
+        )
+        legacy_dir = legacy_root / skill_name
+        legacy_file = _legacy_skill_path(legacy_root, skill_name)
+        if legacy_dir.exists():
+            shutil.rmtree(legacy_dir, ignore_errors=True)
+        if legacy_file.exists():
+            legacy_file.unlink()
 
     session.delete(skill)
     session.commit()

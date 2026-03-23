@@ -206,6 +206,30 @@ export function buildSkillSelectionFromTask(
 }
 
 /**
+ * Extracts persisted assistant copy from task history, including clarify prompts.
+ */
+function buildAssistantContent(task: TaskMessage): string {
+  if (typeof task.agent_answer === "string" && task.agent_answer.trim().length > 0) {
+    return task.agent_answer;
+  }
+
+  for (let index = task.recursions.length - 1; index >= 0; index -= 1) {
+    const recursion = task.recursions[index];
+    if (recursion.action_type !== "CLARIFY" || !recursion.action_output) {
+      continue;
+    }
+
+    const actionOutput = asRecord(parseJson(recursion.action_output));
+    const question = actionOutput?.question;
+    if (typeof question === "string" && question.trim().length > 0) {
+      return question;
+    }
+  }
+
+  return "";
+}
+
+/**
  * Maps persisted task history into the same message model used by live streaming updates.
  */
 export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
@@ -337,7 +361,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
     loadedMessages.push({
       id: `assistant-${task.task_id}`,
       role: "assistant",
-      content: task.agent_answer || "",
+      content: buildAssistantContent(task),
       timestamp: task.updated_at,
       task_id: task.task_id,
       currentPlan: task.current_plan,

@@ -79,9 +79,9 @@ export function AssistantMessageBlock({
             {clarifyMessage && message.task_id && (
               <button
                 onClick={() => onReplyTask(message.task_id || null)}
-                className="text-xs text-muted-foreground transition-colors hover:text-info"
+                className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-info/30 hover:text-info"
               >
-                REPLY
+                Reply
               </button>
             )}
           </div>

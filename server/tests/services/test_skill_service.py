@@ -87,6 +87,10 @@ class SkillServiceTestCase(unittest.TestCase):
         )
         return skill_path
 
+    def _user_skill_dir(self, username: str, name: str) -> Path:
+        """Return the unified on-disk directory for one user-owned skill."""
+        return self.workspace_root / username / "skills" / name
+
     def _build_skill_archive(self, directory_name: str, source: str) -> bytes:
         """Create a GitHub-like repository zipball for one skill folder."""
         buffer = BytesIO()
@@ -173,25 +177,13 @@ class SkillServiceTestCase(unittest.TestCase):
                 {
                     "name": "research-notes",
                     "location": str(
-                        (
-                            self.workspace_root
-                            / "alice"
-                            / "skills"
-                            / "private"
-                            / "research-notes"
-                        ).resolve()
+                        self._user_skill_dir("alice", "research-notes").resolve()
                     ),
                 },
                 {
                     "name": "qa-playbook",
                     "location": str(
-                        (
-                            self.workspace_root
-                            / "bob"
-                            / "skills"
-                            / "shared"
-                            / "qa-playbook"
-                        ).resolve()
+                        self._user_skill_dir("bob", "qa-playbook").resolve()
                     ),
                 },
             ],
@@ -318,13 +310,7 @@ class SkillServiceTestCase(unittest.TestCase):
         self.assertEqual(metadata["source"], "network")
         self.assertEqual(metadata["imported"], True)
 
-        imported_dir = (
-            self.workspace_root
-            / "alice"
-            / "skills"
-            / "private"
-            / "research-kit-imported"
-        )
+        imported_dir = self._user_skill_dir("alice", "research-kit-imported")
         self.assertTrue((imported_dir / "scripts" / "install.sh").exists())
 
         imported_source = skill_service.read_user_skill(
@@ -457,9 +443,7 @@ class SkillServiceTestCase(unittest.TestCase):
 
         self.assertEqual(metadata["source"], "bundle")
 
-        imported_dir = (
-            self.workspace_root / "alice" / "skills" / "private" / "local-research-kit"
-        )
+        imported_dir = self._user_skill_dir("alice", "local-research-kit")
         self.assertTrue((imported_dir / "scripts" / "setup.sh").exists())
         imported_source = skill_service.read_user_skill(
             self.session,
@@ -468,6 +452,41 @@ class SkillServiceTestCase(unittest.TestCase):
             "local-research-kit",
         )["source"]
         self.assertIn("name: local-research-kit", imported_source)
+
+    def test_sync_registry_migrates_legacy_kind_directories(self) -> None:
+        """Legacy private/shared folders should migrate into the unified root."""
+        legacy_private_root = self.workspace_root / "alice" / "skills" / "private"
+        legacy_shared_root = self.workspace_root / "alice" / "skills" / "shared"
+        self._write_skill(
+            legacy_private_root,
+            "deep-research",
+            "Legacy private workflow",
+            "Private body.",
+            filename="SKILL.md",
+        )
+        self._write_skill(
+            legacy_shared_root,
+            "team-notes",
+            "Legacy shared workflow",
+            "Shared body.",
+            filename="team-notes.md",
+        )
+
+        skill_service.sync_skill_registry(self.session)
+
+        migrated_private_dir = self._user_skill_dir("alice", "deep-research")
+        migrated_shared_dir = self._user_skill_dir("alice", "team-notes")
+        self.assertTrue((migrated_private_dir / "deep-research.md").exists())
+        self.assertTrue((migrated_shared_dir / "team-notes.md").exists())
+        self.assertFalse((legacy_private_root / "deep-research").exists())
+        self.assertFalse((legacy_shared_root / "team-notes").exists())
+
+        visible = {
+            item["name"]: item
+            for item in skill_service.list_visible_skills(self.session, "alice")
+        }
+        self.assertEqual(visible["deep-research"]["kind"], "private")
+        self.assertEqual(visible["team-notes"]["kind"], "shared")
 
     def test_bundle_import_requires_top_level_skill_markdown(self) -> None:
         """Bundle imports should fail fast when the folder lacks SKILL.md."""

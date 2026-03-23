@@ -154,6 +154,16 @@ export interface TaskPlanSnapshot {
 }
 
 /**
+ * Active clarify question currently bound to the composer reply flow.
+ */
+export interface ChatReplyTarget {
+  /** Task ID that the follow-up answer should continue. */
+  taskId: string;
+  /** Latest clarify question content shown as compact reply context. */
+  question: string;
+}
+
+/**
  * Accumulated recursion state rendered inside an assistant message.
  */
 export interface RecursionRecord {

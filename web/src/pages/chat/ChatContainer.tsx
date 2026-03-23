@@ -34,6 +34,7 @@ import type {
   ChatWebSearchProviderOption,
   ChatPageProps,
   ChatMessage,
+  ChatReplyTarget,
   PlanStepData,
   ReactStreamEvent,
   RecursionRecord,
@@ -53,6 +54,7 @@ import {
 import {
   ZERO_RATE_STREAK_TO_RENDER,
   deriveComposerTaskPlan,
+  isClarifyMessage,
 } from "./utils/chatSelectors";
 
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
@@ -160,6 +162,26 @@ function replaceSessionListItem(
 }
 
 /**
+ * Bumps one sidebar row to the latest activity time so newly active sessions
+ * float to the top immediately instead of waiting for the next backend refresh.
+ */
+function touchSessionListItem(
+  sessions: SessionListItem[],
+  sessionId: string,
+  updatedAt: string,
+): SessionListItem[] {
+  const existingSession = sessions.find((session) => session.session_id === sessionId);
+  if (!existingSession || existingSession.updated_at === updatedAt) {
+    return sessions;
+  }
+
+  return upsertSessionListItem(sessions, {
+    ...existingSession,
+    updated_at: updatedAt,
+  });
+}
+
+/**
  * Applies one streamed session-title update onto the local sidebar cache.
  */
 function applyStreamedSessionTitle(
@@ -224,6 +246,54 @@ function extractSessionTitle(event: ReactStreamEvent): string | undefined {
   return typeof sessionTitle === "string" && sessionTitle.trim().length > 0
     ? sessionTitle.trim()
     : undefined;
+}
+
+/**
+ * Finds the latest assistant clarify message for a given task so the composer
+ * can render a readable reply context instead of a bare task identifier.
+ */
+function findReplyTarget(
+  messages: ChatMessage[],
+  taskId: string | null,
+): ChatReplyTarget | null {
+  if (!taskId) {
+    return null;
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      message.role === "assistant" &&
+      message.task_id === taskId &&
+      message.content.trim().length > 0
+    ) {
+      return {
+        taskId,
+        question: message.content,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Finds the latest persisted waiting-input task so restored sessions can reopen
+ * clarify reply mode without waiting for a fresh SSE event.
+ */
+function findLatestWaitingReplyTaskId(messages: ChatMessage[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      message.role === "assistant" &&
+      typeof message.task_id === "string" &&
+      isClarifyMessage(message)
+    ) {
+      return message.task_id;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -521,6 +591,25 @@ function ChatContainer({
   }, []);
 
   /**
+   * Rehydrates the visible timeline and task-scoped affordances from a
+   * persisted history snapshot, including clarify reply mode.
+   */
+  const applyHistoryMessages = useCallback(
+    (nextMessages: ChatMessage[]) => {
+      syncLiveRefsFromMessages(nextMessages);
+      setReplyTaskId(findLatestWaitingReplyTaskId(nextMessages));
+      setIsStreaming(
+        nextMessages.some(
+          (message) =>
+            message.role === "assistant" && message.status === "running",
+        ),
+      );
+      commitMessages(nextMessages);
+    },
+    [commitMessages, syncLiveRefsFromMessages],
+  );
+
+  /**
    * Applies a local stopped state immediately so the chat surface acknowledges
    * the user's stop request before the backend finishes unwinding the iteration.
    */
@@ -621,8 +710,7 @@ function ChatContainer({
           void getFullSessionHistory(currentSessionId)
             .then((history) => {
               const nextMessages = buildMessagesFromHistory(history.tasks);
-              syncLiveRefsFromMessages(nextMessages);
-              commitMessages(nextMessages);
+              applyHistoryMessages(nextMessages);
               sessionEventCursorRef.current = Math.max(
                 sessionEventCursorRef.current,
                 history.last_event_id,
@@ -911,6 +999,7 @@ function ChatContainer({
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
           clearCompactStatusImmediately();
+          setReplyTaskId(event.task_id);
           liveTaskIdRef.current = event.task_id;
           liveRecursionRef.current = finalizedRecursion;
         } else if (
@@ -922,6 +1011,9 @@ function ChatContainer({
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
           clearCompactStatusImmediately();
+          setReplyTaskId((previousTaskId) =>
+            previousTaskId === event.task_id ? null : previousTaskId,
+          );
           liveTaskIdRef.current = null;
           liveRecursionRef.current = null;
           liveAssistantMessageIdRef.current = null;
@@ -929,6 +1021,9 @@ function ChatContainer({
             stoppedTaskIdsRef.current.add(event.task_id);
           }
         } else {
+          setReplyTaskId((previousTaskId) =>
+            previousTaskId === event.task_id ? null : previousTaskId,
+          );
           liveTaskIdRef.current = event.task_id;
           liveAssistantMessageIdRef.current = targetMessageId;
           liveRecursionRef.current = finalizedRecursion;
@@ -1137,12 +1232,11 @@ function ChatContainer({
     [
       clearCompactStatusImmediately,
       clearCompactStatusWithMinimumDelay,
-      commitMessages,
+      applyHistoryMessages,
       currentSessionId,
       loadSessionRuntimeDebug,
       refreshSessionList,
       showCompactStatus,
-      syncLiveRefsFromMessages,
       updateMessages,
     ],
   );
@@ -1268,14 +1362,7 @@ function ChatContainer({
             try {
               const history = await getFullSessionHistory(autoSelectedSessionId);
               const nextMessages = buildMessagesFromHistory(history.tasks);
-              syncLiveRefsFromMessages(nextMessages);
-              setIsStreaming(
-                nextMessages.some(
-                  (message) =>
-                    message.role === "assistant" && message.status === "running",
-                ),
-              );
-              commitMessages(nextMessages);
+              applyHistoryMessages(nextMessages);
               openSessionStream(
                 autoSelectedSessionId,
                 history.resume_from_event_id,
@@ -1320,7 +1407,7 @@ function ChatContainer({
     sessionIdleTimeoutMs,
     openSessionStream,
     stopSessionStream,
-    syncLiveRefsFromMessages,
+    applyHistoryMessages,
     commitMessages,
   ]);
 
@@ -1569,14 +1656,7 @@ function ChatContainer({
     try {
       const history = await getFullSessionHistory(sessionId);
       const nextMessages = buildMessagesFromHistory(history.tasks);
-      syncLiveRefsFromMessages(nextMessages);
-      setIsStreaming(
-        nextMessages.some(
-          (message) =>
-            message.role === "assistant" && message.status === "running",
-        ),
-      );
-      commitMessages(nextMessages);
+      applyHistoryMessages(nextMessages);
       openSessionStream(sessionId, history.resume_from_event_id);
     } catch (historyError) {
       console.error("Failed to load session history:", historyError);
@@ -1698,8 +1778,7 @@ function ChatContainer({
             void getFullSessionHistory(currentSessionIdRef.current)
               .then((history) => {
                 const nextMessages = buildMessagesFromHistory(history.tasks);
-                syncLiveRefsFromMessages(nextMessages);
-                commitMessages(nextMessages);
+                applyHistoryMessages(nextMessages);
               })
               .catch((historyError) => {
                 console.error(
@@ -1768,6 +1847,9 @@ function ChatContainer({
       }
 
       const messageTimestamp = new Date().toISOString();
+      setSessions((previous) =>
+        touchSessionListItem(previous, activeSessionId, messageTimestamp),
+      );
       const userMessage: ChatMessage = {
         id: `user-${Date.now()}`,
         role: "user",
@@ -1776,13 +1858,16 @@ function ChatContainer({
         timestamp: messageTimestamp,
       };
       assistantMessageId = `assistant-${Date.now()}`;
+      const assistantMessageStatus = currentReplyTaskId
+        ? ("running" as const)
+        : ("skill_resolving" as const);
       const assistantMessage: ChatMessage = {
         id: assistantMessageId,
         role: "assistant",
         content: "",
         timestamp: messageTimestamp,
         recursions: [],
-        status: "running",
+        status: assistantMessageStatus,
       };
 
       if (shouldResetConversation) {
@@ -1827,7 +1912,7 @@ function ChatContainer({
             ? {
                 ...message,
                 task_id: launchResult.task_id,
-                status: "skill_resolving",
+                status: assistantMessageStatus,
               }
             : message,
         ),
@@ -1898,6 +1983,7 @@ function ChatContainer({
 
   const isConversationEmpty = messages.length === 0;
   const composerTaskPlan = deriveComposerTaskPlan(messages);
+  const replyTarget = findReplyTarget(messages, replyTaskId);
 
   return (
     <div className="flex h-full overflow-hidden bg-background text-foreground">
@@ -1937,7 +2023,7 @@ function ChatContainer({
           inputMessage={inputMessage}
           error={error}
           compactStatusMessage={compactStatusMessage}
-          replyTaskId={replyTaskId}
+          replyTarget={replyTarget}
           pendingFiles={pendingFiles}
           canSendMessage={canSendMessage}
           isStreaming={isStreaming}
