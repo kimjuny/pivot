@@ -1298,6 +1298,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         onOpenChange={setIsReactChatOpen}
         title={agent?.name?.trim() || 'ReAct Agent Chat'}
         size="large"
+        fullscreenable
       >
         <ReactChatInterface
           agentId={agentId}

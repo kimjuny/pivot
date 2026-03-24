@@ -16,6 +16,7 @@ import {
   Circle as CircleIcon,
   Copy as CopyIcon,
   Download as DownloadIcon,
+  Expand as ExpandIcon,
   ExternalLink as ExternalLinkIcon,
   Eye as EyeIcon,
   EyeOff as EyeOffIcon,
@@ -98,6 +99,7 @@ export const ChevronUp = withDefaultStroke(ChevronUpIcon);
 export const Circle = withDefaultStroke(CircleIcon);
 export const Copy = withDefaultStroke(CopyIcon);
 export const Download = withDefaultStroke(DownloadIcon);
+export const Expand = withDefaultStroke(ExpandIcon);
 export const ExternalLink = withDefaultStroke(ExternalLinkIcon);
 export const Eye = withDefaultStroke(EyeIcon);
 export const EyeOff = withDefaultStroke(EyeOffIcon);

@@ -1,10 +1,31 @@
-import { useState, useRef, useEffect, useCallback, ReactNode } from 'react';
-import { X, Minus, Maximize2 } from "@/lib/lucide";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import { Expand, Minimize2, X } from "@/lib/lucide";
+import { cn } from "@/lib/utils";
 
 /**
  * Dialog size preset.
  */
-type DialogSize = 'default' | 'large';
+type DialogSize = "default" | "large";
+
+interface DialogPosition {
+  x: number;
+  y: number;
+}
+
+interface DialogDimensions {
+  width: number;
+  height: number;
+  minWidth: number;
+  minHeight: number;
+}
 
 /**
  * Dialogs are rendered without a modal backdrop, so we need explicit stacking
@@ -12,277 +33,374 @@ type DialogSize = 'default' | 'large';
  */
 const BASE_DIALOG_Z_INDEX = 50;
 const DIALOG_HEADER_HEIGHT = 40;
-const MINIMIZE_TRANSITION_MS = 150;
+const FULLSCREEN_TRANSITION_MS = 200;
 let topDialogZIndex = BASE_DIALOG_Z_INDEX;
 
 /** Allocates the next top-most z-index for a dialog instance. */
 function getNextDialogZIndex(): number {
-    topDialogZIndex += 1;
-    return topDialogZIndex;
+  topDialogZIndex += 1;
+  return topDialogZIndex;
+}
+
+/**
+ * Returns the default windowed size for a dialog preset.
+ */
+function getDialogDimensions(size: DialogSize): DialogDimensions {
+  if (size === "large") {
+    return {
+      width: window.innerWidth * 0.75,
+      height: window.innerHeight * 0.75,
+      minWidth: 600,
+      minHeight: 400,
+    };
+  }
+
+  return {
+    width: 480,
+    height: Math.min(window.innerHeight * 0.8, 600),
+    minWidth: 480,
+    minHeight: 300,
+  };
+}
+
+/**
+ * Keeps dialogs fully reachable after drag or fullscreen restore.
+ */
+function clampDialogPosition(
+  position: DialogPosition,
+  dimensions: DialogDimensions,
+): DialogPosition {
+  return {
+    x: Math.max(0, Math.min(position.x, window.innerWidth - dimensions.width)),
+    y: Math.max(
+      0,
+      Math.min(
+        position.y,
+        window.innerHeight - Math.max(dimensions.height, DIALOG_HEADER_HEIGHT),
+      ),
+    ),
+  };
 }
 
 /**
  * Props for DraggableDialog component.
  */
 interface DraggableDialogProps {
-    /** Whether the dialog is open */
-    open: boolean;
-    /** Callback when dialog should close */
-    onOpenChange: (open: boolean) => void;
-    /** Dialog title to display in header */
-    title: string;
-    /** Optional action button to display in header */
-    headerAction?: ReactNode;
-    /** Dialog content to render inside the draggable container */
-    children: ReactNode;
-    /** Size preset: 'default' (480x600) or 'large' (75% of screen) */
-    size?: DialogSize;
+  /** Whether the dialog is open */
+  open: boolean;
+  /** Callback when dialog should close */
+  onOpenChange: (open: boolean) => void;
+  /** Dialog title to display in header */
+  title: string;
+  /** Optional action button to display in header */
+  headerAction?: ReactNode;
+  /** Dialog content to render inside the draggable container */
+  children: ReactNode;
+  /** Size preset: 'default' (480x600) or 'large' (75% of screen) */
+  size?: DialogSize;
+  /** Enables a fullscreen toggle for dialogs that benefit from more workspace. */
+  fullscreenable?: boolean;
 }
 
 /**
- * Draggable and minimizable dialog component.
+ * Draggable dialog component with optional fullscreen support.
  *
  * Features:
  * - Drag anywhere on the screen by dragging the header
- * - Minimize to a compact bar (like macOS notes)
- * - No backdrop/overlay - user can see the canvas while building
- * - Maintains position even when minimized
+ * - Optional fullscreen mode for workspace-heavy flows
+ * - No backdrop/overlay so the underlying canvas stays visible
  * - Theme-aware styling
  * - High-performance dragging using transform
  */
-function DraggableDialog({ open, onOpenChange, title, headerAction, children, size = 'default' }: DraggableDialogProps) {
-    const [isMinimized, setIsMinimized] = useState(false);
-    const [zIndex, setZIndex] = useState(BASE_DIALOG_Z_INDEX);
-    const dialogRef = useRef<HTMLDivElement>(null);
-    const isDraggingRef = useRef(false);
-    const dragStartRef = useRef({ x: 0, y: 0, elemX: 0, elemY: 0 });
-    const currentPosRef = useRef({ x: 0, y: 0 });
+function DraggableDialog({
+  open,
+  onOpenChange,
+  title,
+  headerAction,
+  children,
+  size = "default",
+  fullscreenable = false,
+}: DraggableDialogProps) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreenTransitionActive, setIsFullscreenTransitionActive] =
+    useState(false);
+  const [zIndex, setZIndex] = useState(BASE_DIALOG_Z_INDEX);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0, elemX: 0, elemY: 0 });
+  const currentPosRef = useRef<DialogPosition>({ x: 0, y: 0 });
+  const restorePositionRef = useRef<DialogPosition>({ x: 0, y: 0 });
+  const fullscreenTransitionTimerRef = useRef<number | null>(null);
 
-    /** Brings this dialog above other dialogs on open/click/drag. */
-    const bringToFront = useCallback(() => {
-        setZIndex(getNextDialogZIndex());
-    }, []);
+  const getWindowedDimensions = useCallback(
+    () => getDialogDimensions(size),
+    [size],
+  );
 
-    // Calculate dimensions based on size
-    const getDimensions = useCallback(() => {
-        if (size === 'large') {
-            return {
-                width: window.innerWidth * 0.75,
-                height: window.innerHeight * 0.75,
-                minWidth: 600,
-                minHeight: 400
-            };
-        }
-        return {
-            width: 480,
-            height: Math.min(window.innerHeight * 0.8, 600),
-            minWidth: 480,
-            minHeight: 300
-        };
-    }, [size]);
+  /** Brings this dialog above other dialogs on open, click, or drag. */
+  const bringToFront = useCallback(() => {
+    setZIndex(getNextDialogZIndex());
+  }, []);
 
-    // Initialize position to center on first render
-    useEffect(() => {
-        if (open && dialogRef.current) {
-            bringToFront();
-            const dims = getDimensions();
-            const initialX = (window.innerWidth - dims.width) / 2;
-            const initialY = (window.innerHeight - dims.height) / 2;
-            currentPosRef.current = { x: initialX, y: initialY };
-            dialogRef.current.style.transform = `translate(${initialX}px, ${initialY}px)`;
-        }
-    }, [open, bringToFront, getDimensions]);
+  /**
+   * Applies a windowed transform after clamping it to the visible viewport.
+   */
+  const applyWindowedPosition = useCallback(
+    (position: DialogPosition) => {
+      const dialogElement = dialogRef.current;
+      if (!dialogElement) {
+        return;
+      }
 
-    /**
-     * Start dragging when mouse down on header.
-     * Records initial offset for smooth drag behavior.
-     */
-    const handleMouseDown = (e: React.MouseEvent) => {
-        // Only start drag if clicking on header (not buttons)
-        if ((e.target as HTMLElement).closest('button')) {
-            return;
-        }
+      const boundedPosition = clampDialogPosition(
+        position,
+        getWindowedDimensions(),
+      );
+      currentPosRef.current = boundedPosition;
+      dialogElement.style.transform = `translate(${boundedPosition.x}px, ${boundedPosition.y}px)`;
+    },
+    [getWindowedDimensions],
+  );
 
-        isDraggingRef.current = true;
-        dragStartRef.current = {
-            x: e.clientX,
-            y: e.clientY,
-            elemX: currentPosRef.current.x,
-            elemY: currentPosRef.current.y
-        };
+  /**
+   * Centers a dialog when it opens so each session starts from a predictable
+   * windowed position instead of reusing a stale drag offset.
+   */
+  const centerDialog = useCallback(() => {
+    const dimensions = getWindowedDimensions();
+    applyWindowedPosition({
+      x: (window.innerWidth - dimensions.width) / 2,
+      y: (window.innerHeight - dimensions.height) / 2,
+    });
+  }, [applyWindowedPosition, getWindowedDimensions]);
 
-        // Prevent text selection during drag
-        e.preventDefault();
-        document.body.style.userSelect = 'none';
+  useEffect(() => {
+    if (!open) {
+      if (fullscreenTransitionTimerRef.current !== null) {
+        window.clearTimeout(fullscreenTransitionTimerRef.current);
+        fullscreenTransitionTimerRef.current = null;
+      }
+      setIsFullscreen(false);
+      setIsFullscreenTransitionActive(false);
+      return;
+    }
 
-        if (dialogRef.current) {
-            dialogRef.current.style.cursor = 'grabbing';
-        }
+    bringToFront();
+    centerDialog();
+  }, [bringToFront, centerDialog, open]);
+
+  useEffect(() => {
+    return () => {
+      if (fullscreenTransitionTimerRef.current !== null) {
+        window.clearTimeout(fullscreenTransitionTimerRef.current);
+      }
+    };
+  }, []);
+
+  /**
+   * Start dragging when mouse down on header.
+   * Records initial offset for smooth drag behavior.
+   */
+  const handleMouseDown = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (isFullscreen) {
+      return;
+    }
+
+    if ((event.target as HTMLElement).closest("button")) {
+      return;
+    }
+
+    isDraggingRef.current = true;
+    dragStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      elemX: currentPosRef.current.x,
+      elemY: currentPosRef.current.y,
     };
 
-    /**
-     * Update position while dragging.
-     * Uses direct DOM manipulation for zero-lag dragging.
-     */
-    useEffect(() => {
-        const handleMouseMove = (e: MouseEvent) => {
-            if (!isDraggingRef.current || !dialogRef.current) return;
+    event.preventDefault();
+    document.body.style.userSelect = "none";
 
-            const deltaX = e.clientX - dragStartRef.current.x;
-            const deltaY = e.clientY - dragStartRef.current.y;
+    if (dialogRef.current) {
+      dialogRef.current.style.cursor = "grabbing";
+    }
+  };
 
-            const newX = dragStartRef.current.elemX + deltaX;
-            const newY = dragStartRef.current.elemY + deltaY;
+  /**
+   * Update position while dragging.
+   * Uses direct DOM manipulation for zero-lag dragging.
+   */
+  useEffect(() => {
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!isDraggingRef.current || !dialogRef.current) {
+        return;
+      }
 
-            // Get current dimensions
-            const dims = getDimensions();
-            const dialogWidth = dims.width;
-            const dialogHeight = isMinimized
-                ? DIALOG_HEADER_HEIGHT
-                : dims.height;
-
-            const boundedX = Math.max(0, Math.min(newX, window.innerWidth - dialogWidth));
-            const boundedY = Math.max(0, Math.min(newY, window.innerHeight - dialogHeight));
-
-            currentPosRef.current = { x: boundedX, y: boundedY };
-
-            // Update position using transform for GPU acceleration
-            dialogRef.current.style.transform = `translate(${boundedX}px, ${boundedY}px)`;
-        };
-
-        const handleMouseUp = () => {
-            if (isDraggingRef.current) {
-                isDraggingRef.current = false;
-                document.body.style.userSelect = '';
-
-                if (dialogRef.current) {
-                    dialogRef.current.style.cursor = '';
-                }
-            }
-        };
-
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
-
-        return () => {
-            document.removeEventListener('mousemove', handleMouseMove);
-            document.removeEventListener('mouseup', handleMouseUp);
-        };
-    }, [isMinimized, getDimensions]);
-
-    /**
-     * Toggle between minimized and expanded states.
-     */
-    const toggleMinimize = () => {
-        setIsMinimized(!isMinimized);
+      applyWindowedPosition({
+        x: dragStartRef.current.elemX + (event.clientX - dragStartRef.current.x),
+        y: dragStartRef.current.elemY + (event.clientY - dragStartRef.current.y),
+      });
     };
 
-    /**
-     * Close dialog completely.
-     * Resets minimized state for next open.
-     */
-    const handleClose = () => {
-        onOpenChange(false);
-        setIsMinimized(false);
+    const handleMouseUp = () => {
+      if (!isDraggingRef.current) {
+        return;
+      }
+
+      isDraggingRef.current = false;
+      document.body.style.userSelect = "";
+
+      if (dialogRef.current) {
+        dialogRef.current.style.cursor = "";
+      }
     };
 
-    if (!open) return null;
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
 
-    const dims = getDimensions();
-    const contentHeight = Math.max(dims.height - DIALOG_HEADER_HEIGHT, 0);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [applyWindowedPosition]);
 
-    return (
+  /**
+   * Fullscreen is opt-in because only a few dialog flows benefit from turning a
+   * floating utility window into a primary workspace.
+   */
+  const toggleFullscreen = () => {
+    if (!fullscreenable) {
+      return;
+    }
+
+    if (fullscreenTransitionTimerRef.current !== null) {
+      window.clearTimeout(fullscreenTransitionTimerRef.current);
+    }
+
+    setIsFullscreenTransitionActive(true);
+    fullscreenTransitionTimerRef.current = window.setTimeout(() => {
+      setIsFullscreenTransitionActive(false);
+      fullscreenTransitionTimerRef.current = null;
+    }, FULLSCREEN_TRANSITION_MS);
+
+    if (!isFullscreen) {
+      restorePositionRef.current = currentPosRef.current;
+      currentPosRef.current = { x: 0, y: 0 };
+      if (dialogRef.current) {
+        dialogRef.current.style.transform = "translate(0px, 0px)";
+      }
+      setIsFullscreen(true);
+      return;
+    }
+
+    setIsFullscreen(false);
+    applyWindowedPosition(restorePositionRef.current);
+  };
+
+  /**
+   * Close dialog completely and reset fullscreen state for the next open.
+   */
+  const handleClose = () => {
+    if (fullscreenTransitionTimerRef.current !== null) {
+      window.clearTimeout(fullscreenTransitionTimerRef.current);
+      fullscreenTransitionTimerRef.current = null;
+    }
+    setIsFullscreen(false);
+    setIsFullscreenTransitionActive(false);
+    onOpenChange(false);
+  };
+
+  if (!open) {
+    return null;
+  }
+
+  const dimensions = getWindowedDimensions();
+
+  return (
+    <div
+      ref={dialogRef}
+      className={cn(
+        "fixed left-0 top-0",
+        isFullscreenTransitionActive &&
+          "transition-[width,height,transform] ease-in-out",
+      )}
+      onMouseDownCapture={bringToFront}
+      style={{
+        zIndex,
+        width: isFullscreen ? "100vw" : `${dimensions.width}px`,
+        height: isFullscreen ? "100vh" : `${dimensions.height}px`,
+        minWidth: isFullscreen ? undefined : `${dimensions.minWidth}px`,
+        minHeight: isFullscreen ? undefined : `${dimensions.minHeight}px`,
+        transitionDuration: isFullscreenTransitionActive
+          ? `${FULLSCREEN_TRANSITION_MS}ms`
+          : undefined,
+        willChange: isFullscreen ? undefined : "transform",
+      }}
+    >
+      <div
+        className={cn(
+          "bg-background flex h-full flex-col overflow-hidden shadow-2xl",
+          isFullscreenTransitionActive &&
+            "transition-[border-radius] ease-in-out",
+          isFullscreen ? "border-0 rounded-none" : "rounded-lg border border-border",
+        )}
+        style={{
+          transitionDuration: isFullscreenTransitionActive
+            ? `${FULLSCREEN_TRANSITION_MS}ms`
+            : undefined,
+        }}
+      >
         <div
-            ref={dialogRef}
-            className="fixed left-0 top-0 transition-[height] ease-in-out"
-            onMouseDownCapture={bringToFront}
-            style={{
-                zIndex,
-                width: `${dims.width}px`,
-                height: isMinimized
-                    ? `${DIALOG_HEADER_HEIGHT}px`
-                    : `${dims.height}px`,
-                transitionDuration: `${MINIMIZE_TRANSITION_MS}ms`,
-                willChange: 'transform'
-            }}
+          className={cn(
+            "h-10 border-b border-border bg-background px-3",
+            "flex items-center justify-between select-none",
+            isFullscreen
+              ? "cursor-default"
+              : "cursor-grab active:cursor-grabbing",
+          )}
+          onMouseDown={handleMouseDown}
         >
-            <div className="bg-background border border-border rounded-lg shadow-2xl flex flex-col h-full overflow-hidden">
-                {/* Draggable Header */}
-                <div
-                    className="h-10 px-3 border-b border-border bg-background flex items-center justify-between cursor-grab active:cursor-grabbing select-none"
-                    onMouseDown={handleMouseDown}
-                >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                        <h2 className="text-sm font-semibold text-foreground truncate">
-                            {title}
-                        </h2>
-                    </div>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+            <h2 className="truncate text-sm font-semibold text-foreground">
+              {title}
+            </h2>
+          </div>
 
-                    <div className="flex items-center gap-1">
-                        {headerAction && !isMinimized && (
-                            <div className="mr-2">
-                                {headerAction}
-                            </div>
-                        )}
-                        <button
-                            onClick={toggleMinimize}
-                            className="p-1 hover:bg-accent rounded transition-colors relative overflow-hidden"
-                            aria-label={isMinimized ? "Restore" : "Minimize"}
-                        >
-                            <div className="relative w-3.5 h-3.5">
-                                <Minus
-                                    className={`absolute inset-0 w-3.5 h-3.5 text-foreground transition-all ${isMinimized
-                                        ? 'opacity-0 scale-0 rotate-90'
-                                        : 'opacity-100 scale-100 rotate-0'
-                                        }`}
-                                    style={{
-                                        transitionDuration:
-                                            `${MINIMIZE_TRANSITION_MS}ms`
-                                    }}
-                                />
-                                <Maximize2
-                                    className={`absolute inset-0 w-3.5 h-3.5 text-foreground transition-all ${isMinimized
-                                        ? 'opacity-100 scale-100 rotate-0'
-                                        : 'opacity-0 scale-0 -rotate-90'
-                                        }`}
-                                    style={{
-                                        transitionDuration:
-                                            `${MINIMIZE_TRANSITION_MS}ms`
-                                    }}
-                                />
-                            </div>
-                        </button>
-                        <button
-                            onClick={handleClose}
-                            className="p-1 hover:bg-accent rounded transition-colors"
-                            aria-label="Close"
-                        >
-                            <X className="w-3.5 h-3.5 text-foreground" />
-                        </button>
-                    </div>
-                </div>
-
-                {/* Keeping the content mounted avoids form/editor resets while the
-                   container animates between desktop-window states. */}
-                <div
-                    aria-hidden={isMinimized}
-                    className="flex-1 overflow-hidden transition-[max-height,opacity,transform] ease-in-out"
-                    style={{
-                        maxHeight: isMinimized ? '0px' : `${contentHeight}px`,
-                        opacity: isMinimized ? 0 : 1,
-                        transform: isMinimized
-                            ? 'translateY(-12px)'
-                            : 'translateY(0px)',
-                        transitionDuration: `${MINIMIZE_TRANSITION_MS}ms`,
-                        pointerEvents: isMinimized ? 'none' : 'auto'
-                    }}
-                >
-                    {children}
-                </div>
-            </div>
+          <div className="flex items-center gap-1">
+            {headerAction && <div className="mr-2">{headerAction}</div>}
+            {fullscreenable && (
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="rounded p-1 transition-colors hover:bg-accent"
+                aria-label={
+                  isFullscreen ? "Exit fullscreen" : "Enter fullscreen"
+                }
+                title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-3.5 w-3.5 text-foreground" />
+                ) : (
+                  <Expand className="h-3.5 w-3.5 text-foreground" />
+                )}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleClose}
+              className="rounded p-1 transition-colors hover:bg-accent"
+              aria-label="Close"
+            >
+              <X className="h-3.5 w-3.5 text-foreground" />
+            </button>
+          </div>
         </div>
-    );
+
+        <div className="flex-1 overflow-hidden">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 export default DraggableDialog;

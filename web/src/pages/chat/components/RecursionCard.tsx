@@ -17,12 +17,68 @@ import {
 import { RecursionStateViewer } from "./RecursionStateViewer";
 import { TokenUsageLabel } from "./TokenUsageLabel";
 
+interface ToolExecutionSnapshot {
+  toolCalls: Array<{
+    id: string;
+    name: string;
+    arguments: Record<string, unknown> | string;
+  }>;
+  toolResults: Array<{
+    tool_call_id: string;
+    name: string;
+    result?: unknown;
+    error?: string;
+    success: boolean;
+  }>;
+  pendingResultCount: number;
+  isWaiting: boolean;
+}
+
 interface RecursionCardProps {
   messageId: string;
   recursion: RecursionRecord;
   taskId?: string;
   isExpanded: boolean;
   onToggle: (messageId: string, recursionUid: string) => void;
+}
+
+/**
+ * Normalizes streamed tool payloads so the card can render pending tool work
+ * before result events arrive from the backend.
+ */
+function getToolExecutionSnapshot(eventData: unknown): ToolExecutionSnapshot {
+  const normalized =
+    typeof eventData === "object" && eventData !== null
+      ? (eventData as {
+          tool_calls?: Array<{
+            id: string;
+            name: string;
+            arguments: Record<string, unknown> | string;
+          }>;
+          tool_results?: Array<{
+            tool_call_id: string;
+            name: string;
+            result?: unknown;
+            error?: string;
+            success: boolean;
+          }>;
+        })
+      : undefined;
+
+  const toolCalls = Array.isArray(normalized?.tool_calls)
+    ? normalized.tool_calls
+    : [];
+  const toolResults = Array.isArray(normalized?.tool_results)
+    ? normalized.tool_results
+    : [];
+  const pendingResultCount = Math.max(toolCalls.length - toolResults.length, 0);
+
+  return {
+    toolCalls,
+    toolResults,
+    pendingResultCount,
+    isWaiting: toolCalls.length > 0 && pendingResultCount > 0,
+  };
 }
 
 /**
@@ -49,6 +105,16 @@ export function RecursionCard({
       (event) =>
         !["recursion_start", "reasoning", "token_rate"].includes(event.type),
     );
+  const isThinkingPhase =
+    effectiveStatus === "running" &&
+    Boolean(recursion.thinking) &&
+    !hasStartedGenerating;
+  const stableRunningLabel =
+    recursion.summary ||
+    recursion.reason ||
+    recursion.observe ||
+    recursion.action ||
+    `Iteration ${recursion.iteration + 1}`;
 
   return (
     <div className="mb-3 overflow-hidden rounded-md border border-border bg-muted/20">
@@ -88,19 +154,20 @@ export function RecursionCard({
             />
           )}
           {effectiveStatus === "running" ? (
-            <span
-              className="animate-thinking-wave truncate text-xs font-semibold"
-              style={{
-                background:
-                  "linear-gradient(90deg, #9ca3af 0%, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%, #9ca3af 100%)",
-                backgroundClip: "text",
-                backgroundSize: "400% 100%",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-              }}
-            >
-              {hasStartedGenerating ? "Generating..." : "Thinking..."}
-            </span>
+            isThinkingPhase ? (
+              <span
+                className="animate-pulse truncate text-xs font-semibold text-muted-foreground"
+              >
+                Thinking...
+              </span>
+            ) : (
+              <span
+                className="truncate text-xs font-semibold text-foreground"
+                title={stableRunningLabel}
+              >
+                {stableRunningLabel}
+              </span>
+            )
           ) : (
             <span
               className="truncate text-xs font-semibold text-foreground"
@@ -232,36 +299,43 @@ export function RecursionCard({
 
           {recursion.events.map((event, index) => {
             if (event.type === "tool_call") {
-              const toolData = event.data as
-                | {
-                    tool_calls?: Array<{
-                      id: string;
-                      name: string;
-                      arguments: Record<string, unknown> | string;
-                    }>;
-                    tool_results?: Array<{
-                      tool_call_id: string;
-                      name: string;
-                      result?: unknown;
-                      error?: string;
-                      success: boolean;
-                    }>;
-                  }
-                | undefined;
+              const toolSnapshot = getToolExecutionSnapshot(event.data);
 
               return (
                 <div
                   key={index}
                   className="rounded border border-border bg-background/50 p-2"
                 >
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <Wrench className="h-3.5 w-3.5 text-orange-500" />
-                    <span className="text-xs font-semibold text-foreground">
-                      TOOL EXECUTION
-                    </span>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Wrench className="h-3.5 w-3.5 text-orange-500" />
+                      <span className="text-xs font-semibold text-foreground">
+                        TOOL EXECUTION
+                      </span>
+                    </div>
+                    {toolSnapshot.isWaiting && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[11px] font-medium text-orange-600">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Running...
+                      </span>
+                    )}
                   </div>
                   <div className="space-y-3 pl-5">
-                    {toolData?.tool_calls?.map((call, callIndex) => (
+                    {toolSnapshot.isWaiting && (
+                      <div className="flex items-center gap-2 rounded border border-dashed border-orange-500/30 bg-orange-500/5 px-2.5 py-2 text-xs text-muted-foreground">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" />
+                        <span>
+                          {toolSnapshot.pendingResultCount ===
+                          toolSnapshot.toolCalls.length
+                            ? "Waiting for tool result..."
+                            : `Waiting for ${toolSnapshot.pendingResultCount} tool result${
+                                toolSnapshot.pendingResultCount > 1 ? "s" : ""
+                              }...`}
+                        </span>
+                      </div>
+                    )}
+
+                    {toolSnapshot.toolCalls.map((call, callIndex) => (
                       <div key={`call-${callIndex}`} className="space-y-1">
                         <div className="text-xs font-semibold text-foreground">
                           📥 Call: {call.name}
@@ -277,7 +351,7 @@ export function RecursionCard({
                       </div>
                     ))}
 
-                    {toolData?.tool_results?.map((result, resultIndex) => (
+                    {toolSnapshot.toolResults.map((result, resultIndex) => (
                       <div key={`result-${resultIndex}`} className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-foreground">
