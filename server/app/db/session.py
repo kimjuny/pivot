@@ -27,6 +27,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "scene",
     "session",
     "skill",
+    "skillchangesubmission",
     "subscene",
     "user",
 }
@@ -229,6 +230,13 @@ def ensure_react_schema_compatibility() -> None:
             if "stashed_messages" not in task_columns:
                 conn.execute(
                     text("ALTER TABLE reacttask " "ADD COLUMN stashed_messages VARCHAR")
+                )
+            if "pending_user_action_json" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask "
+                        "ADD COLUMN pending_user_action_json VARCHAR"
+                    )
                 )
             conn.execute(
                 text(

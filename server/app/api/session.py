@@ -11,6 +11,7 @@ from app.schemas.session import (
     CurrentPlanRecursionSummary,
     CurrentPlanStep,
     FullSessionHistoryResponse,
+    PendingUserActionPayload,
     RecursionDetail,
     SessionCreate,
     SessionListItem,
@@ -304,6 +305,13 @@ async def get_full_session_history(
                 status=task_data["status"],
                 total_tokens=task_data["total_tokens"],
                 skill_selection_result=task_data.get("skill_selection_result"),
+                pending_user_action=(
+                    PendingUserActionPayload.model_validate(
+                        task_data["pending_user_action"]
+                    )
+                    if isinstance(task_data.get("pending_user_action"), dict)
+                    else None
+                ),
                 current_plan=[
                     CurrentPlanStep(
                         step_id=step["step_id"],

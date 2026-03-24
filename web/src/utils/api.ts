@@ -1138,6 +1138,18 @@ export interface TaskMessage {
       cached_input_tokens?: number;
     };
   } | null;
+  pending_user_action?: {
+    kind: string;
+    approval_request?: {
+      submission_id: number;
+      skill_name: string;
+      change_type: string;
+      question: string;
+      message?: string;
+      file_count?: number;
+      total_bytes?: number;
+    } | null;
+  } | null;
   current_plan?: CurrentPlanStep[];
   recursions: RecursionDetail[];
   created_at: string;
@@ -1171,6 +1183,16 @@ export interface ReactTaskCancelResponse {
   task_id: string;
   status: string;
   cancel_requested: boolean;
+}
+
+/**
+ * Structured decision for one waiting system-owned user action.
+ */
+export interface ReactPendingUserActionResponse {
+  task_id: string;
+  session_id: string | null;
+  status: string;
+  cursor_before_start: number;
 }
 
 /**
@@ -1252,6 +1274,23 @@ export const cancelReactTask = async (
   return apiRequest(`/react/tasks/${taskId}/cancel`, {
     method: 'POST',
   }) as Promise<ReactTaskCancelResponse>;
+};
+
+/**
+ * Submit one structured approve/reject decision for a waiting task.
+ *
+ * @param taskId - Waiting task UUID
+ * @param decision - Structured user decision
+ * @returns Promise resolving to resume metadata
+ */
+export const submitReactUserAction = async (
+  taskId: string,
+  decision: "approve" | "reject",
+): Promise<ReactPendingUserActionResponse> => {
+  return apiRequest(`/react/tasks/${taskId}/user-action`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  }) as Promise<ReactPendingUserActionResponse>;
 };
 
 /**

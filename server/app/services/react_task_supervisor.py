@@ -23,6 +23,7 @@ from app.llm.llm_factory import create_llm_from_config
 from app.llm.thinking_policy import build_runtime_thinking_kwargs
 from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
+from app.models.user import User
 from app.orchestration.react.engine import ReactEngine
 from app.orchestration.skills import select_skills_with_usage
 from app.orchestration.tool import get_tool_manager
@@ -34,6 +35,7 @@ from app.schemas.react import ReactStreamEvent, ReactStreamEventType, TokenUsage
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_service import SessionService
+from app.services.skill_change_service import apply_skill_change_submission
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
     build_skill_mounts,
@@ -54,7 +56,7 @@ class ReactTaskLaunchRequest:
     """Immutable launch parameters captured before background execution starts."""
 
     agent_id: int
-    message: str
+    message: str | None
     username: str
     session_id: str | None
     file_ids: list[str]
@@ -162,6 +164,94 @@ class ReactTaskSupervisor:
             task_id=task_id,
             session_id=session_id,
             status=status,
+            cursor_before_start=cursor_before_start,
+        )
+
+    async def submit_pending_user_action(
+        self,
+        *,
+        task_id: str,
+        username: str,
+        decision: Literal["approve", "reject"],
+    ) -> ReactTaskLaunchResult:
+        """Apply one structured waiting action and resume the task."""
+        with Session(get_engine()) as db:
+            statement = select(ReactTask).where(ReactTask.task_id == task_id)
+            task = db.exec(statement).first()
+            if task is None:
+                raise ValueError(f"Task {task_id} not found")
+            if task.user != username:
+                raise ValueError("Task does not belong to the current user")
+            if task.status != "waiting_input":
+                raise ValueError("Task is not waiting for a user action")
+
+            pending_user_action = self._load_pending_user_action(task)
+            if pending_user_action is None:
+                raise ValueError("Task does not have a structured pending user action")
+            if pending_user_action.get("kind") != "skill_change_approval":
+                raise ValueError("Unsupported pending user action kind")
+
+            approval_request = pending_user_action.get("approval_request")
+            if not isinstance(approval_request, dict):
+                raise ValueError("Pending user action is missing approval metadata")
+            submission_id = approval_request.get("submission_id")
+            if not isinstance(submission_id, int) or submission_id <= 0:
+                raise ValueError("Pending user action is missing submission_id")
+
+            current_user = db.exec(select(User).where(User.username == username)).first()
+            if current_user is None:
+                raise ValueError(f"User '{username}' not found.")
+
+            apply_result = apply_skill_change_submission(
+                db,
+                current_user,
+                submission_id=submission_id,
+                decision=decision,
+            )
+            runtime_service = ReactRuntimeService(db)
+            runtime_service.set_next_action_result(
+                task,
+                [
+                    {
+                        "result": {
+                            "kind": "skill_change_result",
+                            "decision": decision,
+                            **apply_result,
+                        }
+                    }
+                ],
+            )
+            task.status = "pending"
+            task.cancel_requested_at = None
+            task.updated_at = datetime.now(UTC)
+            db.add(task)
+            db.commit()
+
+            cursor_before_start = self._get_last_event_cursor(
+                db=db,
+                session_id=task.session_id,
+            )
+            launch = ReactTaskLaunchRequest(
+                agent_id=task.agent_id,
+                message=None,
+                username=username,
+                session_id=task.session_id,
+                file_ids=[],
+                task_id=task.task_id,
+            )
+
+        async with self._lock:
+            existing_job = self._active_jobs.get(task_id)
+            if existing_job is None or existing_job.done():
+                self._active_jobs[task_id] = asyncio.create_task(
+                    self._run_task(task_id=task_id, launch=launch),
+                    name=f"react-task-{task_id}",
+                )
+
+        return ReactTaskLaunchResult(
+            task_id=task.task_id,
+            session_id=task.session_id,
+            status="pending",
             cursor_before_start=cursor_before_start,
         )
 
@@ -278,6 +368,7 @@ class ReactTaskSupervisor:
             raise ValueError(f"Agent {launch.agent_id} not found")
         if not agent.llm_id:
             raise ValueError(f"Agent {agent.name} has no LLM configured")
+        session = None
         if launch.session_id:
             session = SessionService(db).get_session(launch.session_id)
             if session is None:
@@ -302,6 +393,12 @@ class ReactTaskSupervisor:
                 raise ValueError("Task does not belong to the current user")
 
             if existing_task.status == "waiting_input":
+                if existing_task.pending_user_action_json:
+                    raise ValueError(
+                        "This task requires a structured user action instead of a text reply"
+                    )
+                if launch.message is None or launch.message.strip() == "":
+                    raise ValueError("Reply message cannot be empty")
                 self._inject_clarify_reply(
                     db=db,
                     task=existing_task,
@@ -317,6 +414,9 @@ class ReactTaskSupervisor:
                 )
 
         if task is None:
+            if launch.message is None or launch.message.strip() == "":
+                raise ValueError("message is required when starting a new text turn")
+            launch_timestamp = datetime.now(UTC)
             task = ReactTask(
                 task_id=str(uuid.uuid4()),
                 session_id=launch.session_id,
@@ -328,14 +428,30 @@ class ReactTaskSupervisor:
                 iteration=0,
                 max_iteration=agent.max_iteration,
                 cancel_requested_at=None,
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
+                created_at=launch_timestamp,
+                updated_at=launch_timestamp,
             )
+            if session is not None:
+                session.updated_at = launch_timestamp
+                db.add(session)
             db.add(task)
             db.commit()
             db.refresh(task)
 
         return task, session_cursor
+
+    def _load_pending_user_action(
+        self,
+        task: ReactTask,
+    ) -> dict[str, Any] | None:
+        """Parse the persisted structured waiting action on one task."""
+        if not task.pending_user_action_json:
+            return None
+        try:
+            parsed = json.loads(task.pending_user_action_json)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     def _inject_clarify_reply(
         self,
@@ -509,7 +625,7 @@ class ReactTaskSupervisor:
                             selection_result = await run_in_threadpool(
                                 select_skills_with_usage,
                                 resolver_llm,
-                                launch.message,
+                                task.user_message,
                                 available_skills,
                                 session_context,
                             )

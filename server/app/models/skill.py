@@ -19,7 +19,7 @@ class Skill(SQLModel, table=True):
         description: Short summary extracted from markdown front matter.
         kind: Visibility scope, either ``private`` or ``shared``.
         source: Origin of the skill, one of ``builtin``, ``manual``,
-            ``network``, or ``bundle``.
+            ``network``, ``bundle``, or ``agent``.
         builtin: Whether the skill ships with the application.
         creator_id: Owning user ID for user-created skills.
         location: Absolute directory path that contains the markdown skill assets.

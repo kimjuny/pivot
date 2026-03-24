@@ -1,6 +1,8 @@
 import type {
+  ChatPendingUserAction,
   ChatMessage,
   RecursionRecord,
+  SkillChangeApprovalRequest,
   TaskPlanSnapshot,
 } from "../types";
 import { deriveComposerTaskPlan as deriveComposerTaskPlanSnapshot } from "./chatPlan";
@@ -88,6 +90,94 @@ export function isClarifyMessage(message: ChatMessage): boolean {
   return (
     message.status === "waiting_input" || getLastRecursion(message)?.action === "CLARIFY"
   );
+}
+
+/**
+ * Guard unknown values before reading structured clarify payloads.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validates one structured skill-change approval request embedded in clarify data.
+ */
+export function toSkillChangeApprovalRequest(
+  value: unknown,
+): SkillChangeApprovalRequest | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const submissionId = value.submission_id;
+  const skillName = value.skill_name;
+  const changeType = value.change_type;
+  const question = value.question;
+  if (
+    typeof submissionId !== "number" ||
+    typeof skillName !== "string" ||
+    (changeType !== "create" && changeType !== "update") ||
+    typeof question !== "string"
+  ) {
+    return undefined;
+  }
+
+  return {
+    submission_id: submissionId,
+    skill_name: skillName,
+    change_type: changeType,
+    question,
+    message: typeof value.message === "string" ? value.message : undefined,
+    file_count: typeof value.file_count === "number" ? value.file_count : undefined,
+    total_bytes:
+      typeof value.total_bytes === "number" ? value.total_bytes : undefined,
+  };
+}
+
+/**
+ * Reads one system-owned pending user action from an unknown value.
+ */
+export function toPendingUserAction(
+  value: unknown,
+): ChatPendingUserAction | undefined {
+  if (!isRecord(value) || value.kind !== "skill_change_approval") {
+    return undefined;
+  }
+
+  const approvalRequest = toSkillChangeApprovalRequest(value.approval_request);
+  if (!approvalRequest) {
+    return undefined;
+  }
+
+  return {
+    kind: "skill_change_approval",
+    approvalRequest,
+  };
+}
+
+/**
+ * Reads the structured approval request attached to one clarify payload.
+ */
+export function extractSkillChangeApprovalRequestFromClarifyData(
+  value: unknown,
+): SkillChangeApprovalRequest | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return toSkillChangeApprovalRequest(value.approval_request);
+}
+
+/**
+ * Reads the task-owned structured approval request attached to one message.
+ */
+export function extractSkillChangeApprovalRequest(
+  message: ChatMessage,
+): SkillChangeApprovalRequest | undefined {
+  if (message.pendingUserAction?.kind === "skill_change_approval") {
+    return message.pendingUserAction.approvalRequest;
+  }
+  return undefined;
 }
 
 /**

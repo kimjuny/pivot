@@ -1,6 +1,6 @@
 import { MessageSquare } from "@/lib/lucide";
 
-import type { ChatMessage } from "../types";
+import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";
 import { UserMessageBubble } from "./UserMessageBubble";
 
@@ -8,8 +8,17 @@ interface ConversationViewProps {
   messages: ChatMessage[];
   agentName?: string;
   expandedRecursions: Record<string, boolean>;
+  isStreaming: boolean;
   onToggleRecursion: (messageId: string, recursionUid: string) => void;
   onReplyTask: (taskId: string | null) => void;
+  onApproveSkillChange: (
+    taskId: string,
+    request: SkillChangeApprovalRequest,
+  ) => void;
+  onRejectSkillChange: (
+    taskId: string,
+    request: SkillChangeApprovalRequest,
+  ) => void;
 }
 
 /**
@@ -19,8 +28,11 @@ export function ConversationView({
   messages,
   agentName,
   expandedRecursions,
+  isStreaming,
   onToggleRecursion,
   onReplyTask,
+  onApproveSkillChange,
+  onRejectSkillChange,
 }: ConversationViewProps) {
   const isConversationEmpty = messages.length === 0;
   const normalizedAgentName = agentName?.trim() || "ReAct Agent";
@@ -53,8 +65,11 @@ export function ConversationView({
             <AssistantMessageBlock
               message={message}
               expandedRecursions={expandedRecursions}
+              isStreaming={isStreaming}
               onToggleRecursion={onToggleRecursion}
               onReplyTask={onReplyTask}
+              onApproveSkillChange={onApproveSkillChange}
+              onRejectSkillChange={onRejectSkillChange}
             />
           )}
         </div>

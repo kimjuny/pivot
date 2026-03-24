@@ -26,7 +26,10 @@ class ReactChatRequest(AppBaseModel):
     """Request schema for ReAct chat stream endpoint."""
 
     agent_id: int = Field(..., description="Agent ID to use for the task")
-    message: str = Field(..., description="User message/task description")
+    message: str | None = Field(
+        default=None,
+        description="User message/task description for text turns",
+    )
     user: str = Field(default="default_user", description="Username")
     task_id: str | None = Field(
         default=None, description="Task ID for resuming a conversation"
@@ -270,6 +273,15 @@ class ReactTaskCancelResponse(AppBaseModel):
     cancel_requested: bool = Field(
         ...,
         description="Whether an active execution acknowledged the cancel request",
+    )
+
+
+class ReactPendingUserActionRequest(AppBaseModel):
+    """Structured decision submitted for a waiting system-owned user action."""
+
+    decision: Literal["approve", "reject"] = Field(
+        ...,
+        description="Structured user decision for the current waiting action",
     )
 
 

@@ -90,6 +90,7 @@ class ReactStateService:
         summary: str,
         tool_results: list[dict[str, Any]],
         token_counter: dict[str, int],
+        pending_user_action: dict[str, Any] | None = None,
     ) -> dict[str, int] | None:
         """Persist a successful recursion and update derived task state.
 
@@ -108,6 +109,8 @@ class ReactStateService:
             summary: Optional user-facing progress summary text.
             tool_results: Executed tool results for this recursion.
             token_counter: Aggregated token usage for the recursion.
+            pending_user_action: Optional system-owned waiting action created by
+                a tool result and persisted on the task row.
 
         Returns:
             Persisted token usage payload, or `None` if empty.
@@ -150,6 +153,12 @@ class ReactStateService:
         self._save_snapshot(task, recursion, context)
 
         if action_type == "CLARIFY":
+            self._set_task_status(task, "waiting_input", commit=False)
+        elif pending_user_action is not None:
+            task.pending_user_action_json = json.dumps(
+                pending_user_action,
+                ensure_ascii=False,
+            )
             self._set_task_status(task, "waiting_input", commit=False)
 
         self.db.commit()
@@ -596,6 +605,8 @@ class ReactStateService:
             commit: Whether to commit immediately.
         """
         task.status = status
+        if status != "waiting_input":
+            task.pending_user_action_json = None
         task.updated_at = datetime.now(UTC)
         self.db.add(task)
         if commit:

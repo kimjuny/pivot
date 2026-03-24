@@ -1196,7 +1196,7 @@ class ChannelService:
         )
         tasks = self.db.exec(statement).all()
         for task in tasks:
-            if task.status == "waiting_input":
+            if task.status == "waiting_input" and not task.pending_user_action_json:
                 return task
         return None
 

@@ -110,6 +110,25 @@ class CurrentPlanStep(AppBaseModel):
     recursion_history: list[CurrentPlanRecursionSummary] = Field(default_factory=list)
 
 
+class SkillChangeApprovalRequestPayload(AppBaseModel):
+    """Structured skill approval request embedded in one waiting action."""
+
+    submission_id: int
+    skill_name: str
+    change_type: str
+    question: str
+    message: str = ""
+    file_count: int = 0
+    total_bytes: int = 0
+
+
+class PendingUserActionPayload(AppBaseModel):
+    """System-owned waiting action persisted on a task."""
+
+    kind: str
+    approval_request: SkillChangeApprovalRequestPayload | None = None
+
+
 class TaskMessage(AppBaseModel):
     """Schema for a task message with full recursion details."""
 
@@ -120,6 +139,7 @@ class TaskMessage(AppBaseModel):
     status: str
     total_tokens: int = 0
     skill_selection_result: dict[str, Any] | None = None
+    pending_user_action: PendingUserActionPayload | None = None
     current_plan: list[CurrentPlanStep] = Field(default_factory=list)
     recursions: list[RecursionDetail] = Field(default_factory=list)
     created_at: str

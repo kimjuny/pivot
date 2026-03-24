@@ -11,6 +11,7 @@ from app.schemas.react import (
     ReactChatRequest,
     ReactContextUsageRequest,
     ReactContextUsageResponse,
+    ReactPendingUserActionRequest,
     ReactSessionRuntimeDebugResponse,
     ReactStreamEvent,
     ReactTaskCancelResponse,
@@ -87,6 +88,9 @@ async def start_react_task(
     current_user: User = Depends(get_current_user),
 ) -> ReactTaskStartResponse:
     """Queue one ReAct task for background execution."""
+    if request.message is None or request.message.strip() == "":
+        raise HTTPException(status_code=400, detail="message is required")
+
     supervisor = get_react_task_supervisor()
     try:
         launch_result = await supervisor.start_task(
@@ -100,6 +104,31 @@ async def start_react_task(
                 thinking_mode=request.thinking_mode,
                 task_id=request.task_id,
             )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ReactTaskStartResponse(
+        task_id=launch_result.task_id,
+        session_id=launch_result.session_id,
+        status=launch_result.status,
+        cursor_before_start=launch_result.cursor_before_start,
+    )
+
+
+@router.post("/react/tasks/{task_id}/user-action", response_model=ReactTaskStartResponse)
+async def submit_react_user_action(
+    task_id: str,
+    request: ReactPendingUserActionRequest,
+    current_user: User = Depends(get_current_user),
+) -> ReactTaskStartResponse:
+    """Submit one structured approve/reject decision for a waiting task."""
+    supervisor = get_react_task_supervisor()
+    try:
+        launch_result = await supervisor.submit_pending_user_action(
+            task_id=task_id,
+            username=current_user.username,
+            decision=request.decision,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -179,6 +208,8 @@ async def react_chat_stream(
         )
 
     supervisor = get_react_task_supervisor()
+    if request.message is None or request.message.strip() == "":
+        raise HTTPException(status_code=400, detail="message is required")
     try:
         launch_result = await supervisor.start_task(
             ReactTaskLaunchRequest(

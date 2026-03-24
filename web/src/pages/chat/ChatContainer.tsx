@@ -11,6 +11,7 @@ import {
   getReactSessionRuntimeDebug,
   listSessions,
   startReactTask,
+  submitReactUserAction,
   updateSession,
   type ReactContextUsageSummary,
   type ReactSessionRuntimeDebug,
@@ -38,6 +39,7 @@ import type {
   PlanStepData,
   ReactStreamEvent,
   RecursionRecord,
+  SkillChangeApprovalRequest,
   TokenUsage,
 } from "./types";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
@@ -54,6 +56,8 @@ import {
 import {
   ZERO_RATE_STREAK_TO_RENDER,
   deriveComposerTaskPlan,
+  extractSkillChangeApprovalRequest,
+  extractSkillChangeApprovalRequestFromClarifyData,
   isClarifyMessage,
 } from "./utils/chatSelectors";
 
@@ -162,33 +166,15 @@ function replaceSessionListItem(
 }
 
 /**
- * Bumps one sidebar row to the latest activity time so newly active sessions
- * float to the top immediately instead of waiting for the next backend refresh.
- */
-function touchSessionListItem(
-  sessions: SessionListItem[],
-  sessionId: string,
-  updatedAt: string,
-): SessionListItem[] {
-  const existingSession = sessions.find((session) => session.session_id === sessionId);
-  if (!existingSession || existingSession.updated_at === updatedAt) {
-    return sessions;
-  }
-
-  return upsertSessionListItem(sessions, {
-    ...existingSession,
-    updated_at: updatedAt,
-  });
-}
-
-/**
- * Applies one streamed session-title update onto the local sidebar cache.
+ * Applies one streamed session-title update without reordering the sidebar.
+ *
+ * Why: session ordering should remain controlled by the server's ``updated_at``
+ * field so task activity and sidebar refreshes cannot drift apart.
  */
 function applyStreamedSessionTitle(
   sessions: SessionListItem[],
   sessionId: string,
   title: string,
-  updatedAt: string,
 ): SessionListItem[] {
   const existingSession = sessions.find((session) => session.session_id === sessionId);
   const nextTitle = title.trim();
@@ -196,17 +182,13 @@ function applyStreamedSessionTitle(
     return sessions;
   }
 
-  if (
-    existingSession.title === nextTitle &&
-    existingSession.updated_at === updatedAt
-  ) {
+  if (existingSession.title === nextTitle) {
     return sessions;
   }
 
-  return upsertSessionListItem(sessions, {
+  return replaceSessionListItem(sessions, {
     ...existingSession,
     title: nextTitle,
-    updated_at: updatedAt,
   });
 }
 
@@ -287,7 +269,8 @@ function findLatestWaitingReplyTaskId(messages: ChatMessage[]): string | null {
     if (
       message.role === "assistant" &&
       typeof message.task_id === "string" &&
-      isClarifyMessage(message)
+      isClarifyMessage(message) &&
+      !extractSkillChangeApprovalRequest(message)
     ) {
       return message.task_id;
     }
@@ -788,12 +771,7 @@ function ChatContainer({
       const streamedSessionId = currentSessionIdRef.current;
       if (sessionTitle && streamedSessionId) {
         setSessions((previousSessions) =>
-          applyStreamedSessionTitle(
-            previousSessions,
-            streamedSessionId,
-            sessionTitle,
-            event.timestamp,
-          ),
+          applyStreamedSessionTitle(previousSessions, streamedSessionId, sessionTitle),
         );
       }
 
@@ -951,6 +929,11 @@ function ChatContainer({
               ...message,
               task_id: event.task_id,
               status: "running" as const,
+              content:
+                message.pendingUserAction?.kind === "skill_change_approval"
+                  ? ""
+                  : message.content,
+              pendingUserAction: undefined,
               recursions: [...updatedRecursions, newRecursion],
               skillSelection:
                 message.skillSelection?.status === "loading"
@@ -974,6 +957,20 @@ function ChatContainer({
         event.type === "task_complete" ||
         event.type === "error"
       ) {
+        if (
+          event.type === "clarify" ||
+          event.type === "task_complete" ||
+          event.type === "task_cancelled" ||
+          event.type === "error"
+        ) {
+          void refreshSessionList().catch((refreshError) => {
+            console.error(
+              "Failed to refresh session list after task activity changed:",
+              refreshError,
+            );
+          });
+        }
+
         let finalizedRecursion: RecursionRecord | null = null;
         const currentRecursion =
           currentRecursionFromRefs ?? runningRecursionFromMessage ?? null;
@@ -995,11 +992,14 @@ function ChatContainer({
         }
 
         if (event.type === "clarify") {
+          const approvalRequest = extractSkillChangeApprovalRequestFromClarifyData(
+            event.data,
+          );
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
           clearCompactStatusImmediately();
-          setReplyTaskId(event.task_id);
+          setReplyTaskId(approvalRequest ? null : event.task_id);
           liveTaskIdRef.current = event.task_id;
           liveRecursionRef.current = finalizedRecursion;
         } else if (
@@ -1057,16 +1057,29 @@ function ChatContainer({
               return {
                 ...message,
                 recursions: updatedRecursions,
+                pendingUserAction: undefined,
                 content: answerData?.answer ?? message.content,
               };
             }
 
             if (event.type === "clarify") {
               const clarifyData = event.data as { question?: string } | undefined;
+              const approvalRequest = extractSkillChangeApprovalRequestFromClarifyData(
+                event.data,
+              );
               return {
                 ...message,
                 recursions: updatedRecursions,
-                content: clarifyData?.question ?? message.content,
+                content:
+                  approvalRequest?.message && approvalRequest.message.trim().length > 0
+                    ? `${clarifyData?.question ?? message.content}\n\n${approvalRequest.message}`
+                    : (clarifyData?.question ?? message.content),
+                pendingUserAction: approvalRequest
+                  ? {
+                      kind: "skill_change_approval",
+                      approvalRequest,
+                    }
+                  : undefined,
                 status: "waiting_input" as const,
                 timestamp: event.timestamp,
               };
@@ -1076,6 +1089,7 @@ function ChatContainer({
               return {
                 ...message,
                 recursions: updatedRecursions,
+                pendingUserAction: undefined,
                 status: "error" as const,
                 content:
                   (event.data as { error?: string } | undefined)?.error ??
@@ -1088,6 +1102,7 @@ function ChatContainer({
               return {
                 ...message,
                 recursions: updatedRecursions,
+                pendingUserAction: undefined,
                 status: "stopped" as const,
                 timestamp: event.timestamp,
                 skillSelection:
@@ -1102,15 +1117,10 @@ function ChatContainer({
               };
             }
 
-            void refreshSessionList().catch((refreshError) => {
-              console.error(
-                "Failed to refresh session list after task completion:",
-                refreshError,
-              );
-            });
             return {
               ...message,
               recursions: updatedRecursions,
+              pendingUserAction: undefined,
               status: "completed" as const,
               timestamp: event.timestamp,
               totalTokens: event.total_tokens ?? message.totalTokens,
@@ -1794,11 +1804,14 @@ function ChatContainer({
   /**
    * Sends the current composer state and incrementally applies streamed backend updates.
    */
-  const sendMessage = async () => {
-    const pendingMessage = inputMessage;
-    const currentReplyTaskId = replyTaskId;
+  const sendMessage = async (options?: {
+    messageOverride?: string;
+    replyTaskIdOverride?: string | null;
+  }) => {
+    const pendingMessage = options?.messageOverride ?? inputMessage;
+    const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
     let assistantMessageId: string | null = null;
-    const filesToSend = readyPendingFiles;
+    const filesToSend = options?.messageOverride ? [] : readyPendingFiles;
     const sentAttachments = filesToSend.map((file) => ({
       fileId: file.fileId,
       kind: file.kind,
@@ -1846,10 +1859,10 @@ function ChatContainer({
         throw new Error("Token expired or invalid. Please log in again.");
       }
 
-      const messageTimestamp = new Date().toISOString();
       setSessions((previous) =>
-        touchSessionListItem(previous, activeSessionId, messageTimestamp),
+        previous,
       );
+      const messageTimestamp = new Date().toISOString();
       const userMessage: ChatMessage = {
         id: `user-${Date.now()}`,
         role: "user",
@@ -1876,7 +1889,9 @@ function ChatContainer({
         updateMessages((previous) => [...previous, userMessage, assistantMessage]);
       }
       setInputMessage("");
-      discardReadyPendingFiles();
+      if (!options?.messageOverride) {
+        discardReadyPendingFiles();
+      }
       setError(null);
       clearCompactStatusImmediately();
       setIsStreaming(true);
@@ -1918,6 +1933,12 @@ function ChatContainer({
         ),
       );
       liveTaskIdRef.current = launchResult.task_id;
+      void refreshSessionList().catch((refreshError) => {
+        console.error(
+          "Failed to refresh session list after task launch:",
+          refreshError,
+        );
+      });
     } catch (streamError) {
       setActiveContextTaskId(null);
       setActiveContextIteration(null);
@@ -1944,6 +1965,65 @@ function ChatContainer({
       }
       setIsStreaming(false);
     }
+  };
+
+  /**
+   * Sends an explicit approval or rejection reply for a pending inline skill change request.
+   */
+  const handleSkillChangeDecision = (
+    decision: "approve" | "reject",
+    taskId: string,
+    _request: SkillChangeApprovalRequest,
+  ) => {
+    setError(null);
+    setIsStreaming(true);
+    setReplyTaskId(null);
+    setActiveContextTaskId(null);
+    setActiveContextIteration(null);
+    clearCompactStatusImmediately();
+    updateMessages((messagesSnapshot) =>
+      messagesSnapshot.map((message) =>
+        message.task_id === taskId && message.role === "assistant"
+          ? {
+              ...message,
+              status: "running" as const,
+              content:
+                message.pendingUserAction?.kind === "skill_change_approval"
+                  ? ""
+                  : message.content,
+              pendingUserAction: undefined,
+            }
+          : message,
+      ),
+    );
+
+    void submitReactUserAction(taskId, decision)
+      .then(() => {
+        void refreshSessionList().catch((refreshError) => {
+          console.error(
+            "Failed to refresh session list after user action:",
+            refreshError,
+          );
+        });
+      })
+      .catch((actionError) => {
+        console.error("Failed to submit pending user action:", actionError);
+        setIsStreaming(false);
+        setError("Failed to submit approval decision");
+        if (currentSessionIdRef.current) {
+          void getFullSessionHistory(currentSessionIdRef.current)
+            .then((history) => {
+              const nextMessages = buildMessagesFromHistory(history.tasks);
+              applyHistoryMessages(nextMessages);
+            })
+            .catch((historyError) => {
+              console.error(
+                "Failed to restore session after approval submission failed:",
+                historyError,
+              );
+            });
+        }
+      });
   };
 
   /**
@@ -2012,8 +2092,15 @@ function ChatContainer({
               messages={messages}
               agentName={agentName}
               expandedRecursions={expandedRecursions}
+              isStreaming={isStreaming}
               onToggleRecursion={toggleRecursion}
               onReplyTask={setReplyTaskId}
+              onApproveSkillChange={(taskId, request) =>
+                handleSkillChangeDecision("approve", taskId, request)
+              }
+              onRejectSkillChange={(taskId, request) =>
+                handleSkillChangeDecision("reject", taskId, request)
+              }
             />
             <div className="h-1" />
           </div>

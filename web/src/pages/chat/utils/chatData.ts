@@ -3,10 +3,12 @@ import type { ChatFileAsset, RecursionDetail, TaskMessage } from "@/utils/api";
 import type {
   ChatAttachment,
   ChatMessage,
+  ChatPendingUserAction,
   ReactStreamEvent,
   SkillSelectionState,
   TokenUsage,
 } from "../types";
+import { toPendingUserAction } from "./chatSelectors";
 
 const CLIPBOARD_FILE_EXTENSION_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -213,6 +215,21 @@ function buildAssistantContent(task: TaskMessage): string {
     return task.agent_answer;
   }
 
+  const pendingUserAction =
+    task.status === "waiting_input"
+      ? toPendingUserAction(task.pending_user_action)
+      : undefined;
+  if (pendingUserAction?.kind === "skill_change_approval") {
+    const { question, message } = pendingUserAction.approvalRequest;
+    return message && message.trim().length > 0
+      ? `${question}\n\n${message}`
+      : question;
+  }
+
+  if (task.status !== "waiting_input") {
+    return "";
+  }
+
   for (let index = task.recursions.length - 1; index >= 0; index -= 1) {
     const recursion = task.recursions[index];
     if (recursion.action_type !== "CLARIFY" || !recursion.action_output) {
@@ -236,6 +253,11 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
   const loadedMessages: ChatMessage[] = [];
 
   for (const task of tasks) {
+    const pendingUserAction: ChatPendingUserAction | undefined =
+      task.status === "waiting_input"
+        ? toPendingUserAction(task.pending_user_action)
+        : undefined;
+
     loadedMessages.push({
       id: `user-${task.task_id}`,
       role: "user",
@@ -293,6 +315,20 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
             trace_id: recursion.trace_id,
             iteration: recursion.iteration,
             data: planData,
+            timestamp: recursion.updated_at,
+          });
+        }
+      }
+
+      if (recursion.action_type === "CLARIFY" && recursion.action_output) {
+        const clarifyData = parseJson(recursion.action_output);
+        if (clarifyData !== null) {
+          events.push({
+            type: "clarify",
+            task_id: task.task_id,
+            trace_id: recursion.trace_id,
+            iteration: recursion.iteration,
+            data: clarifyData,
             timestamp: recursion.updated_at,
           });
         }
@@ -364,6 +400,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       content: buildAssistantContent(task),
       timestamp: task.updated_at,
       task_id: task.task_id,
+      pendingUserAction,
       currentPlan: task.current_plan,
       recursions,
       skillSelection: buildSkillSelectionFromTask(task),

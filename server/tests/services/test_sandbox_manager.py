@@ -30,10 +30,16 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 module,
                 "_get_container_mounts",
                 return_value=[
-                    {"Destination": "/workspace", "Source": "/tmp/workspace"}
+                    {"Destination": "/workspace", "Source": "/tmp/workspace"},
+                    {"Destination": "/workspace/skills", "Source": "/tmp/skills"},
                 ],
             ),
             patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(
+                module,
+                "_container_skills_volume_name",
+                return_value="pivot-sandbox-alice-1-skills",
+            ),
             patch.object(module, "_container_network_mode", return_value="bridge"),
             patch.object(
                 module,
@@ -55,7 +61,11 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 )(),
             ),
         ):
-            should_recreate, reason = module._should_recreate_container(container, {})
+            should_recreate, reason = module._should_recreate_container(
+                container,
+                {},
+                expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+            )
 
         self.assertTrue(should_recreate)
         self.assertEqual(reason, "base_image_id_mismatch")
@@ -71,9 +81,112 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 module,
                 "_get_container_mounts",
                 return_value=[
+                    {"Destination": "/workspace", "Source": "/tmp/workspace"},
+                    {"Destination": "/workspace/skills", "Source": "/tmp/skills"},
+                ],
+            ),
+            patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(
+                module,
+                "_container_skills_volume_name",
+                return_value="pivot-sandbox-alice-1-skills",
+            ),
+            patch.object(module, "_container_network_mode", return_value="bridge"),
+            patch.object(
+                module,
+                "_container_image_ref",
+                return_value="localhost/pivot-sandbox-base:py311-rg",
+            ),
+            patch.object(module, "_resolve_image_id", return_value="sha256:current"),
+            patch.object(module, "_container_image_id", return_value="sha256:current"),
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
+                        "SANDBOX_NETWORK_MODE": "bridge",
+                    },
+                )(),
+            ),
+        ):
+            should_recreate, reason = module._should_recreate_container(
+                container,
+                {},
+                expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+            )
+
+        self.assertFalse(should_recreate)
+        self.assertEqual(reason, "ok")
+
+    def test_recreates_container_when_network_mode_changes(self) -> None:
+        """Changing sandbox network policy should refresh warm containers."""
+        module = cast(Any, sandbox_manager)
+        container = object()
+
+        with (
+            patch.object(module, "_container_working_dir", return_value="/workspace"),
+            patch.object(
+                module,
+                "_get_container_mounts",
+                return_value=[
+                    {"Destination": "/workspace", "Source": "/tmp/workspace"},
+                    {"Destination": "/workspace/skills", "Source": "/tmp/skills"},
+                ],
+            ),
+            patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(
+                module,
+                "_container_skills_volume_name",
+                return_value="pivot-sandbox-alice-1-skills",
+            ),
+            patch.object(module, "_container_network_mode", return_value="none"),
+            patch.object(
+                module,
+                "_container_image_ref",
+                return_value="localhost/pivot-sandbox-base:py311-rg",
+            ),
+            patch.object(module, "_resolve_image_id", return_value="sha256:current"),
+            patch.object(module, "_container_image_id", return_value="sha256:current"),
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
+                        "SANDBOX_NETWORK_MODE": "bridge",
+                    },
+                )(),
+            ),
+        ):
+            should_recreate, reason = module._should_recreate_container(
+                container,
+                {},
+                expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+            )
+
+        self.assertTrue(should_recreate)
+        self.assertEqual(reason, "network_mode_mismatch")
+
+    def test_recreates_container_when_skills_volume_mount_is_missing(self) -> None:
+        """Legacy sandboxes without the private skills volume must be replaced."""
+        module = cast(Any, sandbox_manager)
+        container = object()
+
+        with (
+            patch.object(module, "_container_working_dir", return_value="/workspace"),
+            patch.object(
+                module,
+                "_get_container_mounts",
+                return_value=[
                     {"Destination": "/workspace", "Source": "/tmp/workspace"}
                 ],
             ),
+            patch.object(module, "_container_skills_volume_name", return_value=None),
             patch.object(module, "_mounted_skill_sources", return_value={}),
             patch.object(module, "_container_network_mode", return_value="bridge"),
             patch.object(
@@ -96,48 +209,11 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 )(),
             ),
         ):
-            should_recreate, reason = module._should_recreate_container(container, {})
-
-        self.assertFalse(should_recreate)
-        self.assertEqual(reason, "ok")
-
-    def test_recreates_container_when_network_mode_changes(self) -> None:
-        """Changing sandbox network policy should refresh warm containers."""
-        module = cast(Any, sandbox_manager)
-        container = object()
-
-        with (
-            patch.object(module, "_container_working_dir", return_value="/workspace"),
-            patch.object(
-                module,
-                "_get_container_mounts",
-                return_value=[
-                    {"Destination": "/workspace", "Source": "/tmp/workspace"}
-                ],
-            ),
-            patch.object(module, "_mounted_skill_sources", return_value={}),
-            patch.object(module, "_container_network_mode", return_value="none"),
-            patch.object(
-                module,
-                "_container_image_ref",
-                return_value="localhost/pivot-sandbox-base:py311-rg",
-            ),
-            patch.object(module, "_resolve_image_id", return_value="sha256:current"),
-            patch.object(module, "_container_image_id", return_value="sha256:current"),
-            patch.object(
-                module,
-                "get_settings",
-                return_value=type(
-                    "Settings",
-                    (),
-                    {
-                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
-                        "SANDBOX_NETWORK_MODE": "bridge",
-                    },
-                )(),
-            ),
-        ):
-            should_recreate, reason = module._should_recreate_container(container, {})
+            should_recreate, reason = module._should_recreate_container(
+                container,
+                {},
+                expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+            )
 
         self.assertTrue(should_recreate)
-        self.assertEqual(reason, "network_mode_mismatch")
+        self.assertEqual(reason, "missing_skills_volume_mount")

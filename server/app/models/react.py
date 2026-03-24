@@ -29,6 +29,8 @@ class ReactTask(SQLModel, table=True):
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
         skill_selection_result: Serialized skill resolution summary payload.
+        pending_user_action_json: Serialized system-owned waiting action payload
+            such as a skill approval request that must survive refreshes.
         status: Current status (pending, running, completed, failed, cancelled).
         iteration: Current number of recursion cycles executed.
         max_iteration: Maximum allowed recursion cycles.
@@ -59,6 +61,13 @@ class ReactTask(SQLModel, table=True):
         description=(
             "Serialized skill resolution result payload for UI/history, "
             "e.g. {'count':2,'selected_skills':['coding'],'duration_ms':1200,'tokens':...}."
+        ),
+    )
+    pending_user_action_json: str | None = Field(
+        default=None,
+        description=(
+            "Serialized system-owned waiting action payload, "
+            "e.g. {'kind':'skill_change_approval', ...}."
         ),
     )
     status: str = Field(

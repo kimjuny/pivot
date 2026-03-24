@@ -7,8 +7,9 @@ import {
 
 import { formatTimestamp } from "@/utils/timestamp";
 
-import type { ChatMessage } from "../types";
+import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import {
+  extractSkillChangeApprovalRequest,
   formatTokenCount,
   isClarifyMessage,
 } from "../utils/chatSelectors";
@@ -20,8 +21,17 @@ import { TokenUsageLabel } from "./TokenUsageLabel";
 interface AssistantMessageBlockProps {
   message: ChatMessage;
   expandedRecursions: Record<string, boolean>;
+  isStreaming: boolean;
   onToggleRecursion: (messageId: string, recursionUid: string) => void;
   onReplyTask: (taskId: string | null) => void;
+  onApproveSkillChange: (
+    taskId: string,
+    request: SkillChangeApprovalRequest,
+  ) => void;
+  onRejectSkillChange: (
+    taskId: string,
+    request: SkillChangeApprovalRequest,
+  ) => void;
 }
 
 /**
@@ -30,10 +40,18 @@ interface AssistantMessageBlockProps {
 export function AssistantMessageBlock({
   message,
   expandedRecursions,
+  isStreaming,
   onToggleRecursion,
   onReplyTask,
+  onApproveSkillChange,
+  onRejectSkillChange,
 }: AssistantMessageBlockProps) {
   const clarifyMessage = isClarifyMessage(message);
+  const approvalRequest = extractSkillChangeApprovalRequest(message);
+  const canRenderApprovalActions =
+    clarifyMessage &&
+    typeof message.task_id === "string" &&
+    approvalRequest !== undefined;
 
   return (
     <div className="space-y-2">
@@ -76,13 +94,40 @@ export function AssistantMessageBlock({
                 </>
               )}
             </div>
-            {clarifyMessage && message.task_id && (
-              <button
-                onClick={() => onReplyTask(message.task_id || null)}
-                className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-info/30 hover:text-info"
-              >
-                Reply
-              </button>
+            {canRenderApprovalActions ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={isStreaming}
+                  onClick={() =>
+                    onRejectSkillChange(message.task_id!, approvalRequest)
+                  }
+                  className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-danger/30 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  disabled={isStreaming}
+                  onClick={() =>
+                    onApproveSkillChange(message.task_id!, approvalRequest)
+                  }
+                  className="rounded-full border border-success/30 bg-success/10 px-2.5 py-1 text-[11px] font-medium text-success transition-colors hover:bg-success/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Approve
+                </button>
+              </div>
+            ) : (
+              clarifyMessage &&
+              message.task_id && (
+                <button
+                  type="button"
+                  onClick={() => onReplyTask(message.task_id || null)}
+                  className="rounded-full border border-border/70 bg-background px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:border-info/30 hover:text-info"
+                >
+                  Reply
+                </button>
+              )
             )}
           </div>
           <div className="pl-5 text-sm leading-relaxed text-foreground">

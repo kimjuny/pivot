@@ -14,6 +14,7 @@ vi.mock("@/utils/api", () => ({
   getReactSessionRuntimeDebug: vi.fn(),
   listSessions: vi.fn(),
   startReactTask: vi.fn(),
+  submitReactUserAction: vi.fn(),
   updateSession: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ import {
   getReactSessionRuntimeDebug,
   listSessions,
   startReactTask,
+  submitReactUserAction,
 } from "@/utils/api";
 
 import ChatContainer from "./ChatContainer";
@@ -812,6 +814,140 @@ describe("ChatContainer session rollover", () => {
     expect(replyComposer).toHaveFocus();
   });
 
+  it("renders inline skill approval actions without switching the composer into reply mode", async () => {
+    const sessionId = "skill-approval-session";
+    const updatedAt = new Date().toISOString();
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: sessionId,
+          agent_id: 7,
+          status: "active",
+          title: "Skill approval",
+          is_pinned: false,
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(startReactTask).mockResolvedValueOnce({
+      task_id: "task-skill-approval",
+      session_id: sessionId,
+      status: "pending",
+      cursor_before_start: 0,
+    });
+    vi.mocked(submitReactUserAction).mockResolvedValue({
+      task_id: "task-skill-approval",
+      session_id: sessionId,
+      status: "pending",
+      cursor_before_start: 0,
+    });
+    vi.mocked(getFullSessionHistory).mockResolvedValue({
+      session_id: sessionId,
+      last_event_id: 0,
+      resume_from_event_id: 0,
+      tasks: [
+        {
+          task_id: "task-skill-approval",
+          user_message: "Build me a skill",
+          agent_answer: null,
+          status: "waiting_input",
+          total_tokens: 0,
+          pending_user_action: {
+            kind: "skill_change_approval",
+            approval_request: {
+              submission_id: 42,
+              skill_name: "planning-kit",
+              change_type: "create",
+              question:
+                "Approve the request to create private skill `planning-kit`?",
+              message: "Adds a reusable planning workflow.",
+            },
+          },
+          current_plan: [],
+          recursions: [
+            {
+              iteration: 0,
+              trace_id: "trace-skill-approval",
+              observe: null,
+              thinking: null,
+              reason: null,
+              summary: null,
+              action_type: "CLARIFY",
+              action_output: JSON.stringify({
+                question:
+                    "Approve the request to create private skill `planning-kit`?",
+                approval_request: {
+                  submission_id: 42,
+                  skill_name: "planning-kit",
+                  change_type: "create",
+                  question:
+                    "Approve the request to create private skill `planning-kit`?",
+                  message: "Adds a reusable planning workflow.",
+                },
+              }),
+              tool_call_results: null,
+              status: "done",
+              error_log: null,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: 0,
+              cached_input_tokens: 0,
+              created_at: createdAt,
+              updated_at: updatedAt,
+            },
+          ],
+          created_at: createdAt,
+          updated_at: updatedAt,
+        },
+      ],
+    });
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    const approveButton = await screen.findByRole("button", { name: "Approve" });
+    expect(
+      screen.getAllByText(/Approve the request to create private skill/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Replying")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask anything")).toBeInTheDocument();
+
+    await user.click(approveButton);
+
+    await waitFor(() => {
+      expect(submitReactUserAction).toHaveBeenCalledWith(
+        "task-skill-approval",
+        "approve",
+      );
+    });
+    expect(
+      screen.queryByText(/Approve the request to create private skill/),
+    ).not.toBeInTheDocument();
+  });
+
   it("restores reply mode when session history is already waiting for clarify input", async () => {
     const sessionId = "clarify-history-session";
     const updatedAt = new Date().toISOString();
@@ -905,25 +1041,49 @@ describe("ChatContainer session rollover", () => {
     ).toHaveLength(2);
   });
 
-  it("moves a newly active session to the top of the sidebar immediately", async () => {
+  it("reorders the sidebar from the backend after launching a new session task", async () => {
     const olderUpdatedAt = new Date(Date.now() - 30_000).toISOString();
     const olderCreatedAt = new Date(Date.now() - 60_000).toISOString();
     const createdSessionAt = new Date(Date.now() - 120_000).toISOString();
 
-    vi.mocked(listSessions).mockResolvedValue({
-      sessions: [
-        {
-          session_id: "older-session",
-          agent_id: 7,
-          status: "active",
-          title: "Older thread",
-          is_pinned: false,
-          created_at: olderCreatedAt,
-          updated_at: olderUpdatedAt,
-        },
-      ],
-      total: 1,
-    });
+    vi.mocked(listSessions)
+      .mockResolvedValueOnce({
+        sessions: [
+          {
+            session_id: "older-session",
+            agent_id: 7,
+            status: "active",
+            title: "Older thread",
+            is_pinned: false,
+            created_at: olderCreatedAt,
+            updated_at: olderUpdatedAt,
+          },
+        ],
+        total: 1,
+      })
+      .mockResolvedValueOnce({
+        sessions: [
+          {
+            session_id: "fresh-session",
+            agent_id: 7,
+            status: "active",
+            title: null,
+            is_pinned: false,
+            created_at: createdSessionAt,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            session_id: "older-session",
+            agent_id: 7,
+            status: "active",
+            title: "Older thread",
+            is_pinned: false,
+            created_at: olderCreatedAt,
+            updated_at: olderUpdatedAt,
+          },
+        ],
+        total: 2,
+      });
     vi.mocked(createSession).mockResolvedValue({
       id: 6,
       session_id: "fresh-session",
@@ -985,6 +1145,9 @@ describe("ChatContainer session rollover", () => {
         web_search_provider: null,
         thinking_mode: null,
       });
+    });
+    await waitFor(() => {
+      expect(listSessions).toHaveBeenCalledTimes(2);
     });
 
     const newSessionLabel = screen.getByText("New conversation");

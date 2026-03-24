@@ -35,7 +35,7 @@ logger = get_logger("skill_service")
 
 _SKILLS_DIRNAME = "skills"
 _ALLOWED_KINDS = {"private", "shared"}
-_ALLOWED_USER_SOURCES = {"manual", "network", "bundle"}
+_ALLOWED_USER_SOURCES = {"manual", "network", "bundle", "agent"}
 _LEGACY_USER_SKILL_DIRS = frozenset(_ALLOWED_KINDS)
 
 
@@ -197,7 +197,9 @@ def _migrate_legacy_user_skill_to_unified_root(
     """Move one legacy kind-scoped skill into the unified user skill root."""
     legacy_path = _resolve_skill_path(legacy_root, skill_name)
     if legacy_path is None:
-        raise FileNotFoundError(f"Legacy skill '{skill_name}' not found in {legacy_root}.")
+        raise FileNotFoundError(
+            f"Legacy skill '{skill_name}' not found in {legacy_root}."
+        )
 
     if legacy_path == _legacy_skill_path(legacy_root, skill_name):
         legacy_path = _migrate_legacy_user_skill(legacy_root, skill_name)
@@ -236,6 +238,38 @@ def _file_md5(path: Path) -> str:
 def _validate_skill_name(skill_name: str) -> None:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", skill_name):
         raise ValueError("Skill name can only contain letters, numbers, '_', '-', '.'")
+
+
+def _detect_skill_entry_filename(skill_dir: Path, *, label: str) -> str:
+    """Return the top-level markdown entry file inside a skill directory."""
+    for filename in SKILL_MARKDOWN_FILENAMES:
+        entry_path = skill_dir / filename
+        if entry_path.exists():
+            return filename
+
+    expected_names = ", ".join(SKILL_MARKDOWN_FILENAMES)
+    raise ValueError(f"{label} must contain one of {expected_names} at its top level.")
+
+
+def _replace_directory_contents(source_dir: Path, target_dir: Path) -> None:
+    """Replace one skill directory atomically enough for local filesystem use."""
+    parent_dir = target_dir.parent
+    staging_dir = parent_dir / f".{target_dir.name}.tmp"
+    backup_dir = parent_dir / f".{target_dir.name}.bak"
+
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    if backup_dir.exists():
+        shutil.rmtree(backup_dir, ignore_errors=True)
+
+    shutil.copytree(source_dir, staging_dir)
+
+    if target_dir.exists():
+        target_dir.replace(backup_dir)
+    staging_dir.replace(target_dir)
+
+    if backup_dir.exists():
+        shutil.rmtree(backup_dir, ignore_errors=True)
 
 
 def _discover_skill(
@@ -300,7 +334,11 @@ def _kind_for_unified_skill(
     existing_by_location: dict[str, Skill],
 ) -> tuple[str, str]:
     """Resolve persisted kind/source for a unified user skill directory."""
-    location = str(_skill_location_for_path(_user_skills_dir(user.username, create=False), skill_path).resolve())
+    location = str(
+        _skill_location_for_path(
+            _user_skills_dir(user.username, create=False), skill_path
+        ).resolve()
+    )
     existing = existing_by_location.get(location) or existing_by_name.get(skill_name)
     if existing is not None and existing.creator_id == user.id:
         return existing.kind, _normalize_user_skill_source(existing.source)
@@ -1072,14 +1110,9 @@ def _extract_bundle_skill_directory(
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(item.content)
 
-    for filename in SKILL_MARKDOWN_FILENAMES:
-        entry_path = destination / filename
-        if entry_path.exists():
-            return filename
-
-    expected_names = ", ".join(SKILL_MARKDOWN_FILENAMES)
-    raise ValueError(
-        f"Folder '{bundle_name}' must contain one of {expected_names} at its top level."
+    return _detect_skill_entry_filename(
+        destination,
+        label=f"Folder '{bundle_name}'",
     )
 
 
@@ -1167,6 +1200,105 @@ def _install_skill_from_directory(
         github_ref_type=github_ref_type,
         github_skill_path=github_skill_path,
     )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        row,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+    )
+
+
+def apply_private_skill_directory(
+    session: Session,
+    current_user: User,
+    *,
+    skill_name: str,
+    source_dir: Path,
+    source: str = "agent",
+) -> dict[str, Any]:
+    """Create or replace one creator-owned private skill from a staged directory.
+
+    Args:
+        session: Active database session.
+        current_user: Authenticated user who owns the target namespace.
+        skill_name: Globally unique skill name to create or replace.
+        source_dir: Directory whose files will become the private skill bundle.
+        source: Persisted source label for the resulting skill row.
+
+    Returns:
+        Serialized metadata for the applied private skill.
+
+    Raises:
+        PermissionError: If the name belongs to a builtin, shared, or foreign skill.
+        ValueError: If the skill layout is invalid.
+    """
+    _validate_skill_name(skill_name)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise ValueError("Skill source directory does not exist.")
+
+    sync_skill_registry(session)
+    existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if existing is not None:
+        if existing.builtin:
+            raise PermissionError(f"Skill '{skill_name}' is built-in and read-only.")
+        if existing.creator_id != current_user.id:
+            raise PermissionError(
+                f"Skill '{skill_name}' is owned by another creator and is read-only."
+            )
+        if existing.kind != "private":
+            raise PermissionError(
+                f"Skill '{skill_name}' is a {existing.kind} skill and cannot be updated "
+                "through agent submissions."
+            )
+
+    entry_filename = _detect_skill_entry_filename(
+        source_dir,
+        label=f"Skill directory '{skill_name}'",
+    )
+    entry_path = source_dir / entry_filename
+    rewritten_source = rewrite_skill_name(
+        entry_path.read_text(encoding="utf-8"),
+        skill_name,
+    )
+    entry_path.write_text(rewritten_source, encoding="utf-8")
+
+    base_dir = _user_skills_dir(current_user.username, create=True)
+    target_dir = base_dir / skill_name
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    _replace_directory_contents(source_dir, target_dir)
+
+    discovered = _discover_skill(
+        base_dir=base_dir,
+        skill_path=target_dir / entry_filename,
+        kind="private",
+        source=source,
+        builtin=False,
+        creator=current_user,
+    )
+
+    if existing is None:
+        timestamp = datetime.now(UTC)
+        row = _create_skill_row(
+            discovered=discovered,
+            creator_id=current_user.id,
+            source=source,
+            created_at=timestamp,
+        )
+    else:
+        row = existing
+        row.description = discovered.description
+        row.location = discovered.location
+        row.filename = discovered.filename
+        row.md5 = discovered.md5
+        row.updated_at = discovered.updated_at
+        row.source = source
+
     session.add(row)
     session.commit()
     session.refresh(row)

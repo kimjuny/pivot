@@ -312,6 +312,15 @@ class SessionService:
                 except json.JSONDecodeError:
                     skill_selection_result = None
 
+            pending_user_action: dict[str, Any] | None = None
+            if task.pending_user_action_json:
+                try:
+                    parsed_pending_action = json.loads(task.pending_user_action_json)
+                    if isinstance(parsed_pending_action, dict):
+                        pending_user_action = parsed_pending_action
+                except json.JSONDecodeError:
+                    pending_user_action = None
+
             # Get recursions for this task
             recursion_stmt = (
                 select(ReactRecursion)
@@ -366,6 +375,7 @@ class SessionService:
                     "status": task.status,
                     "total_tokens": task.total_tokens,
                     "skill_selection_result": skill_selection_result,
+                    "pending_user_action": pending_user_action,
                     "current_plan": current_plan_by_task.get(task.task_id, []),
                     "recursions": recursion_list,
                     "created_at": task.created_at,

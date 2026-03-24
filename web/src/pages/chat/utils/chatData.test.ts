@@ -184,4 +184,45 @@ describe("buildMessagesFromHistory", () => {
       "Which export format do you prefer, PDF or PowerPoint?",
     );
   });
+
+  it("does not reuse old clarify prompts once the task has resumed running", () => {
+    const messages = buildMessagesFromHistory([
+      {
+        task_id: "task-resumed",
+        user_message: "Build a skill",
+        agent_answer: null,
+        status: "running",
+        total_tokens: 0,
+        current_plan: [],
+        recursions: [
+          {
+            iteration: 0,
+            trace_id: "trace-resumed",
+            observe: null,
+            thinking: null,
+            reason: null,
+            summary: null,
+            action_type: "CLARIFY",
+            action_output:
+              '{"question":"Approve the request to create private skill `planning-kit`?"}',
+            tool_call_results: null,
+            status: "done",
+            error_log: null,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cached_input_tokens: 0,
+            created_at: "2026-03-16T00:00:00.000Z",
+            updated_at: "2026-03-16T00:00:01.000Z",
+          },
+        ],
+        created_at: "2026-03-16T00:00:00.000Z",
+        updated_at: "2026-03-16T00:00:01.000Z",
+      },
+    ]);
+
+    const assistantMessage = messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.status).toBe("running");
+    expect(assistantMessage?.content).toBe("");
+  });
 });

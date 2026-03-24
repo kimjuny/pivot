@@ -805,6 +805,22 @@ class ReactEngine:
             return [{"result": output if isinstance(output, dict) else {}}]
         return None
 
+    def _extract_pending_user_action_from_tool_results(
+        self,
+        tool_results: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Extract one system-owned waiting action from tool results, if any."""
+        for result_item in tool_results:
+            if result_item.get("success") is not True:
+                continue
+            raw_result = result_item.get("result")
+            if not isinstance(raw_result, dict):
+                continue
+            pending_user_action = raw_result.get("pending_user_action")
+            if isinstance(pending_user_action, dict):
+                return dict(pending_user_action)
+        return None
+
     async def execute_recursion(
         self,
         task: ReactTask,
@@ -994,6 +1010,9 @@ class ReactEngine:
             step_status_updates_validated = [
                 item.to_dict() for item in action.step_status_update
             ]
+            pending_user_action = self._extract_pending_user_action_from_tool_results(
+                tool_results
+            )
             tokens_data = self.state_service.finalize_success(
                 task=task,
                 recursion=recursion,
@@ -1008,6 +1027,7 @@ class ReactEngine:
                 summary=summary,
                 tool_results=tool_results,
                 token_counter=token_counter,
+                pending_user_action=pending_user_action,
             )
             persisted_session_title = self._persist_session_title(task, session_title)
 
@@ -1025,6 +1045,7 @@ class ReactEngine:
                 "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
+                "pending_user_action": pending_user_action,
                 "task_summary": task_summary,
                 "step_status_update": step_status_updates_validated,
                 "current_plan": self._build_current_plan_payload(context),
@@ -1110,12 +1131,13 @@ class ReactEngine:
         compact_threshold_percent = max(int(agent.compact_threshold_percent or 0), 0)
         system_prompt = build_runtime_system_prompt()
 
-        if task.session_id:
+        should_append_user_history = task.iteration == 0 or turn_user_message is not None
+        if task.session_id and should_append_user_history:
             session_service = SessionService(self.db)
             session_service.update_chat_history(
                 task.session_id,
                 "user",
-                turn_user_message or task.user_message,
+                turn_user_message if turn_user_message is not None else task.user_message,
                 files=turn_files,
             )
 
@@ -1398,8 +1420,14 @@ class ReactEngine:
                 action_type = event_data.get("action_type", "")
                 if isinstance(action_type, str):
                     action_type = action_type.strip()
+                pending_user_action = event_data.get("pending_user_action")
                 next_action_result = self._build_next_pending_action_result(event_data)
-                if next_action_result is not None:
+                if isinstance(pending_user_action, dict):
+                    runtime_state = self.runtime_service.set_next_action_result(
+                        task,
+                        None,
+                    )
+                elif next_action_result is not None:
                     runtime_state = self.runtime_service.set_next_action_result(
                         task,
                         next_action_result,
@@ -1498,6 +1526,33 @@ class ReactEngine:
                         },
                         "timestamp": datetime.now(UTC).isoformat(),
                     }
+                    if isinstance(pending_user_action, dict):
+                        approval_request = pending_user_action.get("approval_request")
+                        question = (
+                            approval_request.get("question")
+                            if isinstance(approval_request, dict)
+                            else None
+                        )
+                        yield {
+                            "type": "clarify",
+                            "task_id": task.task_id,
+                            "trace_id": event_data.get("trace_id"),
+                            "iteration": task.iteration,
+                            "data": {
+                                "question": (
+                                    question
+                                    if isinstance(question, str)
+                                    else "Approve this skill change?"
+                                ),
+                                "approval_request": approval_request
+                                if isinstance(approval_request, dict)
+                                else None,
+                            },
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+
+                        self.state_service.advance_iteration(task)
+                        break
 
                 elif action_type == "RE_PLAN":
                     plan_output = event_data.get("output")

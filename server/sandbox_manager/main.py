@@ -113,6 +113,11 @@ def _sandbox_name(username: str, agent_id: int) -> str:
     return f"{prefix}-{user}-{agent_id}"
 
 
+def _skills_volume_name(username: str, agent_id: int) -> str:
+    """Build deterministic named-volume identifier for sandbox-local skills."""
+    return f"{_sandbox_name(username, agent_id)}-skills"
+
+
 def _workspace_target(username: str, agent_id: int) -> str:
     """Return backend-mounted target path for one agent workspace."""
     return f"/app/server/workspace/{username}/agents/{agent_id}"
@@ -228,18 +233,17 @@ def _resolve_workspace_host_root() -> str:
 
 
 def _ensure_agent_workspace_dir(username: str, agent_id: int) -> None:
-    """Create agent workspace paths needed for primary and nested skill mounts.
+    """Create the host-backed agent workspace root.
 
-    Why: sandbox skill directories are mounted under ``/workspace/skills/...``.
-    Some container runtimes do not reliably materialize nested bind targets when the
-    parent directory inside the primary ``/workspace`` bind mount is missing.
+    Why: the primary ``/workspace`` bind mount targets the agent workspace root.
+    Nested ``/workspace/skills`` data now lives in a sandbox-private named volume,
+    so only the top-level agent workspace must exist on the backend host.
     """
     path_in_backend = _workspace_target(username, agent_id)
-    skills_parent_in_backend = f"{path_in_backend}/skills"
     backend = _backend_container()
     try:
         exec_result = backend.exec_run(
-            ["mkdir", "-p", path_in_backend, skills_parent_in_backend],
+            ["mkdir", "-p", path_in_backend],
             workdir="/",
             tty=False,
             stream=False,
@@ -424,15 +428,52 @@ def _touch_container(name: str) -> None:
         _last_used_by_name[name] = time.time()
 
 
-def _remove_container_fast(container: Any, *, reason: str) -> int:
+def _remove_container_fast(
+    container: Any, *, reason: str, remove_skills_volume: bool = False
+) -> int:
     """Remove container with fast path, avoiding long graceful-stop timeout."""
     started = time.perf_counter()
+    volume_name = _container_skills_volume_name(container)
     with suppress(Exception):
         container.kill()
     container.remove(force=True)
+    if remove_skills_volume and volume_name:
+        _remove_skills_volume(volume_name)
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     logger.info("sandbox.remove reason=%s remove_ms=%d", reason, elapsed_ms)
     return elapsed_ms
+
+
+def _ensure_skills_volume(username: str, agent_id: int) -> str:
+    """Create the sandbox-local named volume used for ``/workspace/skills``."""
+    volume_name = _skills_volume_name(username, agent_id)
+    client = get_client()
+    try:
+        client.volumes.get(volume_name)
+    except Exception:
+        client.volumes.create(
+            name=volume_name,
+            labels={
+                "pivot.sandbox.username": username,
+                "pivot.sandbox.agent_id": str(agent_id),
+                "pivot.sandbox.kind": "skills",
+            },
+        )
+    return volume_name
+
+
+def _remove_skills_volume(volume_name: str) -> None:
+    """Delete one sandbox-local skills volume when it is no longer needed."""
+    try:
+        volume = get_client().volumes.get(volume_name)
+        try:
+            volume.remove(force=True)
+        except TypeError:
+            volume.remove()
+    except Exception as exc:
+        logger.warning(
+            "sandbox.volume remove failed volume=%s err=%s", volume_name, exc
+        )
 
 
 def _container_working_dir(container: Any) -> str:
@@ -579,6 +620,15 @@ def _container_network_mode(container: Any) -> str | None:
     return None
 
 
+def _container_skills_volume_name(container: Any) -> str | None:
+    """Read the configured sandbox-local skills volume name from labels."""
+    labels = _container_labels(container)
+    volume_name = labels.get("pivot.sandbox.skills_volume_name")
+    if isinstance(volume_name, str) and volume_name:
+        return volume_name
+    return None
+
+
 def _resolve_image_id(image_ref: str) -> str | None:
     """Resolve the current local image ID for a configured image reference."""
     try:
@@ -605,7 +655,10 @@ def _resolve_image_id(image_ref: str) -> str | None:
 
 
 def _should_recreate_container(
-    container: Any, expected_skill_sources: dict[str, str]
+    container: Any,
+    expected_skill_sources: dict[str, str],
+    *,
+    expected_skills_volume_name: str,
 ) -> tuple[bool, str]:
     """Decide whether an existing sandbox container must be recreated.
 
@@ -634,8 +687,13 @@ def _should_recreate_container(
         return True, "workdir_mismatch"
     if "/workspace" not in destinations:
         return True, "missing_workspace_mount"
+    if "/workspace/skills" not in destinations:
+        return True, "missing_skills_volume_mount"
     if "/app/server" in destinations or "/app/web" in destinations:
         return True, "unsafe_project_mount"
+    container_skills_volume_name = _container_skills_volume_name(container)
+    if container_skills_volume_name != expected_skills_volume_name:
+        return True, "skills_volume_mismatch"
     mounted_skills = _mounted_skill_sources(container)
     if mounted_skills != expected_skill_sources:
         return True, "skill_mount_mismatch"
@@ -677,6 +735,7 @@ def _ensure_sandbox(
     op_started = time.perf_counter()
     settings = get_settings()
     name = _sandbox_name(username, agent_id)
+    skills_volume_name = _ensure_skills_volume(username, agent_id)
     _ensure_agent_workspace_dir(username, agent_id)
     normalized_skills = _normalize_skill_mounts(skills)
     skill_volumes, expected_skill_sources = _build_skill_mounts(normalized_skills)
@@ -684,7 +743,9 @@ def _ensure_sandbox(
     existing = _find_container(name)
     if existing is not None:
         should_recreate, recreate_reason = _should_recreate_container(
-            existing, expected_skill_sources
+            existing,
+            expected_skill_sources,
+            expected_skills_volume_name=skills_volume_name,
         )
     else:
         should_recreate, recreate_reason = (False, "no_container")
@@ -751,12 +812,14 @@ def _ensure_sandbox(
         f"{workspace_host_root.rstrip('/')}/{username}/agents/{agent_id}"
     )
     volumes = {workspace_host_dir: {"bind": "/workspace", "mode": "rw"}}
+    volumes[skills_volume_name] = {"bind": "/workspace/skills", "mode": "rw"}
     volumes.update(skill_volumes)
     setup_cmd = "sleep infinity"
     base_image_id = _resolve_image_id(settings.SANDBOX_BASE_IMAGE)
     labels = {
         "pivot.sandbox.base_image_ref": settings.SANDBOX_BASE_IMAGE,
         "pivot.sandbox.network_mode": settings.SANDBOX_NETWORK_MODE,
+        "pivot.sandbox.skills_volume_name": skills_volume_name,
     }
     if base_image_id is not None:
         labels["pivot.sandbox.base_image_id"] = base_image_id
@@ -848,7 +911,11 @@ def _cleanup_pool_once() -> None:
                 _last_used_by_name.pop(name, None)
             continue
         try:
-            _remove_container_fast(container, reason="pool_idle_ttl")
+            _remove_container_fast(
+                container,
+                reason="pool_idle_ttl",
+                remove_skills_volume=True,
+            )
         except Exception as exc:
             logger.warning(
                 "sandbox.pool cleanup idle remove failed name=%s err=%s", name, exc
@@ -876,7 +943,11 @@ def _cleanup_pool_once() -> None:
                 _last_used_by_name.pop(name, None)
             continue
         try:
-            _remove_container_fast(container, reason="pool_lru_overflow")
+            _remove_container_fast(
+                container,
+                reason="pool_lru_overflow",
+                remove_skills_volume=True,
+            )
         except Exception as exc:
             logger.warning(
                 "sandbox.pool cleanup lru remove failed name=%s err=%s", name, exc
@@ -952,7 +1023,11 @@ def destroy_sandbox(payload: SandboxRequest) -> dict[str, str]:
         )
         return {"status": "not_found", "container_name": name}
     try:
-        _remove_container_fast(container, reason="destroy_api")
+        _remove_container_fast(
+            container,
+            reason="destroy_api",
+            remove_skills_volume=True,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
