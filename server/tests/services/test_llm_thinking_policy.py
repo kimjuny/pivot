@@ -91,6 +91,25 @@ class ThinkingPolicyTestCase(unittest.TestCase):
         self.assertEqual(payload["thinking"], {"type": "adaptive"})
         self.assertEqual(payload["output_config"], {"effort": "medium"})
 
+    def test_legacy_minimax_thinking_policy_downgrades_to_auto(self) -> None:
+        """Stored MiniMax Anthropic thinking overrides should no-op safely."""
+        policy, effort, budget = thinking_policy.validate_thinking_policy(
+            "anthropic_compatible",
+            "minimax-anthropic-thinking-enabled",
+        )
+
+        self.assertEqual(policy, "auto")
+        self.assertIsNone(effort)
+        self.assertIsNone(budget)
+        self.assertEqual(
+            thinking_policy.build_runtime_thinking_kwargs(
+                protocol="anthropic_compatible",
+                thinking_policy="minimax-anthropic-thinking-enabled",
+                thinking_mode="thinking",
+            ),
+            {},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

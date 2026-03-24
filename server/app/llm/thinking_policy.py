@@ -36,8 +36,6 @@ PROTOCOL_THINKING_POLICIES: dict[str, tuple[str, ...]] = {
         "claude-thinking-adaptive",
         "mimo-anthropic-thinking-enabled",
         "mimo-anthropic-thinking-disabled",
-        "minimax-anthropic-thinking-enabled",
-        "minimax-anthropic-thinking-disabled",
     ),
 }
 
@@ -49,7 +47,13 @@ DISABLED_THINKING_POLICIES = {
     "kimi-completion-thinking-disabled",
     "doubao-response-thinking-disabled",
     "mimo-anthropic-thinking-disabled",
-    "minimax-anthropic-thinking-disabled",
+}
+
+LEGACY_THINKING_POLICY_ALIASES = {
+    # MiniMax's Anthropic-compatible endpoint currently ignores the ``thinking``
+    # field, so stored MiniMax thinking overrides are downgraded to ``auto``.
+    "minimax-anthropic-thinking-enabled": DEFAULT_THINKING_POLICY,
+    "minimax-anthropic-thinking-disabled": DEFAULT_THINKING_POLICY,
 }
 
 CLAUDE_ADAPTIVE_EFFORTS = {"low", "medium", "high", "max"}
@@ -91,6 +95,10 @@ def validate_thinking_policy(
     normalized_policy = (thinking_policy or DEFAULT_THINKING_POLICY).strip()
     if not normalized_policy:
         normalized_policy = DEFAULT_THINKING_POLICY
+    normalized_policy = LEGACY_THINKING_POLICY_ALIASES.get(
+        normalized_policy,
+        normalized_policy,
+    )
 
     allowed_policies = get_thinking_policies_for_protocol(protocol)
     if normalized_policy not in allowed_policies:
@@ -237,7 +245,6 @@ def _build_thinking_kwargs(
         "kimi-completion-thinking-enabled",
         "doubao-response-thinking-enabled",
         "mimo-anthropic-thinking-enabled",
-        "minimax-anthropic-thinking-enabled",
     }:
         return {"thinking": {"type": "enabled"}}
     if thinking_policy == "openai-response-reasoning-effort":
@@ -276,8 +283,6 @@ def _build_fast_kwargs(thinking_policy: str) -> dict[str, Any]:
         "doubao-response-thinking-disabled",
         "mimo-anthropic-thinking-enabled",
         "mimo-anthropic-thinking-disabled",
-        "minimax-anthropic-thinking-enabled",
-        "minimax-anthropic-thinking-disabled",
     }:
         return {"thinking": {"type": "disabled"}}
     return {}

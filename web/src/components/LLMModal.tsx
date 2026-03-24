@@ -704,7 +704,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                       </div>
                     )}
 
-                    {['doubao', 'glm', 'mimo', 'kimi', 'minimax'].includes(
+                    {['doubao', 'glm', 'mimo', 'kimi'].includes(
                       currentThinkingState.provider,
                     ) && (
                       <div className="space-y-2">

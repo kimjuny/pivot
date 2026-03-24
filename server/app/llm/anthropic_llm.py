@@ -184,6 +184,37 @@ class AnthropicLLM(AbstractLLM):
         cached_messages[-1] = last_message
         return cached_messages
 
+    def _apply_block_cache_to_prompt(
+        self,
+        system_message: str,
+        formatted_messages: list[dict[str, Any]],
+    ) -> tuple[str | list[dict[str, Any]], list[dict[str, Any]]]:
+        """Mark the last cacheable block in prompt order.
+
+        Why: MiniMax Anthropic block cache uses one explicit breakpoint to cache
+        the longest matching prefix. In our cumulative ReAct history, the latest
+        message becomes part of the stable prefix for the next recursion, so the
+        breakpoint should live on the prompt tail, not be pinned to ``system``.
+        """
+        if formatted_messages:
+            return system_message, self._apply_block_cache_to_messages(
+                formatted_messages
+            )
+
+        if system_message:
+            return (
+                [
+                    {
+                        "type": "text",
+                        "text": system_message,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                formatted_messages,
+            )
+
+        return system_message, formatted_messages
+
     def _convert_anthropic_response(
         self, raw_response: Any, is_stream_chunk: bool = False
     ) -> Response:
@@ -427,18 +458,13 @@ class AnthropicLLM(AbstractLLM):
             if self.cache_policy == "anthropic-auto-cache":
                 api_params["cache_control"] = {"type": "ephemeral"}
             elif self.cache_policy == "anthropic-block-cache":
-                if system_message:
-                    api_params["system"] = [
-                        {
-                            "type": "text",
-                            "text": system_message,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ]
-                else:
-                    api_params["messages"] = self._apply_block_cache_to_messages(
-                        formatted_messages
-                    )
+                cached_system, cached_messages = self._apply_block_cache_to_prompt(
+                    system_message,
+                    formatted_messages,
+                )
+                if cached_system:
+                    api_params["system"] = cached_system
+                api_params["messages"] = cached_messages
 
             # Call Anthropic API
             response = self.client.messages.create(**api_params)
@@ -502,18 +528,13 @@ class AnthropicLLM(AbstractLLM):
             if self.cache_policy == "anthropic-auto-cache":
                 api_params["cache_control"] = {"type": "ephemeral"}
             elif self.cache_policy == "anthropic-block-cache":
-                if system_message:
-                    api_params["system"] = [
-                        {
-                            "type": "text",
-                            "text": system_message,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ]
-                else:
-                    api_params["messages"] = self._apply_block_cache_to_messages(
-                        formatted_messages
-                    )
+                cached_system, cached_messages = self._apply_block_cache_to_prompt(
+                    system_message,
+                    formatted_messages,
+                )
+                if cached_system:
+                    api_params["system"] = cached_system
+                api_params["messages"] = cached_messages
 
             # Use low-level stream=True path. For some Anthropic-compatible
             # providers this avoids SDK-level message snapshot accumulation

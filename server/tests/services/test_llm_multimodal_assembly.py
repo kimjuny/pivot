@@ -216,6 +216,82 @@ class LlmMultimodalAssemblyTestCase(unittest.TestCase):
         self.assertEqual(user_content[1]["source"]["media_type"], "image/png")
         self.assertEqual(user_content[1]["source"]["data"], "YWJj")
 
+    def test_anthropic_block_cache_marks_last_message_when_system_exists(self) -> None:
+        """MiniMax block cache should place its breakpoint on the prompt tail.
+
+        Why: cumulative ReAct history grows by appending new turns, so keeping the
+        cache marker on the newest prompt block allows later recursions to reuse
+        the longest available prefix instead of only the system prompt.
+        """
+        response = SimpleNamespace(
+            id="msg-1",
+            model="minimax-test",
+            content=[SimpleNamespace(type="text", text="done")],
+            stop_reason="end_turn",
+            usage=None,
+        )
+        mock_client = SimpleNamespace(
+            messages=SimpleNamespace(create=Mock(return_value=response))
+        )
+
+        with patch("app.llm.anthropic_llm.Anthropic", return_value=mock_client):
+            llm = AnthropicLLM(
+                endpoint="https://example.com",
+                model="minimax-test",
+                api_key="secret",
+                cache_policy="anthropic-block-cache",
+            )
+
+        llm.chat(
+            [
+                {"role": "system", "content": "Stable system prompt"},
+                {"role": "user", "content": "Stable user context"},
+                {"role": "assistant", "content": "Newest stable recap"},
+            ]
+        )
+
+        payload = mock_client.messages.create.call_args.kwargs
+        self.assertEqual(payload["system"], "Stable system prompt")
+        self.assertEqual(
+            payload["messages"][-1]["content"][0]["cache_control"],
+            {"type": "ephemeral"},
+        )
+
+    def test_anthropic_block_cache_falls_back_to_system_without_messages(self) -> None:
+        """Block cache should still work when only a system prompt is present."""
+        response = SimpleNamespace(
+            id="msg-1",
+            model="minimax-test",
+            content=[SimpleNamespace(type="text", text="done")],
+            stop_reason="end_turn",
+            usage=None,
+        )
+        mock_client = SimpleNamespace(
+            messages=SimpleNamespace(create=Mock(return_value=response))
+        )
+
+        with patch("app.llm.anthropic_llm.Anthropic", return_value=mock_client):
+            llm = AnthropicLLM(
+                endpoint="https://example.com",
+                model="minimax-test",
+                api_key="secret",
+                cache_policy="anthropic-block-cache",
+            )
+
+        llm.chat([{"role": "system", "content": "Stable system prompt"}])
+
+        payload = mock_client.messages.create.call_args.kwargs
+        self.assertEqual(
+            payload["system"],
+            [
+                {
+                    "type": "text",
+                    "text": "Stable system prompt",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

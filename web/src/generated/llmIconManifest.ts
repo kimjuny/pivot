@@ -9,6 +9,7 @@ export const LLM_ICON_KEYS = [
   "claude",
   "doubao",
   "gemini",
+  "ernie",
   "grok",
   "kimi",
   "mimo",

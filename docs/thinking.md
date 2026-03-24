@@ -75,7 +75,10 @@ curl https://ark.cn-beijing.volces.com/api/v3/responses \
 
 官方文档：https://platform.minimaxi.com/docs/api-reference/text-anthropic-api
 
-说明：我看的没错的话，是通过`thinking`字段控制
+说明：
+- MiniMax Anthropic 兼容文档的参数表写着 `thinking` “完全支持”，但同页底部注意事项又写着 `thinking` 会被忽略。
+- 我们在 **2026-03-24** 用 `MiniMax-M2.7-highspeed` 走 Anthropic 兼容接口做了实测：即使显式传入 `thinking={"type":"disabled"}`，响应中仍然会返回 `thinking` block，流式下也仍然会收到 `thinking_delta`。
+- 因此，当前可以认定 **MiniMax Anthropic 协议下的 `thinking` 字段未真正实装为可控开关**。Pivot 已移除该协议下的 MiniMax Thinking 模式配置，避免提供无效选项。
 
 ### Claude（Anthropic）
 
@@ -267,4 +270,3 @@ response = client.chat.completions.create(
 )
 ```
 可见是通过`thinking.type=enabled|disabled`控制
-

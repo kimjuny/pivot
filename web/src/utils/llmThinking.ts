@@ -16,8 +16,7 @@ export type ThinkingProvider =
   | "mimo"
   | "kimi"
   | "chatgpt"
-  | "claude"
-  | "minimax";
+  | "claude";
 
 /**
  * One provider option shown in the top-level Thinking selector.
@@ -51,7 +50,27 @@ const DISABLED_THINKING_POLICIES = new Set([
   "kimi-completion-thinking-disabled",
   "doubao-response-thinking-disabled",
   "mimo-anthropic-thinking-disabled",
-  "minimax-anthropic-thinking-disabled",
+]);
+
+const SUPPORTED_THINKING_POLICIES = new Set([
+  "auto",
+  "qwen-enable-thinking",
+  "qwen-disable-thinking",
+  "doubao-completion-thinking-enabled",
+  "doubao-completion-thinking-disabled",
+  "glm-completion-thinking-enabled",
+  "glm-completion-thinking-disabled",
+  "mimo-completion-thinking-enabled",
+  "mimo-completion-thinking-disabled",
+  "kimi-completion-thinking-enabled",
+  "kimi-completion-thinking-disabled",
+  "doubao-response-thinking-enabled",
+  "doubao-response-thinking-disabled",
+  "openai-response-reasoning-effort",
+  "claude-thinking-enabled",
+  "claude-thinking-adaptive",
+  "mimo-anthropic-thinking-enabled",
+  "mimo-anthropic-thinking-disabled",
 ]);
 
 /**
@@ -77,7 +96,6 @@ export const THINKING_PROVIDER_OPTIONS: Record<
   anthropic_compatible: [
     { value: "auto", label: "Auto" },
     { value: "claude", label: "Claude" },
-    { value: "minimax", label: "MiniMax" },
     { value: "mimo", label: "MiMo" },
   ],
 };
@@ -266,20 +284,6 @@ export function getThinkingEditorStateFromPolicy(
         effortValue: effort ?? "high",
         budgetTokens: null,
       };
-    case "minimax-anthropic-thinking-enabled":
-      return {
-        provider: "minimax",
-        detailValue: "enabled",
-        effortValue: "",
-        budgetTokens: null,
-      };
-    case "minimax-anthropic-thinking-disabled":
-      return {
-        provider: "minimax",
-        detailValue: "disabled",
-        effortValue: "",
-        budgetTokens: null,
-      };
     default:
       return getDefaultThinkingEditorState(protocol, "auto");
   }
@@ -388,16 +392,6 @@ export function buildThinkingPolicyFromEditorState(
       };
     }
 
-    if (provider === "minimax") {
-      return {
-        thinking_policy:
-          detailValue === "disabled"
-            ? "minimax-anthropic-thinking-disabled"
-            : "minimax-anthropic-thinking-enabled",
-        thinking_effort: "",
-        thinking_budget_tokens: null,
-      };
-    }
   }
 
   return {
@@ -423,6 +417,9 @@ export function formatThinkingPolicyLabel(
   policy: string,
   effort?: string | null,
 ): string | null {
+  if (!SUPPORTED_THINKING_POLICIES.has(policy)) {
+    return null;
+  }
   if (policy === "auto") {
     return null;
   }
@@ -439,6 +436,9 @@ export function policySupportsThinkingMode(
   policy: string,
   effort?: string | null,
 ): boolean {
+  if (!SUPPORTED_THINKING_POLICIES.has(policy)) {
+    return false;
+  }
   if (policy === "auto") {
     return false;
   }
@@ -457,7 +457,11 @@ export function policySupportsThinkingMode(
 export function llmHasThinkingSelector(
   llm?: Pick<LLM, "thinking_policy" | "thinking_effort"> | null,
 ): boolean {
-  return Boolean(llm && (llm.thinking_policy ?? "auto") !== "auto");
+  return Boolean(
+    llm &&
+      SUPPORTED_THINKING_POLICIES.has(llm.thinking_policy ?? "auto") &&
+      (llm.thinking_policy ?? "auto") !== "auto",
+  );
 }
 
 /**
