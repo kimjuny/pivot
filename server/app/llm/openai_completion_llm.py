@@ -5,6 +5,7 @@ This implementation targets `/chat/completions` compatible providers.
 
 import contextlib
 import json
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -23,6 +24,8 @@ from .abstract_llm import (
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_openai_completion_content
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAICompletionLLM(AbstractLLM):
@@ -275,6 +278,74 @@ class OpenAICompletionLLM(AbstractLLM):
                 normalized_kwargs.setdefault(key, value)
         return normalized_kwargs
 
+    @staticmethod
+    def _http_error_detail(response: requests.Response | None) -> str:
+        """Build a concise provider-facing diagnostic string for failed responses."""
+        if response is None:
+            return "<no response>"
+
+        request_id = ""
+        for header_name in (
+            "x-request-id",
+            "request-id",
+            "x-bce-request-id",
+            "x-tt-logid",
+            "x-amzn-requestid",
+            "trace-id",
+        ):
+            header_value = response.headers.get(header_name)
+            if isinstance(header_value, str) and header_value.strip():
+                request_id = header_value.strip()
+                break
+
+        content_type = response.headers.get("content-type", "").strip()
+
+        parsed_body: Any = None
+        with contextlib.suppress(Exception):
+            parsed_body = response.json()
+
+        detail = ""
+        if isinstance(parsed_body, dict):
+            summary_keys = (
+                "error",
+                "message",
+                "msg",
+                "error_msg",
+                "error_code",
+                "code",
+                "type",
+                "request_id",
+                "trace_id",
+                "log_id",
+            )
+            summary = {
+                key: parsed_body[key]
+                for key in summary_keys
+                if key in parsed_body and parsed_body[key] not in (None, "")
+            }
+            detail = json.dumps(
+                summary or parsed_body,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        else:
+            with contextlib.suppress(Exception):
+                detail = (response.text or "").strip()
+
+        if not detail:
+            detail = "<empty response body>"
+        if len(detail) > 1200:
+            detail = f"{detail[:1200]}...(truncated)"
+
+        suffix_parts: list[str] = []
+        if content_type:
+            suffix_parts.append(f"content_type={content_type}")
+        if request_id:
+            suffix_parts.append(f"request_id={request_id}")
+        if suffix_parts:
+            return f"{detail} ({', '.join(suffix_parts)})"
+        return detail
+
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """Process a conversation with the LLM.
 
@@ -335,11 +406,19 @@ class OpenAICompletionLLM(AbstractLLM):
             return self._parse_dict_response(response.json(), self.model)
 
         except requests.exceptions.HTTPError as e:
-            text = (
-                e.response.text if getattr(e, "response", None) is not None else str(e)
+            response = getattr(e, "response", None)
+            text = self._http_error_detail(response)
+            logger.error(
+                "Chat Completions request failed endpoint=%s model=%s status=%s detail=%s",
+                self.endpoint,
+                self.model,
+                response.status_code if response is not None else "unknown",
+                text,
             )
             raise RuntimeError(
-                f"OpenAI completion API request failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
+                "OpenAI completion API request failed for "
+                f"{self.endpoint}: HTTP "
+                f"{response.status_code if response is not None else 'Unknown'} - {text}"
             ) from e
         except Exception as e:
             raise RuntimeError(
@@ -421,11 +500,19 @@ class OpenAICompletionLLM(AbstractLLM):
                                 continue
 
         except requests.exceptions.HTTPError as e:
-            text = (
-                e.response.text if getattr(e, "response", None) is not None else str(e)
+            response = getattr(e, "response", None)
+            text = self._http_error_detail(response)
+            logger.error(
+                "Chat Completions streaming request failed endpoint=%s model=%s status=%s detail=%s",
+                self.endpoint,
+                self.model,
+                response.status_code if response is not None else "unknown",
+                text,
             )
             raise RuntimeError(
-                f"OpenAI completion streaming failed for {self.endpoint}: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'} - {text}"
+                "OpenAI completion streaming failed for "
+                f"{self.endpoint}: HTTP "
+                f"{response.status_code if response is not None else 'Unknown'} - {text}"
             ) from e
         except Exception as e:
             raise RuntimeError(
