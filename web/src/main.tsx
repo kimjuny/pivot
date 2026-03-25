@@ -9,6 +9,7 @@ import ToolsPage from './components/ToolsPage'
 import SkillsPage from './components/SkillsPage'
 import ChannelsPage from './components/ChannelsPage'
 import ChannelLinkPage from './components/ChannelLinkPage'
+import StudioDashboardPage from './components/StudioDashboardPage'
 import Navigation from './components/Navigation'
 import { AuthProvider } from './contexts/AuthContext'
 import { getStoredUser, isTokenValid, useAuth } from './contexts/auth-core'
@@ -114,6 +115,17 @@ export function ChannelsListPage() {
   );
 }
 
+/**
+ * Studio dashboard page with layout.
+ */
+export function StudioDashboardRoute() {
+  return (
+    <AuthenticatedLayout>
+      <StudioDashboardPage />
+    </AuthenticatedLayout>
+  );
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="pivot-ui-theme">
@@ -124,6 +136,18 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/" element={<LoginPage />} />
 
             {/* Protected routes */}
+            <Route path="/studio" element={<Navigate to="/studio/dashboard" replace />} />
+            <Route path="/studio/dashboard" element={<StudioDashboardRoute />} />
+            <Route path="/studio/agents" element={<AgentListPage />} />
+            <Route path="/studio/agents/:agentId" element={<AgentDetailPage />} />
+            <Route path="/studio/assets" element={<Navigate to="/studio/assets/models" replace />} />
+            <Route path="/studio/assets/models" element={<LLMListPage />} />
+            <Route path="/studio/assets/tools" element={<ToolsListPage />} />
+            <Route path="/studio/assets/skills" element={<SkillsListPage />} />
+            <Route path="/studio/connections" element={<Navigate to="/studio/connections/channels" replace />} />
+            <Route path="/studio/connections/channels" element={<ChannelsListPage />} />
+            <Route path="/studio/operations" element={<Navigate to="/studio/dashboard" replace />} />
+
             <Route path="/agents" element={<AgentListPage />} />
             <Route path="/agent/:agentId" element={<AgentDetailPage />} />
             <Route path="/llms" element={<LLMListPage />} />

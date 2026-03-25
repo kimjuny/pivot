@@ -163,7 +163,7 @@ function AgentDetailPage() {
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="text-xl text-muted-foreground mb-4 font-medium">Agent not found</div>
           <button
-            onClick={() => navigate('/agents')}
+            onClick={() => navigate('/studio/agents')}
             className="px-6 py-3 btn-accent rounded-lg font-medium"
           >
             Back to Agents

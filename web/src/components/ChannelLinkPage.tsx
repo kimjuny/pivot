@@ -57,7 +57,7 @@ function ChannelLinkPage() {
       await completeChannelLink(token);
       toast.success('Channel account linked');
       if (status) {
-        navigate(`/agent/${status.agent_id}`, { replace: true });
+        navigate(`/studio/agents/${status.agent_id}`, { replace: true });
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Failed to complete linking');

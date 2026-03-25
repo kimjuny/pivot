@@ -60,7 +60,7 @@ function PasswordInput({
 /**
  * Login page component.
  * Full-page login form that serves as the entry point for unauthenticated users.
- * Automatically redirects to /agents if user is already logged in.
+ * Automatically redirects to the Studio dashboard if user is already logged in.
  */
 function LoginPage() {
   const navigate = useNavigate();
@@ -71,11 +71,11 @@ function LoginPage() {
   const [errorMessage, setErrorMessage] = useState('');
 
   /**
-   * Redirect to /agents if already logged in.
+   * Redirect to the Studio dashboard if already logged in.
    */
   useEffect(() => {
     if (user && isTokenValid()) {
-      navigate('/agents', { replace: true });
+      navigate('/studio/dashboard', { replace: true });
     }
   }, [user, navigate]);
 
@@ -98,8 +98,9 @@ function LoginPage() {
     void (async () => {
       try {
         await login(username, password);
-        // Navigate to agents page after successful login
-        navigate('/agents', { replace: true });
+        // Why: Studio now has a top-level dashboard instead of treating the
+        // agent list as the universal entry point for administrators.
+        navigate('/studio/dashboard', { replace: true });
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : 'Incorrect username or password');
       } finally {

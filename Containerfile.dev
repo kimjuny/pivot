@@ -22,6 +22,7 @@ COPY web/tailwind.config.js web/postcss.config.js ./
 COPY web/eslint.config.js web/components.json ./
 COPY web/index.html ./
 COPY web/.env.development ./
+COPY web/scripts/ ./scripts/
 COPY web/src/ ./src/
 COPY web/public/ ./public/
 

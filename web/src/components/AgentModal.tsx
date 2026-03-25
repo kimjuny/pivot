@@ -242,7 +242,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                   onValueChange={(value) => {
                     if (value === '__add_new__') {
                       // Why: creating the dependency in-place avoids forcing users to abandon the flow.
-                      navigate('/llms');
+                      navigate('/studio/assets/models');
                       onClose();
                     } else {
                       setFormData({

@@ -102,6 +102,7 @@ services:
     volumes:
       - ./web/src:/app/web/src:z
       - ./web/public:/app/web/public:z
+      - ./web/scripts:/app/web/scripts:z
       - ./web/index.html:/app/web/index.html:ro
       - ./web/vite.config.ts:/app/web/vite.config.ts:ro
       - ./web/tailwind.config.js:/app/web/tailwind.config.js:ro

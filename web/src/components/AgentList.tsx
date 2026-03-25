@@ -182,7 +182,7 @@ function AgentList() {
         is_active: agentData.is_active,
       });
       toast.success('Agent created');
-      navigate(`/agent/${newAgent.id}`);
+      navigate(`/studio/agents/${newAgent.id}`);
     } else if (modalMode === 'edit' && editingAgent) {
       await updateAgent(editingAgent.id, {
         name: agentData.name,
@@ -199,7 +199,7 @@ function AgentList() {
     }
   };
 
-  const handleAgentClick = (agent: Agent) => navigate(`/agent/${agent.id}`);
+  const handleAgentClick = (agent: Agent) => navigate(`/studio/agents/${agent.id}`);
   const handleCardKeyDown = (e: React.KeyboardEvent, agent: Agent) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleAgentClick(agent); }
   };
