@@ -8,7 +8,6 @@ import {
     Radio,
     Plus,
     X,
-    MessageSquare,
     Settings2,
     PanelLeft,
     Globe,
@@ -17,7 +16,6 @@ import { useSidebar } from '@/hooks/use-sidebar';
 import {
     Sidebar,
     SidebarContent,
-    SidebarFooter,
     SidebarGroup,
     SidebarGroupContent,
     SidebarGroupLabel,
@@ -50,7 +48,6 @@ import { LLMBrandAvatar } from './LLMBrandAvatar';
 import { WebSearchProviderBadge } from './WebSearchProviderBadge';
 import type { Agent, Scene } from '../types';
 import {
-    updateAgent,
     getSharedTools,
     getPrivateTools,
     getSharedSkills,
@@ -93,8 +90,10 @@ interface SidebarSkill {
     readOnly: boolean;
 }
 
-/** Unified channel binding row for sidebar display. */
-interface SidebarChannel {
+/**
+ * Compact channel binding snapshot used by the sidebar and workspace status.
+ */
+export interface SidebarChannel {
     id: number;
     name: string;
     channelKey: string;
@@ -104,8 +103,10 @@ interface SidebarChannel {
     lastHealthStatus: string | null;
 }
 
-/** Unified web-search binding row for sidebar display. */
-interface SidebarWebSearchBinding {
+/**
+ * Compact web-search binding snapshot used by the sidebar and workspace status.
+ */
+export interface SidebarWebSearchBinding {
     id: number;
     providerKey: string;
     providerName: string;
@@ -203,8 +204,9 @@ interface AgentDetailSidebarProps {
     onSceneSelect: (scene: Scene) => void;
     onCreateScene: () => void;
     onDeleteScene: (scene: Scene) => void;
-    onOpenReactChat: () => void;
-    onAgentUpdate?: (agent: Agent) => void;
+    onAgentDraftUpdate?: (agent: Agent) => void;
+    onChannelBindingsLoaded?: (bindings: SidebarChannel[]) => void;
+    onWebSearchBindingsLoaded?: (bindings: SidebarWebSearchBinding[]) => void;
 }
 
 /**
@@ -219,8 +221,9 @@ function AgentDetailSidebar({
     onSceneSelect,
     onCreateScene,
     onDeleteScene,
-    onOpenReactChat,
-    onAgentUpdate,
+    onAgentDraftUpdate,
+    onChannelBindingsLoaded,
+    onWebSearchBindingsLoaded,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
     const [isScenesOpen, setIsScenesOpen] = useState(true);
@@ -471,17 +474,17 @@ function AgentDetailSidebar({
         setChannelsLoading(true);
         try {
             const bindings = await getAgentChannels(agent.id);
-            setChannels(
-                bindings.map((binding) => ({
-                    id: binding.id,
-                    name: binding.name,
-                    channelKey: binding.channel_key,
-                    providerName: binding.manifest.name,
-                    enabled: binding.enabled,
-                    transportMode: binding.manifest.transport_mode,
-                    lastHealthStatus: binding.last_health_status,
-                }))
-            );
+            const nextBindings = bindings.map((binding) => ({
+                id: binding.id,
+                name: binding.name,
+                channelKey: binding.channel_key,
+                providerName: binding.manifest.name,
+                enabled: binding.enabled,
+                transportMode: binding.manifest.transport_mode,
+                lastHealthStatus: binding.last_health_status,
+            }));
+            setChannels(nextBindings);
+            onChannelBindingsLoaded?.(nextBindings);
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             console.error('Failed to fetch channel bindings:', error);
@@ -489,7 +492,7 @@ function AgentDetailSidebar({
         } finally {
             setChannelsLoading(false);
         }
-    }, [agent?.id]);
+    }, [agent?.id, onChannelBindingsLoaded]);
 
     useEffect(() => {
         void loadChannels();
@@ -508,15 +511,15 @@ function AgentDetailSidebar({
         setWebSearchLoading(true);
         try {
             const bindings = await getAgentWebSearchBindings(agent.id);
-            setWebSearchBindings(
-                bindings.map((binding) => ({
-                    id: binding.id,
-                    providerKey: binding.provider_key,
-                    providerName: binding.manifest.name,
-                    enabled: binding.enabled,
-                    lastHealthStatus: binding.last_health_status,
-                }))
-            );
+            const nextBindings = bindings.map((binding) => ({
+                id: binding.id,
+                providerKey: binding.provider_key,
+                providerName: binding.manifest.name,
+                enabled: binding.enabled,
+                lastHealthStatus: binding.last_health_status,
+            }));
+            setWebSearchBindings(nextBindings);
+            onWebSearchBindingsLoaded?.(nextBindings);
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             console.error('Failed to fetch web search bindings:', error);
@@ -524,25 +527,27 @@ function AgentDetailSidebar({
         } finally {
             setWebSearchLoading(false);
         }
-    }, [agent?.id]);
+    }, [agent?.id, onWebSearchBindingsLoaded]);
 
     useEffect(() => {
         void loadWebSearchBindings();
     }, [loadWebSearchBindings]);
 
-    const handleEditAgent = async (data: AgentFormData) => {
-        if (!agent) return;
+    const handleEditAgent = (data: AgentFormData): Promise<void> => {
+        if (!agent) {
+            return Promise.resolve();
+        }
 
         try {
-            const updatedAgent = await updateAgent(agent.id, data);
-            if (onAgentUpdate) {
-                onAgentUpdate(updatedAgent);
+            if (onAgentDraftUpdate) {
+                onAgentDraftUpdate({ ...agent, ...data });
             }
-            toast.success('Agent updated successfully');
+            toast.success('Agent changes staged in draft');
+            return Promise.resolve();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(`Failed to update agent: ${error.message}`);
-            throw error;
+            return Promise.reject(error);
         }
     };
 
@@ -788,6 +793,12 @@ function AgentDetailSidebar({
                 <SidebarSeparator />
 
                 <SidebarContent className="gap-0.5 pt-2">
+                    <SidebarGroup className="py-0 pb-1">
+                        <SidebarGroupLabel className="h-6 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">
+                            Workflow
+                        </SidebarGroupLabel>
+                    </SidebarGroup>
+
                     {/* Scenes Section */}
                     <Collapsible
                         open={isScenesOpen}
@@ -881,6 +892,12 @@ function AgentDetailSidebar({
                             </CollapsibleContent>
                         </SidebarGroup>
                     </Collapsible>
+
+                    <SidebarGroup className="py-0 pb-1 pt-2">
+                        <SidebarGroupLabel className="h-6 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">
+                            Capabilities
+                        </SidebarGroupLabel>
+                    </SidebarGroup>
 
                     {/* Tools Section */}
                     <Collapsible
@@ -1135,6 +1152,12 @@ function AgentDetailSidebar({
                         </SidebarGroup>
                     </Collapsible>
 
+                    <SidebarGroup className="py-0 pb-1 pt-2">
+                        <SidebarGroupLabel className="h-6 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">
+                            Connections
+                        </SidebarGroupLabel>
+                    </SidebarGroup>
+
                     {/* Channels Section */}
                     <Collapsible
                         open={isChannelsOpen}
@@ -1362,30 +1385,6 @@ function AgentDetailSidebar({
                     </Collapsible>
                 </SidebarContent>
 
-                <SidebarSeparator />
-
-                <SidebarFooter className="p-2">
-                    <SidebarMenu>
-                        <SidebarMenuItem>
-                            <SidebarMenuButton
-                                onClick={onOpenReactChat}
-                                tooltip="Chat with Agent"
-                                size="lg"
-                                className={
-                                    state === 'collapsed'
-                                        ? 'justify-center bg-sidebar-primary/10 text-sidebar-primary hover:bg-sidebar-primary/15 hover:text-sidebar-primary'
-                                        : 'bg-sidebar-primary/10 text-sidebar-primary hover:bg-sidebar-primary/15 hover:text-sidebar-primary'
-                                }
-                            >
-                                <MessageSquare className="size-4" />
-                                {state !== 'collapsed' && (
-                                    <span className="font-medium">Chat with Agent</span>
-                                )}
-                            </SidebarMenuButton>
-                        </SidebarMenuItem>
-                    </SidebarMenu>
-                </SidebarFooter>
-
                 {/* Rail for collapse/expand toggle */}
                 <SidebarRail />
             </Sidebar>
@@ -1424,8 +1423,8 @@ function AgentDetailSidebar({
                     currentToolIds={localToolIds}
                     onSaved={(newToolIds) => {
                         setLocalToolIds(newToolIds);
-                        if (onAgentUpdate && agent) {
-                            onAgentUpdate({ ...agent, tool_ids: newToolIds });
+                        if (onAgentDraftUpdate && agent) {
+                            onAgentDraftUpdate({ ...agent, tool_ids: newToolIds });
                         }
                     }}
                 />
@@ -1440,8 +1439,8 @@ function AgentDetailSidebar({
                     currentSkillIds={localSkillIds}
                     onSaved={(newSkillIds) => {
                         setLocalSkillIds(newSkillIds);
-                        if (onAgentUpdate && agent) {
-                            onAgentUpdate({ ...agent, skill_ids: newSkillIds });
+                        if (onAgentDraftUpdate && agent) {
+                            onAgentDraftUpdate({ ...agent, skill_ids: newSkillIds });
                         }
                     }}
                 />

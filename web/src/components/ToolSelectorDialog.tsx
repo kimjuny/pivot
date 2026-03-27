@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import {
   getSharedTools,
   getPrivateTools,
-  updateAgentToolIds,
   type SharedTool,
   type PrivateTool,
 } from '../utils/api';
@@ -220,16 +219,16 @@ function ToolSelectorDialog({
   // Save
   // ---------------------------------------------------------------------------
 
-  const handleSave = async () => {
+  const handleSave = () => {
     setIsSaving(true);
     try {
-      const newToolIds = allowAll ? null : Array.from(checked);
-      const updated = await updateAgentToolIds(agentId, newToolIds);
-      onSaved(updated.tool_ids ?? null);
-      toast.success('Tool allowlist saved');
+      const newToolIds =
+        allowAll ? null : JSON.stringify(Array.from(checked).sort());
+      onSaved(newToolIds);
+      toast.success('Tool allowlist staged in draft');
       onOpenChange(false);
     } catch {
-      toast.error('Failed to save tool allowlist');
+      toast.error('Failed to stage tool allowlist');
     } finally {
       setIsSaving(false);
     }

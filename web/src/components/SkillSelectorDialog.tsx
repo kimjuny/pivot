@@ -4,7 +4,6 @@ import { toast } from 'sonner';
 import {
   getSharedSkills,
   getPrivateSkills,
-  updateAgentSkillIds,
   type SkillSource,
   type SharedSkill,
   type UserSkill,
@@ -166,16 +165,16 @@ function SkillSelectorDialog({
     setChecked(nextChecked);
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     setIsSaving(true);
     try {
-      const newSkillIds = allowAll ? null : Array.from(checked);
-      const updated = await updateAgentSkillIds(agentId, newSkillIds);
-      onSaved(updated.skill_ids ?? null);
-      toast.success('Skill allowlist saved');
+      const newSkillIds =
+        allowAll ? null : JSON.stringify(Array.from(checked).sort());
+      onSaved(newSkillIds);
+      toast.success('Skill allowlist staged in draft');
       onOpenChange(false);
     } catch {
-      toast.error('Failed to save skill allowlist');
+      toast.error('Failed to stage skill allowlist');
     } finally {
       setIsSaving(false);
     }

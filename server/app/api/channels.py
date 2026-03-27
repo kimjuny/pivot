@@ -20,6 +20,7 @@ from app.schemas.channel import (
     ChannelLinkTokenStatusResponse,
     ChannelTestResponse,
 )
+from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.channel_service import ChannelService
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
@@ -82,12 +83,11 @@ async def create_agent_channel(
     current_user=Depends(get_current_user),
 ) -> ChannelBindingResponse:
     """Create one channel binding for an agent."""
-    del current_user
     agent = db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     try:
-        return ChannelService(db).create_binding(
+        binding = ChannelService(db).create_binding(
             agent_id=agent_id,
             channel_key=payload.channel_key,
             name=payload.name,
@@ -95,6 +95,11 @@ async def create_agent_channel(
             auth_config=payload.auth_config,
             runtime_config=payload.runtime_config,
         )
+        AgentSnapshotService(db).save_draft(
+            agent_id,
+            saved_by=current_user.username,
+        )
+        return binding
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Channel provider not found"
@@ -111,15 +116,19 @@ async def update_agent_channel(
     current_user=Depends(get_current_user),
 ) -> ChannelBindingResponse:
     """Update one configured agent channel binding."""
-    del current_user
     try:
-        return ChannelService(db).update_binding(
+        binding = ChannelService(db).update_binding(
             binding_id,
             name=payload.name,
             enabled=payload.enabled,
             auth_config=payload.auth_config,
             runtime_config=payload.runtime_config,
         )
+        AgentSnapshotService(db).save_draft(
+            binding.agent_id,
+            saved_by=current_user.username,
+        )
+        return binding
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -131,9 +140,15 @@ async def delete_agent_channel(
     current_user=Depends(get_current_user),
 ) -> Response:
     """Delete one configured channel binding."""
-    del current_user
+    binding = db.get(AgentChannelBinding, binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="Channel binding not found")
     try:
         ChannelService(db).delete_binding(binding_id)
+        AgentSnapshotService(db).save_draft(
+            binding.agent_id,
+            saved_by=current_user.username,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return Response(status_code=204)

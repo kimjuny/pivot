@@ -185,7 +185,6 @@ function AgentDetailPage() {
           onResetSceneGraph={async () => {}}
           onSceneSelect={setSelectedScene}
           onRefreshScenes={handleRefreshScenes}
-          onAgentUpdate={setAgent}
         />
       </div>
     </div>

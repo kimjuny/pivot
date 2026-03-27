@@ -10,6 +10,8 @@ from sqlmodel import Session, SQLModel
 
 _REQUIRED_TABLES: Final[set[str]] = {
     "agent",
+    "agentrelease",
+    "agentsaveddraft",
     "agentchannelbinding",
     "agentwebsearchbinding",
     "channeleventlog",

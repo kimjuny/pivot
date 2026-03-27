@@ -1,4 +1,5 @@
 from app.models.agent import Agent, Connection, Scene, Subscene
+from app.models.agent_release import AgentRelease, AgentSavedDraft
 from app.models.channel import (
     AgentChannelBinding,
     ChannelEventLog,
@@ -25,6 +26,8 @@ __all__ = [
     "LLM",
     "Agent",
     "AgentChannelBinding",
+    "AgentRelease",
+    "AgentSavedDraft",
     "AgentWebSearchBinding",
     "ChannelEventLog",
     "ChannelLinkToken",

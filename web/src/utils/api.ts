@@ -28,6 +28,52 @@ interface RequestOptions {
  */
 export type FileUploadSource = 'local' | 'clipboard';
 
+/**
+ * Immutable published release metadata for one agent.
+ */
+export interface AgentReleaseRecord {
+  /** Stable backend identifier for the release row. */
+  id: number;
+  /** Agent-scoped release version number. */
+  version: number;
+  /** Optional human-written release note. */
+  release_note: string | null;
+  /** Audit summary rendered from the published snapshot diff. */
+  change_summary: string[];
+  /** Username that published this release, if known. */
+  published_by: string | null;
+  /** UTC timestamp when the release was created. */
+  created_at: string;
+}
+
+/**
+ * Persisted saved-draft metadata for one agent.
+ */
+export interface AgentSavedDraftInfo {
+  /** UTC timestamp of the latest saved draft baseline. */
+  saved_at: string;
+  /** Username that last updated the saved draft, if known. */
+  saved_by: string | null;
+  /** Stable content hash for the normalized saved-draft snapshot. */
+  snapshot_hash: string;
+}
+
+/**
+ * Combined draft/release state used by the Studio toolbar and publish dialog.
+ */
+export interface AgentDraftState {
+  /** Saved-draft metadata for the current agent. */
+  saved_draft: AgentSavedDraftInfo;
+  /** Latest published release, if one exists. */
+  latest_release: AgentReleaseRecord | null;
+  /** Whether the saved draft differs from the latest release. */
+  has_publishable_changes: boolean;
+  /** Summary lines describing what the next publish would contain. */
+  publish_summary: string[];
+  /** Most recent release records for the publish dialog. */
+  release_history: AgentReleaseRecord[];
+}
+
 /** Error class for authentication-related errors */
 export class AuthError extends Error {
   constructor(message: string = 'Authentication required') {
@@ -374,6 +420,7 @@ export const updateAgent = async (
     sandbox_timeout_seconds?: number;
     compact_threshold_percent?: number;
     is_active?: boolean;
+    tool_ids?: string | null;
     skill_ids?: string | null;
   }
 ): Promise<Agent> => {
@@ -381,6 +428,45 @@ export const updateAgent = async (
     method: 'PUT',
     body: JSON.stringify(agentData),
   }) as Promise<Agent>;
+};
+
+/**
+ * Fetch persisted draft/release state for one agent.
+ *
+ * @param agentId - Unique identifier of the agent
+ * @returns Promise resolving to the toolbar draft/release state
+ */
+export const getAgentDraftState = async (agentId: number): Promise<AgentDraftState> => {
+  return apiRequest(`/agents/${agentId}/draft-state`) as Promise<AgentDraftState>;
+};
+
+/**
+ * Persist the current normalized backend state as the saved draft baseline.
+ *
+ * @param agentId - Unique identifier of the agent
+ * @returns Promise resolving to the refreshed draft/release state
+ */
+export const saveAgentDraft = async (agentId: number): Promise<AgentDraftState> => {
+  return apiRequest(`/agents/${agentId}/drafts/save`, {
+    method: 'POST',
+  }) as Promise<AgentDraftState>;
+};
+
+/**
+ * Publish the current saved draft as the next immutable release.
+ *
+ * @param agentId - Unique identifier of the agent
+ * @param releaseNote - Optional release note captured during publish
+ * @returns Promise resolving to the refreshed draft/release state
+ */
+export const publishAgentRelease = async (
+  agentId: number,
+  releaseNote: string
+): Promise<AgentDraftState> => {
+  return apiRequest(`/agents/${agentId}/releases`, {
+    method: 'POST',
+    body: JSON.stringify({ release_note: releaseNote.trim() || null }),
+  }) as Promise<AgentDraftState>;
 };
 
 /**

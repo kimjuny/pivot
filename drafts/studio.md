@@ -17,10 +17,13 @@ clear lifecycle:
 ## Product Principles
 
 - Lifecycle-first, not resource-first.
+- Progressive disclosure over forced workflow.
 - Shared assets and per-agent assembly must stay clearly separated.
 - Draft and published states must be explicit.
 - Studio-only runtime diagnostics must never leak into the end-user product.
-- The primary workflow is configure -> test -> release -> operate.
+- The primary workflow is create -> configure -> test -> release -> operate.
+- Studio structure can express the full lifecycle, but interaction should stay
+  lightweight and IDE-like rather than wizard-like.
 
 ## Top-Level Information Architecture
 
@@ -64,7 +67,7 @@ Purpose:
 
 Content:
 - Agent list
-- Agent builder
+- Agent workspace
 - Test console
 - Release history
 - Audience assignment
@@ -97,8 +100,8 @@ Purpose:
 
 Navigation:
 - Top-level category with second-level destinations
-- Current direct entry: `Channels`
-- Planned direct entries: `Web Search Providers`, `Desktop Connectors`,
+- Current direct entries: `Channels`, `Web Search`
+- Planned direct entries: `Desktop Connectors`,
   `Internal APIs`
 
 Content:
@@ -130,67 +133,110 @@ Content:
 
 ## Agent Builder
 
-The agent builder is the core Studio workspace. It should be structured as a
-step-based product surface instead of a resource accordion.
+The agent builder should not become a step-by-step wizard. The current and
+recommended direction is a single-page agent workspace with lightweight global
+actions and optional modules.
 
-Recommended sections:
+### Current Interaction Model
 
-1. `Overview`
-2. `Workflow`
-3. `Runtime`
-4. `Capabilities`
-5. `Connections`
-6. `Test`
-7. `Releases`
+Creation flow:
+- User starts from `Agents`
+- Clicks `New`
+- Completes a lightweight modal
+- Minimal requirement is effectively `name + primary LLM`
+- Agent is created immediately and opened in the agent workspace
 
-### Overview
+Why this model is correct:
+- A beginner can create a usable agent with very little upfront knowledge
+- Configuration and refinement stay decoupled
+- Advanced capabilities are optional rather than blocking
 
-Purpose:
-- Define the business identity of the agent.
+### Agent Workspace
 
-Content:
+The current workspace is a single-page Studio surface rather than a multi-page
+builder.
+
+Layout:
+- Left sidebar for agent modules
+- Central tabbed work area
+- Floating action cluster anchored at the top-right of the main work area
+
+The action cluster contains:
+- `Discard`
+- `Save`
+- `Test`
+- `History`
+- `Publish`
+
+This is intentionally lighter than a full-width toolbar. The workspace should
+feel like an IDE, not a form wizard.
+
+### Sidebar Semantics
+
+The sidebar preserves the familiar resource entry points, but adds clearer
+product semantics through grouping.
+
+Current grouping:
+- `Workflow`
+  - `Scenes`
+- `Capabilities`
+  - `Tools`
+  - `Skills`
+- `Connections`
+  - `Channels`
+  - `Web Search`
+
+Important:
+- These are not required steps
+- They are optional modules inside one agent workspace
+- There is currently no dedicated `Overview` entry in the sidebar
+
+This is deliberate:
+- Basic agent identity and runtime settings are still edited through the agent
+  modal
+- A separate `Overview` page would duplicate information without creating a
+  stronger workflow
+
+### Basics and Runtime
+
+Basic agent configuration is still modal-driven.
+
+Current editable basics:
 - Name
 - Description
-- Avatar
-- Intended audience
-- Welcome copy
-- Draft or published status
+- Primary model
+- Skill resolution model
+- Session idle timeout
+- Sandbox timeout
+- Compact threshold
+- Active state
+
+These settings participate in the agent draft and release model even though
+they are edited through a modal instead of a dedicated page.
 
 ### Workflow
 
 Purpose:
 - Define the business flow and scene logic for the agent.
 
-Content:
-- Scene graph
-- Multi-scene or multi-workflow orchestration in the future
-
-### Runtime
-
-Purpose:
-- Control model and execution behavior.
-
-Content:
-- Primary model
-- Skill resolution model
-- Thinking and cache policies
-- Session idle timeout
-- Context compact threshold
-- Sandbox timeout
-
-This is where the current advanced runtime configuration should become a
-first-class page instead of staying buried inside a modal.
+Current workspace behavior:
+- Scene graph remains the primary editing surface
+- Multiple scenes remain visible as sidebar items and content tabs
+- Scene editing is part of the main single-page workspace
 
 ### Capabilities
 
 Purpose:
 - Define what the agent can do.
 
-Content:
+Current capabilities:
 - Tool allowlist
 - Skill allowlist
-- Future MCP capability selection
-- Dependency and permission visibility
+
+Current interaction:
+- Tool and skill selection is edited inside the agent workspace
+- These changes are staged into the current draft instead of bypassing draft
+  state
 
 ### Connections
 
@@ -198,36 +244,74 @@ Purpose:
 - Define where the agent can receive requests from and what external retrieval
   surfaces it can use.
 
-Content:
+Current connections:
 - Channel bindings
-- Web search bindings
-- Future desktop and local-device connectors
+- Web search provider bindings
+
+Rule:
+- Channel catalogs and web search catalogs are shared Studio inventory
+- Agent-level bindings are part of the agent assembly layer
 
 ### Test
 
 Purpose:
-- Validate the draft agent before publishing.
+- Validate the current draft before release.
 
-Content:
-- Chat playground
-- Tool traces
-- Runtime compaction status
-- Plan and recursion traces
+Current interaction:
+- `Test` is a global workspace action, not a sidebar step
+- It opens the current draft test surface from the top-right action cluster
+- The old sidebar footer entry for chat has been removed in favor of this
+  clearer Studio action
 
-The existing chat runtime surface should become the Studio test console, with
-draft status made explicit.
+### Drafts and Releases
 
-### Releases
+Draft and release behavior is now a first-class part of the agent workspace.
 
-Purpose:
-- Turn a draft into a stable, auditable deliverable.
+Saved draft:
+- Each agent has one current saved draft baseline
+- `Save` overwrites that baseline
+- There is no draft history list
 
-Content:
-- Draft vs published diff
-- Release notes
-- Publish
-- Rollback
-- Assignment visibility
+Release:
+- `Publish` creates an immutable release snapshot
+- Release history is separate from save history
+- The publish flow compares `saved draft` against `latest release`
+- This comparison survives page reload because it is backed by persisted
+  snapshots, not only frontend session state
+
+Implementation note:
+- The backend now stores normalized JSON snapshots for:
+  - current saved draft
+  - immutable published releases
+- Publish summaries and release history are generated from these snapshots
+
+### Publish UX
+
+The publish flow should stay lightweight but auditable.
+
+Current behavior:
+- `Publish` opens a compact confirmation dialog
+- The dialog shows:
+  - release version transition
+  - grouped change summary
+  - optional release note
+- If there are no differences from the latest release, the dialog explicitly
+  shows `No changes`
+
+Release history:
+- Release history is no longer embedded inside the publish dialog
+- It is accessed from a separate `History` action next to `Publish`
+- Each release record shows:
+  - version
+  - timestamp
+  - publisher
+  - release note
+  - grouped summary of changes
+
+This separation is intentional:
+- `Publish` is a risky confirmation flow
+- `History` is an audit and review flow
+- They should not compete for attention inside one dialog
 
 ## Asset Layer vs Agent Layer
 
@@ -246,10 +330,17 @@ Agent-specific assembly:
 - Enabled tools and skills
 - Bound channels and search providers
 - Workflow and runtime settings
+- Current saved draft
 - Release history
 
 Studio should make it obvious whether the administrator is editing shared
 inventory or one agent instance.
+
+Additional rule:
+- Shared asset content changes are not the same thing as agent draft changes
+- Agent draft changes should be based on the agent's own assembled snapshot
+- Channel templates are treated as stable catalogs; agent-level binding changes
+  are what matter inside the agent workspace
 
 ## Suggested Administrator Roles
 
@@ -263,14 +354,21 @@ Do not over-design fine-grained RBAC in the first Studio iteration.
 
 ## MVP Integration Plan
 
-For the first Studio integration pass:
+Current Studio integration status:
 
-1. Restructure the top navigation into the five top-level modules.
-2. Route concrete resources through second-level navigation instead of adding
-   aggregation pages for every module.
-3. Keep existing resource pages reachable under `Assets` and `Connections`.
-4. Promote the existing chat runtime into a formal `Test Console`.
-5. Introduce draft and release concepts before building the end-user product.
+Completed or largely established:
+1. Top navigation has been restructured around the Studio modules.
+2. Existing resources remain reachable through second-level navigation.
+3. Agent work is centered in a single-page workspace instead of a forced
+   multi-step builder.
+4. `Test` and `Publish` are explicit global actions in the agent workspace.
+5. Draft and release concepts now exist as real persisted backend concepts.
 
-This gives Pivot a coherent Studio identity without forcing a full rewrite of
-all existing pages in one step.
+Next priorities:
+1. Continue refining the agent workspace interaction model rather than
+   replacing it with a page-per-step builder.
+2. Improve release audit depth using more structured snapshot diffs.
+3. Decide which runtime and basics fields should remain modal-driven versus
+   becoming more visible in the workspace.
+4. Prepare the Studio model so the future end-user product can consume stable
+   published releases rather than mutable working state.

@@ -15,6 +15,7 @@ from app.schemas.web_search import (
     WebSearchCatalogItemResponse,
     WebSearchTestResponse,
 )
+from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.web_search_service import WebSearchService
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -100,18 +101,22 @@ async def create_agent_web_search_binding(
     current_user=Depends(get_current_user),
 ) -> WebSearchBindingResponse:
     """Create one web-search provider binding for an agent."""
-    del current_user
     agent = db.get(Agent, agent_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     try:
-        return WebSearchService(db).create_binding(
+        binding = WebSearchService(db).create_binding(
             agent_id=agent_id,
             provider_key=payload.provider_key,
             enabled=payload.enabled,
             auth_config=payload.auth_config,
             runtime_config=payload.runtime_config,
         )
+        AgentSnapshotService(db).save_draft(
+            agent_id,
+            saved_by=current_user.username,
+        )
+        return binding
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Web search provider not found"
@@ -131,14 +136,18 @@ async def update_agent_web_search_binding(
     current_user=Depends(get_current_user),
 ) -> WebSearchBindingResponse:
     """Update one configured web-search provider binding."""
-    del current_user
     try:
-        return WebSearchService(db).update_binding(
+        binding = WebSearchService(db).update_binding(
             binding_id,
             enabled=payload.enabled,
             auth_config=payload.auth_config,
             runtime_config=payload.runtime_config,
         )
+        AgentSnapshotService(db).save_draft(
+            binding.agent_id,
+            saved_by=current_user.username,
+        )
+        return binding
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -150,9 +159,15 @@ async def delete_agent_web_search_binding(
     current_user=Depends(get_current_user),
 ):
     """Delete one configured web-search provider binding."""
-    del current_user
+    binding = db.get(AgentWebSearchBinding, binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="Web search binding not found")
     try:
         WebSearchService(db).delete_binding(binding_id)
+        AgentSnapshotService(db).save_draft(
+            binding.agent_id,
+            saved_by=current_user.username,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return None

@@ -12,6 +12,13 @@ export function compareAgents(agentA: Agent | null, agentB: Agent | null): boole
   if (
     agentA.name !== agentB.name ||
     agentA.description !== agentB.description ||
+    agentA.llm_id !== agentB.llm_id ||
+    agentA.skill_resolution_llm_id !== agentB.skill_resolution_llm_id ||
+    agentA.session_idle_timeout_minutes !== agentB.session_idle_timeout_minutes ||
+    agentA.sandbox_timeout_seconds !== agentB.sandbox_timeout_seconds ||
+    agentA.compact_threshold_percent !== agentB.compact_threshold_percent ||
+    agentA.tool_ids !== agentB.tool_ids ||
+    agentA.skill_ids !== agentB.skill_ids ||
     agentA.model_name !== agentB.model_name ||
     agentA.is_active !== agentB.is_active
   ) {

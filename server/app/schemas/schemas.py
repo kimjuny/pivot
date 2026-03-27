@@ -219,6 +219,41 @@ class AgentDetailResponse(AgentResponse):
     scenes: list[SceneGraphResponse] = Field(default_factory=list)
 
 
+class AgentReleaseResponse(AppBaseModel):
+    """Published immutable release metadata for one agent."""
+
+    id: int
+    version: int
+    release_note: str | None
+    change_summary: list[str] = Field(default_factory=list)
+    published_by: str | None
+    created_at: datetime
+
+
+class AgentSavedDraftInfoResponse(AppBaseModel):
+    """Current saved-draft metadata for one agent."""
+
+    saved_at: datetime
+    saved_by: str | None
+    snapshot_hash: str
+
+
+class AgentDraftStateResponse(AppBaseModel):
+    """Toolbar-facing draft/release state for one agent."""
+
+    saved_draft: AgentSavedDraftInfoResponse
+    latest_release: AgentReleaseResponse | None
+    has_publishable_changes: bool
+    publish_summary: list[str] = Field(default_factory=list)
+    release_history: list[AgentReleaseResponse] = Field(default_factory=list)
+
+
+class AgentPublishRequest(AppBaseModel):
+    """Payload for publishing the current saved draft as a release."""
+
+    release_note: str | None = Field(default=None, max_length=4000)
+
+
 class SceneGraphUpdate(AppBaseModel):
     """Schema for bulk updating scene graph data."""
 

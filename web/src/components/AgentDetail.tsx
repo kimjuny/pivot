@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -26,22 +26,32 @@ import SceneModal from './SceneModal';
 import SubsceneModal from './SubsceneModal';
 import ConnectionModal from './ConnectionModal';
 import SubsceneNode from './SubsceneNode';
-import AgentDetailSidebar from './AgentDetailSidebar';
+import AgentDetailSidebar, {
+  type SidebarChannel,
+  type SidebarWebSearchBinding,
+} from './AgentDetailSidebar';
+import AgentWorkspaceToolbar from './AgentWorkspaceToolbar';
+import PublishReleaseDrawer from './PublishReleaseDrawer';
+import ReleaseHistoryDialog from './ReleaseHistoryDialog';
 import SceneContextMenu, { ContextMenuContext } from './SceneContextMenu';
-import SubmitArea from './SubmitArea';
 import ToolEditor from './ToolEditor';
 import SkillEditor from './SkillEditor';
 import {
+  updateAgent,
   updateAgentScenes,
+  getAgentDraftState,
   getPrivateToolSource,
+  publishAgentRelease,
+  saveAgentDraft,
   getSharedToolSource,
   upsertPrivateTool,
   getSharedSkillSource,
   getUserSkillSource,
   upsertUserSkill,
   type SkillSource,
+  type AgentDraftState,
 } from '../utils/api';
-import { deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
+import { compareSceneGraphs, deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
 import { toast } from 'sonner';
 import type { Agent, Scene, SceneGraph, SceneNode } from '../types';
 import type { AgentTab } from '../store/agentTabStore';
@@ -70,7 +80,6 @@ interface AgentDetailProps {
   onResetSceneGraph: () => Promise<void>;
   onSceneSelect: (scene: Scene) => void;
   onRefreshScenes: () => Promise<void>;
-  onAgentUpdate?: (agent: Agent) => void;
 }
 
 interface ToolTabDescriptor {
@@ -165,8 +174,88 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
   };
 }
 
-function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes, onAgentUpdate }: AgentDetailProps) {
+/**
+ * Build a compact module-level summary for pending draft changes.
+ * Why: hover cards should explain what is about to be saved or published
+ * without overwhelming users with raw field-level diffs.
+ */
+function buildDraftChangeSummary(
+  originalAgent: Agent | null,
+  workspaceAgent: Agent | null
+): string[] {
+  if (!originalAgent || !workspaceAgent) {
+    return [];
+  }
+
+  const changes: string[] = [];
+  const basicsChanged =
+    originalAgent.name !== workspaceAgent.name ||
+    originalAgent.description !== workspaceAgent.description ||
+    originalAgent.is_active !== workspaceAgent.is_active;
+  const runtimeChanged =
+    originalAgent.llm_id !== workspaceAgent.llm_id ||
+    originalAgent.skill_resolution_llm_id !== workspaceAgent.skill_resolution_llm_id ||
+    originalAgent.session_idle_timeout_minutes !==
+      workspaceAgent.session_idle_timeout_minutes ||
+    originalAgent.sandbox_timeout_seconds !==
+      workspaceAgent.sandbox_timeout_seconds ||
+    originalAgent.compact_threshold_percent !==
+      workspaceAgent.compact_threshold_percent;
+  const toolAccessChanged = originalAgent.tool_ids !== workspaceAgent.tool_ids;
+  const skillAccessChanged = originalAgent.skill_ids !== workspaceAgent.skill_ids;
+
+  if (basicsChanged) {
+    changes.push('Agent basics updated');
+  }
+  if (runtimeChanged) {
+    changes.push('Runtime settings updated');
+  }
+  if (toolAccessChanged) {
+    changes.push('Tool access updated');
+  }
+  if (skillAccessChanged) {
+    changes.push('Skill access updated');
+  }
+
+  const originalScenes = originalAgent.scenes ?? [];
+  const workspaceScenes = workspaceAgent.scenes ?? [];
+  const originalSceneNames = new Set(originalScenes.map((scene) => scene.name ?? ''));
+  const workspaceSceneNames = new Set(workspaceScenes.map((scene) => scene.name ?? ''));
+  const addedScenes = workspaceScenes.filter(
+    (scene) => !originalSceneNames.has(scene.name ?? '')
+  ).length;
+  const removedScenes = originalScenes.filter(
+    (scene) => !workspaceSceneNames.has(scene.name ?? '')
+  ).length;
+  let updatedScenes = 0;
+
+  for (const scene of workspaceScenes) {
+    const sceneName = scene.name ?? '';
+    const originalScene = originalScenes.find((item) => (item.name ?? '') === sceneName);
+    if (!originalScene) {
+      continue;
+    }
+    if (compareSceneGraphs(originalScene, scene)) {
+      updatedScenes += 1;
+    }
+  }
+
+  if (addedScenes > 0) {
+    changes.push(`${addedScenes} scene${addedScenes > 1 ? 's' : ''} added`);
+  }
+  if (removedScenes > 0) {
+    changes.push(`${removedScenes} scene${removedScenes > 1 ? 's' : ''} removed`);
+  }
+  if (updatedScenes > 0) {
+    changes.push(`${updatedScenes} scene${updatedScenes > 1 ? 's' : ''} updated`);
+  }
+
+  return changes;
+}
+
+function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes }: AgentDetailProps) {
   const {
+    originalAgent,
     workspaceAgent,
     currentSceneId,
     hasUnsavedChanges,
@@ -197,15 +286,68 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [newSubscenePosition, setNewSubscenePosition] = useState<{ x: number; y: number } | null>(null);
   const [toolEditors, setToolEditors] = useState<Record<string, TabEditorState>>({});
   const [skillEditors, setSkillEditors] = useState<Record<string, TabEditorState>>({});
+  const [isPublishDrawerOpen, setIsPublishDrawerOpen] = useState(false);
+  const [isReleaseHistoryOpen, setIsReleaseHistoryOpen] = useState(false);
+  const [draftState, setDraftState] = useState<AgentDraftState | null>(null);
+  const [isLoadingDraftState, setIsLoadingDraftState] = useState(false);
+  const [isPublishingRelease, setIsPublishingRelease] = useState(false);
+  const [releaseNote, setReleaseNote] = useState('');
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
   const workingScenes = (workspaceAgent?.scenes || []) as unknown as Scene[];
   const workingSceneGraph = workspaceAgent?.scenes?.find(s => s.id === currentSceneId) || null;
+  const saveSummary = useMemo(
+    () => buildDraftChangeSummary(originalAgent, workspaceAgent),
+    [originalAgent, workspaceAgent]
+  );
+  const publishSummary = useMemo(() => {
+    const combined = [...(draftState?.publish_summary ?? []), ...saveSummary];
+    return Array.from(new Set(combined));
+  }, [draftState?.publish_summary, saveSummary]);
+  const hasPersistedPublishableChanges = draftState?.has_publishable_changes ?? false;
+  const hasPublishableChanges = hasUnsavedChanges || hasPersistedPublishableChanges;
 
   // Detect current theme for graph styling
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains('dark')
   );
+
+  /**
+   * Stage agent-level draft fields that should participate in Save / Publish.
+   * Why: some sidebar modules are being migrated away from immediate persistence
+   * so the top toolbar can represent one coherent draft workflow.
+   */
+  const handleAgentDraftUpdate = useCallback((nextAgent: Agent) => {
+    const currentAgent = workspaceAgent ?? agent;
+    if (!currentAgent) {
+      return;
+    }
+
+    setWorkspaceAgent({
+      ...currentAgent,
+      ...nextAgent,
+      scenes: workspaceAgent?.scenes ?? currentAgent.scenes,
+    });
+  }, [agent, setWorkspaceAgent, workspaceAgent]);
+
+  /**
+   * Reload persisted draft/release state from the backend baseline.
+   * Why: publish audit must survive page reloads instead of depending on the
+   * current browser session still remembering what changed.
+   */
+  const refreshDraftState = useCallback(async () => {
+    setIsLoadingDraftState(true);
+    try {
+      const nextDraftState = await getAgentDraftState(agentId);
+      setDraftState(nextDraftState);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Failed to load draft state:', error);
+      toast.error(`Failed to load draft state: ${error.message}`);
+    } finally {
+      setIsLoadingDraftState(false);
+    }
+  }, [agentId]);
 
   // Initialize store with agent data
   useEffect(() => {
@@ -213,6 +355,12 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       initialize(agent);
     }
   }, [agent, initialize]);
+
+  useEffect(() => {
+    setDraftState(null);
+    setReleaseNote('');
+    void refreshDraftState();
+  }, [agentId, refreshDraftState]);
 
   // Sync selectedScene with store
   useEffect(() => {
@@ -977,11 +1125,26 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     }
   }, [selectedElement, contextMenu]);
 
-  const handleSubmit = async () => {
-    if (!workspaceAgent || !workspaceAgent.scenes) return;
+  const handleSubmit = useCallback(async (options?: { silent?: boolean }): Promise<boolean> => {
+    if (!workspaceAgent || !workspaceAgent.scenes) {
+      return false;
+    }
     setSubmitting(true);
 
     try {
+      await updateAgent(agentId, {
+        name: workspaceAgent.name,
+        description: workspaceAgent.description,
+        llm_id: workspaceAgent.llm_id,
+        skill_resolution_llm_id: workspaceAgent.skill_resolution_llm_id ?? null,
+        session_idle_timeout_minutes: workspaceAgent.session_idle_timeout_minutes,
+        sandbox_timeout_seconds: workspaceAgent.sandbox_timeout_seconds,
+        compact_threshold_percent: workspaceAgent.compact_threshold_percent,
+        is_active: workspaceAgent.is_active,
+        tool_ids: workspaceAgent.tool_ids ?? null,
+        skill_ids: workspaceAgent.skill_ids ?? null,
+      });
+
       // Construct payload for all scenes
       const scenesPayload = workspaceAgent.scenes.map(scene => {
         return {
@@ -1005,6 +1168,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
       // 1. Single API Call to sync everything
       const updatedScenes = await updateAgentScenes(agentId, scenesPayload);
+      const nextDraftState = await saveAgentDraft(agentId);
 
       // Diff and update tabs for any scenes that had temporary IDs
       if (workspaceAgent.scenes) {
@@ -1027,38 +1191,103 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       // Notify parent to refresh
       await onRefreshScenes(); // This now fetches full agent in App.tsx
 
-      // We don't strictly need to call markAsCommitted here if onRefreshScenes triggers initialization.
-      // But markAsCommitted clears the dirty flag.
+      setDraftState(nextDraftState);
       markAsCommitted();
+      if (!options?.silent) {
+        toast.success('Draft saved');
+      }
+      return true;
 
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       console.error('Failed to submit changes:', error);
+      toast.error(`Failed to save draft: ${error.message}`);
+      return false;
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [agentId, markAsCommitted, onRefreshScenes, replaceTabResource, setSubmitting, workspaceAgent]);
 
   const handleDiscard = () => {
     discardChanges();
   };
 
+  const handleOpenTest = () => {
+    setIsReactChatOpen(true);
+  };
+
+  const handleOpenPublish = () => {
+    setIsPublishDrawerOpen(true);
+  };
+
+  const handleOpenReleaseHistory = () => {
+    setIsReleaseHistoryOpen(true);
+  };
+
+  const handlePublishRelease = useCallback(async () => {
+    setIsPublishingRelease(true);
+    try {
+      if (hasUnsavedChanges) {
+        const didSave = await handleSubmit({ silent: true });
+        if (!didSave) {
+          return;
+        }
+      }
+      const nextDraftState = await publishAgentRelease(agentId, releaseNote);
+      setDraftState(nextDraftState);
+      await onRefreshScenes();
+      setIsPublishDrawerOpen(false);
+      setReleaseNote('');
+      toast.success('Release published');
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Failed to publish release:', error);
+      toast.error(`Failed to publish release: ${error.message}`);
+    } finally {
+      setIsPublishingRelease(false);
+    }
+  }, [agentId, handleSubmit, hasUnsavedChanges, onRefreshScenes, releaseNote]);
+
+  const handleChannelBindingsLoaded = useCallback((_bindings: SidebarChannel[]) => {
+    void refreshDraftState();
+  }, [refreshDraftState]);
+
+  const handleWebSearchBindingsLoaded = useCallback((_bindings: SidebarWebSearchBinding[]) => {
+    void refreshDraftState();
+  }, [refreshDraftState]);
+
   return (
     <SidebarProvider defaultOpen={true}>
       <AgentDetailSidebar
-        agent={agent}
+        agent={workspaceAgent ?? agent}
         scenes={workingScenes}
         selectedScene={selectedScene}
         onSceneSelect={onSceneSelect}
         onCreateScene={handleCreateSceneModalOpen}
         onDeleteScene={handleDeleteScene}
-        onOpenReactChat={() => setIsReactChatOpen(true)}
-        onAgentUpdate={onAgentUpdate}
+        onAgentDraftUpdate={handleAgentDraftUpdate}
+        onChannelBindingsLoaded={handleChannelBindingsLoaded}
+        onWebSearchBindingsLoaded={handleWebSearchBindingsLoaded}
       />
 
       <SidebarInset className="flex flex-col bg-background overflow-hidden">
         {/* Main Content Area */}
         <div className="flex-1 relative overflow-hidden flex flex-col">
+          <div className="pointer-events-none absolute right-4 top-3 z-20 flex justify-end">
+            <AgentWorkspaceToolbar
+              hasUnsavedChanges={hasUnsavedChanges}
+              hasPublishableChanges={hasPublishableChanges}
+              isSavingDraft={isSubmitting}
+              saveSummary={saveSummary}
+              publishSummary={publishSummary}
+              onSaveDraft={() => void handleSubmit()}
+              onDiscardChanges={handleDiscard}
+              onOpenTest={handleOpenTest}
+              onOpenPublish={handleOpenPublish}
+              onOpenReleaseHistory={handleOpenReleaseHistory}
+            />
+          </div>
+
           {/* Tabs System */}
           {tabs.length > 0 ? (
             <Tabs
@@ -1067,7 +1296,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               className="flex-1 flex flex-col overflow-hidden"
             >
               {/* Tabs List */}
-              <div className="bg-muted border-b border-border px-2 pt-1.5">
+              <div className="bg-muted border-b border-border px-2 pr-72 pt-1.5 lg:pr-[27rem]">
                 <TabsList className="h-auto bg-transparent p-0 gap-1 w-full justify-start items-end -mb-px">
                   {tabs.map((tab) => {
                     // Get icon based on tab type (matching sidebar icons)
@@ -1283,13 +1512,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             onRemoveEdge={handleRemoveEdge}
           />
         </div>
-
-        <SubmitArea
-          hasUnsavedChanges={hasUnsavedChanges}
-          isSubmitting={isSubmitting}
-          onSubmit={handleSubmit}
-          onDiscard={handleDiscard}
-        />
       </SidebarInset>
 
       {/* ReAct Chat Draggable Dialog */}
@@ -1308,6 +1530,24 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
           sessionIdleTimeoutMinutes={agent?.session_idle_timeout_minutes}
         />
       </DraggableDialog>
+
+      <PublishReleaseDrawer
+        open={isPublishDrawerOpen}
+        onOpenChange={setIsPublishDrawerOpen}
+        hasUnsavedChanges={hasUnsavedChanges}
+        changeSummary={publishSummary}
+        latestRelease={draftState?.latest_release ?? null}
+        releaseNote={releaseNote}
+        onReleaseNoteChange={setReleaseNote}
+        isPublishing={isPublishingRelease}
+        canPublish={hasPublishableChanges}
+        onPublish={handlePublishRelease}
+      />
+      <ReleaseHistoryDialog
+        open={isReleaseHistoryOpen}
+        onOpenChange={setIsReleaseHistoryOpen}
+        releaseHistory={draftState?.release_history ?? []}
+      />
 
       {/* Scene Modal */}
       <SceneModal

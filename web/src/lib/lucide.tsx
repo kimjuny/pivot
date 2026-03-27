@@ -2,6 +2,7 @@ import * as React from "react";
 import {
   AlertCircle as AlertCircleIcon,
   AlertTriangle as AlertTriangleIcon,
+  ArrowRight as ArrowRightIcon,
   ArrowLeft as ArrowLeftIcon,
   ArrowUp as ArrowUpIcon,
   Bot as BotIcon,
@@ -23,6 +24,7 @@ import {
   FileSpreadsheet as FileSpreadsheetIcon,
   FileText as FileTextIcon,
   Github as GithubIcon,
+  History as HistoryIcon,
   Globe as GlobeIcon,
   Globe2 as Globe2Icon,
   ImagePlus as ImagePlusIcon,
@@ -85,6 +87,7 @@ function withDefaultStroke(Icon: LucideIcon) {
 
 export const AlertCircle = withDefaultStroke(AlertCircleIcon);
 export const AlertTriangle = withDefaultStroke(AlertTriangleIcon);
+export const ArrowRight = withDefaultStroke(ArrowRightIcon);
 export const ArrowLeft = withDefaultStroke(ArrowLeftIcon);
 export const ArrowUp = withDefaultStroke(ArrowUpIcon);
 export const Bot = withDefaultStroke(BotIcon);
@@ -106,6 +109,7 @@ export const EyeOff = withDefaultStroke(EyeOffIcon);
 export const FileSpreadsheet = withDefaultStroke(FileSpreadsheetIcon);
 export const FileText = withDefaultStroke(FileTextIcon);
 export const Github = withDefaultStroke(GithubIcon);
+export const History = withDefaultStroke(HistoryIcon);
 export const Globe = withDefaultStroke(GlobeIcon);
 export const Globe2 = withDefaultStroke(Globe2Icon);
 export const ImagePlus = withDefaultStroke(ImagePlusIcon);

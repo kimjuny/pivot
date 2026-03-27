@@ -20,6 +20,9 @@ from app.models.user import User
 from app.schemas.schemas import (
     AgentCreate,
     AgentDetailResponse,
+    AgentDraftStateResponse,
+    AgentPublishRequest,
+    AgentReleaseResponse,
     AgentResponse,
     AgentSceneListUpdate,
     AgentUpdate,
@@ -28,6 +31,7 @@ from app.schemas.schemas import (
     SceneResponse,
     SubsceneWithConnectionsResponse,
 )
+from app.services.agent_snapshot_service import AgentSnapshotService
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
@@ -140,6 +144,10 @@ async def create_agent(
         is_active=agent_data.is_active,
         max_iteration=agent_data.max_iteration,
     )
+    AgentSnapshotService(db).save_draft(
+        agent.id or 0,
+        saved_by=current_user.username,
+    )
 
     # Get LLM name for display
     model_display = agent.model_name or "N/A"
@@ -165,6 +173,81 @@ async def create_agent(
         "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
     }
+
+
+@router.get(
+    "/agents/{agent_id}/draft-state",
+    response_model=AgentDraftStateResponse,
+)
+async def get_agent_draft_state(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return saved-draft and release metadata for one agent editor."""
+    del current_user
+    try:
+        return AgentSnapshotService(db).get_draft_state(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/agents/{agent_id}/drafts/save",
+    response_model=AgentDraftStateResponse,
+)
+async def save_agent_draft(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Persist the current normalized agent state as the saved draft."""
+    snapshot_service = AgentSnapshotService(db)
+    try:
+        snapshot_service.save_draft(agent_id, saved_by=current_user.username)
+        return snapshot_service.get_draft_state(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/agents/{agent_id}/releases",
+    response_model=list[AgentReleaseResponse],
+)
+async def list_agent_releases(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """List immutable releases for one agent."""
+    del current_user
+    try:
+        return AgentSnapshotService(db).list_releases(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/agents/{agent_id}/releases",
+    response_model=AgentDraftStateResponse,
+)
+async def publish_agent_release(
+    agent_id: int,
+    payload: AgentPublishRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Publish the current saved draft as the next immutable release."""
+    try:
+        return AgentSnapshotService(db).publish_saved_draft(
+            agent_id,
+            release_note=payload.release_note,
+            published_by=current_user.username,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 409 if "already published" in detail else 404
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
 @router.put("/agents/{agent_id}", response_model=AgentResponse)
@@ -555,6 +638,8 @@ async def delete_agent(
 
         # 3. Delete Scene
         db.delete(scene)
+
+    AgentSnapshotService(db).delete_agent_state(agent_id)
 
     # 4. Delete Agent
     db.delete(agent)
