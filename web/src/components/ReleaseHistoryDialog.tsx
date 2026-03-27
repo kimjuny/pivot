@@ -10,6 +10,8 @@ interface ReleaseHistoryDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Immutable release records to show in audit order. */
   releaseHistory: AgentReleaseRecord[];
+  /** Currently active release id for new user sessions. */
+  activeReleaseId: number | null;
 }
 
 /**
@@ -21,6 +23,7 @@ function ReleaseHistoryDialog({
   open,
   onOpenChange,
   releaseHistory,
+  activeReleaseId,
 }: ReleaseHistoryDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -40,6 +43,9 @@ function ReleaseHistoryDialog({
                   <Badge variant="outline" className="h-6 px-2">
                     v{release.version}
                   </Badge>
+                  {release.id === activeReleaseId ? (
+                    <Badge className="h-6 px-2 text-[11px]">Active</Badge>
+                  ) : null}
                   <span className="text-xs text-muted-foreground">
                     {new Date(release.created_at).toLocaleString()}
                   </span>

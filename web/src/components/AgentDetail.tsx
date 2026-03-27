@@ -306,6 +306,21 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   }, [draftState?.publish_summary, saveSummary]);
   const hasPersistedPublishableChanges = draftState?.has_publishable_changes ?? false;
   const hasPublishableChanges = hasUnsavedChanges || hasPersistedPublishableChanges;
+  const effectiveAgent = workspaceAgent ?? agent;
+  const activeReleaseRecord = useMemo(() => {
+    const activeReleaseId = effectiveAgent?.active_release_id ?? null;
+    if (activeReleaseId == null) {
+      return null;
+    }
+
+    return (
+      draftState?.release_history.find((release) => release.id === activeReleaseId) ??
+      (draftState?.latest_release?.id === activeReleaseId
+        ? draftState.latest_release
+        : null)
+    );
+  }, [draftState?.latest_release, draftState?.release_history, effectiveAgent?.active_release_id]);
+  const activeReleaseVersion = activeReleaseRecord?.version ?? null;
 
   // Detect current theme for graph styling
   const [isDarkMode, setIsDarkMode] = useState(() =>
@@ -1238,7 +1253,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       await onRefreshScenes();
       setIsPublishDrawerOpen(false);
       setReleaseNote('');
-      toast.success('Release published');
+      toast.success('Release published and activated for new sessions');
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       console.error('Failed to publish release:', error);
@@ -1275,6 +1290,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         <div className="flex-1 relative overflow-hidden flex flex-col">
           <div className="pointer-events-none absolute right-4 top-3 z-20 flex justify-end">
             <AgentWorkspaceToolbar
+              activeReleaseVersion={activeReleaseVersion}
               hasUnsavedChanges={hasUnsavedChanges}
               hasPublishableChanges={hasPublishableChanges}
               isSavingDraft={isSubmitting}
@@ -1547,6 +1563,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         open={isReleaseHistoryOpen}
         onOpenChange={setIsReleaseHistoryOpen}
         releaseHistory={draftState?.release_history ?? []}
+        activeReleaseId={effectiveAgent?.active_release_id ?? null}
       />
 
       {/* Scene Modal */}

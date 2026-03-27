@@ -114,6 +114,7 @@ function toSessionListItem(session: SessionResponse): SessionListItem {
   return {
     session_id: session.session_id,
     agent_id: session.agent_id,
+    release_id: session.release_id,
     status: session.status,
     title: session.title,
     is_pinned: session.is_pinned,

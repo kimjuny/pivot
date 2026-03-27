@@ -41,6 +41,9 @@ class Agent(SQLModel, table=True):
             automatically starts a fresh session for this agent.
         sandbox_timeout_seconds: Maximum seconds the backend will wait for one
             sandbox-manager request before surfacing an error to the user.
+        active_release_id: Published release used for newly created end-user
+            sessions.
+        serving_enabled: Whether this agent currently accepts end-user traffic.
         model_name: Deprecated. Name of the LLM model to use (kept for migration).
         is_active: Whether the agent is currently active.
         max_iteration: Maximum number of iterations for ReAct recursion.
@@ -82,6 +85,18 @@ class Agent(SQLModel, table=True):
         description=(
             "Context-window percentage that triggers automatic runtime compaction"
         ),
+    )
+    active_release_id: int | None = Field(
+        default=None,
+        index=True,
+        description=(
+            "Published release used for newly created end-user sessions. "
+            "None means the agent is not yet available to end users."
+        ),
+    )
+    serving_enabled: bool = Field(
+        default=True,
+        description="Whether this agent currently accepts end-user traffic.",
     )
     model_name: str | None = Field(
         default=None, description="Deprecated: Use llm_id instead"

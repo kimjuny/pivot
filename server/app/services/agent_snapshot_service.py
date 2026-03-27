@@ -11,6 +11,7 @@ from app.models.agent import Agent, Connection, Scene, Subscene
 from app.models.agent_release import AgentRelease, AgentSavedDraft
 from app.models.channel import AgentChannelBinding
 from app.models.web_search import AgentWebSearchBinding
+from app.services.agent_service import AgentService
 from sqlmodel import Session, col, desc, select
 
 
@@ -32,11 +33,7 @@ def _load_json_array(raw_value: str | None) -> list[str] | None:
     if not isinstance(parsed, list):
         return []
     values = sorted(
-        {
-            item.strip()
-            for item in parsed
-            if isinstance(item, str) and item.strip()
-        }
+        {item.strip() for item in parsed if isinstance(item, str) and item.strip()}
     )
     return values
 
@@ -54,7 +51,9 @@ def _load_json_object(raw_value: str | None) -> dict[str, Any]:
 
 def _dump_json(payload: Any) -> str:
     """Serialize one payload into canonical compact JSON text."""
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    return json.dumps(
+        payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
 
 
 def _hash_payload(payload: Any) -> str:
@@ -266,7 +265,9 @@ class AgentSnapshotService:
         tool_ids = agent_payload["tool_ids"]
         if tool_ids is not None:
             if tool_ids:
-                changes.append(_format_name_list(tool_ids, noun="Tools", verb="enabled"))
+                changes.append(
+                    _format_name_list(tool_ids, noun="Tools", verb="enabled")
+                )
             else:
                 changes.append("Tool access restricted to no tools")
         skill_ids = agent_payload["skill_ids"]
@@ -297,9 +298,7 @@ class AgentSnapshotService:
             )
         web_search_bindings = snapshot["web_search_bindings"]
         if web_search_bindings:
-            provider_keys = [
-                binding["provider_key"] for binding in web_search_bindings
-            ]
+            provider_keys = [binding["provider_key"] for binding in web_search_bindings]
             changes.append(
                 _format_name_list(
                     provider_keys, noun="Web search providers", verb="configured"
@@ -551,7 +550,10 @@ class AgentSnapshotService:
         """Create one immutable release from the current saved draft."""
         draft = self.get_or_create_saved_draft(agent_id)
         latest_release = self._get_latest_release_model(agent_id)
-        if latest_release is not None and latest_release.snapshot_hash == draft.snapshot_hash:
+        if (
+            latest_release is not None
+            and latest_release.snapshot_hash == draft.snapshot_hash
+        ):
             raise ValueError("The current saved draft is already published.")
 
         latest_release_snapshot = (
@@ -578,6 +580,7 @@ class AgentSnapshotService:
         self.db.add(release)
         self.db.commit()
         self.db.refresh(release)
+        AgentService(self.db).set_active_release(agent_id, release.id)
         return self.get_draft_state(agent_id)
 
     def delete_agent_state(self, agent_id: int) -> None:

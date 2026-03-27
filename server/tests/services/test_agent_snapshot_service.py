@@ -110,6 +110,8 @@ class AgentSnapshotServiceTestCase(unittest.TestCase):
         self.assertEqual(latest_release["version"], 1)
         self.assertEqual(latest_release["release_note"], "Initial launch")
         self.assertEqual(len(published_state["release_history"]), 1)
+        self.session.refresh(self.agent)
+        self.assertEqual(self.agent.active_release_id, latest_release["id"])
 
     def test_saved_draft_diff_survives_binding_changes(self) -> None:
         """Saved draft vs latest release should capture persisted binding edits."""

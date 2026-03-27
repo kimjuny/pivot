@@ -180,6 +180,23 @@ export const createAgent = async (agentData: {
 };
 
 /**
+ * Update whether an agent is currently available to end users.
+ *
+ * @param agentId - Stable agent identifier
+ * @param servingEnabled - Whether end users can currently use this agent
+ * @returns Promise resolving to updated Agent object
+ */
+export const updateAgentServing = async (
+  agentId: number,
+  servingEnabled: boolean,
+): Promise<Agent> => {
+  return apiRequest(`/agents/${agentId}/serving`, {
+    method: 'PATCH',
+    body: JSON.stringify({ serving_enabled: servingEnabled }),
+  }) as Promise<Agent>;
+};
+
+/**
  * Fetch a specific agent by ID.
  * 
  * @param agentId - Unique identifier of the agent
@@ -1000,6 +1017,7 @@ export const deleteLLM = async (llmId: number): Promise<void> => {
 export interface SessionListItem {
   session_id: string;
   agent_id: number;
+  release_id?: number | null;
   status: string;
   title: string | null;
   is_pinned: boolean;
@@ -1022,6 +1040,7 @@ export interface SessionResponse {
   id: number;
   session_id: string;
   agent_id: number;
+  release_id?: number | null;
   user: string;
   status: string;
   title: string | null;

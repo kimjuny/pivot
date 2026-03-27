@@ -32,6 +32,7 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactStreamEvent, ReactStreamEventType, TokenUsage
+from app.services.agent_service import AgentService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_service import SessionService
@@ -198,7 +199,9 @@ class ReactTaskSupervisor:
             if not isinstance(submission_id, int) or submission_id <= 0:
                 raise ValueError("Pending user action is missing submission_id")
 
-            current_user = db.exec(select(User).where(User.username == username)).first()
+            current_user = db.exec(
+                select(User).where(User.username == username)
+            ).first()
             if current_user is None:
                 raise ValueError(f"User '{username}' not found.")
 
@@ -363,9 +366,7 @@ class ReactTaskSupervisor:
         launch: ReactTaskLaunchRequest,
     ) -> tuple[ReactTask, int]:
         """Create or resume a task before background execution starts."""
-        agent = db.get(Agent, launch.agent_id)
-        if agent is None:
-            raise ValueError(f"Agent {launch.agent_id} not found")
+        agent = AgentService(db).require_interaction_enabled(launch.agent_id)
         if not agent.llm_id:
             raise ValueError(f"Agent {agent.name} has no LLM configured")
         session = None
@@ -596,9 +597,8 @@ class ReactTaskSupervisor:
                 resolution_duration_ms = 0
 
                 resolver_llm_id = agent.skill_resolution_llm_id
-                if (
-                    resolver_llm_id is not None
-                    and _should_run_skill_resolution(task=task, agent=agent)
+                if resolver_llm_id is not None and _should_run_skill_resolution(
+                    task=task, agent=agent
                 ):
                     await self._publish_event(
                         db=db,

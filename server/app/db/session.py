@@ -152,6 +152,10 @@ def ensure_agent_schema_compatibility() -> None:
                     "ALTER TABLE agent " "ADD COLUMN compact_threshold_percent INTEGER"
                 )
             )
+        if "active_release_id" not in columns:
+            conn.execute(text("ALTER TABLE agent ADD COLUMN active_release_id INTEGER"))
+        if "serving_enabled" not in columns:
+            conn.execute(text("ALTER TABLE agent ADD COLUMN serving_enabled BOOLEAN"))
         conn.execute(
             text(
                 "UPDATE agent "
@@ -171,6 +175,13 @@ def ensure_agent_schema_compatibility() -> None:
                 "UPDATE agent "
                 "SET compact_threshold_percent = 60 "
                 "WHERE compact_threshold_percent IS NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE agent "
+                "SET serving_enabled = 1 "
+                "WHERE serving_enabled IS NULL"
             )
         )
 
@@ -196,7 +207,18 @@ def ensure_session_schema_compatibility() -> None:
             conn.execute(
                 text("ALTER TABLE session ADD COLUMN react_compact_result VARCHAR")
             )
+        if "release_id" not in columns:
+            conn.execute(text("ALTER TABLE session ADD COLUMN release_id INTEGER"))
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
+        conn.execute(
+            text(
+                "UPDATE session "
+                "SET release_id = ("
+                "  SELECT active_release_id FROM agent WHERE agent.id = session.agent_id"
+                ") "
+                "WHERE release_id IS NULL"
+            )
+        )
 
 
 def ensure_react_schema_compatibility() -> None:

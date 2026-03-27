@@ -5,7 +5,9 @@ import logging
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask
+from app.models.session import Session as ConversationSession
 from app.models.user import User
 from app.schemas.react import (
     ReactChatRequest,
@@ -17,12 +19,14 @@ from app.schemas.react import (
     ReactTaskCancelResponse,
     ReactTaskStartResponse,
 )
+from app.services.agent_service import AgentService
 from app.services.react_context_service import ReactContextUsageService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
     get_react_task_supervisor,
 )
+from app.services.session_service import SessionService
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -32,6 +36,61 @@ from sqlmodel import Session, col, select
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _resolve_runtime_agent_for_request(
+    *,
+    db: Session,
+    request: ReactChatRequest,
+    username: str,
+) -> tuple[Agent, ConversationSession | None]:
+    """Resolve the agent and optional session targeted by one runtime request.
+
+    Why: runtime execution needs one shared gate that enforces ownership for
+    resumed sessions and blocks further interaction when an agent has been
+    disabled for end users.
+    """
+    agent_service = AgentService(db)
+    session_service = SessionService(db)
+
+    session_row: ConversationSession | None = None
+    if request.session_id is not None:
+        session_row = session_service.get_session(request.session_id)
+        if session_row is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session_row.user != username:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if session_row.agent_id != request.agent_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Session does not belong to the requested agent",
+            )
+    elif request.task_id is not None:
+        task = db.exec(
+            select(ReactTask).where(ReactTask.task_id == request.task_id)
+        ).first()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task.user != username:
+            raise HTTPException(status_code=403, detail="Access denied")
+        if task.agent_id != request.agent_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Task does not belong to the requested agent",
+            )
+        if task.session_id is not None:
+            session_row = session_service.get_session(task.session_id)
+            if session_row is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        agent = agent_service.require_interaction_enabled(request.agent_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    return agent, session_row
 
 
 async def _stream_supervisor_events(
@@ -85,11 +144,17 @@ async def _stream_supervisor_events(
 @router.post("/react/tasks", response_model=ReactTaskStartResponse)
 async def start_react_task(
     request: ReactChatRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ReactTaskStartResponse:
     """Queue one ReAct task for background execution."""
     if request.message is None or request.message.strip() == "":
         raise HTTPException(status_code=400, detail="message is required")
+    _resolve_runtime_agent_for_request(
+        db=db,
+        request=request,
+        username=current_user.username,
+    )
 
     supervisor = get_react_task_supervisor()
     try:
@@ -116,7 +181,9 @@ async def start_react_task(
     )
 
 
-@router.post("/react/tasks/{task_id}/user-action", response_model=ReactTaskStartResponse)
+@router.post(
+    "/react/tasks/{task_id}/user-action", response_model=ReactTaskStartResponse
+)
 async def submit_react_user_action(
     task_id: str,
     request: ReactPendingUserActionRequest,
@@ -197,6 +264,7 @@ async def stream_react_session_events(
 async def react_chat_stream(
     request: ReactChatRequest,
     raw_request: Request,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Compatibility stream that starts a task then tails its events."""
@@ -206,6 +274,11 @@ async def react_chat_stream(
             status_code=400,
             detail="session_id is required for reconnectable chat streaming",
         )
+    _resolve_runtime_agent_for_request(
+        db=db,
+        request=request,
+        username=current_user.username,
+    )
 
     supervisor = get_react_task_supervisor()
     if request.message is None or request.message.strip() == "":

@@ -36,6 +36,7 @@ def _build_session_response(session: Session) -> SessionResponse:
         id=session.id or 0,
         session_id=session.session_id,
         agent_id=session.agent_id,
+        release_id=session.release_id,
         user=session.user,
         status=session.status,
         title=session.title,
@@ -64,10 +65,17 @@ async def create_session(
         Created session information.
     """
     service = SessionService(db)
-    session = service.create_session(
-        agent_id=request.agent_id,
-        user=current_user.username,
-    )
+    try:
+        session = service.create_session(
+            agent_id=request.agent_id,
+            user=current_user.username,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 409
+        if "not found" in detail:
+            status_code = 404
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
     return _build_session_response(session)
 
@@ -103,6 +111,7 @@ async def list_sessions(
             SessionListItem(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
+                release_id=session.release_id,
                 status=session.status,
                 title=session.title,
                 is_pinned=session.is_pinned,

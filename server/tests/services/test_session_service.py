@@ -185,3 +185,39 @@ class SessionServiceTestCase(unittest.TestCase):
             self.fail("Expected pinned session row")
 
         self.assertTrue(updated_session.is_pinned)
+
+    def test_create_session_pins_active_release_id(self) -> None:
+        """New sessions should freeze the agent's current active release."""
+        self.agent.active_release_id = 7
+        self.session.add(self.agent)
+        self.session.commit()
+
+        created = self.service.create_session(agent_id=self.agent.id or 0, user="alice")
+
+        self.assertEqual(created.release_id, 7)
+        self.assertEqual(created.agent_id, self.agent.id or 0)
+
+    def test_create_session_rejects_unpublished_agent(self) -> None:
+        """End users should not start sessions before an agent is published."""
+        self.agent.active_release_id = None
+        self.session.add(self.agent)
+        self.session.commit()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "not published for end users yet",
+        ):
+            self.service.create_session(agent_id=self.agent.id or 0, user="alice")
+
+    def test_create_session_rejects_disabled_agent(self) -> None:
+        """Serving-disabled agents should refuse new interactive sessions."""
+        self.agent.active_release_id = 3
+        self.agent.serving_enabled = False
+        self.session.add(self.agent)
+        self.session.commit()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "disabled for end users",
+        ):
+            self.service.create_session(agent_id=self.agent.id or 0, user="alice")

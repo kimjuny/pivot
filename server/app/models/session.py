@@ -22,6 +22,7 @@ class Session(SQLModel, table=True):
         id: Primary key of the session.
         session_id: UUID string for global unique session identification.
         agent_id: Foreign key to the agent handling this session.
+        release_id: Published release fixed to this session at creation time.
         user: Username of the user who owns this session.
         status: Current status (active, waiting_input, closed).
         title: Optional user-facing session label set from the sidebar.
@@ -42,6 +43,14 @@ class Session(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     session_id: str = Field(index=True, unique=True, description="UUID for session")
     agent_id: int = Field(foreign_key="agent.id", index=True)
+    release_id: int | None = Field(
+        default=None,
+        index=True,
+        description=(
+            "Published release fixed to this session at creation time. "
+            "Legacy rows created before release pinning may still be null."
+        ),
+    )
     user: str = Field(index=True, description="Username")
     status: str = Field(
         default="active",

@@ -26,6 +26,10 @@ export interface Agent {
   sandbox_timeout_seconds: number;
   /** Context-window percentage that triggers automatic runtime compaction. */
   compact_threshold_percent: number;
+  /** Published release used by default for newly created end-user sessions. */
+  active_release_id?: number | null;
+  /** Whether this agent currently accepts end-user traffic. */
+  serving_enabled?: boolean;
   /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
   /** Whether the agent is currently active */

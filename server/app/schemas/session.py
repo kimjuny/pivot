@@ -20,6 +20,7 @@ class SessionResponse(AppBaseModel):
     id: int
     session_id: str
     agent_id: int
+    release_id: int | None
     user: str
     status: str
     title: str | None = None
@@ -40,6 +41,7 @@ class SessionListItem(AppBaseModel):
 
     session_id: str
     agent_id: int
+    release_id: int | None
     status: str
     title: str | None = None
     is_pinned: bool = False

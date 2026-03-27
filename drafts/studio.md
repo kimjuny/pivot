@@ -70,7 +70,7 @@ Content:
 - Agent workspace
 - Test console
 - Release history
-- Audience assignment
+- Future: audience assignment
 
 ### Assets
 
@@ -278,12 +278,84 @@ Release:
 - The publish flow compares `saved draft` against `latest release`
 - This comparison survives page reload because it is backed by persisted
   snapshots, not only frontend session state
+- In the current MVP direction, publishing also updates the agent's
+  `active_release_id`
 
 Implementation note:
 - The backend now stores normalized JSON snapshots for:
   - current saved draft
   - immutable published releases
 - Publish summaries and release history are generated from these snapshots
+- Shared tools and skills are not version-pinned yet in MVP
+- This means the agent assembly is snapshotted, but shared dependency
+  implementation can still drift until tools and skills gain their own version
+  management
+
+### Serving Contract
+
+The user-facing product must consume releases, not drafts.
+
+Core rules:
+- A user session must bind to exactly one `release_id`
+- That `release_id` is chosen when the session is created
+- A session never switches to a different release in the middle of a
+  conversation
+- `active_release_id` determines which release new sessions use by default
+- Changing `active_release_id` affects only future sessions, not existing ones
+
+This rule exists to protect:
+- conversation consistency
+- auditability
+- release-level operations analysis
+
+### Serving Toggle
+
+Release selection and service availability are separate concerns.
+
+Current MVP direction:
+- `active_release_id` controls which release new sessions use
+- `serving_enabled` controls whether the agent is available to end users at all
+
+The user-facing toggle should use `Enable / Disable` language rather than
+`Activate / Deactivate`, because `active` is already used for release
+selection semantics.
+
+Operational behavior:
+- `Enable`: the agent can appear in the user-facing product
+- `Disable`: the agent is withdrawn from the user-facing product
+- The toggle should live in the agent-management surface, not inside the
+  snapshot or release model
+
+Why this separation matters:
+- Publishing is a version action
+- Enabling or disabling is a serving action
+- Malfunctioning agents should be stoppable immediately without manufacturing a
+  fake replacement release
+
+### User-Facing Availability
+
+The MVP does not need assignment yet.
+
+Current rule:
+- If an agent has a published `active_release_id` and `serving_enabled = true`,
+  it is visible to all end users
+- Assignment and audience targeting can be added later as a separate layer
+
+Future visibility rule:
+- `active_release_id != null`
+- `serving_enabled = true`
+- assignment checks, once that system exists
+
+### Disabled Agent Behavior
+
+When `serving_enabled = false`:
+- The agent should no longer appear in the end-user agent list
+- New sessions should not be allowed
+- Existing session history remains readable
+- Existing sessions must not continue interactive Q&A
+
+This is the current agreed MVP behavior because it provides a clean emergency
+stop without destroying historical context.
 
 ### Publish UX
 
@@ -341,6 +413,8 @@ Additional rule:
 - Agent draft changes should be based on the agent's own assembled snapshot
 - Channel templates are treated as stable catalogs; agent-level binding changes
   are what matter inside the agent workspace
+- MVP release semantics snapshot the agent assembly layer first; shared tool and
+  skill implementation pinning can be added in a later iteration
 
 ## Suggested Administrator Roles
 
@@ -367,8 +441,12 @@ Completed or largely established:
 Next priorities:
 1. Continue refining the agent workspace interaction model rather than
    replacing it with a page-per-step builder.
-2. Improve release audit depth using more structured snapshot diffs.
-3. Decide which runtime and basics fields should remain modal-driven versus
+2. Implement the Phase 1 serving contract for end users:
+   - `active_release_id`
+   - `serving_enabled`
+   - session-level `release_id` binding
+3. Improve release audit depth using more structured snapshot diffs.
+4. Decide which runtime and basics fields should remain modal-driven versus
    becoming more visible in the workspace.
-4. Prepare the Studio model so the future end-user product can consume stable
+5. Prepare the Studio model so the future end-user product can consume stable
    published releases rather than mutable working state.

@@ -78,6 +78,15 @@ class AgentUpdate(AppBaseModel):
     skill_ids: str | None = None
 
 
+class AgentServingUpdate(AppBaseModel):
+    """Schema for updating whether an agent serves end-user traffic."""
+
+    serving_enabled: bool = Field(
+        ...,
+        description="Whether this agent currently accepts end-user traffic",
+    )
+
+
 class AgentResponse(AppBaseModel):
     id: int
     name: str
@@ -87,6 +96,8 @@ class AgentResponse(AppBaseModel):
     session_idle_timeout_minutes: int
     sandbox_timeout_seconds: int
     compact_threshold_percent: int
+    active_release_id: int | None
+    serving_enabled: bool
     model_name: str | None
     is_active: bool
     max_iteration: int

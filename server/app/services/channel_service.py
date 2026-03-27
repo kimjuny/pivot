@@ -658,11 +658,21 @@ class ChannelService:
                 )
             return
 
-        channel_session = self._get_or_create_channel_session(
-            binding=binding,
-            identity=identity,
-            external_conversation_id=event.external_conversation_id,
-        )
+        try:
+            channel_session = self._get_or_create_channel_session(
+                binding=binding,
+                identity=identity,
+                external_conversation_id=event.external_conversation_id,
+            )
+        except ValueError as exc:
+            yield ChannelOutboundAction(
+                kind="error",
+                text=str(exc),
+                delivery_hint="append",
+                slot="primary",
+                is_terminal=True,
+            )
+            return
         yield ChannelOutboundAction(
             kind="progress",
             text="Received, starting the task...",

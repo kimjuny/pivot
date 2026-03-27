@@ -13,6 +13,7 @@ from app.models.react import (
 )
 from app.models.session import Session
 from app.schemas.file import FileAssetListItem
+from app.services.agent_service import AgentService
 from app.services.file_service import FileService
 from sqlmodel import Session as DBSession, col, select
 
@@ -44,14 +45,20 @@ class SessionService:
 
         Returns:
             Created Session instance.
+
+        Raises:
+            ValueError: If the agent is not published for end users or is
+                currently disabled.
         """
         session_id = str(uuid.uuid4())
         now = datetime.now(UTC)
+        agent = AgentService(self.db).require_session_creation_ready(agent_id)
 
         # Create session
         session = Session(
             session_id=session_id,
             agent_id=agent_id,
+            release_id=agent.active_release_id,
             user=user,
             status="active",
             title=None,

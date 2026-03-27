@@ -759,12 +759,16 @@ function AgentDetailSidebar({
                                             <span className="truncate text-sm font-semibold">
                                                 {agent?.name || 'Loading…'}
                                             </span>
-                                            {agent?.is_active && (
-                                                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                                                    Active
-                                                </span>
-                                            )}
+                                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                <span
+                                                    className={`h-1.5 w-1.5 rounded-full ${
+                                                        agent?.serving_enabled === false
+                                                            ? 'bg-amber-500'
+                                                            : 'bg-success'
+                                                    }`}
+                                                />
+                                                {agent?.serving_enabled === false ? 'Disabled' : 'Enabled'}
+                                            </span>
                                         </div>
                                     </SidebarMenuButton>
                                     <Tooltip>
@@ -1406,7 +1410,6 @@ function AgentDetailSidebar({
                                 agent.sandbox_timeout_seconds,
                             compact_threshold_percent:
                                 agent.compact_threshold_percent,
-                            is_active: agent.is_active,
                         }
                         : undefined
                 }

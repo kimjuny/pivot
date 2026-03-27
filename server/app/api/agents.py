@@ -25,12 +25,14 @@ from app.schemas.schemas import (
     AgentReleaseResponse,
     AgentResponse,
     AgentSceneListUpdate,
+    AgentServingUpdate,
     AgentUpdate,
     ConnectionResponse,
     SceneGraphResponse,
     SceneResponse,
     SubsceneWithConnectionsResponse,
 )
+from app.services.agent_service import AgentService
 from app.services.agent_snapshot_service import AgentSnapshotService
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
@@ -39,6 +41,33 @@ from sqlmodel import Session, select
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _serialize_agent_response(
+    agent: Any,
+    *,
+    model_display: str,
+) -> dict[str, Any]:
+    """Serialize one agent row into the shared response payload shape."""
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "description": agent.description,
+        "llm_id": agent.llm_id,
+        "skill_resolution_llm_id": agent.skill_resolution_llm_id,
+        "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
+        "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
+        "compact_threshold_percent": agent.compact_threshold_percent,
+        "active_release_id": agent.active_release_id,
+        "serving_enabled": agent.serving_enabled,
+        "model_name": model_display,
+        "is_active": agent.is_active,
+        "max_iteration": agent.max_iteration,
+        "tool_ids": agent.tool_ids,
+        "skill_ids": agent.skill_ids,
+        "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
+        "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
+    }
 
 
 @router.get("/agents", response_model=list[AgentResponse])
@@ -68,25 +97,7 @@ async def get_agents(
             if llm:
                 model_display = f"{llm.name} ({llm.model})"
 
-        result.append(
-            {
-                "id": agent.id,
-                "name": agent.name,
-                "description": agent.description,
-                "llm_id": agent.llm_id,
-                "skill_resolution_llm_id": agent.skill_resolution_llm_id,
-                "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
-                "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
-                "compact_threshold_percent": agent.compact_threshold_percent,
-                "model_name": model_display,
-                "is_active": agent.is_active,
-                "max_iteration": agent.max_iteration,
-                "tool_ids": agent.tool_ids,
-                "skill_ids": agent.skill_ids,
-                "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
-                "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
-            }
-        )
+        result.append(_serialize_agent_response(agent, model_display=model_display))
     return result
 
 
@@ -156,23 +167,7 @@ async def create_agent(
         if llm:
             model_display = f"{llm.name} ({llm.model})"
 
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "description": agent.description,
-        "llm_id": agent.llm_id,
-        "skill_resolution_llm_id": agent.skill_resolution_llm_id,
-        "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
-        "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
-        "compact_threshold_percent": agent.compact_threshold_percent,
-        "model_name": model_display,
-        "is_active": agent.is_active,
-        "max_iteration": agent.max_iteration,
-        "tool_ids": agent.tool_ids,
-        "skill_ids": agent.skill_ids,
-        "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
-        "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
-    }
+    return _serialize_agent_response(agent, model_display=model_display)
 
 
 @router.get(
@@ -248,6 +243,31 @@ async def publish_agent_release(
         detail = str(exc)
         status_code = 409 if "already published" in detail else 404
         raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+@router.patch("/agents/{agent_id}/serving", response_model=AgentResponse)
+async def update_agent_serving_state(
+    agent_id: int,
+    payload: AgentServingUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Enable or disable one agent for end-user traffic."""
+    del current_user
+    try:
+        updated_agent = AgentService(db).set_serving_enabled(
+            agent_id,
+            payload.serving_enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    model_display = updated_agent.model_name or "N/A"
+    if updated_agent.llm_id:
+        llm = llm_crud.get(updated_agent.llm_id, db)
+        if llm:
+            model_display = f"{llm.name} ({llm.model})"
+    return _serialize_agent_response(updated_agent, model_display=model_display)
 
 
 @router.put("/agents/{agent_id}", response_model=AgentResponse)
@@ -342,23 +362,7 @@ async def update_agent(
         if llm:
             model_display = f"{llm.name} ({llm.model})"
 
-    return {
-        "id": updated_agent.id,
-        "name": updated_agent.name,
-        "description": updated_agent.description,
-        "llm_id": updated_agent.llm_id,
-        "skill_resolution_llm_id": updated_agent.skill_resolution_llm_id,
-        "session_idle_timeout_minutes": updated_agent.session_idle_timeout_minutes,
-        "sandbox_timeout_seconds": updated_agent.sandbox_timeout_seconds,
-        "compact_threshold_percent": updated_agent.compact_threshold_percent,
-        "model_name": model_display,
-        "is_active": updated_agent.is_active,
-        "max_iteration": updated_agent.max_iteration,
-        "tool_ids": updated_agent.tool_ids,
-        "skill_ids": updated_agent.skill_ids,
-        "created_at": updated_agent.created_at.replace(tzinfo=UTC).isoformat(),
-        "updated_at": updated_agent.updated_at.replace(tzinfo=UTC).isoformat(),
-    }
+    return _serialize_agent_response(updated_agent, model_display=model_display)
 
 
 @router.get("/agents/{agent_id}", response_model=AgentDetailResponse)
@@ -439,24 +443,9 @@ async def get_agent(
             )
         )
 
-    return {
-        "id": agent.id,
-        "name": agent.name,
-        "description": agent.description,
-        "llm_id": agent.llm_id,
-        "skill_resolution_llm_id": agent.skill_resolution_llm_id,
-        "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
-        "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
-        "compact_threshold_percent": agent.compact_threshold_percent,
-        "model_name": model_display,
-        "is_active": agent.is_active,
-        "max_iteration": agent.max_iteration,
-        "tool_ids": agent.tool_ids,
-        "skill_ids": agent.skill_ids,
-        "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
-        "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
-        "scenes": scenes_graph_responses,
-    }
+    response = _serialize_agent_response(agent, model_display=model_display)
+    response["scenes"] = scenes_graph_responses
+    return response
 
 
 @router.put("/agents/{agent_id}/scenes", response_model=list[SceneResponse])

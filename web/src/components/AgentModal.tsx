@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -39,7 +38,6 @@ export interface AgentFormData {
   sandbox_timeout_seconds: number;
   /** Context percentage that triggers automatic compaction. */
   compact_threshold_percent: number;
-  is_active: boolean;
 }
 
 interface AgentModalProps {
@@ -61,7 +59,6 @@ function createDefaultFormData(): AgentFormData {
     session_idle_timeout_minutes: 15,
     sandbox_timeout_seconds: 60,
     compact_threshold_percent: 60,
-    is_active: true,
   };
 }
 
@@ -91,8 +88,6 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           sandbox_timeout_seconds: initialData.sandbox_timeout_seconds ?? 60,
           compact_threshold_percent:
             initialData.compact_threshold_percent ?? 60,
-          is_active:
-            initialData.is_active !== undefined ? initialData.is_active : true,
         });
       } else {
         setFormData(createDefaultFormData());
@@ -165,7 +160,6 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         session_idle_timeout_minutes: formData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: formData.sandbox_timeout_seconds,
         compact_threshold_percent: formData.compact_threshold_percent,
-        is_active: formData.is_active,
       });
       onClose();
     } catch (err) {
@@ -323,18 +317,6 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                   </SelectContent>
                 </Select>
               )}
-            </div>
-
-            <div className="flex items-center space-x-3">
-              <Switch
-                id="is_active"
-                checked={formData.is_active}
-                onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
-                disabled={isSubmitting}
-              />
-              <Label htmlFor="is_active" className="cursor-pointer">
-                Activate Agent
-              </Label>
             </div>
           </TabsContent>
 

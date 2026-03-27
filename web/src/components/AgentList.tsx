@@ -1,8 +1,25 @@
 import { useState, useEffect, useCallback, useMemo, MouseEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Bot, MoreHorizontal, Pencil, Trash2, X } from "@/lib/lucide";
+import {
+  Plus,
+  Bot,
+  CheckCircle2,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  X,
+  XCircle,
+} from "@/lib/lucide";
 import { toast } from 'sonner';
-import { getAgents, deleteAgent, updateAgent, createAgent, AuthError } from '../utils/api';
+import {
+  getAgents,
+  deleteAgent,
+  updateAgent,
+  createAgent,
+  updateAgentServing,
+  AuthError,
+} from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
 import AgentModal from './AgentModal';
@@ -70,6 +87,7 @@ function AgentList() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [servingAgentIds, setServingAgentIds] = useState<number[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     agent: Agent | null;
@@ -146,6 +164,23 @@ function AgentList() {
     setDeleteConfirmation({ isOpen: true, agent });
   };
 
+  const handleServingToggle = async (agent: Agent, e: MouseEvent) => {
+    e.stopPropagation();
+    setServingAgentIds(previous => [...previous, agent.id]);
+    try {
+      const nextServingEnabled = agent.serving_enabled === false;
+      const updatedAgent = await updateAgentServing(agent.id, nextServingEnabled);
+      setAgents(previous =>
+        previous.map(existing => (existing.id === updatedAgent.id ? updatedAgent : existing)),
+      );
+      toast.success(nextServingEnabled ? 'Agent enabled' : 'Agent disabled');
+    } catch (err) {
+      toast.error(`Failed to update availability: ${(err as Error).message}`);
+    } finally {
+      setServingAgentIds(previous => previous.filter(id => id !== agent.id));
+    }
+  };
+
   const confirmDeleteAgent = async () => {
     if (!deleteConfirmation.agent) return;
     try {
@@ -167,7 +202,6 @@ function AgentList() {
     session_idle_timeout_minutes: number;
     sandbox_timeout_seconds: number;
     compact_threshold_percent: number;
-    is_active?: boolean;
   }) => {
     if (modalMode === 'create') {
       if (!agentData.llm_id) { toast.error('LLM selection is required'); return; }
@@ -179,7 +213,6 @@ function AgentList() {
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
-        is_active: agentData.is_active,
       });
       toast.success('Agent created');
       navigate(`/studio/agents/${newAgent.id}`);
@@ -192,7 +225,6 @@ function AgentList() {
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
-        is_active: agentData.is_active,
       });
       toast.success('Agent updated');
       await loadAgents();
@@ -323,6 +355,10 @@ function AgentList() {
           {/* Agent card grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
             {pagedAgents.map(agent => {
+              const isPublished = agent.active_release_id != null;
+              const isServingEnabled = agent.serving_enabled !== false;
+              const isServingPending = servingAgentIds.includes(agent.id);
+
               return (
                 <Card
                   key={agent.id}
@@ -370,6 +406,19 @@ function AgentList() {
                         size="medium"
                         onClick={e => e.stopPropagation()}
                       >
+                        <DropdownMenuItem
+                          onClick={e => void handleServingToggle(agent, e as unknown as MouseEvent)}
+                          disabled={isServingPending}
+                        >
+                          {isServingPending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                          ) : isServingEnabled ? (
+                            <XCircle className="w-4 h-4" aria-hidden="true" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                          )}
+                          {isServingEnabled ? 'Disable' : 'Enable'}
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
                           <Pencil className="w-4 h-4" aria-hidden="true" />
                           Edit
@@ -395,7 +444,23 @@ function AgentList() {
                   </div>
 
                   {/* Bottom: model badge */}
-                  <div className="mt-2">
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <Badge
+                      variant={isPublished ? 'default' : 'outline'}
+                      className="text-[10px] px-1.5 py-0 h-4"
+                    >
+                      {isPublished ? 'Published' : 'Draft'}
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] px-1.5 py-0 h-4 ${
+                        isServingEnabled
+                          ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+                          : 'border-amber-500/30 text-amber-700 dark:text-amber-300'
+                      }`}
+                    >
+                      {isServingEnabled ? 'Enabled' : 'Disabled'}
+                    </Badge>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 max-w-full truncate">
                       {agent.model_name || 'No LLM'}
                     </Badge>
@@ -471,7 +536,6 @@ function AgentList() {
                   editingAgent.sandbox_timeout_seconds,
                 compact_threshold_percent:
                   editingAgent.compact_threshold_percent,
-                is_active: editingAgent.is_active,
               }
             : undefined
         }
