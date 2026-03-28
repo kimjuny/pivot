@@ -158,7 +158,7 @@ export function SessionSidebar({
     >
       <SidebarHeader className="gap-2 px-3 pb-2 pt-3">
         {!isCollapsed && sidebarTitle ? (
-          <div className="px-1 pb-1">
+          <div className="pb-1">
             <div className="flex items-center gap-2 rounded-xl px-2 py-1.5">
               {sidebarTitleIcon ? (
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-accent/70 text-sidebar-foreground">
@@ -211,12 +211,15 @@ export function SessionSidebar({
 
       <SidebarSeparator className="mx-3" />
 
-      <SidebarContent className="gap-0">
+      {!isCollapsed && (
+      <>
+        <SidebarSeparator className="mx-3" />
+        <SidebarContent className="gap-0">
         <SidebarGroup className="py-2">
           <SidebarGroupLabel className="h-6 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/42">
             Sessions
           </SidebarGroupLabel>
-          <SidebarGroupContent className="px-1">
+          <SidebarGroupContent className="px-1 pt-1">
             {sessions.length === 0 ? (
               <div className="px-3 py-4 text-sm text-muted-foreground">
                 {isLoadingSession ? (
@@ -268,7 +271,7 @@ export function SessionSidebar({
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <SidebarMenuAction
-                                showOnHover
+                                showOnHover={!session.is_pinned}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                 }}
@@ -331,11 +334,13 @@ export function SessionSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      </>
+      )}
 
       {footer ? (
         <>
           <SidebarSeparator className="mx-3" />
-          <SidebarFooter className="px-3 pb-3 pt-2">
+          <SidebarFooter className={`mt-auto px-3 pb-3 pt-2 group-data-[collapsible=icon]:px-1`}>
             {footer(isCollapsed)}
           </SidebarFooter>
         </>

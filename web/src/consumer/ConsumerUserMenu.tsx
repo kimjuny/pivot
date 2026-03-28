@@ -38,19 +38,16 @@ function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          className={`h-10 ${isCollapsed ? "w-10 px-0" : "w-full justify-start gap-3 px-3"}`}
+          className={`h-8 ${isCollapsed ? "mx-auto w-8 px-0" : "w-full justify-start gap-3 px-3"}`}
           aria-label={user ? `User menu: ${user.username}` : "User menu"}
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+          <div className={`flex items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary ${isCollapsed ? "size-5" : "size-7"}`}>
             {user?.username.charAt(0).toUpperCase() ?? "U"}
           </div>
           {!isCollapsed && (
             <div className="min-w-0 text-left">
               <div className="truncate text-sm font-medium text-foreground">
                 {user?.username ?? "Workspace"}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Account
               </div>
             </div>
           )}
@@ -59,7 +56,7 @@ function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
       <DropdownMenuContent
         align={isCollapsed ? "start" : "end"}
         side="top"
-        className="w-52"
+        className="min-w-[8rem]"
       >
         <div className="px-2 py-1.5 text-sm font-medium">
           {user?.username ?? "Workspace"}

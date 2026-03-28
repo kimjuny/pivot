@@ -16,6 +16,7 @@ from app.crud.llm import llm as llm_crud
 from app.crud.scene import scene as scene_crud
 from app.crud.subscene import subscene as subscene_crud
 from app.models.agent import Connection
+from app.models.agent_release import AgentRelease
 from app.models.user import User
 from app.schemas.schemas import (
     AgentCreate,
@@ -47,6 +48,7 @@ def _serialize_agent_response(
     agent: Any,
     *,
     model_display: str,
+    active_release_version: int | None = None,
 ) -> dict[str, Any]:
     """Serialize one agent row into the shared response payload shape."""
     return {
@@ -59,6 +61,7 @@ def _serialize_agent_response(
         "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
         "compact_threshold_percent": agent.compact_threshold_percent,
         "active_release_id": agent.active_release_id,
+        "active_release_version": active_release_version,
         "serving_enabled": agent.serving_enabled,
         "model_name": model_display,
         "is_active": agent.is_active,
@@ -97,7 +100,19 @@ async def get_agents(
             if llm:
                 model_display = f"{llm.name} ({llm.model})"
 
-        result.append(_serialize_agent_response(agent, model_display=model_display))
+        release_version = None
+        if agent.active_release_id is not None:
+            release = db.get(AgentRelease, agent.active_release_id)
+            if release is not None:
+                release_version = release.version
+
+        result.append(
+            _serialize_agent_response(
+                agent,
+                model_display=model_display,
+                active_release_version=release_version,
+            )
+        )
     return result
 
 

@@ -443,14 +443,16 @@ function AgentList() {
                     )}
                   </div>
 
-                  {/* Bottom: model badge */}
+                  {/* Bottom: badges */}
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <Badge
-                      variant={isPublished ? 'default' : 'outline'}
-                      className="text-[10px] px-1.5 py-0 h-4"
-                    >
-                      {isPublished ? 'Published' : 'Draft'}
-                    </Badge>
+                    {isPublished && agent.active_release_version != null && (
+                      <Badge
+                        variant="default"
+                        className="text-[10px] px-1.5 py-0 h-4"
+                      >
+                        v{agent.active_release_version}
+                      </Badge>
+                    )}
                     <Badge
                       variant="outline"
                       className={`text-[10px] px-1.5 py-0 h-4 ${

@@ -28,6 +28,8 @@ export interface Agent {
   compact_threshold_percent: number;
   /** Published release used by default for newly created end-user sessions. */
   active_release_id?: number | null;
+  /** Version number of the active release, if any. */
+  active_release_version?: number | null;
   /** Whether this agent currently accepts end-user traffic. */
   serving_enabled?: boolean;
   /** Deprecated: Name of the LLM model used by this agent */

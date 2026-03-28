@@ -97,6 +97,7 @@ class AgentResponse(AppBaseModel):
     sandbox_timeout_seconds: int
     compact_threshold_percent: int
     active_release_id: int | None
+    active_release_version: int | None = None
     serving_enabled: bool
     model_name: str | None
     is_active: bool

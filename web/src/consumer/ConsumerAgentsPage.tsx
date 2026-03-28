@@ -14,23 +14,15 @@ import {
   updateSession,
 } from "@/utils/api";
 import { SessionSidebar } from "@/pages/chat/components/SessionSidebar";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import {
   getConsumerAgents,
   getConsumerSessions,
   type ConsumerSessionListItem,
 } from "@/consumer/api";
 import ConsumerUserMenu from "@/consumer/ConsumerUserMenu";
+import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import type { Agent } from "@/types";
-import { formatTimestamp } from "@/utils/timestamp";
 
 /**
  * Keep the recent-session list aligned with backend ordering semantics.
@@ -152,6 +144,14 @@ function ConsumerAgentsPage() {
         currentSessionId={null}
         isLoadingSession={isLoading}
         isStreaming={false}
+        sidebarTitleIcon={
+          <img
+            src="/pivot.svg"
+            alt=""
+            className="size-5"
+            aria-hidden="true"
+          />
+        }
         sidebarTitle="Pivot"
         onNewSession={handleNewSession}
         onSelectSession={handleSelectSession}
@@ -197,88 +197,79 @@ function ConsumerAgentsPage() {
         <div className="pointer-events-none absolute left-3 top-3 z-20">
           <SidebarTrigger className="pointer-events-auto h-8 w-8 rounded-lg bg-transparent text-muted-foreground shadow-none hover:bg-accent/70 hover:text-foreground" />
         </div>
-        <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col px-6 py-6">
-          <div className="flex flex-col gap-4 border-b border-border pb-5 md:flex-row md:items-end md:justify-between">
+        <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-6">
+          <div className="flex flex-col gap-4 pb-5 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+              <h1 className="text-xl font-semibold tracking-tight text-foreground">
                 Agents
               </h1>
               <p className="text-sm text-muted-foreground">
-                Choose an agent and jump straight into work.
+                Choose an agent and start a conversation.
               </p>
             </div>
 
-            <div className="w-full md:max-w-sm">
+            <div className="w-full md:max-w-xs">
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search agents"
+                placeholder="Search agents…"
                 aria-label="Search consumer agents"
               />
             </div>
           </div>
 
-          <div className="py-6">
+          <div className="flex-1">
             {isLoading ? (
-              <Card>
-                <CardContent className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Loading visible agents…</span>
-                </CardContent>
-              </Card>
+              <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading agents…</span>
+              </div>
             ) : error ? (
-              <Card>
-                <CardContent className="pt-6 text-sm text-destructive">
-                  {error}
-                </CardContent>
-              </Card>
+              <div className="py-12 text-sm text-destructive">{error}</div>
             ) : filteredAgents.length === 0 ? (
-              <Card>
-                <CardContent className="pt-6 text-sm text-muted-foreground">
-                  No published agents matched your search.
-                </CardContent>
-              </Card>
+              <div className="py-12 text-center text-sm text-muted-foreground">
+                {agents.length === 0
+                  ? "No agents available yet."
+                  : "No agents match your search."}
+              </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <div className="flex flex-col">
                 {filteredAgents.map((agent) => (
-                  <Card
+                  <button
                     key={agent.id}
-                    className="cursor-pointer transition-colors hover:border-primary/40"
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
                     onClick={() => navigate(`/app/agents/${agent.id}`)}
                   >
-                    <CardHeader>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-2">
-                          <CardTitle className="flex items-center gap-2">
-                            <Bot className="h-4 w-4 text-primary" />
-                            <span>{agent.name}</span>
-                          </CardTitle>
-                          <CardDescription className="line-clamp-3 min-h-[3.75rem]">
-                            {agent.description?.trim() || "No description yet."}
-                          </CardDescription>
-                        </div>
-                        <Badge variant="secondary">Live</Badge>
-                      </div>
-                    </CardHeader>
+                    <LLMBrandAvatar
+                      model={agent.model_name}
+                      containerClassName="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10"
+                      imageClassName="size-4"
+                      fallback={
+                        <Bot
+                          className="size-4 text-primary"
+                          aria-hidden="true"
+                        />
+                      }
+                    />
 
-                    <CardContent className="space-y-4">
-                      <div className="space-y-1 text-sm text-muted-foreground">
-                        <div>{agent.model_name || "No model label"}</div>
-                        <div>Updated {formatTimestamp(agent.updated_at)}</div>
-                      </div>
+                    <span className="min-w-0 shrink-0 text-sm font-medium">
+                      {agent.name}
+                    </span>
 
-                      <Button
-                        type="button"
-                        className="w-full"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          navigate(`/app/agents/${agent.id}`);
-                        }}
+                    <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                      {agent.description?.trim() ?? ""}
+                    </span>
+
+                    {agent.model_name && (
+                      <Badge
+                        variant="outline"
+                        className="shrink-0 text-[10px]"
                       >
-                        Open chat
-                      </Button>
-                    </CardContent>
-                  </Card>
+                        {agent.model_name}
+                      </Badge>
+                    )}
+                  </button>
                 ))}
               </div>
             )}

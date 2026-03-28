@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Plus } from "@/lib/lucide";
+import { Bot, Plus } from "@/lib/lucide";
 import { useNavigate } from 'react-router-dom';
 import { getLLMs } from '../utils/api';
 import type { LLM } from '../types';
+import { LLMBrandAvatar } from './LLMBrandAvatar';
 import {
   Dialog,
   DialogContent,
@@ -258,9 +259,15 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                     ) : (
                       availableLLMs.map((llm) => (
                         <SelectItem key={llm.id} value={llm.id.toString()}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{llm.name}</span>
-                            <span className="text-xs text-muted-foreground">({llm.model})</span>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <LLMBrandAvatar
+                              model={llm.model}
+                              containerClassName="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10"
+                              imageClassName="size-3.5"
+                              fallback={<Bot className="size-3.5 text-primary" aria-hidden="true" />}
+                            />
+                            <span className="shrink-0 font-medium">{llm.name}</span>
+                            <span className="min-w-0 truncate text-xs text-muted-foreground">({llm.model})</span>
                           </div>
                         </SelectItem>
                       ))
@@ -308,9 +315,15 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                         key={`skill-resolution-${llm.id}`}
                         value={llm.id.toString()}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{llm.name}</span>
-                          <span className="text-xs text-muted-foreground">({llm.model})</span>
+                        <div className="flex min-w-0 items-center gap-2">
+                          <LLMBrandAvatar
+                            model={llm.model}
+                            containerClassName="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10"
+                            imageClassName="size-3.5"
+                            fallback={<Bot className="size-3.5 text-primary" aria-hidden="true" />}
+                          />
+                          <span className="truncate font-medium">{llm.name}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">({llm.model})</span>
                         </div>
                       </SelectItem>
                     ))}
