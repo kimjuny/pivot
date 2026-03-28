@@ -44,10 +44,13 @@ class OpenAICompletionErrorsTestCase(unittest.TestCase):
         stream_response.__exit__ = Mock(return_value=None)
         stream_response.raise_for_status.side_effect = http_error
 
-        with patch(
-            "app.llm.openai_completion_llm.requests.post",
-            return_value=stream_response,
-        ), self.assertRaises(RuntimeError) as raised:
+        with (
+            patch(
+                "app.llm.openai_completion_llm.requests.post",
+                return_value=stream_response,
+            ),
+            self.assertRaises(RuntimeError) as raised,
+        ):
             list(llm.chat_stream([{"role": "user", "content": "hello"}]))
 
         message = str(raised.exception)

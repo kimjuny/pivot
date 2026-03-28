@@ -21,6 +21,11 @@ import {
   API_BASE_URL,
 } from "@/utils/api";
 import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import {
   AUTH_EXPIRED_EVENT,
   getAuthToken,
   isTokenValid,
@@ -114,7 +119,9 @@ function toSessionListItem(session: SessionResponse): SessionListItem {
   return {
     session_id: session.session_id,
     agent_id: session.agent_id,
+    type: session.type ?? "consumer",
     release_id: session.release_id,
+    test_workspace_hash: session.test_workspace_hash ?? null,
     status: session.status,
     title: session.title,
     is_pinned: session.is_pinned,
@@ -285,10 +292,18 @@ function findLatestWaitingReplyTaskId(messages: ChatMessage[]): string | null {
  */
 function ChatContainer({
   agentId,
+  sessionType = "consumer",
+  initialSessionId,
+  testSnapshot,
+  testSnapshotHash,
   agentName,
   agentToolIds,
   primaryLlmId,
   sessionIdleTimeoutMinutes,
+  sidebarNavigationItems,
+  sidebarTitleIcon,
+  sidebarTitle,
+  sidebarFooter,
   onRuntimeDebugChange,
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -303,7 +318,6 @@ function ChatContainer({
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
     null,
   );
@@ -496,10 +510,14 @@ function ChatContainer({
    * Reloads the sidebar session list so metadata stays in sync after task completion.
    */
   const refreshSessionList = useCallback(async (): Promise<SessionListItem[]> => {
-    const response = await listSessions(agentId);
+    const response = await listSessions(
+      agentId,
+      50,
+      { type: sessionType },
+    );
     setSessions(response.sessions);
     return response.sessions;
-  }, [agentId]);
+  }, [agentId, sessionType]);
 
   /**
    * Commits a fully prepared message snapshot to both React state and the
@@ -1348,7 +1366,11 @@ function ChatContainer({
 
   useEffect(() => {
     const initSessions = async () => {
-      if (isInitialized || isLoadingSession) {
+      if (
+        isInitialized ||
+        isLoadingSession ||
+        (sessionType === "studio_test" && testSnapshot && !testSnapshotHash)
+      ) {
         return;
       }
 
@@ -1357,11 +1379,37 @@ function ChatContainer({
         const existingSessions = await refreshSessionList();
 
         if (existingSessions.length > 0) {
-          const autoSelectedSessionId = getAutoSelectedSessionId(
-            existingSessions,
-            Date.now(),
-            sessionIdleTimeoutMs,
-          );
+          const requestedSessionId =
+            typeof initialSessionId === "string" &&
+            initialSessionId.trim().length > 0
+              ? initialSessionId.trim()
+              : null;
+          const requestedSession = requestedSessionId
+            ? existingSessions.find(
+                (session) => session.session_id === requestedSessionId,
+              )
+            : null;
+          const studioMatchingSessions =
+            sessionType === "studio_test"
+              ? testSnapshotHash
+                ? existingSessions.filter(
+                    (session) => session.test_workspace_hash === testSnapshotHash,
+                  )
+                : []
+              : existingSessions;
+          const autoSelectedSessionId =
+            requestedSession?.session_id ??
+            (sessionType === "studio_test"
+              ? getAutoSelectedSessionId(
+                  studioMatchingSessions,
+                  Date.now(),
+                  sessionIdleTimeoutMs,
+                )
+              : getAutoSelectedSessionId(
+                  existingSessions,
+                  Date.now(),
+                  sessionIdleTimeoutMs,
+                ));
 
           setCurrentSessionId(autoSelectedSessionId);
           currentSessionIdRef.current = autoSelectedSessionId;
@@ -1413,6 +1461,7 @@ function ChatContainer({
   }, [
     agentId,
     isInitialized,
+    initialSessionId,
     isLoadingSession,
     refreshSessionList,
     sessionIdleTimeoutMs,
@@ -1420,6 +1469,9 @@ function ChatContainer({
     stopSessionStream,
     applyHistoryMessages,
     commitMessages,
+    sessionType,
+    syncLiveRefsFromMessages,
+    testSnapshotHash,
   ]);
 
   useEffect(() => {
@@ -1538,6 +1590,8 @@ function ChatContainer({
         task_id: replyTaskId,
         draft_message: inputMessage,
         file_ids: draftFileIds,
+        session_type: sessionType,
+        test_snapshot: currentSessionId ? undefined : testSnapshot,
       })
         .then((usage) => {
           if (contextUsageRequestIdRef.current === requestId) {
@@ -1567,6 +1621,8 @@ function ChatContainer({
     isStreaming,
     readyPendingFileIdsKey,
     replyTaskId,
+    sessionType,
+    testSnapshot,
   ]);
 
   useEffect(() => {
@@ -1585,6 +1641,7 @@ function ChatContainer({
         task_id: activeContextTaskId,
         draft_message: "",
         file_ids: [],
+        session_type: sessionType,
       })
         .then((usage) => {
           if (contextUsageRequestIdRef.current === requestId) {
@@ -1613,6 +1670,7 @@ function ChatContainer({
     clearCompactStatusImmediately,
     currentSessionId,
     isStreaming,
+    sessionType,
   ]);
 
   /**
@@ -1839,7 +1897,10 @@ function ChatContainer({
       let initialCursor = sessionEventCursorRef.current;
 
       if (!activeSessionId) {
-        const session = await createSession(agentId);
+        const session = await createSession(agentId, {
+          type: sessionType,
+          testSnapshot: sessionType === "studio_test" ? testSnapshot : undefined,
+        });
         activeSessionId = session.session_id;
         shouldResetConversation = true;
         const sessionItem = toSessionListItem(session);
@@ -2067,22 +2128,27 @@ function ChatContainer({
   const replyTarget = findReplyTarget(messages, replyTaskId);
 
   return (
-    <div className="flex h-full overflow-hidden bg-background text-foreground">
+    <SidebarProvider defaultOpen>
       <SessionSidebar
         sessions={sessions}
         currentSessionId={currentSessionId}
         isLoadingSession={isLoadingSession}
         isStreaming={isStreaming}
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapsed={() => setIsSidebarCollapsed((previous) => !previous)}
+        sidebarTitleIcon={sidebarTitleIcon}
+        sidebarTitle={sidebarTitle}
         onNewSession={handleNewSession}
         onSelectSession={handleSelectSession}
         onRenameSession={handleRenameSession}
         onTogglePinSession={handleTogglePinSession}
         onDeleteSession={handleDeleteSession}
+        navigationItems={sidebarNavigationItems}
+        footer={sidebarFooter}
       />
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <SidebarInset className="flex flex-1 flex-col overflow-hidden bg-background text-foreground">
+        <div className="pointer-events-none absolute left-3 top-3 z-20">
+          <SidebarTrigger className="pointer-events-auto h-8 w-8 rounded-lg bg-transparent text-muted-foreground shadow-none hover:bg-accent/70 hover:text-foreground" />
+        </div>
         <div
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
@@ -2139,8 +2205,8 @@ function ChatContainer({
           onDocumentInputChange={handleDocumentInputChange}
           onRemovePendingFile={removePendingFile}
         />
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 

@@ -255,13 +255,40 @@ Rule:
 ### Test
 
 Purpose:
-- Validate the current draft before release.
+- Validate the current working copy before release.
 
 Current interaction:
 - `Test` is a global workspace action, not a sidebar step
 - It opens the current draft test surface from the top-right action cluster
 - The old sidebar footer entry for chat has been removed in favor of this
   clearer Studio action
+
+Current runtime contract:
+- Studio Test no longer depends on publish
+- Studio Test creates `session.type = studio_test`
+- A Studio Test session does not bind `release_id`
+- A Studio Test session binds one frozen working-copy snapshot through
+  `test_snapshot_id`
+- The runtime uses that frozen snapshot for execution, context estimation, and
+  session restoration
+
+Saved draft vs working copy:
+- `Save` persists the current draft baseline
+- `Test` does not wait for `Save`
+- `Test` should reflect the current working copy, including unsaved editor
+  changes
+
+Session behavior:
+- Old Studio Test sessions remain visible for the current agent
+- Reopening Test should auto-restore only the most recent session whose
+  `workspace_hash` matches the current working copy
+- If the working copy changed, Test should start a new blank test session
+  instead of silently resuming an older incompatible one
+
+Visibility boundary:
+- Studio Test session lists should show only `studio_test` sessions for the
+  current agent
+- Consumer must never surface `studio_test` sessions
 
 ### Drafts and Releases
 
@@ -307,6 +334,12 @@ This rule exists to protect:
 - conversation consistency
 - auditability
 - release-level operations analysis
+
+Implementation note:
+- The serving runtime now resolves execution from the release snapshot pinned by
+  `session.release_id`
+- Context estimation and task execution should no longer read mutable live agent
+  fields for Consumer sessions
 
 ### Serving Toggle
 
@@ -437,16 +470,19 @@ Completed or largely established:
    multi-step builder.
 4. `Test` and `Publish` are explicit global actions in the agent workspace.
 5. Draft and release concepts now exist as real persisted backend concepts.
+6. Studio Test now runs against working-copy snapshots without requiring
+   publish.
+7. Studio Test and Consumer are separated by `session.type`:
+   - `studio_test` for Studio validation
+   - `consumer` for end-user released conversations
+8. Consumer-serving runtime now resolves from release snapshots instead of the
+   mutable live agent row.
 
 Next priorities:
 1. Continue refining the agent workspace interaction model rather than
    replacing it with a page-per-step builder.
-2. Implement the Phase 1 serving contract for end users:
-   - `active_release_id`
-   - `serving_enabled`
-   - session-level `release_id` binding
-3. Improve release audit depth using more structured snapshot diffs.
-4. Decide which runtime and basics fields should remain modal-driven versus
+2. Improve release audit depth using more structured snapshot diffs.
+3. Decide which runtime and basics fields should remain modal-driven versus
    becoming more visible in the workspace.
-5. Prepare the Studio model so the future end-user product can consume stable
-   published releases rather than mutable working state.
+4. Continue refining the Studio Test UX around snapshot awareness and session
+   history.

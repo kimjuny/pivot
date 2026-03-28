@@ -1131,13 +1131,17 @@ class ReactEngine:
         compact_threshold_percent = max(int(agent.compact_threshold_percent or 0), 0)
         system_prompt = build_runtime_system_prompt()
 
-        should_append_user_history = task.iteration == 0 or turn_user_message is not None
+        should_append_user_history = (
+            task.iteration == 0 or turn_user_message is not None
+        )
         if task.session_id and should_append_user_history:
             session_service = SessionService(self.db)
             session_service.update_chat_history(
                 task.session_id,
                 "user",
-                turn_user_message if turn_user_message is not None else task.user_message,
+                turn_user_message
+                if turn_user_message is not None
+                else task.user_message,
                 files=turn_files,
             )
 

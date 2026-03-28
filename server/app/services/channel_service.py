@@ -43,6 +43,7 @@ from app.schemas.channel import (
     ChannelLinkTokenResponse,
     ChannelLinkTokenStatusResponse,
 )
+from app.services.agent_release_runtime_service import AgentReleaseRuntimeService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
@@ -756,10 +757,23 @@ class ChannelService:
             )
             return
 
-        if not agent.llm_id:
+        try:
+            runtime_config = AgentReleaseRuntimeService(self.db).resolve_for_session(
+                session_id
+            )
+        except ValueError as exc:
             yield ChannelOutboundAction(
                 kind="error",
-                text=f"Agent {agent.name} has no LLM configured yet.",
+                text=str(exc),
+                delivery_hint="append",
+                is_terminal=True,
+            )
+            return
+
+        if runtime_config.llm_id is None:
+            yield ChannelOutboundAction(
+                kind="error",
+                text=f"Agent {runtime_config.agent_name} has no LLM configured yet.",
                 delivery_hint="append",
                 is_terminal=True,
             )

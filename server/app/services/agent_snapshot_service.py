@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.agent import Agent, Connection, Scene, Subscene
-from app.models.agent_release import AgentRelease, AgentSavedDraft
+from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import AgentChannelBinding
 from app.models.web_search import AgentWebSearchBinding
 from app.services.agent_service import AgentService
@@ -68,6 +68,23 @@ def _format_name_list(names: list[str], *, noun: str, verb: str) -> str:
     preview = ", ".join(names[:3])
     suffix = "" if len(names) <= 3 else f", +{len(names) - 3} more"
     return f"{noun} {verb}: {preview}{suffix}"
+
+
+def _normalize_allowlist_payload(raw_value: Any) -> list[str] | None:
+    """Normalize a Studio snapshot allowlist payload into a sorted unique list."""
+    if raw_value is None:
+        return None
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+        except (TypeError, ValueError):
+            return []
+        return _normalize_allowlist_payload(parsed)
+    if not isinstance(raw_value, list):
+        return []
+    return sorted(
+        {item.strip() for item in raw_value if isinstance(item, str) and item.strip()}
+    )
 
 
 class AgentSnapshotService:
@@ -217,6 +234,217 @@ class AgentSnapshotService:
                 for binding in web_search_bindings
             ],
         }
+
+    def build_studio_test_snapshot(
+        self,
+        agent_id: int,
+        *,
+        working_copy_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize one Studio working copy into a runtime snapshot.
+
+        Args:
+            agent_id: Agent whose persisted bindings should backfill the snapshot.
+            working_copy_snapshot: Frontend-authored working copy payload.
+
+        Returns:
+            Canonical runtime snapshot for one Studio test session.
+
+        Raises:
+            ValueError: If the payload is malformed.
+        """
+        if not isinstance(working_copy_snapshot, dict):
+            raise ValueError("Studio test snapshot must be a JSON object.")
+
+        base_snapshot = self.build_current_snapshot(agent_id)
+        raw_agent_payload = working_copy_snapshot.get("agent")
+        raw_scenes_payload = working_copy_snapshot.get("scenes", [])
+        if not isinstance(raw_agent_payload, dict):
+            raise ValueError("Studio test snapshot is missing agent data.")
+        if not isinstance(raw_scenes_payload, list):
+            raise ValueError("Studio test snapshot scenes must be a JSON array.")
+
+        base_agent_payload = base_snapshot["agent"]
+        normalized_agent = {
+            "id": base_agent_payload["id"],
+            "name": str(raw_agent_payload.get("name") or base_agent_payload["name"]),
+            "description": (
+                str(raw_agent_payload["description"])
+                if isinstance(raw_agent_payload.get("description"), str)
+                else None
+            ),
+            "llm_id": (
+                int(raw_agent_payload["llm_id"])
+                if isinstance(raw_agent_payload.get("llm_id"), int)
+                else None
+            ),
+            "skill_resolution_llm_id": (
+                int(raw_agent_payload["skill_resolution_llm_id"])
+                if isinstance(raw_agent_payload.get("skill_resolution_llm_id"), int)
+                else None
+            ),
+            "session_idle_timeout_minutes": int(
+                raw_agent_payload.get(
+                    "session_idle_timeout_minutes",
+                    base_agent_payload["session_idle_timeout_minutes"],
+                )
+            ),
+            "sandbox_timeout_seconds": int(
+                raw_agent_payload.get(
+                    "sandbox_timeout_seconds",
+                    base_agent_payload["sandbox_timeout_seconds"],
+                )
+            ),
+            "compact_threshold_percent": int(
+                raw_agent_payload.get(
+                    "compact_threshold_percent",
+                    base_agent_payload["compact_threshold_percent"],
+                )
+            ),
+            "is_active": bool(
+                raw_agent_payload.get("is_active", base_agent_payload["is_active"])
+            ),
+            "max_iteration": int(
+                raw_agent_payload.get(
+                    "max_iteration",
+                    base_agent_payload["max_iteration"],
+                )
+            ),
+            "tool_ids": _normalize_allowlist_payload(raw_agent_payload.get("tool_ids")),
+            "skill_ids": _normalize_allowlist_payload(
+                raw_agent_payload.get("skill_ids")
+            ),
+        }
+
+        normalized_scenes: list[dict[str, Any]] = []
+        for raw_scene in raw_scenes_payload:
+            if not isinstance(raw_scene, dict):
+                raise ValueError("Studio test snapshot scenes must contain objects.")
+            raw_subscenes = raw_scene.get("subscenes", [])
+            if not isinstance(raw_subscenes, list):
+                raise ValueError(
+                    "Studio test snapshot scene subscenes must be a JSON array."
+                )
+
+            normalized_subscenes: list[dict[str, Any]] = []
+            for raw_subscene in raw_subscenes:
+                if not isinstance(raw_subscene, dict):
+                    raise ValueError(
+                        "Studio test snapshot subscenes must contain objects."
+                    )
+                raw_connections = raw_subscene.get("connections", [])
+                if not isinstance(raw_connections, list):
+                    raise ValueError(
+                        "Studio test snapshot connections must be a JSON array."
+                    )
+                normalized_connections: list[dict[str, Any]] = []
+                for raw_connection in raw_connections:
+                    if not isinstance(raw_connection, dict):
+                        raise ValueError(
+                            "Studio test snapshot connections must contain objects."
+                        )
+                    normalized_connections.append(
+                        {
+                            "id": raw_connection.get("id"),
+                            "name": str(raw_connection.get("name") or ""),
+                            "condition": (
+                                str(raw_connection["condition"])
+                                if isinstance(raw_connection.get("condition"), str)
+                                else None
+                            ),
+                            "from_subscene": str(
+                                raw_connection.get("from_subscene") or ""
+                            ),
+                            "to_subscene": str(raw_connection.get("to_subscene") or ""),
+                        }
+                    )
+
+                normalized_subscenes.append(
+                    {
+                        "id": raw_subscene.get("id"),
+                        "name": str(raw_subscene.get("name") or ""),
+                        "type": str(raw_subscene.get("type") or "normal"),
+                        "state": str(raw_subscene.get("state") or "inactive"),
+                        "description": (
+                            str(raw_subscene["description"])
+                            if isinstance(raw_subscene.get("description"), str)
+                            else None
+                        ),
+                        "mandatory": bool(raw_subscene.get("mandatory", False)),
+                        "objective": (
+                            str(raw_subscene["objective"])
+                            if isinstance(raw_subscene.get("objective"), str)
+                            else None
+                        ),
+                        "connections": normalized_connections,
+                    }
+                )
+
+            normalized_scenes.append(
+                {
+                    "id": raw_scene.get("id"),
+                    "name": str(raw_scene.get("name") or ""),
+                    "description": (
+                        str(raw_scene["description"])
+                        if isinstance(raw_scene.get("description"), str)
+                        else None
+                    ),
+                    "subscenes": normalized_subscenes,
+                }
+            )
+
+        return {
+            "schema_version": 1,
+            "agent": normalized_agent,
+            "scenes": normalized_scenes,
+            "channel_bindings": base_snapshot["channel_bindings"],
+            "web_search_bindings": base_snapshot["web_search_bindings"],
+        }
+
+    def build_studio_workspace_hash_payload(
+        self,
+        agent_id: int,
+        *,
+        working_copy_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Normalize the Studio working-copy anchor used for session matching."""
+        normalized_snapshot = self.build_studio_test_snapshot(
+            agent_id,
+            working_copy_snapshot=working_copy_snapshot,
+        )
+        return {
+            "schema_version": 1,
+            "agent": normalized_snapshot["agent"],
+            "scenes": normalized_snapshot["scenes"],
+        }
+
+    def create_test_snapshot(
+        self,
+        agent_id: int,
+        *,
+        working_copy_snapshot: dict[str, Any],
+        created_by: str | None = None,
+    ) -> AgentTestSnapshot:
+        """Freeze one Studio working copy into an immutable test snapshot."""
+        runtime_snapshot = self.build_studio_test_snapshot(
+            agent_id,
+            working_copy_snapshot=working_copy_snapshot,
+        )
+        workspace_hash_payload = self.build_studio_workspace_hash_payload(
+            agent_id,
+            working_copy_snapshot=working_copy_snapshot,
+        )
+        snapshot = AgentTestSnapshot(
+            agent_id=agent_id,
+            snapshot_json=_dump_json(runtime_snapshot),
+            snapshot_hash=_hash_payload(runtime_snapshot),
+            workspace_hash=_hash_payload(workspace_hash_payload),
+            created_by=created_by,
+        )
+        self.db.add(snapshot)
+        self.db.commit()
+        self.db.refresh(snapshot)
+        return snapshot
 
     def _load_snapshot_json(self, raw_value: str) -> dict[str, Any]:
         """Parse one stored snapshot JSON payload."""

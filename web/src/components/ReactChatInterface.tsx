@@ -207,14 +207,19 @@ function CompactDebugButton({
 /**
  * Backward-compatible entrypoint that now owns the floating compact debug shell.
  */
-function ReactChatInterface(props: ReactChatInterfaceProps) {
+function ReactChatInterface({
+  showCompactDebug = true,
+  ...props
+}: ReactChatInterfaceProps) {
   const [debugState, setDebugState] =
     useState<ChatRuntimeDebugState>(EMPTY_DEBUG_STATE);
 
   return (
     <div className="relative h-full">
       <ChatPage {...props} onRuntimeDebugChange={setDebugState} />
-      <CompactDebugButton debugState={debugState} />
+      {showCompactDebug ? (
+        <CompactDebugButton debugState={debugState} />
+      ) : null}
     </div>
   );
 }

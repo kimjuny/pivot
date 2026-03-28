@@ -47,9 +47,11 @@ WORKDIR /workspace
 # ---- Backend dev target -----------------------------------------------------
 FROM docker.io/library/python:3.11-slim AS backend-dev
 
-# System deps for compiled Python packages
+# System deps for compiled Python packages and local type-check tooling.
+# Pyright's Python wrapper shells out to Node; bundling nodejs in the dev image
+# avoids a nodeenv bootstrap on every fresh container run.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libffi-dev && \
+    apt-get install -y --no-install-recommends gcc libffi-dev nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry

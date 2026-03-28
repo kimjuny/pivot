@@ -22,7 +22,10 @@ class Session(SQLModel, table=True):
         id: Primary key of the session.
         session_id: UUID string for global unique session identification.
         agent_id: Foreign key to the agent handling this session.
+        type: Whether this session belongs to Consumer or Studio Test.
         release_id: Published release fixed to this session at creation time.
+        test_snapshot_id: Frozen Studio working-copy snapshot pinned to this
+            session when ``type`` is ``studio_test``.
         user: Username of the user who owns this session.
         status: Current status (active, waiting_input, closed).
         title: Optional user-facing session label set from the sidebar.
@@ -43,12 +46,25 @@ class Session(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     session_id: str = Field(index=True, unique=True, description="UUID for session")
     agent_id: int = Field(foreign_key="agent.id", index=True)
+    type: str = Field(
+        default="consumer",
+        index=True,
+        description="Session type: consumer or studio_test",
+    )
     release_id: int | None = Field(
         default=None,
         index=True,
         description=(
             "Published release fixed to this session at creation time. "
             "Legacy rows created before release pinning may still be null."
+        ),
+    )
+    test_snapshot_id: int | None = Field(
+        default=None,
+        index=True,
+        description=(
+            "Frozen Studio working-copy snapshot pinned to this session. "
+            "Consumer sessions keep this field null."
         ),
     )
     user: str = Field(index=True, description="Username")

@@ -84,7 +84,10 @@ def _resolve_runtime_agent_for_request(
                 raise HTTPException(status_code=404, detail="Session not found")
 
     try:
-        agent = agent_service.require_interaction_enabled(request.agent_id)
+        if session_row is not None and session_row.type == "studio_test":
+            agent = agent_service.get_required_agent(request.agent_id)
+        else:
+            agent = agent_service.require_interaction_enabled(request.agent_id)
     except ValueError as exc:
         detail = str(exc)
         status_code = 404 if "not found" in detail else 409
@@ -338,6 +341,12 @@ async def estimate_react_context_usage(
             task_id=request.task_id,
             draft_message=request.draft_message,
             file_ids=request.file_ids,
+            session_type=request.session_type,
+            test_snapshot=(
+                request.test_snapshot.model_dump()
+                if request.test_snapshot is not None
+                else None
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

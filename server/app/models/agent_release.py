@@ -30,6 +30,28 @@ class AgentSavedDraft(SQLModel, table=True):
     saved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class AgentTestSnapshot(SQLModel, table=True):
+    """Immutable Studio test snapshot frozen from one working copy.
+
+    Attributes:
+        id: Primary key of the Studio test snapshot row.
+        agent_id: Agent whose working copy produced the snapshot.
+        snapshot_json: Canonical runtime snapshot used for test execution.
+        snapshot_hash: Stable content hash for the full runtime snapshot.
+        workspace_hash: Stable content hash for the Studio working-copy anchor.
+        created_by: Username that created the test snapshot, if known.
+        created_at: UTC timestamp when the snapshot was frozen.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    agent_id: int = Field(foreign_key="agent.id", index=True)
+    snapshot_json: str = Field()
+    snapshot_hash: str = Field(index=True, max_length=64)
+    workspace_hash: str = Field(index=True, max_length=64)
+    created_by: str | None = Field(default=None, max_length=120)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class AgentRelease(SQLModel, table=True):
     """Immutable published release snapshot for one agent.
 

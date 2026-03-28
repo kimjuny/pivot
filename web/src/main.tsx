@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import LoginPage from './components/LoginPage'
 import AgentList from './components/AgentList'
 import AgentDetailPage from './components/AgentDetailPage'
@@ -15,6 +15,9 @@ import { AuthProvider } from './contexts/AuthContext'
 import { getStoredUser, isTokenValid, useAuth } from './contexts/auth-core'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
+import ConsumerEntryPage from '@/consumer/ConsumerEntryPage'
+import ConsumerAgentsPage from '@/consumer/ConsumerAgentsPage'
+import ConsumerAgentPage from '@/consumer/ConsumerAgentPage'
 import './index.css'
 
 /**
@@ -126,6 +129,17 @@ export function StudioDashboardRoute() {
   );
 }
 
+/**
+ * Consumer layout wrapper for end-user-facing routes.
+ */
+export function ConsumerRouteLayout() {
+  return (
+    <ProtectedRoute>
+      <Outlet />
+    </ProtectedRoute>
+  );
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeProvider defaultTheme="dark" storageKey="pivot-ui-theme">
@@ -136,6 +150,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/" element={<LoginPage />} />
 
             {/* Protected routes */}
+            <Route path="/app" element={<ConsumerRouteLayout />}>
+              <Route index element={<ConsumerEntryPage />} />
+              <Route path="agents" element={<ConsumerAgentsPage />} />
+              <Route path="agents/:agentId" element={<ConsumerAgentPage />} />
+            </Route>
+
             <Route path="/studio" element={<Navigate to="/studio/dashboard" replace />} />
             <Route path="/studio/dashboard" element={<StudioDashboardRoute />} />
             <Route path="/studio/agents" element={<AgentListPage />} />

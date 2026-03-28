@@ -9,6 +9,7 @@ export const mockAgent: Agent = {
   sandbox_timeout_seconds: 60,
   compact_threshold_percent: 60,
   is_active: true,
+  max_iteration: 30,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 }

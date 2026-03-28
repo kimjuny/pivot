@@ -12,6 +12,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "agent",
     "agentrelease",
     "agentsaveddraft",
+    "agenttestsnapshot",
     "agentchannelbinding",
     "agentwebsearchbinding",
     "channeleventlog",
@@ -209,7 +210,18 @@ def ensure_session_schema_compatibility() -> None:
             )
         if "release_id" not in columns:
             conn.execute(text("ALTER TABLE session ADD COLUMN release_id INTEGER"))
+        if "type" not in columns:
+            conn.execute(
+                text("ALTER TABLE session ADD COLUMN type VARCHAR DEFAULT 'consumer'")
+            )
+        if "test_snapshot_id" not in columns:
+            conn.execute(
+                text("ALTER TABLE session ADD COLUMN test_snapshot_id INTEGER")
+            )
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
+        conn.execute(
+            text("UPDATE session SET type = 'consumer' WHERE type IS NULL")
+        )
         conn.execute(
             text(
                 "UPDATE session "

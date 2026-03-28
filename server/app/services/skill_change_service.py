@@ -404,7 +404,9 @@ def submit_skill_change_for_agent(
         ValueError: If the user cannot be resolved or the draft is invalid.
     """
     with Session(get_engine()) as session:
-        current_user = session.exec(select(User).where(User.username == username)).first()
+        current_user = session.exec(
+            select(User).where(User.username == username)
+        ).first()
         if current_user is None:
             raise ValueError(f"User '{username}' not found.")
 

@@ -6,7 +6,8 @@ import sys
 import unittest
 from importlib import import_module
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlmodel import Session as DBSession, SQLModel, create_engine
 
@@ -15,6 +16,8 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 Agent = import_module("app.models.agent").Agent
+AgentRelease = import_module("app.models.agent_release").AgentRelease
+LLM = import_module("app.models.llm").LLM
 ReactTask = import_module("app.models.react").ReactTask
 SessionModel = import_module("app.models.session").Session
 User = import_module("app.models.user").User
@@ -24,6 +27,9 @@ ReactTaskLaunchRequest = import_module(
 ReactTaskSupervisor = import_module(
     "app.services.react_task_supervisor"
 ).ReactTaskSupervisor
+ToolExecutionContext = import_module(
+    "app.orchestration.tool.manager"
+).ToolExecutionContext
 _should_run_skill_resolution = import_module(
     "app.services.react_task_supervisor"
 )._should_run_skill_resolution
@@ -39,7 +45,36 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         SQLModel.metadata.create_all(self.engine)
         self.session = DBSession(self.engine)
 
-        agent = Agent(name="agent-1", llm_id=1)
+        llm = LLM(
+            name="llm-live",
+            endpoint="https://example.com/v1",
+            model="live-model",
+            api_key="secret",
+            max_context=5000,
+        )
+        release_llm = LLM(
+            name="llm-release",
+            endpoint="https://example.com/v1",
+            model="release-model",
+            api_key="secret",
+            max_context=9000,
+        )
+        self.session.add(llm)
+        self.session.add(release_llm)
+        self.session.commit()
+        self.session.refresh(llm)
+        self.session.refresh(release_llm)
+        self.llm = llm
+        self.release_llm = release_llm
+
+        agent = Agent(
+            name="agent-1",
+            llm_id=llm.id,
+            max_iteration=30,
+            tool_ids='["live_tool"]',
+            skill_ids='["live_skill"]',
+            sandbox_timeout_seconds=25,
+        )
         self.session.add(agent)
         self.session.commit()
         self.session.refresh(agent)
@@ -49,9 +84,44 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.session.add(user)
         self.session.commit()
 
+        release = AgentRelease(
+            agent_id=agent.id or 0,
+            version=1,
+            snapshot_json=json.dumps(
+                {
+                    "schema_version": 1,
+                    "agent": {
+                        "id": agent.id,
+                        "name": agent.name,
+                        "description": None,
+                        "llm_id": release_llm.id,
+                        "skill_resolution_llm_id": None,
+                        "session_idle_timeout_minutes": 15,
+                        "sandbox_timeout_seconds": 90,
+                        "compact_threshold_percent": 60,
+                        "is_active": True,
+                        "max_iteration": 7,
+                        "tool_ids": ["release_tool"],
+                        "skill_ids": ["release_skill"],
+                    },
+                    "scenes": [],
+                    "channel_bindings": [],
+                    "web_search_bindings": [],
+                },
+                ensure_ascii=False,
+            ),
+            snapshot_hash="hash-release",
+            change_summary_json="[]",
+        )
+        self.session.add(release)
+        self.session.commit()
+        self.session.refresh(release)
+        self.release = release
+
         session = SessionModel(
             session_id="session-1",
             agent_id=agent.id or 0,
+            release_id=release.id or 0,
             user="alice",
             chat_history=json.dumps({"version": 1, "messages": []}),
             react_llm_messages="[]",
@@ -75,7 +145,6 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
 
     def test_runs_skill_resolution_for_new_task(self) -> None:
         """Fresh tasks should keep the pre-task skill matcher enabled."""
-        agent = Agent(name="agent-1", llm_id=1, skill_resolution_llm_id=2)
         task = ReactTask(
             task_id="task-1",
             agent_id=1,
@@ -86,11 +155,10 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             iteration=0,
         )
 
-        self.assertTrue(_should_run_skill_resolution(task=task, agent=agent))
+        self.assertTrue(_should_run_skill_resolution(task=task, resolver_llm_id=2))
 
     def test_skips_skill_resolution_for_waiting_input_resume(self) -> None:
         """Clarify resumes should continue the task instead of matching skills again."""
-        agent = Agent(name="agent-1", llm_id=1, skill_resolution_llm_id=2)
         task = ReactTask(
             task_id="task-clarify",
             agent_id=1,
@@ -101,7 +169,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             iteration=1,
         )
 
-        self.assertFalse(_should_run_skill_resolution(task=task, agent=agent))
+        self.assertFalse(_should_run_skill_resolution(task=task, resolver_llm_id=2))
 
     def test_prepare_task_updates_session_activity_for_new_turns(self) -> None:
         """Launching a fresh turn should let the backend own sidebar ordering."""
@@ -126,9 +194,109 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             self.fail("Expected refreshed session row")
 
         self.assertEqual(task.session_id, "session-1")
+        self.assertEqual(task.max_iteration, 7)
         self.assertGreater(refreshed_session.updated_at, original_updated_at)
 
-    def test_prepare_task_rejects_text_reply_for_structured_pending_action(self) -> None:
+    def test_run_task_uses_release_runtime_settings(self) -> None:
+        """Execution should read tool and timeout settings from the pinned release."""
+        task = ReactTask(
+            task_id="task-release",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Run released config",
+            user_intent="Run released config",
+            status="pending",
+            iteration=0,
+            max_iteration=7,
+        )
+        self.session.add(task)
+        self.session.commit()
+
+        captured: dict[str, object] = {}
+
+        class DummyEngine:
+            """Minimal async engine stub for release-runtime capture."""
+
+            def __init__(self, **kwargs: object) -> None:
+                tool_execution_context = kwargs["tool_execution_context"]
+                if not isinstance(tool_execution_context, ToolExecutionContext):
+                    raise AssertionError("Expected a ToolExecutionContext instance")
+                captured["tool_execution_context"] = tool_execution_context
+                self.cancelled = False
+
+            async def run_task(self, **kwargs: object):
+                if False:
+                    yield kwargs
+
+        with (
+            patch.object(
+                self.supervisor,
+                "_build_request_tool_manager",
+                return_value=MagicMock(),
+            ) as build_tool_manager,
+            patch.object(
+                react_task_supervisor_module,
+                "create_llm_from_config",
+                return_value=object(),
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "build_runtime_thinking_kwargs",
+                return_value={},
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "list_visible_skills",
+                return_value=[],
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "build_skill_mounts",
+                return_value=[],
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "ReactEngine",
+                DummyEngine,
+            ),
+            patch.object(
+                self.supervisor,
+                "_publish_event",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            asyncio.run(
+                self.supervisor._run_task(
+                    task_id="task-release",
+                    launch=ReactTaskLaunchRequest(
+                        agent_id=self.agent.id or 0,
+                        message="Run released config",
+                        username="alice",
+                        session_id="session-1",
+                        file_ids=[],
+                    ),
+                )
+            )
+
+        build_tool_manager.assert_called_once_with(
+            username="alice",
+            agent_id=self.agent.id or 0,
+            raw_tool_ids='["release_tool"]',
+        )
+        self.assertIn("tool_execution_context", captured)
+        tool_execution_context = captured["tool_execution_context"]
+        self.assertIsInstance(tool_execution_context, ToolExecutionContext)
+        if not isinstance(tool_execution_context, ToolExecutionContext):
+            self.fail("Expected a ToolExecutionContext instance")
+        self.assertEqual(
+            cast(Any, tool_execution_context).sandbox_timeout_seconds,
+            90,
+        )
+
+    def test_prepare_task_rejects_text_reply_for_structured_pending_action(
+        self,
+    ) -> None:
         """Structured waiting actions should not be resumable through freeform text."""
         task = ReactTask(
             task_id="task-approval",
@@ -167,7 +335,9 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                 ),
             )
 
-    def test_submit_pending_user_action_resumes_task_with_structured_result(self) -> None:
+    def test_submit_pending_user_action_resumes_task_with_structured_result(
+        self,
+    ) -> None:
         """Approving one waiting action should enqueue a structured action_result."""
         task = ReactTask(
             task_id="task-approval",
@@ -193,19 +363,22 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.session.add(task)
         self.session.commit()
 
-        with patch.object(
-            react_task_supervisor_module,
-            "apply_skill_change_submission",
-            return_value={
-                "submission_id": 42,
-                "skill_name": "planning-kit",
-                "status": "applied",
-                "message": "Applied private skill 'planning-kit'.",
-            },
-        ), patch.object(
-            self.supervisor,
-            "_run_task",
-            new=AsyncMock(return_value=None),
+        with (
+            patch.object(
+                react_task_supervisor_module,
+                "apply_skill_change_submission",
+                return_value={
+                    "submission_id": 42,
+                    "skill_name": "planning-kit",
+                    "status": "applied",
+                    "message": "Applied private skill 'planning-kit'.",
+                },
+            ),
+            patch.object(
+                self.supervisor,
+                "_run_task",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             launch_result = asyncio.run(
                 self.supervisor.submit_pending_user_action(

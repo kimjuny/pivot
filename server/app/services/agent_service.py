@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.models.agent import Agent
+from sqlmodel import col, select
 
 if TYPE_CHECKING:
     from sqlmodel import Session as DBSession
@@ -128,6 +129,55 @@ class AgentService:
             raise ValueError("Agent is not published for end users yet")
         if not agent.serving_enabled:
             raise ValueError("Agent is currently disabled for end users")
+        return agent
+
+    def list_consumer_visible_agents(self) -> list[Agent]:
+        """List agents currently visible in the end-user product.
+
+        Returns:
+            Agent rows that have a published active release and are enabled for
+            end-user traffic.
+        """
+        statement = (
+            select(Agent)
+            .where(col(Agent.active_release_id).is_not(None))
+            .where(col(Agent.serving_enabled).is_(True))
+            .order_by(col(Agent.updated_at).desc())
+        )
+        return list(self.db.exec(statement).all())
+
+    def get_consumer_visible_agent(self, agent_id: int) -> Agent | None:
+        """Return one agent only when it is visible in Consumer.
+
+        Args:
+            agent_id: Stable agent identifier.
+
+        Returns:
+            The matching visible agent, or ``None`` when absent or unavailable.
+        """
+        statement = (
+            select(Agent)
+            .where(Agent.id == agent_id)
+            .where(col(Agent.active_release_id).is_not(None))
+            .where(col(Agent.serving_enabled).is_(True))
+        )
+        return self.db.exec(statement).first()
+
+    def require_consumer_visible_agent(self, agent_id: int) -> Agent:
+        """Return one Consumer-visible agent or raise.
+
+        Args:
+            agent_id: Stable agent identifier.
+
+        Returns:
+            The matching visible agent row.
+
+        Raises:
+            ValueError: If the agent is not available to end users.
+        """
+        agent = self.get_consumer_visible_agent(agent_id)
+        if agent is None:
+            raise ValueError("Agent is not available to end users")
         return agent
 
     def require_interaction_enabled(self, agent_id: int) -> Agent:

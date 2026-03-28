@@ -8,7 +8,6 @@ from typing import Any
 from app.config import get_settings
 from app.crud.llm import llm as llm_crud
 from app.llm.token_estimator import estimate_messages_tokens
-from app.models.agent import Agent
 from app.models.react import ReactTask
 from app.orchestration.react.context import ReactContext
 from app.orchestration.react.prompt_template import (
@@ -20,6 +19,10 @@ from app.orchestration.react.prompt_template import (
 from app.orchestration.tool import get_tool_manager
 from app.orchestration.tool.manager import ToolManager
 from app.schemas.react import ReactContextUsageResponse
+from app.services.agent_release_runtime_service import (
+    AgentReleaseRuntimeService,
+    AgentRuntimeConfig,
+)
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.workspace_service import (
@@ -51,6 +54,8 @@ class ReactContextUsageService:
         task_id: str | None = None,
         draft_message: str = "",
         file_ids: list[str] | None = None,
+        session_type: str = "consumer",
+        test_snapshot: dict[str, Any] | None = None,
     ) -> ReactContextUsageResponse:
         """Estimate the prompt window used by the current chat surface.
 
@@ -61,6 +66,9 @@ class ReactContextUsageService:
             task_id: Optional active task whose runtime messages should be measured.
             draft_message: Current unsent composer text.
             file_ids: Uploaded file IDs that should contribute prompt blocks.
+            session_type: Session type used before a session has been created.
+            test_snapshot: Optional Studio working-copy snapshot used before the
+                first studio_test session is created.
 
         Returns:
             Structured prompt-usage estimate for the chat surface.
@@ -68,16 +76,6 @@ class ReactContextUsageService:
         Raises:
             ValueError: If the agent, LLM, task, or files cannot be resolved.
         """
-        agent = self.db.get(Agent, agent_id)
-        if agent is None:
-            raise ValueError(f"Agent {agent_id} not found.")
-        if agent.llm_id is None:
-            raise ValueError(f"Agent {agent.name} has no LLM configured.")
-
-        llm_config = llm_crud.get(agent.llm_id, self.db)
-        if llm_config is None:
-            raise ValueError(f"LLM configuration {agent.llm_id} not found.")
-
         normalized_file_ids = self._normalize_file_ids(file_ids or [])
         attachment_blocks = self._build_attachment_blocks(
             file_ids=normalized_file_ids,
@@ -90,6 +88,21 @@ class ReactContextUsageService:
             else None
         )
         effective_session_id = session_id or (task.session_id if task else None)
+        runtime_config = self._resolve_runtime_config(
+            agent_id=agent_id,
+            session_id=effective_session_id,
+            task=task,
+            session_type=session_type,
+            test_snapshot=test_snapshot,
+        )
+        if runtime_config.llm_id is None:
+            raise ValueError(
+                f"Agent {runtime_config.agent_name} has no LLM configured."
+            )
+
+        llm_config = llm_crud.get(runtime_config.llm_id, self.db)
+        if llm_config is None:
+            raise ValueError(f"LLM configuration {runtime_config.llm_id} not found.")
 
         base_messages = self._load_session_runtime_messages(
             session_id=effective_session_id,
@@ -125,7 +138,7 @@ class ReactContextUsageService:
                 )
         elif draft_message or attachment_blocks:
             preview_messages = self._build_new_task_preview_messages(
-                agent=agent,
+                runtime_config=runtime_config,
                 username=username,
                 session_id=effective_session_id,
                 draft_message=draft_message,
@@ -210,7 +223,7 @@ class ReactContextUsageService:
     def _build_new_task_preview_messages(
         self,
         *,
-        agent: Agent,
+        runtime_config: AgentRuntimeConfig,
         username: str,
         session_id: str | None,
         draft_message: str,
@@ -225,7 +238,7 @@ class ReactContextUsageService:
             )
 
         user_prompt = self._build_user_prompt(
-            agent=agent,
+            runtime_config=runtime_config,
             username=username,
             session_id=session_id,
         )
@@ -247,14 +260,14 @@ class ReactContextUsageService:
     def _build_user_prompt(
         self,
         *,
-        agent: Agent,
+        runtime_config: AgentRuntimeConfig,
         username: str,
         session_id: str | None,
     ) -> str:
         """Build the task bootstrap user prompt used for next-turn previews."""
         tool_manager = self._build_request_tool_manager(
             username=username,
-            agent=agent,
+            runtime_config=runtime_config,
         )
         return build_runtime_user_prompt(
             tool_manager=tool_manager,
@@ -265,10 +278,10 @@ class ReactContextUsageService:
         self,
         *,
         username: str,
-        agent: Agent,
+        runtime_config: AgentRuntimeConfig,
     ) -> ToolManager:
         """Rebuild the request-scoped tool catalog used in ReAct prompts."""
-        ensure_agent_workspace(username, agent.id or 0)
+        ensure_agent_workspace(username, runtime_config.agent_id)
 
         shared_manager = get_tool_manager()
         request_tool_manager = ToolManager()
@@ -280,7 +293,7 @@ class ReactContextUsageService:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
 
-        allowed_tool_names = self._parse_name_allowlist(agent.tool_ids)
+        allowed_tool_names = self._parse_name_allowlist(runtime_config.raw_tool_ids)
         if allowed_tool_names is None:
             return request_tool_manager
 
@@ -289,6 +302,47 @@ class ReactContextUsageService:
             if metadata.name in allowed_tool_names:
                 filtered_manager.add_entry(metadata)
         return filtered_manager
+
+    def _resolve_runtime_config(
+        self,
+        *,
+        agent_id: int,
+        session_id: str | None,
+        task: ReactTask | None,
+        session_type: str,
+        test_snapshot: dict[str, Any] | None,
+    ) -> AgentRuntimeConfig:
+        """Resolve the effective runtime config for prompt estimation.
+
+        Args:
+            agent_id: Requested agent identifier from the API payload.
+            session_id: Optional session driving release-pinned estimation.
+            task: Optional active task that already belongs to one session.
+            session_type: Session type used before a session exists.
+            test_snapshot: Optional Studio working-copy snapshot for draft previews.
+
+        Returns:
+            Effective runtime config for the estimation request.
+
+        Raises:
+            ValueError: If the session does not belong to the requested agent.
+        """
+        runtime_service = AgentReleaseRuntimeService(self.db)
+        if task is not None:
+            runtime_config = runtime_service.resolve_for_task(task)
+        elif session_id:
+            runtime_config = runtime_service.resolve_for_session(session_id)
+        elif session_type == "studio_test" and test_snapshot is not None:
+            runtime_config = runtime_service.resolve_for_test_payload(
+                agent_id=agent_id,
+                working_copy_snapshot=test_snapshot,
+            )
+        else:
+            runtime_config = runtime_service.resolve_for_agent(agent_id)
+
+        if runtime_config.agent_id != agent_id:
+            raise ValueError("Session does not belong to the requested agent.")
+        return runtime_config
 
     @staticmethod
     def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:

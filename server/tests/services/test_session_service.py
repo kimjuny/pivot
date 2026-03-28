@@ -18,6 +18,9 @@ ReactPlanStep = import_module("app.models.react").ReactPlanStep
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
 Session = import_module("app.models.session").Session
+AgentSnapshotService = import_module(
+    "app.services.agent_snapshot_service"
+).AgentSnapshotService
 SessionService = import_module("app.services.session_service").SessionService
 
 
@@ -36,6 +39,12 @@ class SessionServiceTestCase(unittest.TestCase):
         self.session.refresh(agent)
         self.agent = agent
 
+        second_agent = Agent(name="agent-2", llm_id=None)
+        self.session.add(second_agent)
+        self.session.commit()
+        self.session.refresh(second_agent)
+        self.second_agent = second_agent
+
         session = Session(
             session_id="session-1",
             agent_id=agent.id or 0,
@@ -45,6 +54,16 @@ class SessionServiceTestCase(unittest.TestCase):
             react_llm_cache_state="{}",
         )
         self.session.add(session)
+        self.session.add(
+            Session(
+                session_id="session-2",
+                agent_id=second_agent.id or 0,
+                user="alice",
+                chat_history=json.dumps({"version": 1, "messages": []}),
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
         self.session.commit()
         self.session.refresh(session)
 
@@ -221,3 +240,93 @@ class SessionServiceTestCase(unittest.TestCase):
             "disabled for end users",
         ):
             self.service.create_session(agent_id=self.agent.id or 0, user="alice")
+
+    def test_create_studio_test_session_pins_frozen_snapshot(self) -> None:
+        """Studio Test should create sessions from a frozen working-copy snapshot."""
+        snapshot = AgentSnapshotService(self.session).create_test_snapshot(
+            self.agent.id or 0,
+            working_copy_snapshot={
+                "schema_version": 1,
+                "agent": {
+                    "name": "agent-1 draft",
+                    "description": "Draft",
+                    "llm_id": None,
+                    "skill_resolution_llm_id": None,
+                    "session_idle_timeout_minutes": 15,
+                    "sandbox_timeout_seconds": 60,
+                    "compact_threshold_percent": 60,
+                    "is_active": True,
+                    "max_iteration": 30,
+                    "tool_ids": None,
+                    "skill_ids": None,
+                },
+                "scenes": [],
+            },
+            created_by="alice",
+        )
+
+        created = self.service.create_session(
+            agent_id=self.agent.id or 0,
+            user="alice",
+            session_type="studio_test",
+            test_snapshot_id=snapshot.id,
+        )
+
+        self.assertEqual(created.type, "studio_test")
+        self.assertIsNone(created.release_id)
+        self.assertEqual(created.test_snapshot_id, snapshot.id)
+
+    def test_get_sessions_by_user_filters_by_session_type(self) -> None:
+        """Studio and Consumer session listings should stay isolated."""
+        snapshot = AgentSnapshotService(self.session).create_test_snapshot(
+            self.agent.id or 0,
+            working_copy_snapshot={
+                "schema_version": 1,
+                "agent": {
+                    "name": "agent-1 draft",
+                    "description": None,
+                    "llm_id": None,
+                    "skill_resolution_llm_id": None,
+                    "session_idle_timeout_minutes": 15,
+                    "sandbox_timeout_seconds": 60,
+                    "compact_threshold_percent": 60,
+                    "is_active": True,
+                    "max_iteration": 30,
+                    "tool_ids": None,
+                    "skill_ids": None,
+                },
+                "scenes": [],
+            },
+            created_by="alice",
+        )
+        self.session.add(
+            Session(
+                session_id="session-3",
+                agent_id=self.agent.id or 0,
+                type="studio_test",
+                test_snapshot_id=snapshot.id,
+                user="alice",
+                chat_history=json.dumps({"version": 1, "messages": []}),
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.session.commit()
+
+        sessions = self.service.get_sessions_by_user(
+            user="alice",
+            session_type="studio_test",
+            limit=10,
+        )
+
+        self.assertEqual([session.session_id for session in sessions], ["session-3"])
+
+    def test_get_sessions_by_user_supports_multiple_agent_ids(self) -> None:
+        """Multi-agent filters keep Consumer listings inside the requested scope."""
+        sessions = self.service.get_sessions_by_user(
+            user="alice",
+            agent_ids=[self.second_agent.id or 0],
+            limit=10,
+        )
+
+        self.assertEqual([session.session_id for session in sessions], ["session-2"])

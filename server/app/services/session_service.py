@@ -3,8 +3,9 @@
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
+from app.models.agent_release import AgentTestSnapshot
 from app.models.react import (
     ReactPlanStep,
     ReactRecursionState,
@@ -36,29 +37,50 @@ class SessionService:
         self,
         agent_id: int,
         user: str,
+        *,
+        session_type: Literal["consumer", "studio_test"] = "consumer",
+        test_snapshot_id: int | None = None,
     ) -> Session:
         """Create a new session row.
 
         Args:
             agent_id: ID of the agent for this session.
             user: Username of the session owner.
+            session_type: Whether the session belongs to Consumer or Studio Test.
+            test_snapshot_id: Frozen Studio working-copy snapshot pinned to the
+                session when ``session_type`` is ``studio_test``.
 
         Returns:
             Created Session instance.
 
         Raises:
-            ValueError: If the agent is not published for end users or is
-                currently disabled.
+            ValueError: If the session type is invalid, if the agent is not
+                ready for the requested session type, or if required snapshot
+                metadata is missing.
         """
         session_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        agent = AgentService(self.db).require_session_creation_ready(agent_id)
+        release_id: int | None = None
+        resolved_test_snapshot_id: int | None = None
+
+        if session_type == "consumer":
+            agent = AgentService(self.db).require_session_creation_ready(agent_id)
+            release_id = agent.active_release_id
+        elif session_type == "studio_test":
+            AgentService(self.db).get_required_agent(agent_id)
+            if test_snapshot_id is None:
+                raise ValueError("Studio test sessions require a frozen snapshot.")
+            resolved_test_snapshot_id = test_snapshot_id
+        else:
+            raise ValueError(f"Unsupported session type '{session_type}'.")
 
         # Create session
         session = Session(
             session_id=session_id,
             agent_id=agent_id,
-            release_id=agent.active_release_id,
+            type=session_type,
+            release_id=release_id,
+            test_snapshot_id=resolved_test_snapshot_id,
             user=user,
             status="active",
             title=None,
@@ -115,6 +137,8 @@ class SessionService:
         self,
         user: str,
         agent_id: int | None = None,
+        agent_ids: list[int] | None = None,
+        session_type: Literal["consumer", "studio_test"] | None = None,
         limit: int = 50,
     ) -> list[Session]:
         """Get all sessions for a user, optionally filtered by agent.
@@ -122,6 +146,8 @@ class SessionService:
         Args:
             user: Username to filter by.
             agent_id: Optional agent ID to filter by.
+            agent_ids: Optional set of agent IDs to include.
+            session_type: Optional session type to filter by.
             limit: Maximum number of sessions to return.
 
         Returns:
@@ -130,11 +156,34 @@ class SessionService:
         stmt = select(Session).where(Session.user == user)
         if agent_id is not None:
             stmt = stmt.where(Session.agent_id == agent_id)
+        elif agent_ids is not None:
+            if len(agent_ids) == 0:
+                return []
+            stmt = stmt.where(col(Session.agent_id).in_(agent_ids))
+        if session_type is not None:
+            stmt = stmt.where(Session.type == session_type)
         stmt = stmt.order_by(
             col(Session.is_pinned).desc(),
             col(Session.updated_at).desc(),
         ).limit(limit)
         return list(self.db.exec(stmt).all())
+
+    def get_test_workspace_hashes(
+        self,
+        snapshot_ids: list[int],
+    ) -> dict[int, str]:
+        """Return Studio workspace hashes keyed by test snapshot identifier."""
+        if len(snapshot_ids) == 0:
+            return {}
+
+        statement = select(AgentTestSnapshot).where(
+            col(AgentTestSnapshot.id).in_(snapshot_ids)
+        )
+        return {
+            snapshot.id or 0: snapshot.workspace_hash
+            for snapshot in self.db.exec(statement).all()
+            if snapshot.id is not None
+        }
 
     def update_session_metadata(
         self,
@@ -277,9 +326,19 @@ class SessionService:
             return False
 
         FileService(self.db).clear_files_by_session_id(session_id)
+        test_snapshot_id = session.test_snapshot_id
 
         self.db.delete(session)
         self.db.commit()
+        if test_snapshot_id is not None:
+            still_referenced = self.db.exec(
+                select(Session).where(Session.test_snapshot_id == test_snapshot_id)
+            ).first()
+            if still_referenced is None:
+                test_snapshot = self.db.get(AgentTestSnapshot, test_snapshot_id)
+                if test_snapshot is not None:
+                    self.db.delete(test_snapshot)
+                    self.db.commit()
         return True
 
     def get_full_session_history(self, session_id: str) -> list[dict[str, Any]]:

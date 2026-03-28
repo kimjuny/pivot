@@ -2,6 +2,28 @@ import type {
   FileUploadSource,
   ReactSessionRuntimeDebug,
 } from "@/utils/api";
+import type {
+  ChatSessionType,
+  StudioTestSnapshotPayload,
+} from "@/utils/agentTestSnapshot";
+
+import type { ReactNode } from "react";
+
+/**
+ * One workspace-level shortcut rendered above the session list.
+ */
+export interface ChatSidebarNavigationItem {
+  /** Stable key used for React rendering. */
+  key: string;
+  /** Human-readable label shown in the expanded sidebar. */
+  label: string;
+  /** Icon rendered in both expanded and collapsed modes. */
+  icon: ReactNode;
+  /** Whether this destination matches the currently visible workspace. */
+  isActive: boolean;
+  /** Callback invoked when the user selects the destination. */
+  onSelect: () => void | Promise<void>;
+}
 
 /**
  * Props accepted by the page-scoped ReAct chat container.
@@ -9,6 +31,14 @@ import type {
 export interface ReactChatInterfaceProps {
   /** Unique identifier of the agent backing the conversation. */
   agentId: number;
+  /** Session namespace used by this chat surface. */
+  sessionType?: ChatSessionType;
+  /** Optional session UUID that should be opened first when available. */
+  initialSessionId?: string | null;
+  /** Optional Studio working-copy snapshot used to create test sessions. */
+  testSnapshot?: StudioTestSnapshotPayload | null;
+  /** Optional Studio working-copy hash used to restore matching test sessions. */
+  testSnapshotHash?: string | null;
   /** Display name shown in empty state and dialog title copy. */
   agentName?: string;
   /**
@@ -20,6 +50,16 @@ export interface ReactChatInterfaceProps {
   primaryLlmId?: number;
   /** Minutes of inactivity before chat rolls over into a new session. */
   sessionIdleTimeoutMinutes?: number;
+  /** Optional workspace shortcuts shown above the session list. */
+  sidebarNavigationItems?: ChatSidebarNavigationItem[];
+  /** Optional identity icon shown beside the sidebar title. */
+  sidebarTitleIcon?: ReactNode;
+  /** Optional sidebar identity title shown above navigation controls. */
+  sidebarTitle?: string;
+  /** Optional footer renderer anchored to the bottom of the left sidebar. */
+  sidebarFooter?: (isCollapsed: boolean) => ReactNode;
+  /** Whether the floating compact debug affordance should be shown. */
+  showCompactDebug?: boolean;
 }
 
 /**

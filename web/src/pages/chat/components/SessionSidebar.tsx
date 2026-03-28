@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import {
   Loader2,
   MoreHorizontal,
-  PanelLeft,
   Pencil,
   Pin,
   PinOff,
@@ -11,7 +10,6 @@ import {
   Trash2,
 } from "@/lib/lucide";
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,15 +18,32 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  SidebarSeparator,
+} from "@/components/ui/sidebar";
+import { useSidebar } from "@/hooks/use-sidebar";
 import type { SessionListItem } from "@/utils/api";
+import type { ChatSidebarNavigationItem } from "@/pages/chat/types";
 
 interface SessionSidebarProps {
   sessions: SessionListItem[];
   currentSessionId: string | null;
   isLoadingSession: boolean;
   isStreaming: boolean;
-  isCollapsed: boolean;
-  onToggleCollapsed: () => void;
+  sidebarTitleIcon?: ReactNode;
+  sidebarTitle?: string;
   onNewSession: () => void | Promise<void>;
   onSelectSession: (sessionId: string) => void | Promise<void>;
   onRenameSession: (
@@ -40,6 +55,8 @@ interface SessionSidebarProps {
     isPinned: boolean,
   ) => void | Promise<void>;
   onDeleteSession: (sessionId: string) => void | Promise<void>;
+  navigationItems?: ChatSidebarNavigationItem[];
+  footer?: (isCollapsed: boolean) => ReactNode;
 }
 
 /**
@@ -58,17 +75,21 @@ export function SessionSidebar({
   currentSessionId,
   isLoadingSession,
   isStreaming,
-  isCollapsed,
-  onToggleCollapsed,
+  sidebarTitleIcon,
+  sidebarTitle,
   onNewSession,
   onSelectSession,
   onRenameSession,
   onTogglePinSession,
   onDeleteSession,
+  navigationItems = [],
+  footer,
 }: SessionSidebarProps) {
+  const { state } = useSidebar();
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState<string>("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const isCollapsed = state === "collapsed";
 
   useEffect(() => {
     if (!editingSessionId) {
@@ -130,127 +151,136 @@ export function SessionSidebar({
   };
 
   return (
-    <>
-      <div
-        className={`flex flex-shrink-0 flex-col border-r border-border bg-muted/30 transition-all duration-300 ease-in-out ${
-          isCollapsed ? "w-12" : "w-64"
-        }`}
-      >
-        <div
-          className={`flex items-center border-b border-border p-3 ${
-            isCollapsed ? "justify-center" : "justify-between"
-          }`}
-        >
-          {!isCollapsed && (
-            <Button
+    <Sidebar
+      layout="contained"
+      collapsible="icon"
+      className="border-r border-sidebar-border/70 bg-sidebar/95"
+    >
+      <SidebarHeader className="gap-2 px-3 pb-2 pt-3">
+        {!isCollapsed && sidebarTitle ? (
+          <div className="px-1 pb-1">
+            <div className="flex items-center gap-2 rounded-xl px-2 py-1.5">
+              {sidebarTitleIcon ? (
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-accent/70 text-sidebar-foreground">
+                  {sidebarTitleIcon}
+                </div>
+              ) : (
+                <span className="h-2.5 w-2.5 rounded-full bg-primary/80" />
+              )}
+              <div className="min-w-0">
+                <div className="truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+                  {sidebarTitle}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip="New Session"
               onClick={() => {
                 void onNewSession();
               }}
-              variant="outline"
-              className="flex-1 justify-start gap-2"
               disabled={isLoadingSession || isStreaming}
+              className="text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
             >
               <SquarePen className="h-4 w-4" />
-              New Session
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`h-8 w-8 ${isCollapsed ? "" : "ml-2"}`}
-          onClick={onToggleCollapsed}
-          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-            <PanelLeft className="h-4 w-4" />
-          </Button>
-        </div>
+              <span>New Session</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
 
-        {!isCollapsed && (
-          <div className="flex-1 overflow-y-auto">
-            <div className="space-y-1 p-2">
-              {sessions.length === 0 ? (
-                <div className="py-4 text-center text-sm text-muted-foreground">
-                  {isLoadingSession ? (
-                    <div className="flex items-center justify-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      <span>Loading sessions...</span>
-                    </div>
-                  ) : (
-                    <span>No sessions yet</span>
-                  )}
-                </div>
-              ) : (
-                sessions.map((session) => {
+          {navigationItems.map((item) => (
+            <SidebarMenuItem key={item.key}>
+              <SidebarMenuButton
+                isActive={item.isActive}
+                tooltip={item.label}
+                onClick={() => {
+                  void item.onSelect();
+                }}
+                className="text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarHeader>
+
+      <SidebarSeparator className="mx-3" />
+
+      <SidebarContent className="gap-0">
+        <SidebarGroup className="py-2">
+          <SidebarGroupLabel className="h-6 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/42">
+            Sessions
+          </SidebarGroupLabel>
+          <SidebarGroupContent className="px-1">
+            {sessions.length === 0 ? (
+              <div className="px-3 py-4 text-sm text-muted-foreground">
+                {isLoadingSession ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Loading sessions...</span>
+                  </div>
+                ) : (
+                  <span>No sessions yet</span>
+                )}
+              </div>
+            ) : (
+              <SidebarMenu>
+                {sessions.map((session) => {
                   const isActive = session.session_id === currentSessionId;
                   const isEditing = session.session_id === editingSessionId;
 
                   return (
-                    <div
-                      key={session.session_id}
-                      onClick={() => {
-                        if (isEditing) {
-                          return;
-                        }
-                        void onSelectSession(session.session_id);
-                      }}
-                      className={`group w-full cursor-pointer rounded-lg border border-transparent px-2 py-1 text-left transition-colors ${
-                        isActive ? "bg-muted" : "hover:bg-muted"
-                      }`}
-                    >
-                      <div className="flex min-h-6 items-center justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          {isEditing ? (
-                            <Input
-                              ref={renameInputRef}
-                              value={editingTitle}
-                              onChange={(event) => setEditingTitle(event.target.value)}
-                              onBlur={() => {
-                                void submitRename();
-                              }}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                void handleRenameKeyDown(event);
-                              }}
-                              className="h-6 border-transparent bg-transparent px-0 text-xs shadow-none focus:border-transparent focus-visible:border-transparent focus-visible:ring-0"
-                              aria-label="Rename session"
-                            />
-                          ) : (
-                            <div className="flex min-w-0 min-h-6 items-center">
-                              <span className="truncate text-xs font-medium">
-                                {getSessionTitle(session)}
-                              </span>
-                            </div>
-                          )}
+                    <SidebarMenuItem key={session.session_id}>
+                      {isEditing ? (
+                        <div className="px-2 py-1">
+                          <Input
+                            ref={renameInputRef}
+                            value={editingTitle}
+                            onChange={(event) => setEditingTitle(event.target.value)}
+                            onBlur={() => {
+                              void submitRename();
+                            }}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => {
+                              void handleRenameKeyDown(event);
+                            }}
+                            className="h-8 rounded-lg border-sidebar-border/60 bg-background px-2 text-xs shadow-none focus-visible:ring-2"
+                            aria-label="Rename session"
+                          />
                         </div>
-
-                        {!isEditing && (
+                      ) : (
+                        <>
+                          <SidebarMenuButton
+                            isActive={isActive}
+                            tooltip={getSessionTitle(session)}
+                            onClick={() => {
+                              void onSelectSession(session.session_id);
+                            }}
+                            className="h-9 rounded-xl px-2.5 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+                          >
+                            <span>{getSessionTitle(session)}</span>
+                          </SidebarMenuButton>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <button
-                                type="button"
-                                className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-accent ${
-                                  session.is_pinned
-                                    ? "opacity-100"
-                                    : "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
-                                }`}
+                              <SidebarMenuAction
+                                showOnHover
                                 onClick={(event) => {
                                   event.stopPropagation();
                                 }}
                                 title="Session actions"
+                                className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
                               >
-                                <span className="relative flex h-4 w-4 items-center justify-center">
-                                  {session.is_pinned && (
-                                    <Pin className="absolute h-3.5 w-3.5 text-foreground transition-opacity group-hover:opacity-0" />
-                                  )}
-                                  <MoreHorizontal
-                                    className={`absolute h-4 w-4 text-muted-foreground transition-opacity ${
-                                      session.is_pinned
-                                        ? "opacity-0 group-hover:opacity-100"
-                                        : "opacity-100"
-                                    }`}
-                                  />
-                                </span>
-                              </button>
+                                {session.is_pinned ? (
+                                  <Pin className="h-4 w-4" />
+                                ) : (
+                                  <MoreHorizontal className="h-4 w-4" />
+                                )}
+                              </SidebarMenuAction>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent
                               align="end"
@@ -291,33 +321,27 @@ export function SessionSidebar({
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
-                        )}
-                      </div>
-                    </div>
+                        </>
+                      )}
+                    </SidebarMenuItem>
                   );
-                })
-              )}
-            </div>
-          </div>
-        )}
+                })}
+              </SidebarMenu>
+            )}
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
 
-        {isCollapsed && (
-          <div className="flex flex-1 flex-col items-center space-y-2 py-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={() => {
-                void onNewSession();
-              }}
-              disabled={isLoadingSession || isStreaming}
-              title="New Session"
-            >
-              <SquarePen className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-      </div>
-    </>
+      {footer ? (
+        <>
+          <SidebarSeparator className="mx-3" />
+          <SidebarFooter className="px-3 pb-3 pt-2">
+            {footer(isCollapsed)}
+          </SidebarFooter>
+        </>
+      ) : null}
+
+      <SidebarRail />
+    </Sidebar>
   );
 }

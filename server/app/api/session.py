@@ -1,6 +1,7 @@
 """API endpoints for session management."""
 
 from datetime import UTC
+from typing import Literal, cast
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
@@ -20,6 +21,7 @@ from app.schemas.session import (
     SessionUpdate,
     TaskMessage,
 )
+from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.session_service import (
     SESSION_METADATA_UNSET,
     SessionService,
@@ -30,13 +32,19 @@ from sqlmodel import Session as DBSession
 router = APIRouter()
 
 
-def _build_session_response(session: Session) -> SessionResponse:
+def _build_session_response(
+    session: Session,
+    *,
+    test_workspace_hash: str | None = None,
+) -> SessionResponse:
     """Serialize one session row into the API response contract."""
     return SessionResponse(
         id=session.id or 0,
         session_id=session.session_id,
         agent_id=session.agent_id,
+        type=cast(Literal["consumer", "studio_test"], session.type),
         release_id=session.release_id,
+        test_workspace_hash=test_workspace_hash,
         user=session.user,
         status=session.status,
         title=session.title,
@@ -66,9 +74,24 @@ async def create_session(
     """
     service = SessionService(db)
     try:
+        test_snapshot_id: int | None = None
+        if request.type == "studio_test":
+            if request.test_snapshot is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="studio_test sessions require test_snapshot",
+                )
+            test_snapshot = AgentSnapshotService(db).create_test_snapshot(
+                request.agent_id,
+                working_copy_snapshot=request.test_snapshot.model_dump(),
+                created_by=current_user.username,
+            )
+            test_snapshot_id = test_snapshot.id
         session = service.create_session(
             agent_id=request.agent_id,
             user=current_user.username,
+            session_type=request.type,
+            test_snapshot_id=test_snapshot_id,
         )
     except ValueError as exc:
         detail = str(exc)
@@ -77,12 +100,22 @@ async def create_session(
             status_code = 404
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
-    return _build_session_response(session)
+    test_workspace_hash = None
+    if request.type == "studio_test" and test_snapshot_id is not None:
+        test_workspace_hash = service.get_test_workspace_hashes([test_snapshot_id]).get(
+            test_snapshot_id
+        )
+
+    return _build_session_response(
+        session,
+        test_workspace_hash=test_workspace_hash,
+    )
 
 
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     agent_id: int | None = None,
+    session_type: Literal["consumer", "studio_test"] | None = None,
     limit: int = 50,
     db: DBSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -102,7 +135,15 @@ async def list_sessions(
     sessions = service.get_sessions_by_user(
         user=current_user.username,
         agent_id=agent_id,
+        session_type=session_type,
         limit=limit,
+    )
+    test_snapshot_hashes = service.get_test_workspace_hashes(
+        [
+            session.test_snapshot_id
+            for session in sessions
+            if session.test_snapshot_id is not None
+        ]
     )
 
     session_items = []
@@ -111,7 +152,13 @@ async def list_sessions(
             SessionListItem(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
+                type=cast(Literal["consumer", "studio_test"], session.type),
                 release_id=session.release_id,
+                test_workspace_hash=(
+                    test_snapshot_hashes.get(session.test_snapshot_id or 0)
+                    if session.test_snapshot_id is not None
+                    else None
+                ),
                 status=session.status,
                 title=session.title,
                 is_pinned=session.is_pinned,
@@ -154,7 +201,16 @@ async def get_session(
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return _build_session_response(session)
+    test_workspace_hash = None
+    if session.test_snapshot_id is not None:
+        test_workspace_hash = service.get_test_workspace_hashes(
+            [session.test_snapshot_id]
+        ).get(session.test_snapshot_id)
+
+    return _build_session_response(
+        session,
+        test_workspace_hash=test_workspace_hash,
+    )
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionResponse)
@@ -203,7 +259,16 @@ async def update_session(
     if updated_session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return _build_session_response(updated_session)
+    test_workspace_hash = None
+    if updated_session.test_snapshot_id is not None:
+        test_workspace_hash = service.get_test_workspace_hashes(
+            [updated_session.test_snapshot_id]
+        ).get(updated_session.test_snapshot_id)
+
+    return _build_session_response(
+        updated_session,
+        test_workspace_hash=test_workspace_hash,
+    )
 
 
 @router.get("/sessions/{session_id}/history", response_model=ChatHistoryResponse)

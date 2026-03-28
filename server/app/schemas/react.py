@@ -5,6 +5,7 @@ from enum import Enum
 from typing import Any, Literal
 
 from app.schemas.base import AppBaseModel
+from app.schemas.session import StudioTestSnapshotPayload
 from pydantic import Field
 
 
@@ -70,6 +71,14 @@ class ReactContextUsageRequest(AppBaseModel):
     file_ids: list[str] = Field(
         default_factory=list,
         description="Uploaded file IDs whose prompt blocks should be included",
+    )
+    session_type: Literal["consumer", "studio_test"] = Field(
+        default="consumer",
+        description="Session type used when estimating a draft before session creation",
+    )
+    test_snapshot: StudioTestSnapshotPayload | None = Field(
+        default=None,
+        description="Working-copy snapshot used for studio_test draft estimation",
     )
 
 

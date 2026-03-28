@@ -32,6 +32,7 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
 )
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactStreamEvent, ReactStreamEventType, TokenUsage
+from app.services.agent_release_runtime_service import AgentReleaseRuntimeService
 from app.services.agent_service import AgentService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
@@ -110,14 +111,18 @@ def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
     return result
 
 
-def _should_run_skill_resolution(*, task: ReactTask, agent: Agent) -> bool:
+def _should_run_skill_resolution(
+    *,
+    task: ReactTask,
+    resolver_llm_id: int | None,
+) -> bool:
     """Return whether this launch should execute pre-task skill matching.
 
     Why: when a task resumes from a persisted CLARIFY pause, the runtime window
     already contains the selected-skill bootstrap context. Re-running skill
     resolution adds latency and duplicate UI events without changing the task.
     """
-    if agent.skill_resolution_llm_id is None:
+    if resolver_llm_id is None:
         return False
 
     return task.iteration == 0 and task.status in {"pending", "running"}
@@ -366,9 +371,6 @@ class ReactTaskSupervisor:
         launch: ReactTaskLaunchRequest,
     ) -> tuple[ReactTask, int]:
         """Create or resume a task before background execution starts."""
-        agent = AgentService(db).require_interaction_enabled(launch.agent_id)
-        if not agent.llm_id:
-            raise ValueError(f"Agent {agent.name} has no LLM configured")
         session = None
         if launch.session_id:
             session = SessionService(db).get_session(launch.session_id)
@@ -376,6 +378,20 @@ class ReactTaskSupervisor:
                 raise ValueError(f"Session {launch.session_id} not found")
             if session.user != launch.username:
                 raise ValueError("Session does not belong to the current user")
+        agent_service = AgentService(db)
+        if session is not None and session.type == "studio_test":
+            agent_service.get_required_agent(launch.agent_id)
+        else:
+            agent_service.require_interaction_enabled(launch.agent_id)
+        runtime_config = (
+            AgentReleaseRuntimeService(db).resolve_for_session(launch.session_id)
+            if launch.session_id
+            else AgentReleaseRuntimeService(db).resolve_for_agent(launch.agent_id)
+        )
+        if runtime_config.agent_id != launch.agent_id:
+            raise ValueError("Session does not belong to the requested agent")
+        if runtime_config.llm_id is None:
+            raise ValueError(f"Agent {runtime_config.agent_name} has no LLM configured")
 
         session_cursor = self._get_last_event_cursor(
             db=db,
@@ -427,7 +443,7 @@ class ReactTaskSupervisor:
                 user_intent=launch.message,
                 status="pending",
                 iteration=0,
-                max_iteration=agent.max_iteration,
+                max_iteration=runtime_config.max_iteration,
                 cancel_requested_at=None,
                 created_at=launch_timestamp,
                 updated_at=launch_timestamp,
@@ -501,13 +517,16 @@ class ReactTaskSupervisor:
                 agent = db.get(Agent, task.agent_id)
                 if agent is None:
                     raise ValueError(f"Agent {task.agent_id} not found")
-                if not agent.llm_id:
-                    raise ValueError(f"Agent {agent.name} has no LLM configured")
+                runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(task)
+                if runtime_config.llm_id is None:
+                    raise ValueError(
+                        f"Agent {runtime_config.agent_name} has no LLM configured"
+                    )
 
-                llm_config = llm_crud.get(agent.llm_id, db)
+                llm_config = llm_crud.get(runtime_config.llm_id, db)
                 if llm_config is None:
                     raise ValueError(
-                        f"LLM configuration with ID {agent.llm_id} not found"
+                        f"LLM configuration with ID {runtime_config.llm_id} not found"
                     )
                 llm_runtime_kwargs = build_runtime_thinking_kwargs(
                     protocol=llm_config.protocol,
@@ -541,12 +560,12 @@ class ReactTaskSupervisor:
                 request_tool_manager = self._build_request_tool_manager(
                     username=launch.username,
                     agent_id=agent.id or 0,
-                    raw_tool_ids=agent.tool_ids,
+                    raw_tool_ids=runtime_config.raw_tool_ids,
                 )
 
                 available_skills = list_visible_skills(db, launch.username)
                 total_skill_count = len(available_skills)
-                allowed_skills = _parse_name_allowlist(agent.skill_ids)
+                allowed_skills = _parse_name_allowlist(runtime_config.raw_skill_ids)
                 if allowed_skills is not None:
                     available_skills = [
                         item
@@ -580,7 +599,7 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         username=launch.username,
                         agent_id=agent.id or 0,
-                        sandbox_timeout_seconds=agent.sandbox_timeout_seconds,
+                        sandbox_timeout_seconds=runtime_config.sandbox_timeout_seconds,
                         web_search_provider=launch.web_search_provider,
                         allowed_skills=tuple(allowed_skill_mounts),
                     ),
@@ -596,9 +615,10 @@ class ReactTaskSupervisor:
                 selected_skills_text = ""
                 resolution_duration_ms = 0
 
-                resolver_llm_id = agent.skill_resolution_llm_id
+                resolver_llm_id = runtime_config.skill_resolution_llm_id
                 if resolver_llm_id is not None and _should_run_skill_resolution(
-                    task=task, agent=agent
+                    task=task,
+                    resolver_llm_id=resolver_llm_id,
                 ):
                     await self._publish_event(
                         db=db,

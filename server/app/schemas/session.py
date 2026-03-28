@@ -1,10 +1,66 @@
 """Schemas for Session API requests and responses."""
 
-from typing import Any
+from typing import Any, Literal
 
 from app.schemas.base import AppBaseModel
 from app.schemas.file import FileAssetListItem
 from pydantic import Field
+
+
+class StudioTestSnapshotConnectionPayload(AppBaseModel):
+    """Normalized connection payload accepted for Studio test snapshots."""
+
+    id: int | str | None = None
+    name: str
+    condition: str | None = None
+    from_subscene: str
+    to_subscene: str
+
+
+class StudioTestSnapshotSubscenePayload(AppBaseModel):
+    """Normalized subscene payload accepted for Studio test snapshots."""
+
+    id: int | str | None = None
+    name: str
+    type: str = "normal"
+    state: str = "inactive"
+    description: str | None = None
+    mandatory: bool = False
+    objective: str | None = None
+    connections: list[StudioTestSnapshotConnectionPayload] = Field(default_factory=list)
+
+
+class StudioTestSnapshotScenePayload(AppBaseModel):
+    """Normalized scene payload accepted for Studio test snapshots."""
+
+    id: int | str | None = None
+    name: str
+    description: str | None = None
+    subscenes: list[StudioTestSnapshotSubscenePayload] = Field(default_factory=list)
+
+
+class StudioTestSnapshotAgentPayload(AppBaseModel):
+    """Runtime-facing agent payload accepted for Studio test snapshots."""
+
+    name: str
+    description: str | None = None
+    llm_id: int | None = None
+    skill_resolution_llm_id: int | None = None
+    session_idle_timeout_minutes: int = Field(default=15, ge=1)
+    sandbox_timeout_seconds: int = Field(default=60, ge=1)
+    compact_threshold_percent: int = Field(default=60, ge=1, le=100)
+    is_active: bool = True
+    max_iteration: int = Field(default=30, ge=1)
+    tool_ids: list[str] | None = None
+    skill_ids: list[str] | None = None
+
+
+class StudioTestSnapshotPayload(AppBaseModel):
+    """Minimal working-copy snapshot sent from Studio into Test."""
+
+    schema_version: int = 1
+    agent: StudioTestSnapshotAgentPayload
+    scenes: list[StudioTestSnapshotScenePayload] = Field(default_factory=list)
 
 
 class SessionCreate(AppBaseModel):
@@ -12,6 +68,14 @@ class SessionCreate(AppBaseModel):
 
     agent_id: int = Field(..., description="Agent ID for this session")
     user: str = Field(default="default_user", description="Username")
+    type: Literal["consumer", "studio_test"] = Field(
+        default="consumer",
+        description="Whether the session belongs to Consumer or Studio Test",
+    )
+    test_snapshot: StudioTestSnapshotPayload | None = Field(
+        default=None,
+        description="Frozen Studio working-copy snapshot used for studio_test sessions",
+    )
 
 
 class SessionResponse(AppBaseModel):
@@ -20,7 +84,9 @@ class SessionResponse(AppBaseModel):
     id: int
     session_id: str
     agent_id: int
+    type: Literal["consumer", "studio_test"]
     release_id: int | None
+    test_workspace_hash: str | None = None
     user: str
     status: str
     title: str | None = None
@@ -41,7 +107,9 @@ class SessionListItem(AppBaseModel):
 
     session_id: str
     agent_id: int
+    type: Literal["consumer", "studio_test"]
     release_id: int | None
+    test_workspace_hash: str | None = None
     status: str
     title: str | None = None
     is_pinned: bool = False
@@ -53,6 +121,20 @@ class SessionListResponse(AppBaseModel):
     """Response schema for session list."""
 
     sessions: list[SessionListItem]
+    total: int
+
+
+class ConsumerSessionListItem(SessionListItem):
+    """Session list item enriched with Consumer-facing agent metadata."""
+
+    agent_name: str
+    agent_description: str | None = None
+
+
+class ConsumerSessionListResponse(AppBaseModel):
+    """Response schema for Consumer recent session listings."""
+
+    sessions: list[ConsumerSessionListItem]
     total: int
 
 

@@ -119,7 +119,7 @@ const SidebarProvider = React.forwardRef<
                             } as React.CSSProperties
                         }
                         className={cn(
-                            "group/sidebar-wrapper flex h-full w-full has-[[data-variant=inset]]:bg-sidebar",
+                            "group/sidebar-wrapper relative flex h-full w-full has-[[data-variant=inset]]:bg-sidebar",
                             className
                         )}
                         ref={ref}
@@ -144,6 +144,7 @@ const Sidebar = React.forwardRef<
         side?: "left" | "right"
         variant?: "sidebar" | "floating" | "inset"
         collapsible?: "offcanvas" | "icon" | "none"
+        layout?: "viewport" | "contained"
     }
 >(
     (
@@ -151,6 +152,7 @@ const Sidebar = React.forwardRef<
             side = "left",
             variant = "sidebar",
             collapsible = "offcanvas",
+            layout = "viewport",
             className,
             children,
             ...props
@@ -216,7 +218,9 @@ const Sidebar = React.forwardRef<
                 />
                 <div
                     className={cn(
-                        "duration-200 fixed top-12 z-10 hidden h-[calc(100vh-3rem)] w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex",
+                        layout === "viewport"
+                            ? "duration-200 fixed top-12 z-10 hidden h-[calc(100vh-3rem)] w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex"
+                            : "duration-200 absolute inset-y-0 z-10 hidden w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex",
                         side === "left"
                             ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
                             : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",

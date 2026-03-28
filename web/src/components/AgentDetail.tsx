@@ -51,6 +51,11 @@ import {
   type SkillSource,
   type AgentDraftState,
 } from '../utils/api';
+import {
+  buildStudioTestSnapshotPayload,
+  computeStudioTestWorkspaceHash,
+  type StudioTestSnapshotPayload,
+} from '@/utils/agentTestSnapshot';
 import { compareSceneGraphs, deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
 import { toast } from 'sonner';
 import type { Agent, Scene, SceneGraph, SceneNode } from '../types';
@@ -292,9 +297,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [isLoadingDraftState, setIsLoadingDraftState] = useState(false);
   const [isPublishingRelease, setIsPublishingRelease] = useState(false);
   const [releaseNote, setReleaseNote] = useState('');
+  const [studioTestSnapshotHash, setStudioTestSnapshotHash] = useState<string | null>(null);
   const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
-  const workingScenes = (workspaceAgent?.scenes || []) as unknown as Scene[];
+  const workingScenes = useMemo(
+    () => ((workspaceAgent?.scenes ?? []) as unknown as Scene[]),
+    [workspaceAgent?.scenes]
+  );
   const workingSceneGraph = workspaceAgent?.scenes?.find(s => s.id === currentSceneId) || null;
   const saveSummary = useMemo(
     () => buildDraftChangeSummary(originalAgent, workspaceAgent),
@@ -321,6 +330,16 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     );
   }, [draftState?.latest_release, draftState?.release_history, effectiveAgent?.active_release_id]);
   const activeReleaseVersion = activeReleaseRecord?.version ?? null;
+  const studioTestSnapshot = useMemo<StudioTestSnapshotPayload | null>(() => {
+    if (!effectiveAgent) {
+      return null;
+    }
+
+    return buildStudioTestSnapshotPayload(
+      effectiveAgent,
+      workingScenes,
+    );
+  }, [effectiveAgent, workingScenes]);
 
   // Detect current theme for graph styling
   const [isDarkMode, setIsDarkMode] = useState(() =>
@@ -376,6 +395,34 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     setReleaseNote('');
     void refreshDraftState();
   }, [agentId, refreshDraftState]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!studioTestSnapshot) {
+      setStudioTestSnapshotHash(null);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    void computeStudioTestWorkspaceHash(studioTestSnapshot)
+      .then((nextHash) => {
+        if (!isCancelled) {
+          setStudioTestSnapshotHash(nextHash);
+        }
+      })
+      .catch((hashError) => {
+        console.error('Failed to compute Studio test snapshot hash:', hashError);
+        if (!isCancelled) {
+          setStudioTestSnapshotHash(null);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [studioTestSnapshot]);
 
   // Sync selectedScene with store
   useEffect(() => {
@@ -1540,10 +1587,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       >
         <ReactChatInterface
           agentId={agentId}
-          agentName={agent?.name}
-          agentToolIds={agent?.tool_ids}
-          primaryLlmId={agent?.llm_id}
-          sessionIdleTimeoutMinutes={agent?.session_idle_timeout_minutes}
+          sessionType="studio_test"
+          testSnapshot={studioTestSnapshot}
+          testSnapshotHash={studioTestSnapshotHash}
+          agentName={effectiveAgent?.name}
+          agentToolIds={effectiveAgent?.tool_ids}
+          primaryLlmId={effectiveAgent?.llm_id}
+          sessionIdleTimeoutMinutes={effectiveAgent?.session_idle_timeout_minutes}
         />
       </DraggableDialog>
 

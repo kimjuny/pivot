@@ -1,5 +1,9 @@
 import type { Agent, Scene, SceneGraph, LLM } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
+import type {
+  ChatSessionType,
+  StudioTestSnapshotPayload,
+} from "@/utils/agentTestSnapshot";
 
 /**
  * API base URL from environment configuration.
@@ -94,7 +98,7 @@ export class AuthError extends Error {
  * @throws AuthError if token is invalid or request returns 401
  * @throws Error if request fails or returns non-OK status
  */
-const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promise<unknown> => {
+export const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promise<unknown> => {
   const url = `${API_BASE_URL}${endpoint}`;
 
   const headers: Record<string, string> = {
@@ -1017,7 +1021,9 @@ export const deleteLLM = async (llmId: number): Promise<void> => {
 export interface SessionListItem {
   session_id: string;
   agent_id: number;
+  type?: ChatSessionType;
   release_id?: number | null;
+  test_workspace_hash?: string | null;
   status: string;
   title: string | null;
   is_pinned: boolean;
@@ -1040,7 +1046,9 @@ export interface SessionResponse {
   id: number;
   session_id: string;
   agent_id: number;
+  type?: ChatSessionType;
   release_id?: number | null;
+  test_workspace_hash?: string | null;
   user: string;
   status: string;
   title: string | null;
@@ -1055,10 +1063,20 @@ export interface SessionResponse {
  * @param agentId - Agent ID for the session
  * @returns Promise resolving to created session
  */
-export const createSession = async (agentId: number): Promise<SessionResponse> => {
+export const createSession = async (
+  agentId: number,
+  options?: {
+    type?: ChatSessionType;
+    testSnapshot?: StudioTestSnapshotPayload | null;
+  },
+): Promise<SessionResponse> => {
   return apiRequest('/sessions', {
     method: 'POST',
-    body: JSON.stringify({ agent_id: agentId }),
+    body: JSON.stringify({
+      agent_id: agentId,
+      type: options?.type ?? 'consumer',
+      test_snapshot: options?.testSnapshot ?? null,
+    }),
   }) as Promise<SessionResponse>;
 };
 
@@ -1071,11 +1089,17 @@ export const createSession = async (agentId: number): Promise<SessionResponse> =
  */
 export const listSessions = async (
   agentId?: number,
-  limit: number = 50
+  limit: number = 50,
+  options?: {
+    type?: ChatSessionType;
+  },
 ): Promise<SessionListResponse> => {
   let endpoint = `/sessions?limit=${limit}`;
   if (agentId !== undefined) {
     endpoint += `&agent_id=${agentId}`;
+  }
+  if (options?.type) {
+    endpoint += `&session_type=${options.type}`;
   }
   return apiRequest(endpoint) as Promise<SessionListResponse>;
 };
@@ -1410,6 +1434,8 @@ export const getReactContextUsage = async (payload: {
   task_id?: string | null;
   draft_message?: string;
   file_ids?: string[];
+  session_type?: ChatSessionType;
+  test_snapshot?: StudioTestSnapshotPayload | null;
 }): Promise<ReactContextUsageSummary> => {
   return apiRequest('/react/context-usage', {
     method: 'POST',

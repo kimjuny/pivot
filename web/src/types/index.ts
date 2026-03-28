@@ -34,6 +34,8 @@ export interface Agent {
   model_name?: string;
   /** Whether the agent is currently active */
   is_active: boolean;
+  /** Maximum recursion depth allowed for one ReAct task. */
+  max_iteration: number;
   /**
    * JSON-encoded list of allowed tool names, e.g. '["add","test_tool"]'.
    * null means no restriction (all tools visible); '[]' means no tools.
