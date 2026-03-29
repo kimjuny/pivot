@@ -222,7 +222,7 @@ function Navigation() {
       title: 'Session Activity',
       description: 'Inspect user sessions, execution traces, and long-running task behavior.',
       icon: Bot,
-      disabled: true,
+      to: '/studio/operations/sessions',
     },
     {
       title: 'Tool and Sandbox Logs',

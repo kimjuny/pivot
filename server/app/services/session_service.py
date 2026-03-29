@@ -16,6 +16,7 @@ from app.models.session import Session
 from app.schemas.file import FileAssetListItem
 from app.services.agent_service import AgentService
 from app.services.file_service import FileService
+from sqlalchemy import func
 from sqlmodel import Session as DBSession, col, select
 
 SESSION_IDLE_TIMEOUT = timedelta(minutes=15)
@@ -132,6 +133,49 @@ class SessionService:
             else session.updated_at.replace(tzinfo=UTC)
         )
         return reference_now - updated_at > SESSION_IDLE_TIMEOUT
+
+    def list_sessions_for_operations(
+        self,
+        *,
+        agent_id: int | None = None,
+        status: str | None = None,
+        session_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Session], int]:
+        """List all sessions across users for the Studio Operations view.
+
+        Args:
+            agent_id: Optional agent ID filter.
+            status: Optional session status filter.
+            session_type: Optional session type filter.
+            page: 1-based page number.
+            page_size: Maximum rows per page.
+
+        Returns:
+            Tuple of (sessions, total_count) for pagination.
+        """
+        filter_clauses: list[Any] = []
+        if agent_id is not None:
+            filter_clauses.append(Session.agent_id == agent_id)
+        if status is not None:
+            filter_clauses.append(Session.status == status)
+        if session_type is not None:
+            filter_clauses.append(Session.type == session_type)
+
+        count_stmt = select(func.count(Session.id))  # type: ignore[reportArgumentType, reportCallIssue]
+        for clause in filter_clauses:
+            count_stmt = count_stmt.where(clause)
+        total = self.db.exec(count_stmt).one()
+
+        data_stmt = select(Session).order_by(col(Session.updated_at).desc())
+        for clause in filter_clauses:
+            data_stmt = data_stmt.where(clause)
+        offset = (page - 1) * page_size
+        data_stmt = data_stmt.offset(offset).limit(page_size)
+        sessions = list(self.db.exec(data_stmt).all())
+
+        return sessions, total
 
     def get_sessions_by_user(
         self,

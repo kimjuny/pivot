@@ -18,6 +18,8 @@ import { Toaster } from '@/components/ui/sonner'
 import ConsumerEntryPage from '@/consumer/ConsumerEntryPage'
 import ConsumerAgentsPage from '@/consumer/ConsumerAgentsPage'
 import ConsumerAgentPage from '@/consumer/ConsumerAgentPage'
+import SessionHistoryPage from '@/studio/operations/SessionHistoryPage'
+import SessionDetailPage from '@/studio/operations/SessionDetailPage'
 import './index.css'
 
 /**
@@ -166,7 +168,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/studio/assets/skills" element={<SkillsListPage />} />
             <Route path="/studio/connections" element={<Navigate to="/studio/connections/channels" replace />} />
             <Route path="/studio/connections/channels" element={<ChannelsListPage />} />
-            <Route path="/studio/operations" element={<Navigate to="/studio/dashboard" replace />} />
+            <Route path="/studio/operations" element={<Navigate to="/studio/operations/sessions" replace />} />
+            <Route path="/studio/operations/sessions" element={<AuthenticatedLayout><SessionHistoryPage /></AuthenticatedLayout>} />
+            <Route path="/studio/operations/sessions/:sessionId" element={<AuthenticatedLayout><SessionDetailPage /></AuthenticatedLayout>} />
 
             <Route path="/agents" element={<AgentListPage />} />
             <Route path="/agent/:agentId" element={<AgentDetailPage />} />
