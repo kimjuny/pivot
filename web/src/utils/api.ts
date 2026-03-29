@@ -6,10 +6,73 @@ import type {
 } from "@/utils/agentTestSnapshot";
 
 /**
- * API base URL from environment configuration.
- * In development, uses localhost; in production, uses relative path.
+ * Runtime API base URL override.
+ * Set by the desktop adapter to run configured at build time.
  */
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8003/api';
+let runtimeApiBaseUrl: string | null = null;
+
+/**
+ * Override the API base URL at runtime.
+ *
+ * @param url - Full API base URL including the /api path segment
+ *   (e.g. "https://pivot.example.com/api").
+ */
+export function setApiBaseUrl(url: string): void {
+  runtimeApiBaseUrl = url;
+}
+
+/**
+ * Resolve the current API base URL.
+ *
+ * - **Dev mode**: always returns `/api` so requests go through the Vite proxy
+ *   (avoids CORS entirely for both web and desktop dev servers).
+ * - **Prod mode**: prefers a runtime override (set by the Tauri desktop shell
+ *   after the user configures the backend URL), then falls back to the
+ *   build-time env var, then to `http://localhost:8003/api`.
+ *
+ * @returns The active API base URL string.
+ */
+export function getApiBaseUrl(): string {
+  if (import.meta.env.DEV) return '/api';
+  if (runtimeApiBaseUrl) return runtimeApiBaseUrl;
+  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8003/api';
+}
+
+// ---------------------------------------------------------------------------
+// Pluggable HTTP client
+// ---------------------------------------------------------------------------
+
+/**
+ * The fetch implementation used by all API helpers.
+ *
+ * Defaults to the global `fetch`.  The Tauri desktop shell overrides it at
+ * startup via {@link setHttpClient} so that requests are routed through the
+ * native Rust HTTP plugin instead of the WebView network stack.
+ */
+let _fetch: typeof fetch = fetch;
+
+/**
+ * Replace the fetch implementation.
+ *
+ * Called once by the Tauri desktop bootstrap before React mounts.
+ */
+export function setHttpClient(client: typeof fetch): void {
+  _fetch = client;
+}
+
+/**
+ * Send an HTTP request through the currently configured client.
+ *
+ * Every API helper in this module (and across the codebase) should call this
+ * instead of the bare `fetch` so that the Tauri HTTP plugin can intercept
+ * requests when running inside the desktop shell.
+ */
+export function httpClient(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  return _fetch(input, init);
+}
 
 /**
  * Configuration options for API requests.
@@ -99,7 +162,7 @@ export class AuthError extends Error {
  * @throws Error if request fails or returns non-OK status
  */
 export const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promise<unknown> => {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -127,7 +190,7 @@ export const apiRequest = async (endpoint: string, options: RequestOptions = {})
   };
 
   try {
-    const response = await fetch(url, config);
+    const response = await httpClient(url, config);
 
     // Handle 401 Unauthorized - token expired or invalid
     if (response.status === 401) {
@@ -1490,14 +1553,14 @@ export const uploadChatFile = async (
   source: FileUploadSource,
   signal?: AbortSignal
 ): Promise<ChatFileAsset> => {
-  const url = `${API_BASE_URL}/files/uploads`;
+  const url = `${getApiBaseUrl()}/files/uploads`;
   const headers = getAuthorizedHeaders();
   const formData = new FormData();
   formData.append('file', file);
   formData.append('source', source);
 
   try {
-    const response = await fetch(url, {
+    const response = await httpClient(url, {
       method: 'POST',
       headers,
       body: formData,
@@ -1543,11 +1606,11 @@ export const uploadChatImage = async (
  * @param fileId - Backend file UUID
  */
 export const deleteChatFile = async (fileId: string): Promise<void> => {
-  const url = `${API_BASE_URL}/files/${fileId}`;
+  const url = `${getApiBaseUrl()}/files/${fileId}`;
   const headers = getAuthorizedHeaders();
 
   try {
-    const response = await fetch(url, {
+    const response = await httpClient(url, {
       method: 'DELETE',
       headers,
     });
@@ -1587,10 +1650,10 @@ export const fetchChatFileBlob = async (
   fileId: string,
   signal?: AbortSignal
 ): Promise<Blob> => {
-  const url = `${API_BASE_URL}/files/${fileId}/content`;
+  const url = `${getApiBaseUrl()}/files/${fileId}/content`;
   const headers = getAuthorizedHeaders();
 
-  const response = await fetch(url, {
+  const response = await httpClient(url, {
     method: 'GET',
     headers,
     signal,
@@ -1900,7 +1963,7 @@ export const importBundleSkill = async (payload: {
   skillName: string;
   files: BundleSkillImportFile[];
 }): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
-  const url = `${API_BASE_URL}/skills/import/bundle`;
+  const url = `${getApiBaseUrl()}/skills/import/bundle`;
   const headers = getAuthorizedHeaders();
   const formData = new FormData();
 
@@ -1913,7 +1976,7 @@ export const importBundleSkill = async (payload: {
   });
 
   try {
-    const response = await fetch(url, {
+    const response = await httpClient(url, {
       method: 'POST',
       headers,
       body: formData,

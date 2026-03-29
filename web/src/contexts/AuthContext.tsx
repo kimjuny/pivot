@@ -8,6 +8,7 @@ import {
   saveAuthSession,
   type User,
 } from './auth-core';
+import { getApiBaseUrl, httpClient } from '@/utils/api';
 
 /**
  * Authentication Provider component.
@@ -53,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Stores the access token and user data in localStorage for persistence.
    */
   const login = useCallback(async (username: string, password: string) => {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8003/api'}/auth/login`, {
+    const response = await httpClient(`${getApiBaseUrl()}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

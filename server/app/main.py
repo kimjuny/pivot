@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import traceback
@@ -75,10 +76,16 @@ class TimingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Add CORS middleware to allow frontend to communicate with backend
+# Add CORS middleware to allow frontend to communicate with backend.
+# Origins are configurable via the CORS_ORIGINS env var (comma-separated).
+# Default: http://localhost:3000 (Vite dev server). Production deployments
+# serve frontend and API from the same origin via nginx, so CORS is not needed.
+_cors_origins_str = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
+_cors_origins = [o.strip() for o in _cors_origins_str.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -18,7 +18,8 @@ import {
   type SessionListItem,
   type SessionResponse,
   type WebSearchBinding,
-  API_BASE_URL,
+  getApiBaseUrl,
+  httpClient,
 } from "@/utils/api";
 import {
   SidebarInset,
@@ -1293,8 +1294,8 @@ function ChatContainer({
             headers.Authorization = `Bearer ${token}`;
           }
 
-          const response = await fetch(
-            `${API_BASE_URL}/react/sessions/${sessionId}/events/stream?after_id=${sessionEventCursorRef.current}`,
+          const response = await httpClient(
+            `${getApiBaseUrl()}/react/sessions/${sessionId}/events/stream?after_id=${sessionEventCursorRef.current}`,
             {
               headers,
               signal: controller.signal,

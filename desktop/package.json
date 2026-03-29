@@ -1,0 +1,17 @@
+{
+  "name": "pivot-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev:web": "cd ../web && npx vite --config vite.config.desktop.ts --port 5173",
+    "build:web": "cd ../web && npx vite build --config vite.config.desktop.ts",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "npm run build:web && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  }
+}

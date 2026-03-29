@@ -1,0 +1,44 @@
+{
+  "identifier": "io.pivot.desktop",
+  "productName": "Pivot",
+  "version": "0.1.0",
+  "build": {
+    "frontendDist": "../../web/dist-desktop",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev:web",
+    "beforeBuildCommand": "npm run build:web"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pivot",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": ["default"]
+    },
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "id": "main-tray",
+      "tooltip": "Pivot"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "targets": "all"
+  }
+}

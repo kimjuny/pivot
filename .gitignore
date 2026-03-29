@@ -94,3 +94,7 @@ server/workspace
 .cursor
 .codex
 openspec
+
+# Desktop (Tauri)
+desktop/src-tauri/target/
+web/dist-desktop/

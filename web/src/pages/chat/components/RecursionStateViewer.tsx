@@ -7,7 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { API_BASE_URL } from "@/utils/api";
+import { getApiBaseUrl, httpClient } from "@/utils/api";
 import { getAuthToken } from "@/contexts/auth-core";
 
 interface RecursionStateViewerProps {
@@ -36,7 +36,7 @@ export function RecursionStateViewer({
 
     setLoading(true);
     try {
-      const apiUrl = `${API_BASE_URL}/react/tasks/${taskId}/states/${iteration}`;
+      const apiUrl = `${getApiBaseUrl()}/react/tasks/${taskId}/states/${iteration}`;
       const token = getAuthToken();
       const headers: Record<string, string> = {};
 
@@ -44,7 +44,7 @@ export function RecursionStateViewer({
         headers.Authorization = `Bearer ${token}`;
       }
 
-      const response = await fetch(apiUrl, { headers });
+      const response = await httpClient(apiUrl, { headers });
       if (!response.ok) {
         throw new Error("Failed to fetch state");
       }
