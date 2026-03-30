@@ -13,7 +13,8 @@ import {
   formatTokenCount,
   isClarifyMessage,
 } from "../utils/chatSelectors";
-import { FormattedAnswerContent } from "./FormattedAnswerContent";
+import { AssistantAttachmentList } from "./AssistantAttachmentList";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 import { RecursionCard } from "./RecursionCard";
 import { SkillSelectionCard } from "./SkillSelectionCard";
 import { TokenUsageLabel } from "./TokenUsageLabel";
@@ -74,7 +75,7 @@ export function AssistantMessageBlock({
         </div>
       )}
 
-      {message.content && (
+      {(message.content || (message.assistantAttachments?.length ?? 0) > 0) && (
         <div className="rounded-lg border border-border bg-background/50 p-3">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -131,7 +132,8 @@ export function AssistantMessageBlock({
             )}
           </div>
           <div className="pl-5 text-sm leading-relaxed text-foreground">
-            <FormattedAnswerContent content={message.content} />
+            {message.content && <MarkdownRenderer content={message.content} />}
+            <AssistantAttachmentList attachments={message.assistantAttachments} />
           </div>
         </div>
       )}

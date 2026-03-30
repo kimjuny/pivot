@@ -185,6 +185,51 @@ describe("buildMessagesFromHistory", () => {
     );
   });
 
+  it("maps assistant-generated attachments from full-history payloads", () => {
+    const messages = buildMessagesFromHistory([
+      {
+        task_id: "task-attachment",
+        user_message: "Create a report",
+        files: [],
+        assistant_attachments: [
+          {
+            attachment_id: "attachment-1",
+            display_name: "report.md",
+            original_name: "report.md",
+            mime_type: "text/markdown",
+            extension: "md",
+            size_bytes: 2048,
+            render_kind: "markdown",
+            workspace_relative_path: "outputs/report.md",
+            created_at: "2026-03-16T00:00:01.000Z",
+          },
+        ],
+        agent_answer: "Created the report.",
+        status: "completed",
+        total_tokens: 0,
+        current_plan: [],
+        recursions: [],
+        created_at: "2026-03-16T00:00:00.000Z",
+        updated_at: "2026-03-16T00:00:02.000Z",
+      },
+    ]);
+
+    const assistantMessage = messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.assistantAttachments).toEqual([
+      {
+        attachmentId: "attachment-1",
+        displayName: "report.md",
+        originalName: "report.md",
+        mimeType: "text/markdown",
+        extension: "md",
+        sizeBytes: 2048,
+        renderKind: "markdown",
+        workspaceRelativePath: "outputs/report.md",
+        createdAt: "2026-03-16T00:00:01.000Z",
+      },
+    ]);
+  });
+
   it("does not reuse old clarify prompts once the task has resumed running", () => {
     const messages = buildMessagesFromHistory([
       {

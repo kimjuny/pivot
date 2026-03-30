@@ -151,12 +151,13 @@
 ```json
 {
   // ...
-  "action": {
-    "action_type": "ANSWER",
-    "output": {
-      "answer": "最终输出给用户的结论" //【必须返回】
-    }
-  },
+    "action": {
+      "action_type": "ANSWER",
+      "output": {
+        "answer": "最终输出给用户的结论", //【必须返回】
+        "attachments": [] //【可选返回】仅返回 /workspace 下、需要暴露给用户的文件绝对路径
+      }
+    },
   "task_summary": { //【必须返回】在action_type = ANSWER环节对本次递归的task进行收尾性总结
     "narrative": "",
     "key_findings": ["..."],

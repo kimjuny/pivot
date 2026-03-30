@@ -368,7 +368,7 @@ function DraggableDialog({
           </div>
 
           <div className="flex items-center gap-1">
-            {headerAction && <div className="mr-2">{headerAction}</div>}
+            {headerAction}
             {fullscreenable && (
               <button
                 type="button"

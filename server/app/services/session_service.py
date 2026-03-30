@@ -14,8 +14,10 @@ from app.models.react import (
 )
 from app.models.session import Session
 from app.schemas.file import FileAssetListItem
+from app.schemas.task_attachment import TaskAttachmentListItem
 from app.services.agent_service import AgentService
 from app.services.file_service import FileService
+from app.services.task_attachment_service import TaskAttachmentService
 from sqlalchemy import func
 from sqlmodel import Session as DBSession, col, select
 
@@ -33,6 +35,34 @@ class SessionService:
             db: Database session for persistence operations.
         """
         self.db = db
+
+    @staticmethod
+    def _serialize_history_files(
+        files: list[FileAssetListItem | dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Normalizes persisted file payloads before writing chat history."""
+        return [
+            (
+                item.model_dump()
+                if isinstance(item, FileAssetListItem)
+                else FileAssetListItem.model_validate(item).model_dump()
+            )
+            for item in files or []
+        ]
+
+    @staticmethod
+    def _serialize_history_attachments(
+        attachments: list[TaskAttachmentListItem | dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Normalizes persisted attachment payloads before writing chat history."""
+        return [
+            (
+                item.model_dump()
+                if isinstance(item, TaskAttachmentListItem)
+                else TaskAttachmentListItem.model_validate(item).model_dump()
+            )
+            for item in attachments or []
+        ]
 
     def create_session(
         self,
@@ -274,7 +304,8 @@ class SessionService:
         session_id: str,
         message_type: str,
         content: str,
-        files: list[FileAssetListItem] | None = None,
+        files: list[FileAssetListItem | dict[str, Any]] | None = None,
+        attachments: list[TaskAttachmentListItem | dict[str, Any]] | None = None,
     ) -> bool:
         """Update chat history with a new message.
 
@@ -305,7 +336,8 @@ class SessionService:
                 "type": message_type,
                 "content": content,
                 "timestamp": datetime.now(UTC).isoformat(),
-                "files": [item.dict() for item in files or []],
+                "files": self._serialize_history_files(files),
+                "attachments": self._serialize_history_attachments(attachments),
             }
         )
 
@@ -370,6 +402,7 @@ class SessionService:
             return False
 
         FileService(self.db).clear_files_by_session_id(session_id)
+        TaskAttachmentService(self.db).delete_by_session_id(session_id)
         test_snapshot_id = session.test_snapshot_id
 
         self.db.delete(session)
@@ -407,6 +440,9 @@ class SessionService:
         )
         tasks = list(self.db.exec(stmt).all())
         file_history = FileService(self.db).build_history_items(
+            [task.task_id for task in tasks]
+        )
+        attachment_history = TaskAttachmentService(self.db).list_by_task_ids(
             [task.task_id for task in tasks]
         )
         current_plan_by_task = self._load_current_plan_by_task(tasks)
@@ -481,6 +517,7 @@ class SessionService:
                     "task_id": task.task_id,
                     "user_message": task.user_message,
                     "files": file_history.get(task.task_id, []),
+                    "assistant_attachments": attachment_history.get(task.task_id, []),
                     "agent_answer": agent_answer,
                     "status": task.status,
                     "total_tokens": task.total_tokens,

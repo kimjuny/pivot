@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from app.schemas.base import AppBaseModel
 from app.schemas.file import FileAssetListItem
+from app.schemas.task_attachment import TaskAttachmentListItem
 from pydantic import Field
 
 
@@ -145,6 +146,7 @@ class ChatHistoryMessage(AppBaseModel):
     content: str
     timestamp: str
     files: list[FileAssetListItem] = Field(default_factory=list)
+    attachments: list[TaskAttachmentListItem] = Field(default_factory=list)
 
 
 class ChatHistoryResponse(AppBaseModel):
@@ -219,6 +221,7 @@ class TaskMessage(AppBaseModel):
     task_id: str
     user_message: str
     files: list[FileAssetListItem] = Field(default_factory=list)
+    assistant_attachments: list[TaskAttachmentListItem] = Field(default_factory=list)
     agent_answer: str | None = None
     status: str
     total_tokens: int = 0

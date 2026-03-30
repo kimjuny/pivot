@@ -29,6 +29,7 @@ from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
+from app.api.task_attachments import router as task_attachments_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.api.web_search import router as web_search_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
@@ -102,6 +103,7 @@ app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
+app.include_router(task_attachments_router, prefix="/api")
 app.include_router(channels_router, prefix="/api")
 app.include_router(consumer_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")

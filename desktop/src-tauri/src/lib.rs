@@ -7,6 +7,8 @@ use tauri::{
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Focus the main window when a second instance is attempted.

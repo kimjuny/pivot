@@ -2,9 +2,11 @@
 
 import json
 import sys
+import tempfile
 import unittest
 from importlib import import_module
 from pathlib import Path
+from typing import Any, cast
 
 from sqlmodel import Session as DBSession, SQLModel, create_engine
 
@@ -22,6 +24,10 @@ AgentSnapshotService = import_module(
     "app.services.agent_snapshot_service"
 ).AgentSnapshotService
 SessionService = import_module("app.services.session_service").SessionService
+TaskAttachmentService = import_module(
+    "app.services.task_attachment_service"
+).TaskAttachmentService
+workspace_service = import_module("app.services.workspace_service")
 
 
 class SessionServiceTestCase(unittest.TestCase):
@@ -204,6 +210,83 @@ class SessionServiceTestCase(unittest.TestCase):
             self.fail("Expected pinned session row")
 
         self.assertTrue(updated_session.is_pinned)
+
+    def test_full_history_includes_assistant_attachments(self) -> None:
+        """Full history should expose persisted assistant artifacts beside the answer."""
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        workspace_module = cast(Any, workspace_service)
+        original_workspace_root = workspace_module._WORKSPACE_ROOT
+        workspace_module._WORKSPACE_ROOT = Path(temp_dir.name)
+        self.addCleanup(
+            setattr,
+            workspace_module,
+            "_WORKSPACE_ROOT",
+            original_workspace_root,
+        )
+
+        task = ReactTask(
+            task_id="task-attachments",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Create a report",
+            user_intent="Create a report",
+            status="completed",
+        )
+        self.session.add(task)
+        self.session.commit()
+
+        source_file = (
+            workspace_module.ensure_agent_workspace("alice", self.agent.id or 0)
+            / "outputs"
+            / "report.md"
+        )
+        source_file.parent.mkdir(parents=True, exist_ok=True)
+        source_file.write_text("# Report", encoding="utf-8")
+
+        TaskAttachmentService(self.session).create_from_answer_paths(
+            username="alice",
+            agent_id=self.agent.id or 0,
+            task_id=task.task_id,
+            session_id="session-1",
+            paths=["/workspace/outputs/report.md"],
+        )
+
+        history = self.service.get_full_session_history("session-1")
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(
+            history[0]["assistant_attachments"][0].display_name,
+            "report.md",
+        )
+
+    def test_update_chat_history_accepts_attachment_dict_payloads(self) -> None:
+        """Chat history should accept public attachment dicts from the streaming layer."""
+        success = self.service.update_chat_history(
+            "session-1",
+            "assistant",
+            "Done",
+            attachments=[
+                {
+                    "attachment_id": "attachment-1",
+                    "display_name": "report.md",
+                    "original_name": "report.md",
+                    "mime_type": "text/markdown",
+                    "extension": "md",
+                    "size_bytes": 128,
+                    "render_kind": "markdown",
+                    "workspace_relative_path": "outputs/report.md",
+                    "created_at": "2026-03-30T00:00:00Z",
+                }
+            ],
+        )
+
+        self.assertTrue(success)
+
+        history = self.service.get_chat_history("session-1")
+        self.assertEqual(history[-1]["attachments"][0]["attachment_id"], "attachment-1")
+        self.assertEqual(history[-1]["attachments"][0]["display_name"], "report.md")
 
     def test_create_session_pins_active_release_id(self) -> None:
         """New sessions should freeze the agent's current active release."""

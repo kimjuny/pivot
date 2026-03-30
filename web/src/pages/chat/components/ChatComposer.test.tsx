@@ -250,6 +250,50 @@ describe("ChatComposer", () => {
     );
   });
 
+  it("keeps a non-running task plan collapsed when reopening a session", async () => {
+    vi.useFakeTimers();
+
+    render(
+      <ChatComposer
+        {...buildComposerProps({
+          taskPlan: {
+            messageId: "assistant-paused",
+            taskId: "task-paused",
+            taskStatus: "waiting_input",
+            steps: [
+              {
+                stepId: "1",
+                title: "Inspect the repository",
+                description: "Review the current files",
+                completionCriteria: "Context is collected",
+                status: "done",
+              },
+              {
+                stepId: "2",
+                title: "Ship the fix",
+                description: "Patch the bug",
+                completionCriteria: "Change is merged",
+                status: "running",
+              },
+            ],
+          },
+        })}
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Expand task plan" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("composer-task-plan-body")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+  });
+
   it("shows a clear compacting notice while the runtime window is rebuilding", () => {
     render(
       <ChatComposer

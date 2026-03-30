@@ -1,6 +1,7 @@
 import type {
   FileUploadSource,
   ReactSessionRuntimeDebug,
+  TaskAttachmentAsset,
 } from "@/utils/api";
 import type {
   ChatSessionType,
@@ -190,6 +191,7 @@ export interface TaskPlanStep {
 export interface TaskPlanSnapshot {
   messageId: string;
   taskId?: string;
+  taskStatus?: ChatMessage["status"];
   steps: TaskPlanStep[];
 }
 
@@ -289,6 +291,21 @@ export interface ChatAttachment {
 }
 
 /**
+ * Assistant-generated artifact rendered below one final answer.
+ */
+export interface AssistantAttachment {
+  attachmentId: string;
+  displayName: string;
+  originalName: string;
+  mimeType: string;
+  extension: string;
+  sizeBytes: number;
+  renderKind: TaskAttachmentAsset["render_kind"];
+  workspaceRelativePath: string;
+  createdAt: string;
+}
+
+/**
  * Upload queue item that keeps local UI state beside persisted file metadata.
  */
 export interface PendingUploadItem extends ChatAttachment {
@@ -306,6 +323,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   attachments?: ChatAttachment[];
+  assistantAttachments?: AssistantAttachment[];
   timestamp: string;
   task_id?: string;
   /** Latest current-plan snapshot attached to this task, when available. */

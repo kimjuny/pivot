@@ -102,7 +102,7 @@ serialized by the existing full-history endpoint.
 
 ## Implementation Plan
 
-### Phase 1 — Backend: Studio Operations session list endpoint
+### Phase 1 — Backend: Studio Operations session list endpoint ✅
 
 **New file:** `server/app/api/operations.py`
 
@@ -176,7 +176,7 @@ def list_sessions_for_operations(
 
 This returns `(sessions, total_count)` for pagination metadata.
 
-### Phase 2 — Backend: Studio Operations session detail endpoint
+### Phase 2 — Backend: Studio Operations session detail endpoint ✅
 
 **New endpoint:**
 
@@ -211,7 +211,7 @@ Response shape:
 - The admin endpoint should verify that the requesting user has Studio access
   but should NOT restrict by `session.user`.
 
-### Phase 3 — Frontend: Session History list page
+### Phase 3 — Frontend: Session History list page ✅
 
 **New file:** `web/src/studio/operations/SessionHistoryPage.tsx`
 
@@ -292,7 +292,7 @@ No full-text search in the first version.
 
 **Table component:** Use shadcn `Table` from `web/src/components/ui/table.tsx`.
 
-### Phase 4 — Frontend: Session Detail page
+### Phase 4 — Frontend: Session Detail page ✅
 
 **New file:** `web/src/studio/operations/SessionDetailPage.tsx`
 
@@ -367,7 +367,7 @@ Specifically:
 The key point: do NOT wrap the detail page in any chat session context or
 controller. It is a pure data-fetching page that renders pre-built messages.
 
-### Phase 5 — Navigation update
+### Phase 5 — Navigation update ✅
 
 **Update the sidebar navigation in the Studio layout** so that `Operations`
 has a second-level entry for `Session History`.

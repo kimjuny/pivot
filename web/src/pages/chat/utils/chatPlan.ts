@@ -63,6 +63,7 @@ export function deriveTaskPlanSnapshot(
     return {
       messageId: message.id,
       taskId: message.task_id,
+      taskStatus: message.status,
       steps: applyTaskPlanHeuristics(latestPlanSteps, message.status),
     };
   }
@@ -75,6 +76,7 @@ export function deriveTaskPlanSnapshot(
   return {
     messageId: message.id,
     taskId: message.task_id,
+    taskStatus: message.status,
     steps: applyTaskPlanHeuristics(persistedPlan, message.status),
   };
 }

@@ -17,6 +17,7 @@ interface ComposerTaskPlanProps {
 
 const PLAN_ENTER_DELAY_MS = 16;
 const PLAN_AUTO_COLLAPSE_DELAY_MS = 720;
+const ACTIVE_TASK_PLAN_STATUSES = new Set(["running", "skill_resolving"]);
 
 function isSettledTaskPlan(taskPlan: TaskPlanSnapshot): boolean {
   return (
@@ -25,6 +26,12 @@ function isSettledTaskPlan(taskPlan: TaskPlanSnapshot): boolean {
       (step) => step.status === "done" || step.status === "error",
     )
   );
+}
+
+function shouldAutoExpandTaskPlan(taskPlan: TaskPlanSnapshot): boolean {
+  return taskPlan.taskStatus
+    ? ACTIVE_TASK_PLAN_STATUSES.has(taskPlan.taskStatus)
+    : true;
 }
 
 /**
@@ -40,6 +47,7 @@ export function ComposerTaskPlan({ taskPlan }: ComposerTaskPlanProps) {
   ).length;
   const planKey = taskPlan.taskId ?? taskPlan.messageId;
   const isTaskPlanSettled = isSettledTaskPlan(taskPlan);
+  const shouldAutoExpandOnEnter = shouldAutoExpandTaskPlan(taskPlan);
 
   if (previousPlanKeyRef.current !== planKey) {
     previousPlanKeyRef.current = planKey;
@@ -54,13 +62,13 @@ export function ComposerTaskPlan({ taskPlan }: ComposerTaskPlanProps) {
     // collapsed shell first instead of snapping straight to expanded.
     const enterTimer = window.setTimeout(() => {
       setHasEntered(true);
-      setIsExpanded(true);
+      setIsExpanded(shouldAutoExpandOnEnter);
     }, PLAN_ENTER_DELAY_MS);
 
     return () => {
       window.clearTimeout(enterTimer);
     };
-  }, [planKey]);
+  }, [planKey, shouldAutoExpandOnEnter]);
 
   useEffect(() => {
     if (!previousSettledRef.current && isTaskPlanSettled) {

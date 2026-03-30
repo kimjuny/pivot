@@ -1,7 +1,13 @@
-import type { ChatFileAsset, RecursionDetail, TaskMessage } from "@/utils/api";
+import type {
+  ChatFileAsset,
+  RecursionDetail,
+  TaskAttachmentAsset,
+  TaskMessage,
+} from "@/utils/api";
 
 import type {
   ChatAttachment,
+  AssistantAttachment,
   ChatMessage,
   ChatPendingUserAction,
   ReactStreamEvent,
@@ -110,6 +116,25 @@ export function toChatAttachment(
     suspectedScanned: file.suspected_scanned,
     textEncoding: file.text_encoding,
     previewUrl,
+  };
+}
+
+/**
+ * Converts API task-attachment payloads into the assistant artifact model.
+ */
+export function toAssistantAttachment(
+  attachment: TaskAttachmentAsset,
+): AssistantAttachment {
+  return {
+    attachmentId: attachment.attachment_id,
+    displayName: attachment.display_name,
+    originalName: attachment.original_name,
+    mimeType: attachment.mime_type,
+    extension: attachment.extension,
+    sizeBytes: attachment.size_bytes,
+    renderKind: attachment.render_kind,
+    workspaceRelativePath: attachment.workspace_relative_path,
+    createdAt: attachment.created_at,
   };
 }
 
@@ -398,6 +423,9 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       id: `assistant-${task.task_id}`,
       role: "assistant",
       content: buildAssistantContent(task),
+      assistantAttachments: (task.assistant_attachments ?? []).map((attachment) =>
+        toAssistantAttachment(attachment),
+      ),
       timestamp: task.updated_at,
       task_id: task.task_id,
       pendingUserAction,

@@ -32,6 +32,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "skill",
     "skillchangesubmission",
     "subscene",
+    "taskattachment",
     "user",
 }
 
@@ -219,9 +220,7 @@ def ensure_session_schema_compatibility() -> None:
                 text("ALTER TABLE session ADD COLUMN test_snapshot_id INTEGER")
             )
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
-        conn.execute(
-            text("UPDATE session SET type = 'consumer' WHERE type IS NULL")
-        )
+        conn.execute(text("UPDATE session SET type = 'consumer' WHERE type IS NULL"))
         conn.execute(
             text(
                 "UPDATE session "

@@ -11,6 +11,8 @@ import {
   deleteChatImage,
   fetchChatFileBlob,
   fetchChatImageBlob,
+  fetchTaskAttachmentBlob,
+  setHttpClient,
   uploadChatFile,
   uploadChatImage,
   updateSession,
@@ -19,10 +21,12 @@ import {
 describe('chat file api helpers', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+    setHttpClient(fetch);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    setHttpClient(fetch);
     vi.restoreAllMocks();
   });
 
@@ -158,6 +162,21 @@ describe('chat file api helpers', () => {
     expect(result.type).toBe('application/pdf');
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/files/file-3/content'),
+      expect.objectContaining({
+        method: 'GET',
+      })
+    );
+  });
+
+  it('fetches assistant attachment blobs for preview dialogs', async () => {
+    const blob = new Blob(['markdown-bytes'], { type: 'text/markdown' });
+    vi.mocked(fetch).mockResolvedValue(new Response(blob, { status: 200 }));
+
+    const result = await fetchTaskAttachmentBlob('attachment-1');
+
+    expect(result.type).toBe('text/markdown');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/task-attachments/attachment-1/content'),
       expect.objectContaining({
         method: 'GET',
       })

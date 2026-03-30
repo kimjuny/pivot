@@ -1205,6 +1205,7 @@ export interface SessionChatHistoryMessage {
   content: string;
   timestamp: string;
   files?: ChatFileAsset[];
+  attachments?: TaskAttachmentAsset[];
 }
 
 /**
@@ -1229,6 +1230,21 @@ export interface ChatFileAsset {
   task_id: string | null;
   created_at: string;
   expires_at?: string;
+}
+
+/**
+ * Assistant-generated attachment metadata returned by the backend.
+ */
+export interface TaskAttachmentAsset {
+  attachment_id: string;
+  display_name: string;
+  original_name: string;
+  mime_type: string;
+  extension: string;
+  size_bytes: number;
+  render_kind: 'markdown' | 'pdf' | 'image' | 'text' | 'download';
+  workspace_relative_path: string;
+  created_at: string;
 }
 
 /**
@@ -1316,6 +1332,7 @@ export interface TaskMessage {
   task_id: string;
   user_message: string;
   files?: ChatFileAsset[];
+  assistant_attachments?: TaskAttachmentAsset[];
   agent_answer: string | null;
   status: string;
   total_tokens: number;
@@ -1684,6 +1701,39 @@ export const fetchChatImageBlob = async (
   signal?: AbortSignal
 ): Promise<Blob> => {
   return fetchChatFileBlob(fileId, signal);
+};
+
+/**
+ * Fetch an assistant-generated task attachment blob with auth headers.
+ *
+ * @param attachmentId - Persisted attachment UUID
+ * @param signal - Optional abort signal
+ * @returns Promise resolving to the attachment blob
+ */
+export const fetchTaskAttachmentBlob = async (
+  attachmentId: string,
+  signal?: AbortSignal
+): Promise<Blob> => {
+  const url = `${getApiBaseUrl()}/task-attachments/${attachmentId}/content`;
+  const headers = getAuthorizedHeaders();
+
+  const response = await httpClient(url, {
+    method: 'GET',
+    headers,
+    signal,
+  });
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json() as { detail?: string };
+    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+  }
+
+  return await response.blob();
 };
 
 // ---------------------------------------------------------------------------

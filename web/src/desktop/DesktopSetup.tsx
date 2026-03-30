@@ -1,9 +1,6 @@
 import React, { useState } from "react";
-import { getApiBaseUrl, setApiBaseUrl, httpClient } from "@/utils/api";
-import {
-  setStoredBackendUrl,
-  resolveApiBaseUrl,
-} from "@/desktop/desktop-adapter";
+import { httpClient, setApiBaseUrl } from "@/utils/api";
+import { setStoredBackendUrl } from "@/desktop/desktop-adapter";
 
 /**
  * First-launch setup screen for the desktop application.
@@ -78,7 +75,9 @@ export function DesktopSetup({ onReady }: { onReady: () => void }) {
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") handleConnect();
+              if (e.key === "Enter") {
+                void handleConnect();
+              }
             }}
             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             autoFocus
@@ -89,7 +88,9 @@ export function DesktopSetup({ onReady }: { onReady: () => void }) {
         </div>
 
         <button
-          onClick={handleConnect}
+          onClick={() => {
+            void handleConnect();
+          }}
           disabled={connecting}
           className="inline-flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
         >

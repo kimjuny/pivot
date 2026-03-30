@@ -245,10 +245,15 @@ Approach B is the right choice for an enterprise desktop product because:
    frontend makes the desktop app version the single source of truth for what
    UI the user sees.
 
-The cross-origin problem is solved by **`tauri-plugin-http`**, which replaces
-`window.fetch` with a Rust-side `reqwest` client. Every API call is routed
-through the Tauri Rust process, bypassing the WebView's CORS enforcement
-entirely:
+The cross-origin problem is solved by a two-mode architecture:
+
+**Dev mode** — Vite dev server proxies `/api` to the backend. No CORS needed
+because requests are same-origin. Both web and desktop dev servers share this
+mechanism.
+
+**Prod mode** — `tauri-plugin-http` replaces the HTTP client with a Rust-side
+`reqwest` client. Every `httpClient()` call is routed through the Tauri Rust
+process, bypassing the WebView's CORS enforcement entirely:
 
 ```
 ┌────────────────────────────────────────────┐
@@ -256,7 +261,7 @@ entirely:
 │                                            │
 │  ┌──────────────────────────────────────┐  │
 │  │         WebView                      │  │
-│  │   window.fetch (overridden)          │  │
+│  │   httpClient() (pluggable)           │  │
 │  │        │                             │  │
 │  └────────┼─────────────────────────────┘  │
 │           │                                │
@@ -272,10 +277,12 @@ This approach means:
 
 - The backend **never needs to allow the Tauri origin** in CORS. Only the
   web-dev origin (`http://localhost:3000`) is allowed.
-- All `fetch()` calls in the app (API requests, SSE streams, login, setup
-  connectivity test) automatically go through Rust — no per-call changes.
-- The override happens in `bootstrap()` before React mounts, so every
-  downstream caller is covered.
+- All `fetch()` calls go through a shared `httpClient()` abstraction. In dev
+  mode this is the native `fetch` (Vite proxy handles routing). In prod mode
+  the Tauri HTTP plugin overrides it via `setHttpClient()` before React mounts.
+- No global `window.fetch` mutation — the override is explicit and controlled.
+- The URL resolution (`getApiBaseUrl()`) returns `/api` in dev mode and the
+  runtime-configured absolute URL in prod mode.
 
 The backend CORS configuration is restricted:
 
@@ -373,8 +380,9 @@ Each future command must:
 
 - A bundled copy of the Consumer frontend that renders without network.
 - A native window with system tray behavior (close-to-tray, single instance).
-- `tauri-plugin-http` which overrides `window.fetch` so all API calls route
-  through Rust's `reqwest` client, bypassing CORS entirely.
+- `tauri-plugin-http` which replaces the HTTP client so all `httpClient()` calls
+  route through Rust's `reqwest` client in production, bypassing CORS entirely.
+  In dev mode the Vite proxy handles routing instead.
 - Runtime-configurable backend URL via `setApiBaseUrl()` and the desktop
   setup screen.
 - A thin platform adapter (`desktop-adapter.ts`) for feature detection.
@@ -428,25 +436,27 @@ export function resolveApiBaseUrl(): string | null {
 }
 ```
 
-The shared API module (`web/src/utils/api.ts`) exposes `setApiBaseUrl()` and
-`getApiBaseUrl()` so the desktop adapter can inject the resolved URL at
-runtime without changing the API call sites.
+The shared API module (`web/src/utils/api.ts`) exposes a pluggable HTTP client
+(`httpClient` / `setHttpClient`) and dynamic URL resolution (`getApiBaseUrl()` /
+`setApiBaseUrl()`). In dev mode `getApiBaseUrl()` returns `/api` (routed by the
+Vite proxy). In prod mode the desktop adapter injects the runtime URL and the
+Tauri HTTP plugin overrides the HTTP client.
 
-In addition to the adapter above, the desktop entry overrides `window.fetch`
-with Tauri's HTTP plugin fetch before React mounts:
+In addition to the adapter above, the desktop entry dynamically loads the
+Tauri HTTP plugin in production and injects it via `setHttpClient()`:
 
 ```typescript
 // web/src/desktop/main.tsx — bootstrap()
-if (isDesktop) {
+if (!import.meta.env.DEV) {
   const { fetch: tauriFetch } = await import("@tauri-apps/plugin-http");
-  window.fetch = tauriFetch as typeof window.fetch;
+  setHttpClient(tauriFetch as typeof fetch);
 }
 ```
 
-This ensures every `fetch()` call in the app — API requests, SSE streams,
-login, setup connectivity test — is routed through Rust's `reqwest` client
-rather than the WebView's network stack. The backend never sees a request
-from the Tauri WebView origin, so CORS does not apply.
+This ensures every `httpClient()` call in the app — API requests, SSE streams,
+login, setup connectivity test — is routed through Rust's `reqwest` client in
+production. In dev mode the Vite proxy handles routing, so the Tauri plugin is
+not loaded.
 
 ## Desktop Connectors — Studio Configuration Surface
 
@@ -798,11 +808,14 @@ experience. It does not introduce a new product, a new data model, or a new API
 surface. It adds native OS integration (tray, window management, auto-update)
 and establishes the IPC foundation for future local resource access.
 
-The current implementation uses direct CORS for API calls (the backend already
-allows all origins) rather than a Tauri proxy plugin. This simplifies the Rust
-shell and avoids the macOS-14+ limitation of Tauri's built-in proxy feature. If
-the backend ever tightens CORS, the proxy approach can be introduced later
-without frontend changes.
+The current implementation uses a dual-mode approach for API access:
+- **Dev mode**: Vite dev server proxies `/api` to the backend (no CORS needed).
+- **Prod mode**: `tauri-plugin-http` routes requests through Rust's reqwest
+  (no CORS — Rust is the HTTP client, not the WebView).
+
+Server CORS is restricted to `http://localhost:3000` by default, configurable
+via the `CORS_ORIGINS` environment variable. The Tauri origin never needs to be
+allowed because prod-mode requests go through Rust, not the WebView.
 
 Desktop Connectors in Studio remain a placeholder until agents need local
 capabilities. When that time comes, they become the configuration surface for

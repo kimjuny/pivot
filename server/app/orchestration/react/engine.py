@@ -31,6 +31,7 @@ from app.schemas.file import FileAssetListItem
 from app.services.react_runtime_service import ReactRuntimeService, TaskRuntimeState
 from app.services.react_state_service import ReactStateService
 from app.services.session_service import SessionService
+from app.services.task_attachment_service import TaskAttachmentService
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session
 
@@ -149,6 +150,33 @@ class ReactEngine:
         )
         if inferred_total > 0:
             token_counter["total_tokens"] = inferred_total
+
+    def _persist_answer_attachments(
+        self,
+        *,
+        task: ReactTask,
+        action_output: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Normalize and persist assistant attachments declared on an answer."""
+        normalized_output = dict(action_output)
+        declared_paths = TaskAttachmentService.extract_declared_paths(normalized_output)
+        normalized_output.pop("attatchments", None)
+
+        if not declared_paths:
+            normalized_output["attachments"] = []
+            return normalized_output, []
+
+        attachment_service = TaskAttachmentService(self.db)
+        attachments = attachment_service.create_from_answer_paths(
+            username=task.user,
+            agent_id=task.agent_id,
+            task_id=task.task_id,
+            session_id=task.session_id,
+            paths=declared_paths,
+        )
+        public_payload = attachment_service.to_event_payload(attachments)
+        normalized_output["attachments"] = public_payload
+        return normalized_output, public_payload
 
     @staticmethod
     def _to_percent(used_tokens: int, max_context_tokens: int) -> int:
@@ -943,6 +971,13 @@ class ReactEngine:
             action = decision.action
             action_type = action.action_type
             action_output = dict(action.output)
+            answer_attachments: list[dict[str, Any]] = []
+
+            if action_type == "ANSWER":
+                action_output, answer_attachments = self._persist_answer_attachments(
+                    task=task,
+                    action_output=action_output,
+                )
 
             # Extract the plan step this recursion belongs to.
             # The LLM returns action.step_id when executing as part of a plan.
@@ -1042,6 +1077,7 @@ class ReactEngine:
                 "summary": summary,
                 "session_title": persisted_session_title,
                 "output": action_output,
+                "answer_attachments": answer_attachments,
                 "assistant_message": assistant_message_raw,
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
@@ -1610,10 +1646,14 @@ class ReactEngine:
 
                     if task.session_id:
                         answer_output = event_data.get("output", {})
+                        attachments_data = event_data.get("answer_attachments")
                         SessionService(self.db).update_chat_history(
                             task.session_id,
                             "assistant",
                             answer_output.get("answer", ""),
+                            attachments=attachments_data
+                            if isinstance(attachments_data, list)
+                            else None,
                         )
 
                     # Task complete

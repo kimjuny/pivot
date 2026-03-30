@@ -2,21 +2,30 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/utils/api", () => ({
-  API_BASE_URL: "http://localhost:8003/api",
-  cancelReactTask: vi.fn(),
-  createSession: vi.fn(),
-  deleteSession: vi.fn(),
-  getAgentWebSearchBindings: vi.fn(),
-  getFullSessionHistory: vi.fn(),
-  getLLMById: vi.fn(),
-  getReactContextUsage: vi.fn(),
-  getReactSessionRuntimeDebug: vi.fn(),
-  listSessions: vi.fn(),
-  startReactTask: vi.fn(),
-  submitReactUserAction: vi.fn(),
-  updateSession: vi.fn(),
-}));
+vi.mock("@/utils/api", async () => {
+  const actual = await vi.importActual<typeof import("@/utils/api")>(
+    "@/utils/api",
+  );
+
+  return {
+    ...actual,
+    cancelReactTask: vi.fn(),
+    createSession: vi.fn(),
+    deleteSession: vi.fn(),
+    getAgentWebSearchBindings: vi.fn(),
+    getFullSessionHistory: vi.fn(),
+    getLLMById: vi.fn(),
+    getReactContextUsage: vi.fn(),
+    getReactSessionRuntimeDebug: vi.fn(),
+    httpClient: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      fetch(input, init),
+    ),
+    listSessions: vi.fn(),
+    startReactTask: vi.fn(),
+    submitReactUserAction: vi.fn(),
+    updateSession: vi.fn(),
+  };
+});
 
 vi.mock("@/contexts/auth-core", () => ({
   AUTH_EXPIRED_EVENT: "auth-expired",
@@ -33,6 +42,7 @@ import {
   getLLMById,
   getReactContextUsage,
   getReactSessionRuntimeDebug,
+  httpClient,
   listSessions,
   startReactTask,
   submitReactUserAction,
@@ -90,6 +100,8 @@ function applyPointerCapturePolyfill() {
 }
 
 describe("ChatContainer session rollover", () => {
+  const expectedSessionListArgs = [7, 50, { type: "consumer" }] as const;
+
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubGlobal("fetch", vi.fn());
@@ -116,6 +128,19 @@ describe("ChatContainer session rollover", () => {
       resume_from_event_id: 0,
       tasks: [],
     });
+    vi.mocked(httpClient).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
   });
 
   afterEach(() => {
@@ -160,7 +185,7 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(listSessions).toHaveBeenCalledWith(7);
+      expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
     });
 
     expect(createSession).not.toHaveBeenCalled();
@@ -202,7 +227,7 @@ describe("ChatContainer session rollover", () => {
       status: "pending",
       cursor_before_start: 0,
     });
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -227,7 +252,7 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(listSessions).toHaveBeenCalledWith(7);
+      expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
     });
 
     await user.click(screen.getByText("Focused thread"));
@@ -329,7 +354,7 @@ describe("ChatContainer session rollover", () => {
       status: "pending",
       cursor_before_start: 0,
     });
-    vi.mocked(fetch).mockImplementation(
+    vi.mocked(httpClient).mockImplementation(
       () =>
         Promise.resolve(
           new Response(
@@ -409,7 +434,7 @@ describe("ChatContainer session rollover", () => {
       created_at: "2026-03-20T00:00:00.000Z",
       updated_at: "2026-03-20T00:00:00.000Z",
     });
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -479,7 +504,7 @@ describe("ChatContainer session rollover", () => {
       created_at: "2026-03-20T00:00:00.000Z",
       updated_at: "2026-03-20T00:00:00.000Z",
     });
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -599,7 +624,7 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(listSessions).toHaveBeenCalledWith(7);
+      expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
     });
 
     expect(
@@ -666,7 +691,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     const encoder = new TextEncoder();
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -718,7 +743,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalled();
+      expect(httpClient).toHaveBeenCalled();
     });
 
     expect(screen.queryByText("Iteration 2")).not.toBeInTheDocument();
@@ -746,7 +771,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     const encoder = new TextEncoder();
-    vi.mocked(fetch).mockImplementation(() =>
+    vi.mocked(httpClient).mockImplementation(() =>
       Promise.resolve(
         new Response(
           new ReadableStream({
@@ -904,7 +929,7 @@ describe("ChatContainer session rollover", () => {
         },
       ],
     });
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -1005,7 +1030,7 @@ describe("ChatContainer session rollover", () => {
         },
       ],
     });
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -1101,7 +1126,7 @@ describe("ChatContainer session rollover", () => {
       status: "pending",
       cursor_before_start: 0,
     });
-    vi.mocked(fetch).mockImplementation(() =>
+    vi.mocked(httpClient).mockImplementation(() =>
       Promise.resolve(
         new Response(
           new ReadableStream({
@@ -1128,7 +1153,7 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(listSessions).toHaveBeenCalledWith(7);
+      expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
     });
 
     await user.click(screen.getByRole("button", { name: "New Session" }));
@@ -1220,7 +1245,7 @@ describe("ChatContainer session rollover", () => {
       status: "cancelled",
       cancel_requested: true,
     });
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {
@@ -1315,7 +1340,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     const encoder = new TextEncoder();
-    vi.mocked(fetch).mockResolvedValue(
+    vi.mocked(httpClient).mockResolvedValue(
       new Response(
         new ReadableStream({
           start(controller) {

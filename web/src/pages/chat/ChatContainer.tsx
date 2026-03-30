@@ -54,6 +54,7 @@ import {
   isReactStreamEvent,
   parseJson,
   parseTokenRateData,
+  toAssistantAttachment,
 } from "./utils/chatData";
 import {
   getAutoSelectedSessionId,
@@ -1073,12 +1074,30 @@ function ChatContainer({
             );
 
             if (event.type === "answer") {
-              const answerData = event.data as { answer?: string } | undefined;
+              const answerData = event.data as {
+                answer?: string;
+                attachments?: Array<{
+                  attachment_id: string;
+                  display_name: string;
+                  original_name: string;
+                  mime_type: string;
+                  extension: string;
+                  size_bytes: number;
+                  render_kind: "markdown" | "pdf" | "image" | "text" | "download";
+                  workspace_relative_path: string;
+                  created_at: string;
+                }>;
+              } | undefined;
               return {
                 ...message,
                 recursions: updatedRecursions,
                 pendingUserAction: undefined,
                 content: answerData?.answer ?? message.content,
+                assistantAttachments: Array.isArray(answerData?.attachments)
+                  ? answerData.attachments.map((attachment) =>
+                      toAssistantAttachment(attachment),
+                    )
+                  : message.assistantAttachments,
               };
             }
 
@@ -1472,6 +1491,7 @@ function ChatContainer({
     commitMessages,
     sessionType,
     syncLiveRefsFromMessages,
+    testSnapshot,
     testSnapshotHash,
   ]);
 

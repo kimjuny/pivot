@@ -375,6 +375,7 @@ async def get_full_session_history(
                 task_id=task_data["task_id"],
                 user_message=task_data["user_message"],
                 files=task_data.get("files", []),
+                assistant_attachments=task_data.get("assistant_attachments", []),
                 agent_answer=task_data["agent_answer"],
                 status=task_data["status"],
                 total_tokens=task_data["total_tokens"],

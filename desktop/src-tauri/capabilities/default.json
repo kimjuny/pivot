@@ -6,6 +6,8 @@
     "core:default",
     "core:window:default",
     "core:tray:default",
+    "dialog:default",
+    "fs:write-files",
     {
       "identifier": "http:default",
       "allow": [

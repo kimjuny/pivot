@@ -19,6 +19,7 @@ from app.models.react import (
 from app.models.session import Session
 from app.models.skill import Skill
 from app.models.skill_change_submission import SkillChangeSubmission
+from app.models.task_attachment import TaskAttachment
 from app.models.user import User, UserLogin, UserResponse
 from app.models.web_search import AgentWebSearchBinding
 
@@ -46,6 +47,7 @@ __all__ = [
     "Skill",
     "SkillChangeSubmission",
     "Subscene",
+    "TaskAttachment",
     "User",
     "UserLogin",
     "UserResponse",

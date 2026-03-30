@@ -57,6 +57,33 @@ describe("AssistantMessageBlock", () => {
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
   });
 
+  it("renders final answers with markdown headings and emphasis", () => {
+    render(
+      <AssistantMessageBlock
+        message={{
+          id: "assistant-markdown",
+          role: "assistant",
+          content: "## Summary\n\n**Important** details live here.",
+          timestamp: "2026-03-17T00:00:00.000Z",
+          status: "completed",
+          recursions: [],
+        }}
+        expandedRecursions={{}}
+        isStreaming={false}
+        onToggleRecursion={vi.fn()}
+        onReplyTask={vi.fn()}
+        onApproveSkillChange={vi.fn()}
+        onRejectSkillChange={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Summary", level: 2 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Important")).toBeInTheDocument();
+    expect(screen.getByText("details live here.")).toBeInTheDocument();
+  });
+
   it("renders inline approval actions for skill change clarify messages", async () => {
     const user = userEvent.setup();
     const onApproveSkillChange = vi.fn();
