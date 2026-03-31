@@ -87,6 +87,41 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0].display_name, "diagram.txt")
 
+    def test_create_from_answer_paths_marks_common_code_files_as_text(self) -> None:
+        """Code and config files should stay previewable instead of falling back to raw download."""
+        source_file = self.agent_workspace / "outputs" / "script.js"
+        source_file.parent.mkdir(parents=True, exist_ok=True)
+        source_file.write_text("console.log('pivot')\n", encoding="utf-8")
+
+        attachments = self.service.create_from_answer_paths(
+            username="alice",
+            agent_id=7,
+            task_id="task-3",
+            session_id="session-3",
+            paths=["/workspace/outputs/script.js"],
+        )
+
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].render_kind, "text")
+        self.assertEqual(attachments[0].mime_type, "application/javascript")
+
+    def test_create_from_answer_paths_marks_hidden_env_files_as_text(self) -> None:
+        """Hidden plain-text config files should remain previewable in the client."""
+        source_file = self.agent_workspace / ".env"
+        source_file.write_text("OPENAI_API_KEY=test\n", encoding="utf-8")
+
+        attachments = self.service.create_from_answer_paths(
+            username="alice",
+            agent_id=7,
+            task_id="task-4",
+            session_id="session-4",
+            paths=["/workspace/.env"],
+        )
+
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].render_kind, "text")
+        self.assertEqual(attachments[0].workspace_relative_path, ".env")
+
     def test_extract_declared_paths_accepts_both_spellings(self) -> None:
         """Both the corrected and legacy attachment keys should normalize cleanly."""
         self.assertEqual(

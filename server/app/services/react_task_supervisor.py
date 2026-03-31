@@ -728,7 +728,9 @@ class ReactTaskSupervisor:
                     task.status = "failed"
                     task.updated_at = datetime.now(UTC)
                     db.add(task)
-                    SessionService(db).sync_runtime_status(task.session_id, commit=False)
+                    SessionService(db).sync_runtime_status(
+                        task.session_id, commit=False
+                    )
                     db.commit()
                     await self._publish_event(
                         db=db,

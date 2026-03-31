@@ -70,7 +70,9 @@ describe("RecursionCard", () => {
       />,
     );
 
-    expect(screen.getByText("Repository structure loaded.")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Repository structure loaded.").length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 

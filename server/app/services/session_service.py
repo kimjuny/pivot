@@ -332,9 +332,10 @@ class SessionService:
                     "message": error_message,
                     "timestamp": self._normalize_utc_timestamp(recursion.updated_at),
                 }
-                if latest_error is None or candidate_error["timestamp"] > latest_error[
-                    "timestamp"
-                ]:
+                if (
+                    latest_error is None
+                    or candidate_error["timestamp"] > latest_error["timestamp"]
+                ):
                     latest_error = candidate_error
 
             fallback_error_message = self._build_operations_task_failure_message(
@@ -347,9 +348,10 @@ class SessionService:
                     "message": fallback_error_message,
                     "timestamp": self._normalize_utc_timestamp(task.updated_at),
                 }
-                if latest_error is None or candidate_error["timestamp"] > latest_error[
-                    "timestamp"
-                ]:
+                if (
+                    latest_error is None
+                    or candidate_error["timestamp"] > latest_error["timestamp"]
+                ):
                     latest_error = candidate_error
 
             if task_has_attention_signal:

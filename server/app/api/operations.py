@@ -95,9 +95,7 @@ def _serialize_operations_diagnostics(
         "task_count": int(normalized.get("task_count", 0)),
         "completed_task_count": int(normalized.get("completed_task_count", 0)),
         "active_task_count": int(normalized.get("active_task_count", 0)),
-        "waiting_input_task_count": int(
-            normalized.get("waiting_input_task_count", 0)
-        ),
+        "waiting_input_task_count": int(normalized.get("waiting_input_task_count", 0)),
         "failed_task_count": int(normalized.get("failed_task_count", 0)),
         "cancelled_task_count": int(normalized.get("cancelled_task_count", 0)),
         "attention_task_count": int(normalized.get("attention_task_count", 0)),
@@ -223,7 +221,9 @@ async def get_operations_session_detail(
 
     # Reuse the existing full-history serialization
     tasks_data = service.get_full_session_history(session_id)
-    diagnostics = service.get_operations_session_diagnostics([session_id]).get(session_id)
+    diagnostics = service.get_operations_session_diagnostics([session_id]).get(
+        session_id
+    )
     tasks = []
     for task_data in tasks_data:
         recursions = [

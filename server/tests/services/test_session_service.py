@@ -320,9 +320,7 @@ class SessionServiceTestCase(unittest.TestCase):
         )
         self.session.commit()
 
-        runtime_statuses = self.service.get_runtime_statuses(
-            ["session-1", "session-2"]
-        )
+        runtime_statuses = self.service.get_runtime_statuses(["session-1", "session-2"])
 
         self.assertEqual(runtime_statuses["session-1"], "running")
         self.assertEqual(runtime_statuses["session-2"], "waiting_input")

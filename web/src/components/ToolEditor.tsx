@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
-import type * as Monaco from 'monaco-editor';
+import * as Monaco from 'monaco-editor';
 import { AlertCircle, AlertTriangle, CheckCircle2, Loader2 } from "@/lib/lucide";
 import { checkToolAst, checkToolRuff, checkToolPyright, type ToolDiagnostic } from '../utils/api';
 import { useTheme } from '@/lib/use-theme';
@@ -114,7 +114,6 @@ function ToolEditor({
   readOnly = false,
 }: ToolEditorProps) {
   const resolvedTheme = useResolvedTheme();
-  const monacoRef = useRef<typeof Monaco | null>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
 
   // Stable refs for debounce timers to avoid stale closures
@@ -141,7 +140,7 @@ function ToolEditor({
    * Must be called after any per-source update.
    */
   const flushMarkers = useCallback((merged: ToolDiagnostic[]) => {
-    if (!monacoRef.current || !editorRef.current) return;
+    if (!editorRef.current) return;
     const model = editorRef.current.getModel();
     if (!model) return;
     const all = [
@@ -149,34 +148,30 @@ function ToolEditor({
       ...markersRef.current.ruff,
       ...markersRef.current.pyright,
     ];
-    monacoRef.current.editor.setModelMarkers(model, 'pivot-tool-check', all);
+    Monaco.editor.setModelMarkers(model, 'pivot-tool-check', all);
     setAllDiagnostics(merged);
   }, []);
 
   /** Mount callback – capture monaco and editor instances, bind Ctrl+S. */
   const handleMount: OnMount = useCallback(
-    (editor, monaco) => {
-      const monacoApi = monaco as typeof Monaco;
+    (editor: Monaco.editor.IStandaloneCodeEditor) => {
       editorRef.current = editor;
-      monacoRef.current = monacoApi;
 
       // Bind save shortcut; always reads the latest value via ref
       editor.addCommand(
-        monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS,
+        Monaco.KeyMod.CtrlCmd | Monaco.KeyCode.KeyS,
         () => {
           if (onSave && !readOnly) {
             const current = valueRef.current;
             setIsChecking(true);
             void checkToolPyright(current)
               .then((diagnostics) => {
-                if (monacoRef.current) {
-                  markersRef.current.pyright = toMarkers(monacoRef.current, diagnostics);
-                  const merged = [
-                    ...diagnostics,
-                    // keep ast/ruff as ToolDiagnostic proxies via stored markers count
-                  ];
-                  flushMarkers(merged);
-                }
+                markersRef.current.pyright = toMarkers(Monaco, diagnostics);
+                const merged = [
+                  ...diagnostics,
+                  // keep ast/ruff as ToolDiagnostic proxies via stored markers count
+                ];
+                flushMarkers(merged);
                 onSave(current);
               })
               .catch(() => {})
@@ -205,31 +200,29 @@ function ToolEditor({
         setIsChecking(true);
         void checkToolAst(code)
           .then((diagnostics) => {
-            if (monacoRef.current) {
-              markersRef.current.ast = toMarkers(monacoRef.current, diagnostics);
-              const merged = [
-                ...diagnostics,
-                ...markersRef.current.ruff.map((m) => ({
-                  line: m.startLineNumber,
-                  col: m.startColumn,
-                  endLine: m.endLineNumber,
-                  endCol: m.endColumn,
-                  message: m.message ?? '',
-                  severity: m.severity === monacoRef.current?.MarkerSeverity.Error ? 'error' : 'warning',
-                  source: 'ruff',
-                })),
-                ...markersRef.current.pyright.map((m) => ({
-                  line: m.startLineNumber,
-                  col: m.startColumn,
-                  endLine: m.endLineNumber,
-                  endCol: m.endColumn,
-                  message: m.message ?? '',
-                  severity: m.severity === monacoRef.current?.MarkerSeverity.Error ? 'error' : 'warning',
-                  source: 'pyright',
-                })),
-              ] as ToolDiagnostic[];
-              flushMarkers(merged);
-            }
+            markersRef.current.ast = toMarkers(Monaco, diagnostics);
+            const merged = [
+              ...diagnostics,
+              ...markersRef.current.ruff.map((m) => ({
+                line: m.startLineNumber,
+                col: m.startColumn,
+                endLine: m.endLineNumber,
+                endCol: m.endColumn,
+                message: m.message ?? '',
+                severity: m.severity === Monaco.MarkerSeverity.Error ? 'error' : 'warning',
+                source: 'ruff',
+              })),
+              ...markersRef.current.pyright.map((m) => ({
+                line: m.startLineNumber,
+                col: m.startColumn,
+                endLine: m.endLineNumber,
+                endCol: m.endColumn,
+                message: m.message ?? '',
+                severity: m.severity === Monaco.MarkerSeverity.Error ? 'error' : 'warning',
+                source: 'pyright',
+              })),
+            ] as ToolDiagnostic[];
+            flushMarkers(merged);
           })
           .catch(() => {})
           .finally(() => setIsChecking(false));
@@ -240,31 +233,29 @@ function ToolEditor({
         setIsChecking(true);
         void checkToolRuff(code)
           .then((diagnostics) => {
-            if (monacoRef.current) {
-              markersRef.current.ruff = toMarkers(monacoRef.current, diagnostics);
-              const merged = [
-                ...markersRef.current.ast.map((m) => ({
-                  line: m.startLineNumber,
-                  col: m.startColumn,
-                  endLine: m.endLineNumber,
-                  endCol: m.endColumn,
-                  message: m.message ?? '',
-                  severity: m.severity === monacoRef.current?.MarkerSeverity.Error ? 'error' : 'warning',
-                  source: 'ast',
-                })),
-                ...diagnostics,
-                ...markersRef.current.pyright.map((m) => ({
-                  line: m.startLineNumber,
-                  col: m.startColumn,
-                  endLine: m.endLineNumber,
-                  endCol: m.endColumn,
-                  message: m.message ?? '',
-                  severity: m.severity === monacoRef.current?.MarkerSeverity.Error ? 'error' : 'warning',
-                  source: 'pyright',
-                })),
-              ] as ToolDiagnostic[];
-              flushMarkers(merged);
-            }
+            markersRef.current.ruff = toMarkers(Monaco, diagnostics);
+            const merged = [
+              ...markersRef.current.ast.map((m) => ({
+                line: m.startLineNumber,
+                col: m.startColumn,
+                endLine: m.endLineNumber,
+                endCol: m.endColumn,
+                message: m.message ?? '',
+                severity: m.severity === Monaco.MarkerSeverity.Error ? 'error' : 'warning',
+                source: 'ast',
+              })),
+              ...diagnostics,
+              ...markersRef.current.pyright.map((m) => ({
+                line: m.startLineNumber,
+                col: m.startColumn,
+                endLine: m.endLineNumber,
+                endCol: m.endColumn,
+                message: m.message ?? '',
+                severity: m.severity === Monaco.MarkerSeverity.Error ? 'error' : 'warning',
+                source: 'pyright',
+              })),
+            ] as ToolDiagnostic[];
+            flushMarkers(merged);
           })
           .catch(() => {})
           .finally(() => setIsChecking(false));

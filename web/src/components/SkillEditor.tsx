@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
-import type * as Monaco from 'monaco-editor';
+import * as Monaco from 'monaco-editor';
 import { Loader2 } from "@/lib/lucide";
 import { useTheme } from '@/lib/use-theme';
 import { Button } from '@/components/ui/button';
@@ -48,10 +48,11 @@ function SkillEditor({
     valueRef.current = value;
   }, [value]);
 
-  const handleMount: OnMount = useCallback((editor, monaco) => {
-    const monacoApi = monaco as typeof Monaco;
+  const handleMount: OnMount = useCallback((
+    editor: Monaco.editor.IStandaloneCodeEditor,
+  ) => {
     editorRef.current = editor;
-    editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => {
+    editor.addCommand(Monaco.KeyMod.CtrlCmd | Monaco.KeyCode.KeyS, () => {
       if (onSave && !readOnly) {
         onSave(valueRef.current);
       }

@@ -1,4 +1,7 @@
+import type { ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
+
+import { cn } from "@/lib/utils";
 
 interface MarkdownRendererProps {
   content: string;
@@ -36,6 +39,56 @@ const DOCUMENT_MARKDOWN_CLASSES =
   "prose-h3:mt-6 prose-h3:text-xl prose-h4:mt-5 prose-h4:text-lg " +
   "prose-p:my-3 prose-ul:my-4 prose-ol:my-4 prose-hr:my-8";
 
+const BLOCK_CODE_WRAPPER_CLASSES =
+  "not-prose my-4 overflow-hidden rounded-xl border border-border/60 bg-muted";
+
+const BLOCK_PRE_CLASSES =
+  "m-0 max-w-full overflow-x-auto px-4 py-3 text-sm leading-6";
+
+const BLOCK_CODE_CLASSES =
+  "block min-w-full bg-transparent p-0 font-mono text-[13px] font-medium text-foreground whitespace-pre";
+
+type MarkdownPreProps = ComponentPropsWithoutRef<"pre">;
+type MarkdownCodeProps = ComponentPropsWithoutRef<"code">;
+
+const MARKDOWN_COMPONENTS = {
+  pre({ className, children, ...props }: MarkdownPreProps) {
+    return (
+      <div className={BLOCK_CODE_WRAPPER_CLASSES}>
+        <pre className={cn(BLOCK_PRE_CLASSES, className)} {...props}>
+          {children}
+        </pre>
+      </div>
+    );
+  },
+  code({ className, children, ...props }: MarkdownCodeProps) {
+    const content = Array.isArray(children)
+      ? children
+          .filter((child): child is string => typeof child === "string")
+          .join("")
+      : typeof children === "string"
+        ? children
+        : "";
+    const isBlockCode =
+      (className?.includes("language-") ?? false) ||
+      (content?.includes("\n") ?? false);
+
+    if (!isBlockCode) {
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    }
+
+    return (
+      <code className={cn(BLOCK_CODE_CLASSES, className)} {...props}>
+        {children}
+      </code>
+    );
+  },
+};
+
 /**
  * Renders model-authored markdown with the same parser and typography across chat surfaces.
  */
@@ -52,7 +105,7 @@ export function MarkdownRenderer({
 
   return (
     <article className={`${BASE_MARKDOWN_CLASSES} ${variantClasses}`}>
-      <ReactMarkdown>{content}</ReactMarkdown>
+      <ReactMarkdown components={MARKDOWN_COMPONENTS}>{content}</ReactMarkdown>
     </article>
   );
 }

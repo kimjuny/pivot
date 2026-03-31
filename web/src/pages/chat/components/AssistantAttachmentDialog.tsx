@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Editor from "@monaco-editor/react";
 import { Download, Loader2 } from "@/lib/lucide";
 import { toast } from "sonner";
 
@@ -7,6 +8,7 @@ import {
   isDesktop,
   saveBlobWithNativeDialog,
 } from "@/desktop/desktop-adapter";
+import { useTheme } from "@/lib/use-theme";
 import { fetchTaskAttachmentBlob } from "@/utils/api";
 
 import type { AssistantAttachment } from "../types";
@@ -19,6 +21,99 @@ interface AssistantAttachmentDialogProps {
 }
 
 /**
+ * Resolve the app theme to the concrete Monaco theme expected by the editor.
+ */
+function useResolvedMonacoTheme(): "vs-dark" | "light" {
+  const { theme } = useTheme();
+
+  if (theme === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "vs-dark"
+      : "light";
+  }
+
+  return theme === "dark" ? "vs-dark" : "light";
+}
+
+/**
+ * Maps one attachment extension to the closest built-in Monaco language.
+ */
+function getAttachmentEditorLanguage(attachment: AssistantAttachment): string {
+  const extension = attachment.extension.toLowerCase();
+  const filename = attachment.displayName.toLowerCase();
+
+  if (filename === "dockerfile") {
+    return "dockerfile";
+  }
+  if (filename === "makefile") {
+    return "plaintext";
+  }
+
+  const languageByExtension: Record<string, string> = {
+    bat: "bat",
+    c: "c",
+    cc: "cpp",
+    conf: "ini",
+    cpp: "cpp",
+    css: "css",
+    csv: "plaintext",
+    env: "shell",
+    go: "go",
+    h: "cpp",
+    hpp: "cpp",
+    htm: "html",
+    html: "html",
+    ini: "ini",
+    java: "java",
+    js: "javascript",
+    json: "json",
+    jsonl: "json",
+    jsx: "javascript",
+    log: "plaintext",
+    lua: "lua",
+    md: "markdown",
+    py: "python",
+    rb: "ruby",
+    rs: "rust",
+    scss: "scss",
+    sh: "shell",
+    sql: "sql",
+    svg: "xml",
+    text: "plaintext",
+    toml: "ini",
+    ts: "typescript",
+    tsx: "typescript",
+    txt: "plaintext",
+    xml: "xml",
+    yaml: "yaml",
+    yml: "yaml",
+    zsh: "shell",
+  };
+
+  if (extension in languageByExtension) {
+    return languageByExtension[extension];
+  }
+
+  if (attachment.mimeType === "application/json") {
+    return "json";
+  }
+  if (attachment.mimeType.startsWith("text/html")) {
+    return "html";
+  }
+  if (attachment.mimeType.startsWith("text/css")) {
+    return "css";
+  }
+  if (
+    attachment.mimeType.includes("javascript") ||
+    attachment.mimeType.includes("ecmascript")
+  ) {
+    return "javascript";
+  }
+
+  return "plaintext";
+}
+
+/**
  * Opens one assistant-generated attachment inside a draggable utility window.
  */
 export function AssistantAttachmentDialog({
@@ -26,6 +121,7 @@ export function AssistantAttachmentDialog({
   open,
   onOpenChange,
 }: AssistantAttachmentDialogProps) {
+  const monacoTheme = useResolvedMonacoTheme();
   const [textContent, setTextContent] = useState<string>("");
   const [attachmentBlob, setAttachmentBlob] = useState<Blob | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -161,7 +257,11 @@ export function AssistantAttachmentDialog({
       fullscreenable
     >
       <div className="flex h-full flex-col bg-background">
-        <div className="min-h-0 flex-1 overflow-auto p-4">
+        <div
+          className={`min-h-0 flex-1 overflow-auto ${
+            attachment?.renderKind === "text" ? "overflow-hidden" : "p-4"
+          }`}
+        >
           {isLoading ? (
             <div className="flex h-full min-h-40 items-center justify-center text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -175,9 +275,31 @@ export function AssistantAttachmentDialog({
               <MarkdownRenderer content={textContent} variant="document" />
             </div>
           ) : attachment?.renderKind === "text" ? (
-            <pre className="whitespace-pre-wrap break-words rounded-lg border border-border/70 bg-muted/30 p-4 text-sm leading-relaxed text-foreground">
-              {textContent}
-            </pre>
+            <div className="h-full min-h-[60vh] bg-muted/20">
+              <Editor
+                height="100%"
+                language={getAttachmentEditorLanguage(attachment)}
+                value={textContent}
+                theme={monacoTheme}
+                loading={
+                  <div className="flex h-full min-h-[60vh] items-center justify-center text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  </div>
+                }
+                options={{
+                  automaticLayout: true,
+                  domReadOnly: true,
+                  fontSize: 13,
+                  lineNumbers: "on",
+                  minimap: { enabled: false },
+                  readOnly: true,
+                  renderLineHighlight: "none",
+                  renderWhitespace: "selection",
+                  scrollBeyondLastLine: false,
+                  wordWrap: "on",
+                }}
+              />
+            </div>
           ) : attachment?.renderKind === "pdf" ? (
             objectUrl ? (
               <iframe

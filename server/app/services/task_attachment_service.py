@@ -17,8 +17,62 @@ from sqlmodel import Session as DBSession, col, select
 logger = logging.getLogger(__name__)
 
 _MAX_ATTACHMENTS_PER_ANSWER = 8
-_TEXT_EXTENSIONS = {"md", "markdown", "txt", "text"}
+_TEXT_EXTENSIONS = {
+    "bat",
+    "c",
+    "cc",
+    "cfg",
+    "conf",
+    "cpp",
+    "css",
+    "csv",
+    "env",
+    "go",
+    "h",
+    "hpp",
+    "htm",
+    "html",
+    "ini",
+    "java",
+    "js",
+    "json",
+    "jsonl",
+    "jsx",
+    "log",
+    "lua",
+    "md",
+    "markdown",
+    "py",
+    "rb",
+    "rs",
+    "scss",
+    "sh",
+    "sql",
+    "svg",
+    "text",
+    "toml",
+    "ts",
+    "tsx",
+    "txt",
+    "xml",
+    "yaml",
+    "yml",
+    "zsh",
+}
+_TEXT_FILENAMES = {"dockerfile", "makefile", ".env"}
 _MARKDOWN_MIME_TYPES = {"text/markdown", "text/x-markdown"}
+_TEXT_MIME_TYPES = {
+    "application/ecmascript",
+    "application/javascript",
+    "application/json",
+    "application/sql",
+    "application/toml",
+    "application/x-httpd-php",
+    "application/x-python-code",
+    "application/x-sh",
+    "application/x-shellscript",
+    "application/x-yaml",
+}
 
 
 class TaskAttachmentService:
@@ -238,6 +292,7 @@ class TaskAttachmentService:
     def _detect_metadata(self, host_path: Path) -> dict[str, str]:
         """Infer stable MIME, extension, and render metadata for one file."""
         extension = host_path.suffix.lower().removeprefix(".")
+        filename = host_path.name.lower()
         guessed_mime_type, _ = mimetypes.guess_type(host_path.name)
         mime_type = guessed_mime_type or "application/octet-stream"
 
@@ -249,7 +304,12 @@ class TaskAttachmentService:
             mime_type = "application/pdf"
         elif mime_type.startswith("image/"):
             render_kind = "image"
-        elif extension in _TEXT_EXTENSIONS or mime_type.startswith("text/"):
+        elif (
+            extension in _TEXT_EXTENSIONS
+            or filename in _TEXT_FILENAMES
+            or mime_type.startswith("text/")
+            or mime_type in _TEXT_MIME_TYPES
+        ):
             render_kind = "text"
         else:
             render_kind = "download"
