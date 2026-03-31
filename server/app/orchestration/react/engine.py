@@ -1698,7 +1698,10 @@ class ReactEngine:
                         "task_id": task.task_id,
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
-                        "data": {"error": error_msg},
+                        "data": {
+                            "error": error_msg,
+                            "terminal": non_retryable_error,
+                        },
                         "timestamp": datetime.now(UTC).isoformat(),
                     }
 
@@ -1739,7 +1742,10 @@ class ReactEngine:
                     "type": "error",
                     "task_id": task.task_id,
                     "iteration": task.iteration,
-                    "data": {"error": "Maximum iteration reached"},
+                    "data": {
+                        "error": "Maximum iteration reached",
+                        "terminal": True,
+                    },
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
 
@@ -1770,6 +1776,6 @@ class ReactEngine:
                 "type": "error",
                 "task_id": task.task_id,
                 "iteration": task.iteration,
-                "data": {"error": error_message},
+                "data": {"error": error_message, "terminal": True},
                 "timestamp": datetime.now(UTC).isoformat(),
             }

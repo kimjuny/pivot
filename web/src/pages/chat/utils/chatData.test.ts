@@ -270,4 +270,47 @@ describe("buildMessagesFromHistory", () => {
     expect(assistantMessage?.status).toBe("running");
     expect(assistantMessage?.content).toBe("");
   });
+
+  it("keeps failed task errors out of the final answer content", () => {
+    const messages = buildMessagesFromHistory([
+      {
+        task_id: "task-failed",
+        user_message: "Run the command",
+        agent_answer: null,
+        status: "failed",
+        total_tokens: 0,
+        current_plan: [],
+        recursions: [
+          {
+            iteration: 0,
+            trace_id: "trace-failed",
+            observe: null,
+            thinking: null,
+            reason: null,
+            summary: null,
+            action_type: null,
+            action_output: null,
+            tool_call_results: null,
+            status: "error",
+            error_log: "Sandbox timed out while running tests.",
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cached_input_tokens: 0,
+            created_at: "2026-03-16T00:00:00.000Z",
+            updated_at: "2026-03-16T00:00:01.000Z",
+          },
+        ],
+        created_at: "2026-03-16T00:00:00.000Z",
+        updated_at: "2026-03-16T00:00:01.000Z",
+      },
+    ]);
+
+    const assistantMessage = messages.find((message) => message.role === "assistant");
+    expect(assistantMessage?.status).toBe("error");
+    expect(assistantMessage?.content).toBe("");
+    expect(assistantMessage?.errorMessage).toBe(
+      "Sandbox timed out while running tests.",
+    );
+  });
 });

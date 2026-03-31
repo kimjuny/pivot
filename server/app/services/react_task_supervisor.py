@@ -738,7 +738,7 @@ class ReactTaskSupervisor:
                             "task_id": task.task_id,
                             "iteration": task.iteration,
                             "timestamp": datetime.now(UTC).isoformat(),
-                            "data": {"error": str(exc)},
+                            "data": {"error": str(exc), "terminal": True},
                         },
                     )
         finally:

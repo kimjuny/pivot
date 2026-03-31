@@ -57,6 +57,34 @@ describe("AssistantMessageBlock", () => {
     expect(screen.queryByText("Error")).not.toBeInTheDocument();
   });
 
+  it("renders terminal errors outside the final answer block", () => {
+    render(
+      <AssistantMessageBlock
+        message={{
+          id: "assistant-error",
+          role: "assistant",
+          content: "",
+          errorMessage: "Sandbox timed out while running tests.",
+          timestamp: "2026-03-17T00:00:00.000Z",
+          status: "error",
+          recursions: [],
+        }}
+        expandedRecursions={{}}
+        isStreaming={false}
+        onToggleRecursion={vi.fn()}
+        onReplyTask={vi.fn()}
+        onApproveSkillChange={vi.fn()}
+        onRejectSkillChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("FINAL ANSWER")).not.toBeInTheDocument();
+    expect(screen.getByText("ERROR")).toBeInTheDocument();
+    expect(
+      screen.getByText("Sandbox timed out while running tests."),
+    ).toBeInTheDocument();
+  });
+
   it("renders final answers with markdown headings and emphasis", () => {
     render(
       <AssistantMessageBlock

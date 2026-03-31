@@ -51,6 +51,7 @@ import type {
 import type { ChatThinkingMode } from "@/utils/llmThinking";
 import {
   buildMessagesFromHistory,
+  getStreamErrorData,
   isReactStreamEvent,
   parseJson,
   parseTokenRateData,
@@ -979,11 +980,15 @@ function ChatContainer({
         event.type === "task_complete" ||
         event.type === "error"
       ) {
+        const streamError =
+          event.type === "error" ? getStreamErrorData(event.data) : undefined;
+        const isTerminalError = streamError?.terminal ?? true;
+
         if (
           event.type === "clarify" ||
           event.type === "task_complete" ||
           event.type === "task_cancelled" ||
-          event.type === "error"
+          (event.type === "error" && isTerminalError)
         ) {
           void refreshSessionList().catch((refreshError) => {
             console.error(
@@ -1010,6 +1015,10 @@ function ChatContainer({
                   : "completed",
             endTime: event.timestamp,
             tokens: event.tokens ?? currentRecursion.tokens,
+            errorLog:
+              event.type === "error"
+                ? (streamError?.message ?? currentRecursion.errorLog)
+                : currentRecursion.errorLog,
           };
         }
 
@@ -1027,7 +1036,7 @@ function ChatContainer({
         } else if (
           event.type === "task_complete" ||
           event.type === "task_cancelled" ||
-          event.type === "error"
+          (event.type === "error" && isTerminalError)
         ) {
           setIsStreaming(false);
           setActiveContextTaskId(null);
@@ -1042,6 +1051,13 @@ function ChatContainer({
           if (event.type === "task_cancelled") {
             stoppedTaskIdsRef.current.add(event.task_id);
           }
+        } else if (event.type === "error") {
+          setIsStreaming(true);
+          setActiveContextTaskId(event.task_id);
+          setActiveContextIteration(null);
+          liveTaskIdRef.current = event.task_id;
+          liveAssistantMessageIdRef.current = targetMessageId;
+          liveRecursionRef.current = null;
         } else {
           setReplyTaskId((previousTaskId) =>
             previousTaskId === event.task_id ? null : previousTaskId,
@@ -1094,6 +1110,7 @@ function ChatContainer({
                 recursions: updatedRecursions,
                 pendingUserAction: undefined,
                 content: answerData?.answer ?? message.content,
+                errorMessage: undefined,
                 assistantAttachments: Array.isArray(answerData?.attachments)
                   ? answerData.attachments.map((attachment) =>
                       toAssistantAttachment(attachment),
@@ -1121,19 +1138,29 @@ function ChatContainer({
                     }
                   : undefined,
                 status: "waiting_input" as const,
+                errorMessage: undefined,
                 timestamp: event.timestamp,
               };
             }
 
             if (event.type === "error") {
+              if (!isTerminalError) {
+                return {
+                  ...message,
+                  recursions: updatedRecursions,
+                  pendingUserAction: undefined,
+                  status: "running" as const,
+                  errorMessage: undefined,
+                  timestamp: event.timestamp,
+                };
+              }
+
               return {
                 ...message,
                 recursions: updatedRecursions,
                 pendingUserAction: undefined,
                 status: "error" as const,
-                content:
-                  (event.data as { error?: string } | undefined)?.error ??
-                  message.content,
+                errorMessage: streamError?.message ?? message.errorMessage,
                 timestamp: event.timestamp,
               };
             }
@@ -1154,6 +1181,7 @@ function ChatContainer({
                         selectedSkills: [],
                       }
                     : message.skillSelection,
+                errorMessage: undefined,
               };
             }
 
@@ -1162,6 +1190,7 @@ function ChatContainer({
               recursions: updatedRecursions,
               pendingUserAction: undefined,
               status: "completed" as const,
+              errorMessage: undefined,
               timestamp: event.timestamp,
               totalTokens: event.total_tokens ?? message.totalTokens,
             };
@@ -2040,7 +2069,7 @@ function ChatContainer({
               ? {
                   ...message,
                   status: "error",
-                  content: `Error: ${normalizedError.message}`,
+                  errorMessage: normalizedError.message,
                   timestamp: errorTime,
                 }
               : message,

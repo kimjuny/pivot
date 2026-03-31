@@ -167,7 +167,7 @@ export function SessionSidebar({
       collapsible="icon"
       className="border-r border-sidebar-border/70 bg-sidebar/95"
     >
-      <SidebarHeader className="gap-2 px-3 pb-2 pt-3">
+      <SidebarHeader className="gap-2 px-3 pb-2 pt-3 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
         {!isCollapsed && sidebarTitle ? (
           <div className="pb-1">
             <div className="flex items-center gap-2 rounded-xl px-2 py-1.5">

@@ -138,6 +138,18 @@ export function AssistantMessageBlock({
         </div>
       )}
 
+      {message.status === "error" && message.errorMessage && (
+        <div className="rounded-lg border border-danger/30 bg-danger/5 p-3">
+          <div className="mb-2 flex items-center gap-1.5">
+            <XCircle className="h-3.5 w-3.5 text-danger" />
+            <span className="text-xs font-semibold text-foreground">ERROR</span>
+          </div>
+          <div className="pl-5 text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+            {message.errorMessage}
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-2 px-3">
         {message.status === "completed" && (
           <>

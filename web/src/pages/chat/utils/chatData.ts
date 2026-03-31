@@ -52,6 +52,28 @@ export function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * Normalizes streamed error payloads so retryable recursion failures do not
+ * masquerade as terminal task failures in the chat timeline.
+ */
+export function getStreamErrorData(data: unknown): {
+  message: string | undefined;
+  terminal: boolean;
+} {
+  const record = asRecord(data);
+  const errorMessage =
+    typeof record?.error === "string" && record.error.trim().length > 0
+      ? record.error
+      : typeof record?.message === "string" && record.message.trim().length > 0
+        ? record.message
+        : undefined;
+
+  return {
+    message: errorMessage,
+    terminal: typeof record?.terminal === "boolean" ? record.terminal : true,
+  };
+}
+
+/**
  * Guards streamed backend payloads before the container mutates UI state.
  */
 export function isReactStreamEvent(value: unknown): value is ReactStreamEvent {
@@ -272,6 +294,21 @@ function buildAssistantContent(task: TaskMessage): string {
 }
 
 /**
+ * Reads the latest persisted recursion error so failed tasks can render an
+ * explicit error block without pretending the error is a final answer.
+ */
+function getLatestTaskErrorMessage(task: TaskMessage): string | undefined {
+  for (let index = task.recursions.length - 1; index >= 0; index -= 1) {
+    const errorLog = task.recursions[index]?.error_log;
+    if (typeof errorLog === "string" && errorLog.trim().length > 0) {
+      return errorLog;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Maps persisted task history into the same message model used by live streaming updates.
  */
 export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
@@ -423,6 +460,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       id: `assistant-${task.task_id}`,
       role: "assistant",
       content: buildAssistantContent(task),
+      errorMessage: task.status === "failed" ? getLatestTaskErrorMessage(task) : undefined,
       assistantAttachments: (task.assistant_attachments ?? []).map((attachment) =>
         toAssistantAttachment(attachment),
       ),
