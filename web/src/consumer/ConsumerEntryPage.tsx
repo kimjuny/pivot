@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "@/lib/lucide";
 import { useNavigate } from "react-router-dom";
 
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { getConsumerSessions } from "@/consumer/api";
 import { Button } from "@/components/ui/button";
 
@@ -69,12 +69,10 @@ function ConsumerEntryPage() {
   }
 
   return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <Loader2
-        className="h-6 w-6 animate-spin text-muted-foreground"
-        aria-label="Opening your latest workspace"
-      />
-    </div>
+    <CenteredLoadingIndicator
+      className="h-screen"
+      label="Opening your latest workspace"
+    />
   );
 }
 

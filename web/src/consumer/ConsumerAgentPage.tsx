@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Bot, Loader2 } from "@/lib/lucide";
+import { Bot } from "@/lib/lucide";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import ReactChatInterface from "@/components/ReactChatInterface";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,12 +49,10 @@ function ConsumerAgentPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <Loader2
-          className="h-6 w-6 animate-spin text-muted-foreground"
-          aria-label="Loading agent workspace"
-        />
-      </div>
+      <CenteredLoadingIndicator
+        className="h-screen"
+        label="Loading agent workspace"
+      />
     );
   }
 

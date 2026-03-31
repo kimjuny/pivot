@@ -1,4 +1,5 @@
-import { Loader2 } from "@/lib/lucide";
+import { MotionReorderLoading } from "@/components/MotionReorderLoading";
+import { cn } from "@/lib/utils";
 
 /**
  * Props for the centered loading indicator.
@@ -14,7 +15,10 @@ export interface CenteredLoadingIndicatorProps {
    */
   className?: string;
   /**
-   * Optional size overrides for the spinner icon.
+   * Optional size overrides for the loading animation footprint.
+   *
+   * Why: this keeps the legacy prop name stable for existing call sites while
+   * letting the new Motion-based indicator stay drop-in compatible.
    */
   spinnerClassName?: string;
 }
@@ -27,27 +31,19 @@ export function CenteredLoadingIndicator({
   className,
   spinnerClassName,
 }: CenteredLoadingIndicatorProps) {
-  const containerClassName = [
+  const containerClassName = cn(
     "flex items-center justify-center bg-background",
     className,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const iconClassName = [
-    "h-6 w-6 animate-spin text-muted-foreground",
+  );
+  const iconClassName = cn(
+    "h-10 w-10",
     spinnerClassName,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  );
 
   return (
-    <div
-      className={containerClassName}
-      role="status"
-      aria-live="polite"
-      aria-label={label}
-    >
-      <Loader2 className={iconClassName} aria-hidden="true" />
+    <div className={containerClassName} role="status" aria-live="polite">
+      <span className="sr-only">{label}</span>
+      <MotionReorderLoading className={iconClassName} />
     </div>
   );
 }

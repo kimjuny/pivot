@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sidebar,
   SidebarContent,
@@ -41,6 +42,7 @@ interface SessionSidebarProps {
   sessions: SessionListItem[];
   currentSessionId: string | null;
   isLoadingSession: boolean;
+  hasInitializedSessions: boolean;
   isStreaming: boolean;
   sidebarTitleIcon?: ReactNode;
   sidebarTitle?: string;
@@ -85,6 +87,7 @@ export function SessionSidebar({
   sessions,
   currentSessionId,
   isLoadingSession,
+  hasInitializedSessions,
   isStreaming,
   sidebarTitleIcon,
   sidebarTitle,
@@ -101,6 +104,7 @@ export function SessionSidebar({
   const [editingTitle, setEditingTitle] = useState<string>("");
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const isCollapsed = state === "collapsed";
+  const isSessionListPending = isLoadingSession || !hasInitializedSessions;
 
   useEffect(() => {
     if (!editingSessionId) {
@@ -233,10 +237,16 @@ export function SessionSidebar({
           <SidebarGroupContent className="px-1 pt-1">
             {sessions.length === 0 ? (
               <div className="px-3 py-4 text-sm text-muted-foreground">
-                {isLoadingSession ? (
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Loading sessions...</span>
+                {isSessionListPending ? (
+                  <div className="space-y-2" role="status" aria-live="polite">
+                    <span className="sr-only">Loading sessions...</span>
+                    {Array.from({ length: 3 }, (_, index) => (
+                      <Skeleton
+                        key={`session-skeleton-${index}`}
+                        className="h-9 rounded-xl bg-sidebar-accent/55"
+                        aria-hidden="true"
+                      />
+                    ))}
                   </div>
                 ) : (
                   <span>No sessions yet</span>

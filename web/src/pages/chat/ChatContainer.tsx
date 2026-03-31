@@ -2184,6 +2184,7 @@ function ChatContainer({
         sessions={sessions}
         currentSessionId={currentSessionId}
         isLoadingSession={isLoadingSession}
+        hasInitializedSessions={isInitialized}
         isStreaming={isStreaming}
         sidebarTitleIcon={sidebarTitleIcon}
         sidebarTitle={sidebarTitle}

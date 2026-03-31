@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Loader2 } from "@/lib/lucide";
+import { Bot } from "@/lib/lucide";
 import { useNavigate } from "react-router-dom";
 
+import { MotionReorderLoading } from "@/components/MotionReorderLoading";
 import { Badge } from "@/components/ui/badge";
 import {
   SidebarInset,
@@ -143,6 +144,7 @@ function ConsumerAgentsPage() {
         sessions={sidebarSessions}
         currentSessionId={null}
         isLoadingSession={isLoading}
+        hasInitializedSessions={!isLoading}
         isStreaming={false}
         sidebarTitleIcon={
           <img
@@ -221,7 +223,7 @@ function ConsumerAgentsPage() {
           <div className="flex-1">
             {isLoading ? (
               <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <MotionReorderLoading className="h-4 w-4" />
                 <span>Loading agents…</span>
               </div>
             ) : error ? (
