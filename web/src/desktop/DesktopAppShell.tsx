@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 import LoginPage from "@/components/LoginPage";
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import ConsumerAgentPage from "@/consumer/ConsumerAgentPage";
 import ConsumerAgentsPage from "@/consumer/ConsumerAgentsPage";
@@ -28,16 +29,7 @@ function DesktopProtectedRoute({
   const activeUser = user ?? persistedUser;
 
   if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="spinner" />
-          <div className="text-lg font-medium text-muted-foreground">
-            Loading…
-          </div>
-        </div>
-      </div>
-    );
+    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
   }
 
   if (!activeUser || !isTokenValid()) {

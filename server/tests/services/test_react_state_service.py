@@ -20,6 +20,7 @@ ReactPlanStep = import_module("app.models.react").ReactPlanStep
 ReactRecursion = import_module("app.models.react").ReactRecursion
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
+SessionModel = import_module("app.models.session").Session
 ReactStateService = import_module("app.services.react_state_service").ReactStateService
 
 
@@ -37,8 +38,21 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.session.commit()
         self.session.refresh(agent)
 
+        self.session.add(
+            SessionModel(
+                session_id="session-1",
+                agent_id=agent.id or 0,
+                user="alice",
+                chat_history=json.dumps({"version": 1, "messages": []}),
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.session.commit()
+
         self.task = ReactTask(
             task_id="task-1",
+            session_id="session-1",
             agent_id=agent.id or 0,
             user="alice",
             user_message="hello",
@@ -215,6 +229,22 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.assertEqual(self.task.iteration, 1)
         self.service.mark_failed(self.task)
         self.assertEqual(self.task.status, "failed")
+
+    def test_task_status_helpers_sync_session_runtime_status(self) -> None:
+        """Session runtime status should track the task lifecycle helpers."""
+        session = self.session.exec(
+            select(SessionModel).where(SessionModel.session_id == "session-1")
+        ).one()
+
+        self.assertEqual(session.runtime_status, "idle")
+
+        self.service.mark_running(self.task)
+        self.session.refresh(session)
+        self.assertEqual(session.runtime_status, "running")
+
+        self.service.mark_completed(self.task)
+        self.session.refresh(session)
+        self.assertEqual(session.runtime_status, "idle")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import {
   type OperationsSession,
 } from "@/studio/operations/api";
 import { formatTimestamp } from "@/utils/timestamp";
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -283,7 +284,11 @@ export default function SessionHistoryPage() {
             {loading ? (
               <TableRow>
                 <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                  Loading…
+                  <CenteredLoadingIndicator
+                    className="min-h-24 bg-transparent"
+                    spinnerClassName="h-5 w-5"
+                    label="Loading sessions"
+                  />
                 </TableCell>
               </TableRow>
             ) : sessions.length === 0 ? (

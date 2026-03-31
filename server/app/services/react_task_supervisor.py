@@ -233,6 +233,7 @@ class ReactTaskSupervisor:
             task.cancel_requested_at = None
             task.updated_at = datetime.now(UTC)
             db.add(task)
+            SessionService(db).sync_runtime_status(task.session_id, commit=False)
             db.commit()
 
             cursor_before_start = self._get_last_event_cursor(
@@ -287,6 +288,7 @@ class ReactTaskSupervisor:
             task.cancel_requested_at = cancel_timestamp
             task.updated_at = cancel_timestamp
             db.add(task)
+            SessionService(db).sync_runtime_status(task.session_id, commit=False)
             db.commit()
 
             session_id = task.session_id
@@ -452,6 +454,7 @@ class ReactTaskSupervisor:
                 session.updated_at = launch_timestamp
                 db.add(session)
             db.add(task)
+            SessionService(db).sync_runtime_status(task.session_id, commit=False)
             db.commit()
             db.refresh(task)
 
@@ -496,10 +499,12 @@ class ReactTaskSupervisor:
         payload["reply"] = reply
         last_recursion.action_output = json.dumps(payload, ensure_ascii=False)
         last_recursion.updated_at = datetime.now(UTC)
+        task.status = "pending"
         task.cancel_requested_at = None
         task.updated_at = datetime.now(UTC)
         db.add(last_recursion)
         db.add(task)
+        SessionService(db).sync_runtime_status(task.session_id, commit=False)
         db.commit()
 
         runtime_service.set_next_action_result(task, [{"result": payload}])
@@ -723,6 +728,7 @@ class ReactTaskSupervisor:
                     task.status = "failed"
                     task.updated_at = datetime.now(UTC)
                     db.add(task)
+                    SessionService(db).sync_runtime_status(task.session_id, commit=False)
                     db.commit()
                     await self._publish_event(
                         db=db,

@@ -47,6 +47,7 @@ def _build_session_response(
         test_workspace_hash=test_workspace_hash,
         user=session.user,
         status=session.status,
+        runtime_status=session.runtime_status,
         title=session.title,
         is_pinned=session.is_pinned,
         created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
@@ -145,7 +146,6 @@ async def list_sessions(
             if session.test_snapshot_id is not None
         ]
     )
-
     session_items = []
     for session in sessions:
         session_items.append(
@@ -160,6 +160,7 @@ async def list_sessions(
                     else None
                 ),
                 status=session.status,
+                runtime_status=session.runtime_status,
                 title=session.title,
                 is_pinned=session.is_pinned,
                 created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
@@ -206,7 +207,6 @@ async def get_session(
         test_workspace_hash = service.get_test_workspace_hashes(
             [session.test_snapshot_id]
         ).get(session.test_snapshot_id)
-
     return _build_session_response(
         session,
         test_workspace_hash=test_workspace_hash,

@@ -131,6 +131,7 @@ async def list_consumer_sessions(
                 agent_description=visible_agent.description,
                 release_id=session.release_id,
                 status=session.status,
+                runtime_status=session.runtime_status,
                 title=session.title,
                 is_pinned=session.is_pinned,
                 created_at=session.created_at.replace(tzinfo=UTC).isoformat(),

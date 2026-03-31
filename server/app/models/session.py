@@ -27,7 +27,8 @@ class Session(SQLModel, table=True):
         test_snapshot_id: Frozen Studio working-copy snapshot pinned to this
             session when ``type`` is ``studio_test``.
         user: Username of the user who owns this session.
-        status: Current status (active, waiting_input, closed).
+        status: Current session lifecycle status (active, waiting_input, closed).
+        runtime_status: Live aggregate execution state derived from child tasks.
         title: Optional user-facing session label set from the sidebar.
         is_pinned: Whether the session should stay at the top of the sidebar.
         chat_history: JSON string containing the complete chat history.
@@ -71,6 +72,10 @@ class Session(SQLModel, table=True):
     status: str = Field(
         default="active",
         description="Status: active, waiting_input, closed",
+    )
+    runtime_status: str = Field(
+        default="idle",
+        description="Live runtime status: idle, running, waiting_input",
     )
     title: str | None = Field(
         default=None,

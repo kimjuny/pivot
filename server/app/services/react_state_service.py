@@ -14,6 +14,7 @@ from app.models.react import (
     ReactRecursionState,
     ReactTask,
 )
+from app.services.session_service import SessionService
 from sqlmodel import Session as DBSession, col, delete, select
 
 if TYPE_CHECKING:
@@ -609,5 +610,6 @@ class ReactStateService:
             task.pending_user_action_json = None
         task.updated_at = datetime.now(UTC)
         self.db.add(task)
+        SessionService(self.db).sync_runtime_status(task.session_id, commit=False)
         if commit:
             self.db.commit()

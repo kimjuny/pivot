@@ -116,6 +116,7 @@ class SessionService:
             test_snapshot_id=resolved_test_snapshot_id,
             user=user,
             status="active",
+            runtime_status="idle",
             title=None,
             is_pinned=False,
             chat_history=json.dumps({"version": 1, "messages": []}),
@@ -409,6 +410,74 @@ class SessionService:
             for snapshot in self.db.exec(statement).all()
             if snapshot.id is not None
         }
+
+    def get_runtime_statuses(self, session_ids: list[str]) -> dict[str, str]:
+        """Return the live runtime status for each session.
+
+        Why: session-level runtime state should reflect the aggregate status of
+        child tasks without forcing every caller to reimplement that precedence.
+
+        Args:
+            session_ids: Session UUIDs to inspect.
+
+        Returns:
+            Mapping from session UUID to ``idle``, ``running``, or
+            ``waiting_input``.
+        """
+        runtime_statuses = {session_id: "idle" for session_id in session_ids}
+        if len(session_ids) == 0:
+            return runtime_statuses
+
+        statement = (
+            select(ReactTask.session_id, ReactTask.status)
+            .where(col(ReactTask.session_id).in_(session_ids))
+            .where(col(ReactTask.status).in_(["pending", "running", "waiting_input"]))
+        )
+
+        for session_id, task_status in self.db.exec(statement).all():
+            if session_id is None:
+                continue
+            if task_status in {"pending", "running"}:
+                runtime_statuses[session_id] = "running"
+                continue
+            if (
+                task_status == "waiting_input"
+                and runtime_statuses[session_id] != "running"
+            ):
+                runtime_statuses[session_id] = "waiting_input"
+
+        return runtime_statuses
+
+    def sync_runtime_status(
+        self,
+        session_id: str | None,
+        *,
+        commit: bool = True,
+    ) -> str | None:
+        """Persist the latest aggregate runtime status for one session.
+
+        Args:
+            session_id: Session UUID whose runtime status should be refreshed.
+            commit: Whether to commit immediately.
+
+        Returns:
+            The resolved runtime status, or ``None`` when no session exists.
+        """
+        if session_id is None:
+            return None
+
+        session = self.get_session(session_id)
+        if session is None:
+            return None
+
+        runtime_status = self.get_runtime_statuses([session_id]).get(session_id, "idle")
+        if session.runtime_status != runtime_status:
+            session.runtime_status = runtime_status
+            self.db.add(session)
+            if commit:
+                self.db.commit()
+
+        return runtime_status
 
     def update_session_metadata(
         self,

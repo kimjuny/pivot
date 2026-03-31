@@ -18,6 +18,7 @@ import { Toaster } from '@/components/ui/sonner'
 import ConsumerEntryPage from '@/consumer/ConsumerEntryPage'
 import ConsumerAgentsPage from '@/consumer/ConsumerAgentsPage'
 import ConsumerAgentPage from '@/consumer/ConsumerAgentPage'
+import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator'
 import SessionHistoryPage from '@/studio/operations/SessionHistoryPage'
 import SessionDetailPage from '@/studio/operations/SessionDetailPage'
 import './index.css'
@@ -33,14 +34,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   // Show loading while checking auth state
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="spinner"></div>
-          <div className="text-lg text-muted-foreground font-medium">Loading…</div>
-        </div>
-      </div>
-    );
+    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
   }
 
   // Redirect to login if not authenticated

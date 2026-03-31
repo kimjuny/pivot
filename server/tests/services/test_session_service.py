@@ -294,6 +294,62 @@ class SessionServiceTestCase(unittest.TestCase):
         )
         self.assertIsNone(diagnostics["session-1"]["latest_error"]["trace_id"])
 
+    def test_get_runtime_statuses_prioritize_running_then_waiting_input(self) -> None:
+        """Runtime status should follow the most live child-task state."""
+        self.session.add(
+            ReactTask(
+                task_id="task-running-status",
+                session_id="session-1",
+                agent_id=self.agent.id or 0,
+                user="alice",
+                user_message="Still working",
+                user_intent="Still working",
+                status="running",
+            )
+        )
+        self.session.add(
+            ReactTask(
+                task_id="task-waiting-status",
+                session_id="session-2",
+                agent_id=self.second_agent.id or 0,
+                user="alice",
+                user_message="Waiting on input",
+                user_intent="Waiting on input",
+                status="waiting_input",
+            )
+        )
+        self.session.commit()
+
+        runtime_statuses = self.service.get_runtime_statuses(
+            ["session-1", "session-2"]
+        )
+
+        self.assertEqual(runtime_statuses["session-1"], "running")
+        self.assertEqual(runtime_statuses["session-2"], "waiting_input")
+
+    def test_sync_runtime_status_persists_idle_when_no_live_tasks_remain(self) -> None:
+        """Session runtime status should fall back to idle after live work ends."""
+        self.session.add(
+            ReactTask(
+                task_id="task-finished-status",
+                session_id="session-1",
+                agent_id=self.agent.id or 0,
+                user="alice",
+                user_message="Done",
+                user_intent="Done",
+                status="completed",
+            )
+        )
+        self.session.commit()
+
+        runtime_status = self.service.sync_runtime_status("session-1")
+        session = self.service.get_session("session-1")
+
+        self.assertEqual(runtime_status, "idle")
+        if session is None:
+            self.fail("Expected session-1 to exist")
+        self.assertEqual(session.runtime_status, "idle")
+
     def test_update_session_metadata_does_not_pin_when_only_renaming(self) -> None:
         """Renaming a session should not implicitly toggle its pin state."""
         before = self.service.get_session("session-1")

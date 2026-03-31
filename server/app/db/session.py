@@ -219,6 +219,8 @@ def ensure_session_schema_compatibility() -> None:
             conn.execute(
                 text("ALTER TABLE session ADD COLUMN test_snapshot_id INTEGER")
             )
+        if "runtime_status" not in columns:
+            conn.execute(text("ALTER TABLE session ADD COLUMN runtime_status VARCHAR"))
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
         conn.execute(text("UPDATE session SET type = 'consumer' WHERE type IS NULL"))
         conn.execute(
@@ -228,6 +230,41 @@ def ensure_session_schema_compatibility() -> None:
                 "  SELECT active_release_id FROM agent WHERE agent.id = session.agent_id"
                 ") "
                 "WHERE release_id IS NULL"
+            )
+        )
+        if inspector.has_table("reacttask"):
+            conn.execute(
+                text(
+                    "UPDATE session "
+                    "SET runtime_status = 'running' "
+                    "WHERE EXISTS ("
+                    "  SELECT 1 FROM reacttask "
+                    "  WHERE reacttask.session_id = session.session_id "
+                    "    AND reacttask.status IN ('pending', 'running')"
+                    ")"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE session "
+                    "SET runtime_status = 'waiting_input' "
+                    "WHERE NOT EXISTS ("
+                    "  SELECT 1 FROM reacttask "
+                    "  WHERE reacttask.session_id = session.session_id "
+                    "    AND reacttask.status IN ('pending', 'running')"
+                    ") "
+                    "AND EXISTS ("
+                    "  SELECT 1 FROM reacttask "
+                    "  WHERE reacttask.session_id = session.session_id "
+                    "    AND reacttask.status = 'waiting_input'"
+                    ")"
+                )
+            )
+        conn.execute(
+            text(
+                "UPDATE session "
+                "SET runtime_status = 'idle' "
+                "WHERE runtime_status IS NULL"
             )
         )
 

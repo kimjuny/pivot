@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator';
 import AgentDetail from './AgentDetail';
 import Navigation from './Navigation';
 import { getAgentById, AuthError } from '../utils/api';
@@ -127,12 +128,7 @@ function AgentDetailPage() {
     return (
       <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
         <Navigation />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="flex flex-col items-center space-y-4">
-            <div className="spinner"></div>
-            <div className="text-lg text-muted-foreground font-medium">Loading agent details…</div>
-          </div>
-        </div>
+        <CenteredLoadingIndicator className="flex-1" label="Loading agent details" />
       </div>
     );
   }

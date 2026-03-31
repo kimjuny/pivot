@@ -90,6 +90,7 @@ class SessionResponse(AppBaseModel):
     test_workspace_hash: str | None = None
     user: str
     status: str
+    runtime_status: str = "idle"
     title: str | None = None
     is_pinned: bool = False
     created_at: str
@@ -112,6 +113,7 @@ class SessionListItem(AppBaseModel):
     release_id: int | None
     test_workspace_hash: str | None = None
     status: str
+    runtime_status: str = "idle"
     title: str | None = None
     is_pinned: bool = False
     created_at: str

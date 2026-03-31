@@ -13,6 +13,7 @@ export interface ConsumerSessionListItem {
   agent_description: string | null;
   release_id?: number | null;
   status: string;
+  runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;
   is_pinned: boolean;
   created_at: string;

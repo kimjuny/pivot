@@ -125,6 +125,7 @@ function toSessionListItem(session: SessionResponse): SessionListItem {
     release_id: session.release_id,
     test_workspace_hash: session.test_workspace_hash ?? null,
     status: session.status,
+    runtime_status: session.runtime_status ?? "idle",
     title: session.title,
     is_pinned: session.is_pinned,
     created_at: session.created_at,

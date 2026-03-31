@@ -1088,6 +1088,7 @@ export interface SessionListItem {
   release_id?: number | null;
   test_workspace_hash?: string | null;
   status: string;
+  runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;
   is_pinned: boolean;
   created_at: string;
@@ -1114,6 +1115,7 @@ export interface SessionResponse {
   test_workspace_hash?: string | null;
   user: string;
   status: string;
+  runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;
   is_pinned: boolean;
   created_at: string;

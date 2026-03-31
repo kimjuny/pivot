@@ -30,6 +30,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator';
 import {
   Pagination,
   PaginationContent,
@@ -241,14 +242,7 @@ function AgentList() {
   // ---------------------------------------------------------------------------
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="spinner" />
-          <div className="text-lg text-muted-foreground font-medium">Loading…</div>
-        </div>
-      </div>
-    );
+    return <CenteredLoadingIndicator className="h-screen" label="Loading agents" />;
   }
 
   if (error) {

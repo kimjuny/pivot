@@ -67,6 +67,17 @@ function getSessionTitle(session: SessionListItem): string {
 }
 
 /**
+ * Whether the sidebar should show a live execution indicator for this session.
+ *
+ * Why: the sidebar only needs a lightweight "something is still running"
+ * signal, and the persisted session status is the stable cross-refresh source
+ * we already have for that state.
+ */
+function isSessionRunning(session: SessionListItem): boolean {
+  return session.runtime_status === "running";
+}
+
+/**
  * Shows session navigation and keeps session-management controls visually
  * separated from the conversation timeline.
  */
@@ -214,7 +225,7 @@ export function SessionSidebar({
       {!isCollapsed && (
       <>
         <SidebarSeparator className="mx-3" />
-        <SidebarContent className="gap-0">
+        <SidebarContent className="session-sidebar-scroll-area gap-0">
         <SidebarGroup className="py-2">
           <SidebarGroupLabel className="h-6 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/42">
             Sessions
@@ -266,6 +277,14 @@ export function SessionSidebar({
                             }}
                             className="h-9 rounded-xl px-2.5 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
                           >
+                            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                              {isSessionRunning(session) ? (
+                                <Loader2
+                                  className="h-3.5 w-3.5 animate-spin text-sidebar-foreground/60"
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                            </span>
                             <span>{getSessionTitle(session)}</span>
                           </SidebarMenuButton>
                           <DropdownMenu>

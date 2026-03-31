@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator';
 import { LLMBrandAvatar } from '@/components/LLMBrandAvatar';
 import { formatThinkingPolicyLabel } from '@/utils/llmThinking';
 
@@ -380,14 +381,7 @@ function LLMList() {
   // ---------------------------------------------------------------------------
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="spinner" />
-          <div className="text-lg text-muted-foreground font-medium">Loading…</div>
-        </div>
-      </div>
-    );
+    return <CenteredLoadingIndicator className="h-screen" label="Loading models" />;
   }
 
   if (error) {
