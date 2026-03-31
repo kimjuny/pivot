@@ -1,7 +1,10 @@
+import { useState } from "react";
+
 import {
   AlertCircle,
   Brain,
   CheckCircle2,
+  ChevronRight,
   Loader2,
   Square,
   Wrench,
@@ -81,6 +84,120 @@ function getToolExecutionSnapshot(eventData: unknown): ToolExecutionSnapshot {
   };
 }
 
+/** Shared wrapper for collapsible content with 200ms grid-row animation. */
+function CollapsePanel({
+  defaultOpen = false,
+  trigger,
+  children,
+}: {
+  defaultOpen?: boolean;
+  trigger: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="flex w-full items-center gap-1 text-left"
+      >
+        <ChevronRight
+          className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        {trigger}
+      </button>
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="rounded bg-muted/30 p-2">
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Collapsible wrapper for a single tool call's arguments. */
+function CollapsibleCallDetail({
+  defaultOpen = false,
+  label,
+  children,
+}: {
+  defaultOpen?: boolean;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <CollapsePanel
+      defaultOpen={defaultOpen}
+      trigger={<span className="text-xs font-semibold text-foreground">{label}</span>}
+    >
+      {children}
+    </CollapsePanel>
+  );
+}
+
+/** Collapsible wrapper for a single tool result's body. */
+function CollapsibleResultDetail({
+  defaultOpen = false,
+  result,
+}: {
+  defaultOpen?: boolean;
+  result: {
+    name: string;
+    result?: unknown;
+    error?: string;
+    success: boolean;
+  };
+}) {
+  const hasContent =
+    result.result !== undefined && result.result !== null;
+  const hasError = Boolean(result.error);
+
+  return (
+    <CollapsePanel
+      defaultOpen={defaultOpen}
+      trigger={
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-foreground">
+            📤 Result: {result.name}
+          </span>
+          {result.success ? (
+            <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs text-success">
+              ✓
+            </span>
+          ) : (
+            <span className="rounded bg-danger/10 px-1.5 py-0.5 text-xs text-danger">
+              ✗
+            </span>
+          )}
+        </div>
+      }
+    >
+      {hasContent && (
+        <div className="break-all font-mono text-xs text-muted-foreground">
+          {typeof result.result === "string"
+            ? result.result
+            : JSON.stringify(result.result, null, 2)}
+        </div>
+      )}
+      {hasError && (
+        <div className="rounded border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
+          {result.error}
+        </div>
+      )}
+    </CollapsePanel>
+  );
+}
+
 /**
  * Renders one recursion row and its expandable execution details.
  */
@@ -117,7 +234,7 @@ export function RecursionCard({
     `Iteration ${recursion.iteration + 1}`;
 
   return (
-    <div className="mb-3 overflow-hidden rounded-md border border-border bg-muted/20">
+    <div className="mb-3 overflow-hidden rounded-md bg-muted/20">
       <button
         onClick={() => onToggle(messageId, recursion.uid)}
         className="flex w-full items-center justify-between px-3 py-2 transition-colors hover:bg-muted/30"
@@ -211,10 +328,15 @@ export function RecursionCard({
         </div>
       </button>
 
-      {isExpanded && (
-        <div className="space-y-2 px-3 pb-3">
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
+          isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="space-y-2 px-3 pb-3">
           {recursion.thinking && (
-            <div className="rounded border border-border bg-background/60 p-2">
+            <div className="rounded bg-background/60 p-2">
               <div className="mb-1.5 flex items-center gap-1.5">
                 <Brain className="h-3.5 w-3.5 text-primary" />
                 <span className="text-xs font-semibold text-foreground">
@@ -228,7 +350,7 @@ export function RecursionCard({
           )}
 
           {recursion.observe && (
-            <div className="rounded border border-border bg-background/50 p-2">
+            <div className="rounded bg-background/50 p-2">
               <div className="mb-1 flex items-center gap-1.5">
                 <div className="flex h-3.5 w-3.5 items-center justify-center">
                   <div className="h-4 w-1 rounded-full bg-blue-500" />
@@ -244,7 +366,7 @@ export function RecursionCard({
           )}
 
           {recursion.reason && (
-            <div className="rounded border border-border bg-background/50 p-2">
+            <div className="rounded bg-background/50 p-2">
               <div className="mb-1 flex items-center gap-1.5">
                 <Brain className="h-3.5 w-3.5 text-purple-500" />
                 <span className="text-xs font-semibold text-foreground">
@@ -258,7 +380,7 @@ export function RecursionCard({
           )}
 
           {recursion.summary && (
-            <div className="rounded border border-border bg-background/50 p-2">
+            <div className="rounded bg-background/50 p-2">
               <div className="mb-1 flex items-center gap-1.5">
                 <div className="flex h-3.5 w-3.5 items-center justify-center">
                   <div className="h-4 w-1 rounded-full bg-amber-500" />
@@ -274,7 +396,7 @@ export function RecursionCard({
           )}
 
           {recursion.action && (
-            <div className="rounded border border-border bg-background/50 p-2">
+            <div className="rounded bg-background/50 p-2">
               <div className="mb-1 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <div className="flex h-3.5 w-3.5 items-center justify-center">
@@ -304,7 +426,7 @@ export function RecursionCard({
               return (
                 <div
                   key={index}
-                  className="rounded border border-border bg-background/50 p-2"
+                  className="rounded bg-background/50 p-2"
                 >
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
@@ -336,50 +458,27 @@ export function RecursionCard({
                     )}
 
                     {toolSnapshot.toolCalls.map((call, callIndex) => (
-                      <div key={`call-${callIndex}`} className="space-y-1">
-                        <div className="text-xs font-semibold text-foreground">
-                          📥 Call: {call.name}
+                      <CollapsibleCallDetail
+                        key={`call-${callIndex}`}
+                        label={`📥 Call: ${call.name}`}
+                        defaultOpen={false}
+                      >
+                        <div className="mb-1 text-[10px] text-muted-foreground/70">
+                          Arguments:
                         </div>
-                        <div className="rounded border border-border/50 bg-muted/30 p-2 font-mono text-xs text-muted-foreground">
-                          <div className="mb-1 text-[10px] text-muted-foreground/70">
-                            Arguments:
-                          </div>
+                        <div className="font-mono text-xs text-muted-foreground">
                           {typeof call.arguments === "string"
                             ? call.arguments
                             : JSON.stringify(call.arguments, null, 2)}
                         </div>
-                      </div>
+                      </CollapsibleCallDetail>
                     ))}
 
                     {toolSnapshot.toolResults.map((result, resultIndex) => (
-                      <div key={`result-${resultIndex}`} className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-foreground">
-                            📤 Result: {result.name}
-                          </span>
-                          {result.success ? (
-                            <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs text-success">
-                              ✓
-                            </span>
-                          ) : (
-                            <span className="rounded bg-danger/10 px-1.5 py-0.5 text-xs text-danger">
-                              ✗
-                            </span>
-                          )}
-                        </div>
-                        {result.result !== undefined && result.result !== null && (
-                          <div className="break-all rounded border border-border/50 bg-muted/30 p-2 font-mono text-xs text-muted-foreground">
-                            {typeof result.result === "string"
-                              ? result.result
-                              : JSON.stringify(result.result, null, 2)}
-                          </div>
-                        )}
-                        {result.error && (
-                          <div className="rounded border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
-                            {result.error}
-                          </div>
-                        )}
-                      </div>
+                      <CollapsibleResultDetail
+                        key={`result-${resultIndex}`}
+                        result={result}
+                      />
                     ))}
                   </div>
                 </div>
@@ -396,7 +495,7 @@ export function RecursionCard({
               return (
                 <div
                   key={index}
-                  className="rounded border border-border bg-background/50 p-2"
+                  className="rounded bg-background/50 p-2"
                 >
                   <div className="mb-2 flex items-center gap-1.5">
                     <Brain className="h-3.5 w-3.5 text-indigo-500" />
@@ -449,7 +548,8 @@ export function RecursionCard({
             </div>
           )}
         </div>
-      )}
+        </div>
+      </div>
     </div>
   );
 }
