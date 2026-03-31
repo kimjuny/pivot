@@ -1,6 +1,6 @@
 """Studio Operations API — admin-scoped session inspection endpoints."""
 
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from app.api.auth import get_current_user
@@ -63,6 +63,49 @@ def _resolve_task_counts(db: DBSession, session_ids: list[str]) -> dict[str, int
     }
 
 
+def _serialize_operations_diagnostics(
+    diagnostics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Serialize service-level diagnostics payloads for the Operations API.
+
+    Args:
+        diagnostics: Raw diagnostics summary returned by ``SessionService``.
+
+    Returns:
+        JSON-ready diagnostics metadata with ISO 8601 timestamps.
+    """
+    normalized = diagnostics or {}
+    latest_error = normalized.get("latest_error")
+    serialized_latest_error: dict[str, Any] | None = None
+
+    if isinstance(latest_error, dict):
+        timestamp = latest_error.get("timestamp")
+        serialized_latest_error = {
+            "task_id": latest_error.get("task_id"),
+            "trace_id": latest_error.get("trace_id"),
+            "message": latest_error.get("message"),
+            "timestamp": (
+                timestamp.replace(tzinfo=UTC).isoformat()
+                if isinstance(timestamp, datetime)
+                else None
+            ),
+        }
+
+    return {
+        "task_count": int(normalized.get("task_count", 0)),
+        "completed_task_count": int(normalized.get("completed_task_count", 0)),
+        "active_task_count": int(normalized.get("active_task_count", 0)),
+        "waiting_input_task_count": int(
+            normalized.get("waiting_input_task_count", 0)
+        ),
+        "failed_task_count": int(normalized.get("failed_task_count", 0)),
+        "cancelled_task_count": int(normalized.get("cancelled_task_count", 0)),
+        "attention_task_count": int(normalized.get("attention_task_count", 0)),
+        "failed_recursion_count": int(normalized.get("failed_recursion_count", 0)),
+        "latest_error": serialized_latest_error,
+    }
+
+
 @router.get("/operations/sessions")
 async def list_operations_sessions(
     agent_id: int | None = None,
@@ -107,6 +150,7 @@ async def list_operations_sessions(
     agent_names = _resolve_agent_names(db, agent_ids)
     release_versions = _resolve_release_versions(db, release_ids)
     task_counts = _resolve_task_counts(db, session_ids)
+    diagnostics_by_session = service.get_operations_session_diagnostics(session_ids)
 
     items = []
     for session in sessions:
@@ -126,6 +170,9 @@ async def list_operations_sessions(
                 "status": session.status,
                 "title": session.title,
                 "task_count": task_counts.get(session.session_id, 0),
+                "diagnostics": _serialize_operations_diagnostics(
+                    diagnostics_by_session.get(session.session_id)
+                ),
                 "created_at": session.created_at.replace(tzinfo=UTC).isoformat(),
                 "updated_at": session.updated_at.replace(tzinfo=UTC).isoformat(),
             }
@@ -176,6 +223,7 @@ async def get_operations_session_detail(
 
     # Reuse the existing full-history serialization
     tasks_data = service.get_full_session_history(session_id)
+    diagnostics = service.get_operations_session_diagnostics([session_id]).get(session_id)
     tasks = []
     for task_data in tasks_data:
         recursions = [
@@ -253,6 +301,7 @@ async def get_operations_session_detail(
             "user": session.user,
             "status": session.status,
             "title": session.title,
+            "diagnostics": _serialize_operations_diagnostics(diagnostics),
             "created_at": session.created_at.replace(tzinfo=UTC).isoformat(),
             "updated_at": session.updated_at.replace(tzinfo=UTC).isoformat(),
         },

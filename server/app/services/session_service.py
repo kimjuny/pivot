@@ -2,12 +2,14 @@
 
 import json
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from app.models.agent_release import AgentTestSnapshot
 from app.models.react import (
     ReactPlanStep,
+    ReactRecursion,
     ReactRecursionState,
     ReactTask,
     ReactTaskEvent,
@@ -38,7 +40,7 @@ class SessionService:
 
     @staticmethod
     def _serialize_history_files(
-        files: list[FileAssetListItem | dict[str, Any]] | None,
+        files: Sequence[FileAssetListItem | dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         """Normalizes persisted file payloads before writing chat history."""
         return [
@@ -52,7 +54,7 @@ class SessionService:
 
     @staticmethod
     def _serialize_history_attachments(
-        attachments: list[TaskAttachmentListItem | dict[str, Any]] | None,
+        attachments: Sequence[TaskAttachmentListItem | dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
         """Normalizes persisted attachment payloads before writing chat history."""
         return [
@@ -207,6 +209,155 @@ class SessionService:
 
         return sessions, total
 
+    @staticmethod
+    def _normalize_utc_timestamp(value: datetime) -> datetime:
+        """Return a timezone-aware UTC timestamp for persisted datetime values.
+
+        Args:
+            value: Datetime loaded from the persistence layer.
+
+        Returns:
+            A timezone-aware UTC datetime so API serialization stays stable
+            across SQLite and PostgreSQL.
+        """
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _build_operations_task_failure_message(task_status: str) -> str | None:
+        """Return a fallback diagnostics message for terminal task states.
+
+        Args:
+            task_status: Persisted task lifecycle status.
+
+        Returns:
+            A concise diagnostics message, or ``None`` when the task status does
+            not represent a failure that should surface in Operations.
+        """
+        if task_status == "failed":
+            return "Task failed without a persisted recursion error."
+        if task_status == "cancelled":
+            return "Task was cancelled before it completed."
+        return None
+
+    def get_operations_session_diagnostics(
+        self,
+        session_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Aggregate session-level diagnostics for the Studio Operations views.
+
+        Why: the Operations list needs a compact triage summary per session so
+        operators can spot broken work without opening every conversation.
+
+        Args:
+            session_ids: Session UUIDs to summarize.
+
+        Returns:
+            Diagnostics keyed by session UUID. Each summary contains task-state
+            counts plus the latest failure metadata when one exists.
+        """
+        diagnostics_by_session = {
+            session_id: {
+                "task_count": 0,
+                "completed_task_count": 0,
+                "active_task_count": 0,
+                "waiting_input_task_count": 0,
+                "failed_task_count": 0,
+                "cancelled_task_count": 0,
+                "attention_task_count": 0,
+                "failed_recursion_count": 0,
+                "latest_error": None,
+            }
+            for session_id in session_ids
+        }
+        if len(session_ids) == 0:
+            return diagnostics_by_session
+
+        task_stmt = (
+            select(ReactTask)
+            .where(col(ReactTask.session_id).in_(session_ids))
+            .order_by(col(ReactTask.updated_at).desc())
+        )
+        tasks = list(self.db.exec(task_stmt).all())
+        task_ids = [task.task_id for task in tasks]
+        recursions_by_task: dict[str, list[ReactRecursion]] = {}
+
+        if len(task_ids) > 0:
+            recursion_stmt = (
+                select(ReactRecursion)
+                .where(col(ReactRecursion.task_id).in_(task_ids))
+                .order_by(col(ReactRecursion.updated_at).desc())
+            )
+            for recursion in self.db.exec(recursion_stmt).all():
+                recursions_by_task.setdefault(recursion.task_id, []).append(recursion)
+
+        for task in tasks:
+            if task.session_id is None or task.session_id not in diagnostics_by_session:
+                continue
+
+            session_diagnostics = diagnostics_by_session[task.session_id]
+            session_diagnostics["task_count"] += 1
+
+            if task.status in {"pending", "running"}:
+                session_diagnostics["active_task_count"] += 1
+            elif task.status == "waiting_input":
+                session_diagnostics["waiting_input_task_count"] += 1
+            elif task.status == "completed":
+                session_diagnostics["completed_task_count"] += 1
+            elif task.status == "failed":
+                session_diagnostics["failed_task_count"] += 1
+            elif task.status == "cancelled":
+                session_diagnostics["cancelled_task_count"] += 1
+
+            task_has_attention_signal = task.status in {"failed", "waiting_input"}
+            latest_error = session_diagnostics["latest_error"]
+
+            for recursion in recursions_by_task.get(task.task_id, []):
+                if recursion.status == "error":
+                    session_diagnostics["failed_recursion_count"] += 1
+                    task_has_attention_signal = True
+
+                error_message = (
+                    recursion.error_log.strip() if recursion.error_log else None
+                )
+                if error_message is None and recursion.status == "error":
+                    error_message = "Recursion failed without an error log."
+
+                if error_message is None:
+                    continue
+
+                candidate_error = {
+                    "task_id": task.task_id,
+                    "trace_id": recursion.trace_id,
+                    "message": error_message,
+                    "timestamp": self._normalize_utc_timestamp(recursion.updated_at),
+                }
+                if latest_error is None or candidate_error["timestamp"] > latest_error[
+                    "timestamp"
+                ]:
+                    latest_error = candidate_error
+
+            fallback_error_message = self._build_operations_task_failure_message(
+                task.status
+            )
+            if fallback_error_message is not None:
+                candidate_error = {
+                    "task_id": task.task_id,
+                    "trace_id": None,
+                    "message": fallback_error_message,
+                    "timestamp": self._normalize_utc_timestamp(task.updated_at),
+                }
+                if latest_error is None or candidate_error["timestamp"] > latest_error[
+                    "timestamp"
+                ]:
+                    latest_error = candidate_error
+
+            if task_has_attention_signal:
+                session_diagnostics["attention_task_count"] += 1
+
+            session_diagnostics["latest_error"] = latest_error
+
+        return diagnostics_by_session
+
     def get_sessions_by_user(
         self,
         user: str,
@@ -304,8 +455,8 @@ class SessionService:
         session_id: str,
         message_type: str,
         content: str,
-        files: list[FileAssetListItem | dict[str, Any]] | None = None,
-        attachments: list[TaskAttachmentListItem | dict[str, Any]] | None = None,
+        files: Sequence[FileAssetListItem | dict[str, Any]] | None = None,
+        attachments: Sequence[TaskAttachmentListItem | dict[str, Any]] | None = None,
     ) -> bool:
         """Update chat history with a new message.
 

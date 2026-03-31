@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -17,6 +18,7 @@ if str(SERVER_ROOT) not in sys.path:
 import_module("app.models.llm")
 Agent = import_module("app.models.agent").Agent
 ReactPlanStep = import_module("app.models.react").ReactPlanStep
+ReactRecursion = import_module("app.models.react").ReactRecursion
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
 Session = import_module("app.models.session").Session
@@ -179,6 +181,118 @@ class SessionServiceTestCase(unittest.TestCase):
         self.assertEqual(history[0]["current_plan"][0]["step_id"], "1")
         self.assertEqual(history[0]["current_plan"][0]["status"], "pending")
         self.assertEqual(history[0]["current_plan"][0]["recursion_history"], [])
+
+    def test_operations_diagnostics_summarize_attention_and_latest_error(self) -> None:
+        """Operations diagnostics should surface task pressure and newest errors."""
+        base_time = datetime(2026, 3, 30, 12, 0, tzinfo=UTC)
+
+        running_task = ReactTask(
+            task_id="task-running",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Keep going",
+            user_intent="Keep going",
+            status="running",
+            updated_at=base_time,
+        )
+        waiting_task = ReactTask(
+            task_id="task-waiting",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Need approval",
+            user_intent="Need approval",
+            status="waiting_input",
+            updated_at=base_time + timedelta(minutes=1),
+        )
+        failed_task = ReactTask(
+            task_id="task-failed",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Broken execution",
+            user_intent="Broken execution",
+            status="failed",
+            updated_at=base_time + timedelta(minutes=2),
+        )
+        self.session.add(running_task)
+        self.session.add(waiting_task)
+        self.session.add(failed_task)
+        self.session.commit()
+        self.session.refresh(failed_task)
+
+        self.session.add(
+            ReactRecursion(
+                trace_id="trace-older",
+                task_id=failed_task.task_id,
+                react_task_id=failed_task.id or 0,
+                iteration_index=0,
+                status="error",
+                error_log="Initial tool failure",
+                updated_at=base_time + timedelta(minutes=3),
+            )
+        )
+        self.session.add(
+            ReactRecursion(
+                trace_id="trace-newer",
+                task_id=failed_task.task_id,
+                react_task_id=failed_task.id or 0,
+                iteration_index=1,
+                status="error",
+                error_log="Latest sandbox timeout",
+                updated_at=base_time + timedelta(minutes=4),
+            )
+        )
+        self.session.commit()
+
+        diagnostics = self.service.get_operations_session_diagnostics(
+            ["session-1", "session-2"]
+        )
+
+        self.assertEqual(diagnostics["session-1"]["task_count"], 3)
+        self.assertEqual(diagnostics["session-1"]["active_task_count"], 1)
+        self.assertEqual(diagnostics["session-1"]["waiting_input_task_count"], 1)
+        self.assertEqual(diagnostics["session-1"]["failed_task_count"], 1)
+        self.assertEqual(diagnostics["session-1"]["attention_task_count"], 2)
+        self.assertEqual(diagnostics["session-1"]["failed_recursion_count"], 2)
+        self.assertEqual(
+            diagnostics["session-1"]["latest_error"]["message"],
+            "Latest sandbox timeout",
+        )
+        self.assertEqual(
+            diagnostics["session-1"]["latest_error"]["trace_id"],
+            "trace-newer",
+        )
+        self.assertEqual(diagnostics["session-2"]["task_count"], 0)
+        self.assertIsNone(diagnostics["session-2"]["latest_error"])
+
+    def test_operations_diagnostics_fall_back_when_failed_task_has_no_recursion_error(
+        self,
+    ) -> None:
+        """Failed tasks without recursion logs should still appear as triage items."""
+        failed_task = ReactTask(
+            task_id="task-no-recursion-error",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Fallback diagnostics",
+            user_intent="Fallback diagnostics",
+            status="failed",
+            updated_at=datetime(2026, 3, 30, 13, 0, tzinfo=UTC),
+        )
+        self.session.add(failed_task)
+        self.session.commit()
+
+        diagnostics = self.service.get_operations_session_diagnostics(["session-1"])
+
+        self.assertEqual(diagnostics["session-1"]["failed_task_count"], 1)
+        self.assertEqual(diagnostics["session-1"]["attention_task_count"], 1)
+        self.assertEqual(
+            diagnostics["session-1"]["latest_error"]["message"],
+            "Task failed without a persisted recursion error.",
+        )
+        self.assertIsNone(diagnostics["session-1"]["latest_error"]["trace_id"])
 
     def test_update_session_metadata_does_not_pin_when_only_renaming(self) -> None:
         """Renaming a session should not implicitly toggle its pin state."""

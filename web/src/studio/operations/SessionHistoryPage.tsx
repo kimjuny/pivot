@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { cn } from "@/lib/utils";
 import { getAgents } from "@/utils/api";
 import type { Agent } from "@/types";
 import {
@@ -32,7 +33,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ChevronLeft, ChevronRight, FileText } from "@/lib/lucide";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  History,
+} from "@/lib/lucide";
 
 /** Session status badge color mapping. */
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -42,6 +50,32 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
 };
 
 const PAGE_SIZE = 20;
+
+function formatCountLabel(
+  count: number,
+  singular: string,
+  plural: string = `${singular}s`,
+): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function buildSessionHealthCopy(session: OperationsSession): string {
+  const diagnostics = session.diagnostics;
+
+  if (diagnostics.failed_task_count > 0 || diagnostics.failed_recursion_count > 0) {
+    return "Needs attention";
+  }
+  if (diagnostics.waiting_input_task_count > 0) {
+    return "Waiting on user";
+  }
+  if (diagnostics.active_task_count > 0) {
+    return "In progress";
+  }
+  if (diagnostics.completed_task_count > 0 && diagnostics.attention_task_count === 0) {
+    return "Healthy";
+  }
+  return "Idle";
+}
 
 /**
  * Session History list page for Studio Operations.
@@ -113,6 +147,21 @@ export default function SessionHistoryPage() {
 
   const showingFrom = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const showingTo = Math.min(page * PAGE_SIZE, total);
+  const sessionsNeedingAttention = sessions.filter(
+    (session) => session.diagnostics.attention_task_count > 0,
+  ).length;
+  const failedTasksOnPage = sessions.reduce(
+    (count, session) => count + session.diagnostics.failed_task_count,
+    0,
+  );
+  const waitingTasksOnPage = sessions.reduce(
+    (count, session) => count + session.diagnostics.waiting_input_task_count,
+    0,
+  );
+  const failedRecursionsOnPage = sessions.reduce(
+    (count, session) => count + session.diagnostics.failed_recursion_count,
+    0,
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -120,12 +169,59 @@ export default function SessionHistoryPage() {
       <div className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">Session History</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          All consumer and test session activity across the workspace
+          Triage sessions by failures, waiting input, and recent execution errors
         </p>
       </div>
 
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <AlertTriangle className="h-4 w-4 text-warning" />
+            Attention Sessions
+          </div>
+          <div className="mt-2 text-2xl font-semibold">
+            {sessionsNeedingAttention}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Sessions on this page with failures or waiting tasks
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <FileText className="h-4 w-4 text-danger" />
+            Failed Tasks
+          </div>
+          <div className="mt-2 text-2xl font-semibold">{failedTasksOnPage}</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Terminal task failures in the current result set
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <History className="h-4 w-4 text-primary" />
+            Waiting Input
+          </div>
+          <div className="mt-2 text-2xl font-semibold">{waitingTasksOnPage}</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Tasks paused until a human responds
+          </p>
+        </div>
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <AlertTriangle className="h-4 w-4 text-danger" />
+            Failed Recursions
+          </div>
+          <div className="mt-2 text-2xl font-semibold">
+            {failedRecursionsOnPage}
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Low-level execution loops that ended in error
+          </p>
+        </div>
+      </div>
+
       {/* Filters */}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <Select value={agentFilter} onValueChange={handleAgentFilterChange}>
           <SelectTrigger className="w-[180px]" size="small">
             <SelectValue placeholder="All Agents" />
@@ -173,28 +269,26 @@ export default function SessionHistoryPage() {
 
       {/* Table */}
       <div className="rounded-md border">
-        <Table containerClassName="overflow-hidden">
+        <Table className="table-fixed" containerClassName="overflow-hidden">
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[180px]">Agent</TableHead>
-              <TableHead className="w-[100px]">User</TableHead>
-              <TableHead>Title</TableHead>
-              <TableHead className="w-[110px]">Status</TableHead>
-              <TableHead className="w-[80px]">Version</TableHead>
-              <TableHead className="w-[70px]">Tasks</TableHead>
+              <TableHead className="w-[32%]">Session</TableHead>
+              <TableHead className="w-[18%]">Health</TableHead>
+              <TableHead className="w-[22%]">Diagnostics</TableHead>
+              <TableHead className="w-[18%]">Latest Error</TableHead>
               <TableHead className="w-[160px]">Last Activity</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : sessions.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                   <div className="flex flex-col items-center gap-2">
                     <FileText className="h-8 w-8 opacity-40" />
                     <span>No sessions found</span>
@@ -205,35 +299,113 @@ export default function SessionHistoryPage() {
               sessions.map((session) => (
                 <TableRow
                   key={session.session_id}
-                  className="cursor-pointer"
+                  className={cn(
+                    "cursor-pointer",
+                    session.diagnostics.attention_task_count > 0 &&
+                      "bg-warning/5 hover:bg-warning/10",
+                  )}
                   onClick={() =>
                     navigate(`/studio/operations/sessions/${session.session_id}`)
                   }
                 >
-                  <TableCell className="font-medium">
-                    {session.agent_name}
+                  <TableCell className="align-top">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{session.agent_name}</span>
+                        <Badge variant="outline">{session.type}</Badge>
+                        {session.release_version != null && (
+                          <span className="text-xs text-muted-foreground">
+                            v{session.release_version}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        className="truncate text-sm text-muted-foreground"
+                        title={session.title || "Untitled session"}
+                      >
+                        {session.title || "Untitled session"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        User: {session.user}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="align-top">
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant={STATUS_VARIANT[session.status] ?? "outline"}>
+                        {session.status}
+                      </Badge>
+                      <Badge
+                        variant={
+                          session.diagnostics.attention_task_count > 0
+                            ? "destructive"
+                            : "secondary"
+                        }
+                      >
+                        {buildSessionHealthCopy(session)}
+                      </Badge>
+                      {session.diagnostics.active_task_count > 0 && (
+                        <Badge variant="outline">
+                          {formatCountLabel(
+                            session.diagnostics.active_task_count,
+                            "active task",
+                          )}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="align-top text-sm text-muted-foreground">
+                    <div className="space-y-1">
+                      <div>{formatCountLabel(session.task_count, "task")}</div>
+                      <div>
+                        {formatCountLabel(
+                          session.diagnostics.attention_task_count,
+                          "issue",
+                        )}
+                      </div>
+                      <div>
+                        {formatCountLabel(
+                          session.diagnostics.failed_recursion_count,
+                          "failed recursion",
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="align-top">
+                    {session.diagnostics.latest_error?.message ? (
+                      <div className="space-y-1">
+                        <p
+                          className="line-clamp-2 text-sm text-foreground"
+                          title={session.diagnostics.latest_error.message}
+                        >
+                          {session.diagnostics.latest_error.message}
+                        </p>
+                        <div className="text-xs text-muted-foreground">
+                          {formatTimestamp(session.diagnostics.latest_error.timestamp ?? undefined)}
+                        </div>
+                        {session.diagnostics.latest_error.trace_id && (
+                          <div
+                            className="truncate font-mono text-[11px] text-muted-foreground"
+                            title={session.diagnostics.latest_error.trace_id}
+                          >
+                            {session.diagnostics.latest_error.trace_id}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        No recent error
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {session.user}
-                  </TableCell>
-                  <TableCell className="max-w-[300px] truncate text-muted-foreground">
-                    {session.title || "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={STATUS_VARIANT[session.status] ?? "outline"}>
-                      {session.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {session.release_version != null
-                      ? `v${session.release_version}`
-                      : "—"}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {session.task_count}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatTimestamp(session.updated_at)}
+                    <div className="space-y-1">
+                      <div>{formatTimestamp(session.updated_at)}</div>
+                      <div className="text-xs">
+                        Created {formatTimestamp(session.created_at)}
+                      </div>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

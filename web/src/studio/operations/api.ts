@@ -3,6 +3,44 @@
 import { apiRequest } from "@/utils/api";
 
 /**
+ * Latest error signal attached to one Operations session.
+ */
+export interface OperationsSessionLatestError {
+  /** Task that emitted the latest visible failure signal. */
+  task_id: string | null;
+  /** Recursion trace associated with the latest failure, when available. */
+  trace_id: string | null;
+  /** Human-readable diagnostics message for the latest failure. */
+  message: string | null;
+  /** ISO 8601 UTC timestamp for the latest failure signal. */
+  timestamp: string | null;
+}
+
+/**
+ * Compact diagnostics summary attached to one Operations session.
+ */
+export interface OperationsSessionDiagnostics {
+  /** Total number of tasks inside the session. */
+  task_count: number;
+  /** Number of tasks that completed successfully. */
+  completed_task_count: number;
+  /** Number of tasks still actively executing. */
+  active_task_count: number;
+  /** Number of tasks paused for user input. */
+  waiting_input_task_count: number;
+  /** Number of tasks that failed terminally. */
+  failed_task_count: number;
+  /** Number of tasks cancelled before completion. */
+  cancelled_task_count: number;
+  /** Number of tasks that currently deserve operator attention. */
+  attention_task_count: number;
+  /** Number of recursions that ended in error. */
+  failed_recursion_count: number;
+  /** Latest visible failure signal for quick triage. */
+  latest_error: OperationsSessionLatestError | null;
+}
+
+/**
  * One session row returned by the Operations list endpoint.
  */
 export interface OperationsSession {
@@ -26,6 +64,8 @@ export interface OperationsSession {
   title: string | null;
   /** Number of tasks within this session. */
   task_count: number;
+  /** Compact diagnostics summary used for list-page triage. */
+  diagnostics: OperationsSessionDiagnostics;
   /** ISO 8601 UTC creation timestamp. */
   created_at: string;
   /** ISO 8601 UTC last-activity timestamp. */
@@ -54,6 +94,7 @@ export interface OperationsSessionDetail {
   user: string;
   status: string;
   title: string | null;
+  diagnostics: OperationsSessionDiagnostics;
   created_at: string;
   updated_at: string;
 }
