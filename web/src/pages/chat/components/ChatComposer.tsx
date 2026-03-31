@@ -179,218 +179,228 @@ export function ChatComposer({
         </div>
       )}
 
-      {taskPlan && <ComposerTaskPlan taskPlan={taskPlan} />}
-
-      <form
-        onSubmit={onSubmit}
-        className={`relative overflow-hidden rounded-2xl border bg-background shadow-lg transition-all focus-within:border-ring ${
-          taskPlan ? "-mt-px rounded-t-[12px]" : ""
+      <div
+        className={`chat-composer-transition-surface ${
+          taskPlan ? "chat-composer-transition-surface-with-plan" : ""
         }`}
       >
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/jpeg,image/jpg,image/png,image/webp"
-          multiple
-          className="hidden"
-          onChange={onImageInputChange}
-        />
-        <input
-          ref={documentInputRef}
-          type="file"
-          accept=".pdf,.docx,.pptx,.xlsx,.md,.markdown"
-          multiple
-          className="hidden"
-          onChange={onDocumentInputChange}
-        />
+        {taskPlan && <ComposerTaskPlan taskPlan={taskPlan} />}
 
-        <AttachmentList
-          attachments={pendingFiles}
-          variant="composer"
-          onRemovePendingFile={onRemovePendingFile}
-        />
-
-        {replyTarget && (
-          <div className="px-3 pt-3">
-            <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
-              <MessageSquare className="h-3.5 w-3.5 shrink-0 text-primary/75" />
-              <span className="shrink-0 text-[11px] font-medium text-foreground/75">
-                Replying
-              </span>
-              <p className="min-w-0 flex-1 truncate text-[12px] text-foreground/65">
-                {replyPreview}
-              </p>
-              <button
-                type="button"
-                onClick={onCancelReply}
-                className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-                title="Clear reply context"
-                aria-label="Clear reply context"
-              >
-                <XCircle className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        <Textarea
-          ref={textareaRef}
-          value={inputMessage}
-          onChange={(event) => onInputChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
-          className={`min-h-[60px] w-full resize-none border-0 shadow-none focus:shadow-none focus:outline-none focus-visible:ring-0 focus-visible:shadow-none ${
-            replyTarget ? "px-4 pb-3 pt-2.5" : "p-4"
+        <form
+          onSubmit={onSubmit}
+          className={`relative overflow-hidden rounded-2xl border bg-background shadow-lg transition-all focus-within:border-ring ${
+            taskPlan ? "-mt-px rounded-t-[12px]" : ""
           }`}
-          disabled={isStreaming}
-        />
+        >
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png,image/webp"
+            multiple
+            className="hidden"
+            onChange={onImageInputChange}
+          />
+          <input
+            ref={documentInputRef}
+            type="file"
+            accept=".pdf,.docx,.pptx,.xlsx,.md,.markdown"
+            multiple
+            className="hidden"
+            onChange={onDocumentInputChange}
+          />
 
-        <div className="flex items-center justify-between gap-3 px-4 pb-3">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
+          <AttachmentList
+            attachments={pendingFiles}
+            variant="composer"
+            onRemovePendingFile={onRemovePendingFile}
+          />
+
+          {replyTarget && (
+            <div className="px-3 pt-3">
+              <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <MessageSquare className="h-3.5 w-3.5 shrink-0 text-primary/75" />
+                <span className="shrink-0 text-[11px] font-medium text-foreground/75">
+                  Replying
+                </span>
+                <p className="min-w-0 flex-1 truncate text-[12px] text-foreground/65">
+                  {replyPreview}
+                </p>
+                <button
+                  type="button"
+                  onClick={onCancelReply}
+                  className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                  title="Clear reply context"
+                  aria-label="Clear reply context"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          <Textarea
+            ref={textareaRef}
+            value={inputMessage}
+            onChange={(event) => onInputChange(event.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={onPaste}
+            placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
+            className={`min-h-[60px] w-full resize-none border-0 shadow-none focus:shadow-none focus:outline-none focus-visible:ring-0 focus-visible:shadow-none ${
+              replyTarget ? "px-4 pb-3 pt-2.5" : "p-4"
+            }`}
+            disabled={isStreaming}
+          />
+
+          <div className="flex items-center justify-between gap-3 px-4 pb-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-full"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span className="sr-only">Attach</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  size="medium"
+                  className="z-[60]"
+                >
+                  {supportsImageInput && (
+                    <DropdownMenuItem
+                      onClick={() => imageInputRef.current?.click()}
+                    >
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      <span>Upload image</span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onClick={() => documentInputRef.current?.click()}
+                  >
+                    <Paperclip className="mr-2 h-4 w-4" />
+                    <span>Upload file</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              {hasThinkingSelector && (
+                <Select
+                  value={selectedThinkingMode}
+                  onValueChange={(value) =>
+                    onThinkingModeChange(value as ChatThinkingMode)
+                  }
+                >
+                  <SelectTrigger
+                    size="medium"
+                    aria-label="Thinking mode"
+                    className="h-7 w-auto min-w-[5.75rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <SelectedThinkingModeIcon className="h-3.5 w-3.5" />
+                      <span>{selectedThinkingModeLabel}</span>
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent size="medium">
+                    {thinkingModes.includes("fast") && (
+                      <SelectItem value="fast">
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-3.5 w-3.5" />
+                          <span>Fast</span>
+                        </div>
+                      </SelectItem>
+                    )}
+                    {thinkingModes.includes("thinking") && (
+                      <SelectItem value="thinking">
+                        <div className="flex items-center gap-2">
+                          <Brain className="h-3.5 w-3.5" />
+                          <span>Thinking</span>
+                        </div>
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {hasWebSearchSelector && (
+                <Select
+                  value={selectedWebSearchProvider}
+                  onValueChange={onWebSearchProviderChange}
+                >
+                  <SelectTrigger
+                    size="medium"
+                    aria-label="Web search provider"
+                    className="h-7 w-auto min-w-[6.5rem] max-w-[7.25rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                  >
+                    {selectedWebSearchProviderOption ? (
+                      <WebSearchProviderBadge
+                        name={selectedWebSearchProviderOption.name}
+                        logoUrl={selectedWebSearchProviderOption.logoUrl}
+                        textClassName="text-[11px]"
+                      />
+                    ) : (
+                      <SelectValue placeholder="Search" />
+                    )}
+                  </SelectTrigger>
+                  <SelectContent size="medium">
+                    {webSearchProviders.map((provider) => (
+                      <SelectItem key={provider.key} value={provider.key}>
+                        <WebSearchProviderBadge
+                          name={provider.name}
+                          logoUrl={provider.logoUrl}
+                        />
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {hasUploadingFiles && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Processing attachments...</span>
+                </div>
+              )}
+              {compactStatusMessage && (
+                <div className="hidden items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-foreground/80 sm:flex">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <span>Compacting...</span>
+                </div>
+              )}
+              <ContextUsageRing
+                usage={contextUsage}
+                isLoading={isContextUsageLoading}
+              />
+              {isStreaming ? (
                 <Button
-                  variant="ghost"
+                  type="button"
+                  onClick={onStop}
+                  size="icon"
+                  className="h-8 w-8 rounded-full bg-destructive/90 text-destructive-foreground hover:bg-destructive"
+                  title="Stop execution"
+                >
+                  <Square className="h-4 w-4" fill="currentColor" />
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={!canSendMessage}
                   size="icon"
                   className="h-8 w-8 rounded-full"
+                  title="Send message"
                 >
-                  <Plus className="h-4 w-4" />
-                  <span className="sr-only">Attach</span>
+                  <ArrowUp className="h-4 w-4" />
+                  <span className="sr-only">Send</span>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" size="medium" className="z-[60]">
-                {supportsImageInput && (
-                  <DropdownMenuItem
-                    onClick={() => imageInputRef.current?.click()}
-                  >
-                    <ImagePlus className="mr-2 h-4 w-4" />
-                    <span>Upload image</span>
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  onClick={() => documentInputRef.current?.click()}
-                >
-                  <Paperclip className="mr-2 h-4 w-4" />
-                  <span>Upload file</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {hasThinkingSelector && (
-              <Select
-                value={selectedThinkingMode}
-                onValueChange={(value) =>
-                  onThinkingModeChange(value as ChatThinkingMode)
-                }
-              >
-                <SelectTrigger
-                  size="medium"
-                  aria-label="Thinking mode"
-                  className="h-7 w-auto min-w-[5.75rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
-                >
-                  <span className="flex items-center gap-1.5">
-                    <SelectedThinkingModeIcon className="h-3.5 w-3.5" />
-                    <span>{selectedThinkingModeLabel}</span>
-                  </span>
-                </SelectTrigger>
-                <SelectContent size="medium">
-                  {thinkingModes.includes("fast") && (
-                    <SelectItem value="fast">
-                      <div className="flex items-center gap-2">
-                        <Zap className="h-3.5 w-3.5" />
-                        <span>Fast</span>
-                      </div>
-                    </SelectItem>
-                  )}
-                  {thinkingModes.includes("thinking") && (
-                    <SelectItem value="thinking">
-                      <div className="flex items-center gap-2">
-                        <Brain className="h-3.5 w-3.5" />
-                        <span>Thinking</span>
-                      </div>
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
-            )}
-
-            {hasWebSearchSelector && (
-              <Select
-                value={selectedWebSearchProvider}
-                onValueChange={onWebSearchProviderChange}
-              >
-                <SelectTrigger
-                  size="medium"
-                  aria-label="Web search provider"
-                  className="h-7 w-auto min-w-[6.5rem] max-w-[7.25rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
-                >
-                  {selectedWebSearchProviderOption ? (
-                    <WebSearchProviderBadge
-                      name={selectedWebSearchProviderOption.name}
-                      logoUrl={selectedWebSearchProviderOption.logoUrl}
-                      textClassName="text-[11px]"
-                    />
-                  ) : (
-                    <SelectValue placeholder="Search" />
-                  )}
-                </SelectTrigger>
-                <SelectContent size="medium">
-                  {webSearchProviders.map((provider) => (
-                    <SelectItem key={provider.key} value={provider.key}>
-                      <WebSearchProviderBadge
-                        name={provider.name}
-                        logoUrl={provider.logoUrl}
-                      />
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+              )}
+            </div>
           </div>
-
-          <div className="flex items-center gap-2">
-            {hasUploadingFiles && (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Processing attachments...</span>
-              </div>
-            )}
-            {compactStatusMessage && (
-              <div className="hidden items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-foreground/80 sm:flex">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                <span>Compacting...</span>
-              </div>
-            )}
-            <ContextUsageRing
-              usage={contextUsage}
-              isLoading={isContextUsageLoading}
-            />
-            {isStreaming ? (
-              <Button
-                type="button"
-                onClick={onStop}
-                size="icon"
-                className="h-8 w-8 rounded-full bg-destructive/90 text-destructive-foreground hover:bg-destructive"
-                title="Stop execution"
-              >
-                <Square className="h-4 w-4" fill="currentColor" />
-              </Button>
-            ) : (
-              <Button
-                type="submit"
-                disabled={!canSendMessage}
-                size="icon"
-                className="h-8 w-8 rounded-full"
-                title="Send message"
-              >
-                <ArrowUp className="h-4 w-4" />
-                <span className="sr-only">Send</span>
-              </Button>
-            )}
-          </div>
-        </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
