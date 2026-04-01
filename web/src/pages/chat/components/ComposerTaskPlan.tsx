@@ -97,7 +97,7 @@ export function ComposerTaskPlan({ taskPlan }: ComposerTaskPlanProps) {
       }`}
     >
       <div className="overflow-hidden">
-        <div className="overflow-hidden rounded-[28px] rounded-b-none border border-border/70 border-b-0 bg-foreground/[0.03] shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
+        <div className="overflow-hidden rounded-[28px] rounded-b-none border border-border/70 border-b-0 bg-background shadow-[0_10px_28px_rgba(0,0,0,0.12)]">
           <div
             className={`flex items-center justify-between px-4 py-1.5 text-[12.5px] text-muted-foreground ${
               isExpanded ? "border-b border-border/60" : ""

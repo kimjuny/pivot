@@ -4,6 +4,45 @@ import { describe, expect, it } from "vitest";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 describe("MarkdownRenderer", () => {
+  it("keeps blockquote body text readable in document markdown", () => {
+    render(
+      <MarkdownRenderer
+        variant="document"
+        content={[
+          "> **调研时间范围**：2026年1月1日 — 2026年4月1日  ",
+          "> **报告生成日期**：2026年4月",
+        ].join("\n")}
+      />,
+    );
+
+    const blockquote = screen.getByText(/调研时间范围/).closest("blockquote");
+
+    expect(blockquote).not.toBeNull();
+    expect(blockquote).toHaveClass("text-foreground/85");
+    expect(blockquote).toHaveTextContent(/调研时间范围：2026年1月1日 — 2026年4月1日/);
+    expect(blockquote).toHaveTextContent(/报告生成日期：2026年4月/);
+  });
+
+  it("renders GFM tables as semantic table elements", () => {
+    render(
+      <MarkdownRenderer
+        content={[
+          "| Trend | Keyword |",
+          "| --- | --- |",
+          "| Architecture | DeepSeek mHC |",
+        ].join("\n")}
+      />,
+    );
+
+    const table = screen.getByRole("table");
+
+    expect(table).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Trend" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("cell", { name: "DeepSeek mHC" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders fenced code blocks inside a dedicated block container", () => {
     render(
       <MarkdownRenderer

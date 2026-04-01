@@ -14,6 +14,7 @@ import {
   ChevronLeft as ChevronLeftIcon,
   ChevronRight as ChevronRightIcon,
   ChevronUp as ChevronUpIcon,
+  ChevronsUpDown as ChevronsUpDownIcon,
   Circle as CircleIcon,
   Copy as CopyIcon,
   Download as DownloadIcon,
@@ -99,6 +100,7 @@ export const ChevronDown = withDefaultStroke(ChevronDownIcon);
 export const ChevronLeft = withDefaultStroke(ChevronLeftIcon);
 export const ChevronRight = withDefaultStroke(ChevronRightIcon);
 export const ChevronUp = withDefaultStroke(ChevronUpIcon);
+export const ChevronsUpDown = withDefaultStroke(ChevronsUpDownIcon);
 export const Circle = withDefaultStroke(CircleIcon);
 export const Copy = withDefaultStroke(CopyIcon);
 export const Download = withDefaultStroke(DownloadIcon);

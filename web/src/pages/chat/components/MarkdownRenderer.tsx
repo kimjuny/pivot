@@ -1,5 +1,6 @@
 import type { ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { cn } from "@/lib/utils";
 
@@ -50,8 +51,27 @@ const BLOCK_CODE_CLASSES =
 
 type MarkdownPreProps = ComponentPropsWithoutRef<"pre">;
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code">;
+type MarkdownBlockquoteProps = ComponentPropsWithoutRef<"blockquote">;
 
 const MARKDOWN_COMPONENTS = {
+  blockquote({
+    className,
+    children,
+    ...props
+  }: MarkdownBlockquoteProps) {
+    return (
+      <blockquote
+        className={cn(
+          "my-4 border-l-4 border-l-primary pl-4 text-foreground/85",
+          "[&>p]:my-0 [&>p]:text-foreground/85 [&_strong]:font-semibold [&_strong]:text-foreground",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </blockquote>
+    );
+  },
   pre({ className, children, ...props }: MarkdownPreProps) {
     return (
       <div className={BLOCK_CODE_WRAPPER_CLASSES}>
@@ -105,7 +125,12 @@ export function MarkdownRenderer({
 
   return (
     <article className={`${BASE_MARKDOWN_CLASSES} ${variantClasses}`}>
-      <ReactMarkdown components={MARKDOWN_COMPONENTS}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        components={MARKDOWN_COMPONENTS}
+        remarkPlugins={[remarkGfm]}
+      >
+        {content}
+      </ReactMarkdown>
     </article>
   );
 }

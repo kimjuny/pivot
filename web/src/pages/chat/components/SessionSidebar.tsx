@@ -368,7 +368,7 @@ export function SessionSidebar({
         <SidebarFooter
           className={`${
             !isCollapsed ? "session-sidebar-footer " : ""
-          }relative z-20 mt-auto bg-sidebar px-3 pb-3 pt-2 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:px-1`}
+          }relative z-20 mt-auto bg-sidebar px-2 pb-2 pt-1 group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:px-1 group-data-[collapsible=icon]:pb-2`}
         >
           {footer(isCollapsed)}
         </SidebarFooter>

@@ -1,15 +1,22 @@
-import { LogOut, Moon, Sun } from "@/lib/lucide";
+import { ChevronsUpDown, LogOut, Moon, Sun } from "@/lib/lucide";
 import { useNavigate } from "react-router-dom";
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 import { useAuth } from "@/contexts/auth-core";
+import { useSidebar } from "@/hooks/use-sidebar";
 import { useTheme } from "@/lib/use-theme";
 
 interface ConsumerUserMenuProps {
@@ -17,13 +24,21 @@ interface ConsumerUserMenuProps {
 }
 
 /**
- * Workspace-local account menu anchored to the bottom of the Consumer sidebar.
+ * Workspace-local account menu styled like the shadcn sidebar footer pattern.
+ *
+ * Why: the bottom account entry is both identity context and a menu trigger, so
+ * matching the sidebar's own menu button treatment keeps the affordance clear
+ * without introducing a second interaction language just for the footer.
  */
 function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
   const navigate = useNavigate();
   const { logout, user } = useAuth();
   const { theme, setTheme } = useTheme();
+  const { isMobile } = useSidebar();
   const nextTheme = theme === "dark" ? "light" : "dark";
+  const accountName = user?.username ?? "Workspace";
+  const accountSubtitle = "Consumer workspace";
+  const accountInitial = accountName.charAt(0).toUpperCase();
 
   /**
    * Returns the user to the login entrypoint after clearing local auth state.
@@ -34,52 +49,79 @@ function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
   };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          className={`h-8 ${isCollapsed ? "mx-auto w-8 px-0" : "w-full justify-start gap-3 px-3"}`}
-          aria-label={user ? `User menu: ${user.username}` : "User menu"}
-        >
-          <div className={`flex items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary ${isCollapsed ? "size-5" : "size-7"}`}>
-            {user?.username.charAt(0).toUpperCase() ?? "U"}
-          </div>
-          {!isCollapsed && (
-            <div className="min-w-0 text-left">
-              <div className="truncate text-sm font-medium text-foreground">
-                {user?.username ?? "Workspace"}
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton
+              size="lg"
+              tooltip={accountName}
+              aria-label={user ? `User menu: ${user.username}` : "User menu"}
+              className="h-12 gap-2 rounded-xl px-2 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+            >
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
+                {accountInitial}
               </div>
-            </div>
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align={isCollapsed ? "start" : "end"}
-        side="top"
-        className="min-w-[8rem]"
-      >
-        <div className="px-2 py-1.5 text-sm font-medium">
-          {user?.username ?? "Workspace"}
-        </div>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => setTheme(nextTheme)}>
-          {theme === "dark" ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-          {theme === "dark" ? "Light mode" : "Dark mode"}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={handleLogout}
-          className="text-destructive focus:text-destructive"
-        >
-          <LogOut className="h-4 w-4" />
-          Sign out
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+              {!isCollapsed ? (
+                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-semibold text-sidebar-foreground">
+                    {accountName}
+                  </span>
+                  <span className="truncate text-xs text-sidebar-foreground/60">
+                    {accountSubtitle}
+                  </span>
+                </div>
+              ) : null}
+              {!isCollapsed ? (
+                <ChevronsUpDown className="ml-auto size-4 shrink-0 text-sidebar-foreground/70" />
+              ) : null}
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            side={isMobile ? "bottom" : "right"}
+            align="end"
+            sideOffset={4}
+            size="large"
+            className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+          >
+            <DropdownMenuLabel className="p-0 font-normal">
+              <div className="flex items-center gap-2 px-2 py-1.5 text-left text-sm">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
+                  {accountInitial}
+                </div>
+                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-semibold text-popover-foreground">
+                    {accountName}
+                  </span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {accountSubtitle}
+                  </span>
+                </div>
+              </div>
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => setTheme(nextTheme)}>
+                {theme === "dark" ? (
+                  <Sun className="h-4 w-4" />
+                ) : (
+                  <Moon className="h-4 w-4" />
+                )}
+                {theme === "dark" ? "Light mode" : "Dark mode"}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={handleLogout}
+              className="text-destructive focus:text-destructive"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }
 
