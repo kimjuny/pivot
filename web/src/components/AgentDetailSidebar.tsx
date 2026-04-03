@@ -3,6 +3,7 @@ import {
     Bot,
     ChevronDown,
     Layers,
+    Server,
     Wrench,
     Zap,
     Radio,
@@ -42,10 +43,15 @@ import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
 import ChannelBindingDialog from './ChannelBindingDialog';
+import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
 import { WebSearchProviderBadge } from './WebSearchProviderBadge';
+import {
+    formatProviderExtensionLabel,
+    formatProviderVisibilityLabel,
+} from '@/utils/providerMetadata';
 import type { Agent, Scene } from '../types';
 import {
     getSharedTools,
@@ -54,10 +60,13 @@ import {
     getPrivateSkills,
     getChannels,
     getAgentChannels,
+    getAgentExtensionPackages,
     deleteAgentChannel,
+    deleteAgentExtensionBinding,
     getWebSearchProviders,
     getAgentWebSearchBindings,
     deleteAgentWebSearchBinding,
+    type AgentExtensionPackage,
     type SharedTool,
     type PrivateTool,
     type SkillSource,
@@ -98,6 +107,8 @@ export interface SidebarChannel {
     name: string;
     channelKey: string;
     providerName: string;
+    providerVisibility: string;
+    providerExtensionLabel: string | null;
     enabled: boolean;
     transportMode: 'webhook' | 'websocket' | 'polling';
     lastHealthStatus: string | null;
@@ -110,6 +121,8 @@ export interface SidebarWebSearchBinding {
     id: number;
     providerKey: string;
     providerName: string;
+    providerVisibility: string;
+    providerExtensionLabel: string | null;
     enabled: boolean;
     lastHealthStatus: string | null;
 }
@@ -231,23 +244,28 @@ function AgentDetailSidebar({
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isChannelsOpen, setIsChannelsOpen] = useState(false);
     const [isWebSearchOpen, setIsWebSearchOpen] = useState(false);
+    const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
     const [isWebSearchDialogOpen, setIsWebSearchDialogOpen] = useState(false);
+    const [isExtensionDialogOpen, setIsExtensionDialogOpen] = useState(false);
     const [editingChannel, setEditingChannel] = useState<ChannelBinding | null>(null);
     const [editingWebSearchBinding, setEditingWebSearchBinding] = useState<WebSearchBinding | null>(null);
+    const [editingExtensionPackage, setEditingExtensionPackage] = useState<AgentExtensionPackage | null>(null);
     const [tools, setTools] = useState<SidebarTool[]>([]);
     const [skills, setSkills] = useState<SidebarSkill[]>([]);
     const [channels, setChannels] = useState<SidebarChannel[]>([]);
     const [webSearchBindings, setWebSearchBindings] = useState<SidebarWebSearchBinding[]>([]);
+    const [extensionPackages, setExtensionPackages] = useState<AgentExtensionPackage[]>([]);
     const [channelCatalog, setChannelCatalog] = useState<ChannelCatalogItem[]>([]);
     const [webSearchCatalog, setWebSearchCatalog] = useState<WebSearchCatalogItem[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const [skillsLoading, setSkillsLoading] = useState(false);
     const [channelsLoading, setChannelsLoading] = useState(false);
     const [webSearchLoading, setWebSearchLoading] = useState(false);
+    const [extensionsLoading, setExtensionsLoading] = useState(false);
     // Local copy of the agent's tool_ids so it updates without a page reload
     const [localToolIds, setLocalToolIds] = useState<string | null | undefined>(agent?.tool_ids);
     // Local copy of the agent's skill_ids so it updates without a page reload
@@ -479,6 +497,12 @@ function AgentDetailSidebar({
                 name: binding.name,
                 channelKey: binding.channel_key,
                 providerName: binding.manifest.name,
+                providerVisibility: binding.manifest.visibility,
+                providerExtensionLabel: formatProviderExtensionLabel(
+                    binding.manifest.extension_display_name,
+                    binding.manifest.extension_name,
+                    binding.manifest.extension_version,
+                ),
                 enabled: binding.enabled,
                 transportMode: binding.manifest.transport_mode,
                 lastHealthStatus: binding.last_health_status,
@@ -515,6 +539,12 @@ function AgentDetailSidebar({
                 id: binding.id,
                 providerKey: binding.provider_key,
                 providerName: binding.manifest.name,
+                providerVisibility: binding.manifest.visibility,
+                providerExtensionLabel: formatProviderExtensionLabel(
+                    binding.manifest.extension_display_name,
+                    binding.manifest.extension_name,
+                    binding.manifest.extension_version,
+                ),
                 enabled: binding.enabled,
                 lastHealthStatus: binding.last_health_status,
             }));
@@ -555,7 +585,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'channels' | 'webSearch') => {
+    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'extensions' | 'channels' | 'webSearch') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -564,6 +594,7 @@ function AgentDetailSidebar({
                 setIsScenesOpen(section === 'scenes');
                 setIsToolsOpen(section === 'tools');
                 setIsSkillsOpen(section === 'skills');
+                setIsExtensionsOpen(section === 'extensions');
                 setIsChannelsOpen(section === 'channels');
                 setIsWebSearchOpen(section === 'webSearch');
             }, 100);
@@ -572,6 +603,7 @@ function AgentDetailSidebar({
             setIsScenesOpen(section === 'scenes');
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
+            setIsExtensionsOpen(section === 'extensions');
             setIsChannelsOpen(section === 'channels');
             setIsWebSearchOpen(section === 'webSearch');
         }
@@ -700,6 +732,66 @@ function AgentDetailSidebar({
             await deleteAgentWebSearchBinding(bindingId);
             toast.success('Web search provider removed');
             await loadWebSearchBindings();
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            toast.error(error.message);
+        }
+    };
+
+    /**
+     * Extension bindings are package-scoped selections, so reload them whenever
+     * the current agent changes or after any extension mutation.
+     */
+    const loadExtensionPackages = useCallback(async () => {
+        if (!agent?.id) {
+            setExtensionPackages([]);
+            return;
+        }
+
+        setExtensionsLoading(true);
+        try {
+            const packages = await getAgentExtensionPackages(agent.id);
+            setExtensionPackages(packages);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch extension packages:', error);
+            toast.error('Failed to load extensions');
+        } finally {
+            setExtensionsLoading(false);
+        }
+    }, [agent?.id]);
+
+    useEffect(() => {
+        void loadExtensionPackages();
+    }, [loadExtensionPackages]);
+
+    /**
+     * Open the extension dialog in create mode.
+     */
+    const handleAddExtension = () => {
+        setEditingExtensionPackage(null);
+        setIsExtensionDialogOpen(true);
+    };
+
+    /**
+     * Open the extension dialog for one already selected package.
+     */
+    const handleEditExtension = (pkg: AgentExtensionPackage) => {
+        setEditingExtensionPackage(pkg);
+        setIsExtensionDialogOpen(true);
+    };
+
+    /**
+     * Delete one extension binding from the current agent.
+     */
+    const handleDeleteExtension = async (extensionInstallationId: number) => {
+        if (!agent?.id) {
+            return;
+        }
+        try {
+            await deleteAgentExtensionBinding(agent.id, extensionInstallationId);
+            toast.success('Extension removed');
+            await loadExtensionPackages();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(error.message);
@@ -1164,6 +1256,130 @@ function AgentDetailSidebar({
 
                     {/* Channels Section */}
                     <Collapsible
+                        open={isExtensionsOpen}
+                        onOpenChange={setIsExtensionsOpen}
+                        className="group/collapsible"
+                    >
+                        <SidebarGroup className="py-0">
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('extensions')}
+                                        tooltip="Extensions"
+                                        isActive={isExtensionsOpen}
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Server className="size-4" />
+                                        <span>Extensions</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('extensions')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
+                                    <Server className="size-4" />
+                                    <span className="flex-1 text-left">Extensions</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+                                        {extensionsLoading ? '…' : extensionPackages.filter((pkg) => pkg.selected_binding !== null).length}
+                                    </span>
+                                    {agent?.id && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(e) => { e.stopPropagation(); handleAddExtension(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddExtension(); } }}
+                                                    className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                    aria-label="Add extension"
+                                                >
+                                                    <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right">Add extension</TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                </CollapsibleTrigger>
+                            </SidebarGroupLabel>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
+                                <SidebarGroupContent>
+                                    {extensionsLoading ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            Loading extensions…
+                                        </div>
+                                    ) : extensionPackages.filter((pkg) => pkg.selected_binding !== null).length === 0 ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            No extensions configured for this agent
+                                        </div>
+                                    ) : (
+                                        <SidebarMenu>
+                                            {extensionPackages
+                                                .filter((pkg) => pkg.selected_binding !== null)
+                                                .map((pkg) => (
+                                                    <SidebarMenuItem key={pkg.package_id} className="group/item">
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <SidebarMenuButton
+                                                                    size="sm"
+                                                                    onClick={() => handleEditExtension(pkg)}
+                                                                    className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                                >
+                                                                    <Server className="size-3.5 shrink-0" />
+                                                                    <span className="truncate flex-1">
+                                                                        {pkg.display_name}
+                                                                    </span>
+                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                        {pkg.selected_binding?.installation.version ?? pkg.latest_version}
+                                                                    </span>
+                                                                </SidebarMenuButton>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent side="right" className="max-w-xs">
+                                                                <div className="space-y-1">
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <p className="font-semibold">{pkg.display_name}</p>
+                                                                        {pkg.has_update_available && (
+                                                                            <span className="text-[10px] text-primary">
+                                                                                update available
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {pkg.selected_binding?.installation.version ?? 'Unbound'}
+                                                                        {' · '}
+                                                                        {pkg.selected_binding?.enabled ? 'enabled' : 'disabled'}
+                                                                    </p>
+                                                                </div>
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                        {pkg.selected_binding && (
+                                                            <SidebarMenuAction
+                                                                showOnHover
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    void handleDeleteExtension(
+                                                                        pkg.selected_binding?.extension_installation_id ?? 0,
+                                                                    );
+                                                                }}
+                                                                className="hover:bg-destructive/10 hover:text-destructive"
+                                                            >
+                                                                <X className="size-3.5" />
+                                                                <span className="sr-only">Delete extension</span>
+                                                            </SidebarMenuAction>
+                                                        )}
+                                                    </SidebarMenuItem>
+                                                ))}
+                                        </SidebarMenu>
+                                    )}
+                                </SidebarGroupContent>
+                            </CollapsibleContent>
+                        </SidebarGroup>
+                    </Collapsible>
+
+                    <Collapsible
                         open={isChannelsOpen}
                         onOpenChange={setIsChannelsOpen}
                         className="group/collapsible"
@@ -1241,6 +1457,9 @@ function AgentDetailSidebar({
                                                                     textClassName="hidden"
                                                                 />
                                                                 <span className="truncate flex-1">{channel.name}</span>
+                                                                <span className="text-[9px] px-1 rounded border border-sidebar-border/60 text-sidebar-foreground/50 shrink-0">
+                                                                    {channel.providerVisibility === 'extension' ? 'ext' : 'core'}
+                                                                </span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                     {channel.enabled ? 'on' : 'off'}
                                                                 </span>
@@ -1250,8 +1469,13 @@ function AgentDetailSidebar({
                                                             <div className="space-y-1">
                                                                 <p className="font-semibold">{channel.providerName}</p>
                                                                 <p className="text-xs text-muted-foreground">
-                                                                    {channel.transportMode} · {formatChannelStatus(channel.lastHealthStatus)}
+                                                                    {formatProviderVisibilityLabel(channel.providerVisibility)} · {channel.transportMode} · {formatChannelStatus(channel.lastHealthStatus)}
                                                                 </p>
+                                                                {channel.providerExtensionLabel ? (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {channel.providerExtensionLabel}
+                                                                    </p>
+                                                                ) : null}
                                                             </div>
                                                         </TooltipContent>
                                                     </Tooltip>
@@ -1354,6 +1578,9 @@ function AgentDetailSidebar({
                                                                     textClassName="hidden"
                                                                 />
                                                                 <span className="truncate flex-1">{binding.providerName}</span>
+                                                                <span className="text-[9px] px-1 rounded border border-sidebar-border/60 text-sidebar-foreground/50 shrink-0">
+                                                                    {binding.providerVisibility === 'extension' ? 'ext' : 'core'}
+                                                                </span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                     {binding.enabled ? 'on' : 'off'}
                                                                 </span>
@@ -1363,8 +1590,13 @@ function AgentDetailSidebar({
                                                             <div className="space-y-1">
                                                                 <p className="font-semibold">{binding.providerName}</p>
                                                                 <p className="text-xs text-muted-foreground">
-                                                                    {binding.providerKey} · {formatChannelStatus(binding.lastHealthStatus)}
+                                                                    {formatProviderVisibilityLabel(binding.providerVisibility)} · {binding.providerKey} · {formatChannelStatus(binding.lastHealthStatus)}
                                                                 </p>
+                                                                {binding.providerExtensionLabel ? (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {binding.providerExtensionLabel}
+                                                                    </p>
+                                                                ) : null}
                                                             </div>
                                                         </TooltipContent>
                                                     </Tooltip>
@@ -1450,6 +1682,19 @@ function AgentDetailSidebar({
             )}
 
             {/* Channel Binding Dialog */}
+            {agent?.id && (
+                <ExtensionBindingDialog
+                    open={isExtensionDialogOpen}
+                    onOpenChange={setIsExtensionDialogOpen}
+                    agentId={agent.id}
+                    packages={extensionPackages}
+                    initialPackage={editingExtensionPackage}
+                    onSaved={async () => {
+                        await loadExtensionPackages();
+                    }}
+                />
+            )}
+
             {agent?.id && (
                 <ChannelBindingDialog
                     open={isChannelDialogOpen}

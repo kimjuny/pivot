@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from app.schemas.base import AppBaseModel
 from pydantic import Field
@@ -43,6 +43,9 @@ class ChannelManifest(AppBaseModel):
     transport_mode: TransportMode
     visibility: str = "builtin"
     status: str = "active"
+    extension_name: str | None = None
+    extension_version: str | None = None
+    extension_display_name: str | None = None
     capabilities: list[str]
     auth_schema: list[ChannelConfigField]
     config_schema: list[ChannelConfigField]
@@ -132,6 +135,7 @@ class ChannelWebhookResult(AppBaseModel):
     inbound_event: ChannelInboundEvent | None = None
 
 
+@runtime_checkable
 class ChannelProvider(Protocol):
     """Runtime contract implemented by each channel adapter."""
 

@@ -11,6 +11,11 @@ import {
   deleteChatImage,
   fetchChatFileBlob,
   fetchChatImageBlob,
+  getAgentExtensionPackages,
+  getExtensionHookExecutions,
+  importExtensionBundle,
+  previewExtensionBundle,
+  replayExtensionHookExecution,
   fetchTaskAttachmentBlob,
   setHttpClient,
   uploadChatFile,
@@ -219,6 +224,265 @@ describe('chat file api helpers', () => {
           is_pinned: true,
         }),
       })
+    );
+  });
+
+  it('imports extension bundles with authenticated multipart form data', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 9,
+          scope: 'acme',
+          name: 'crm',
+          package_id: '@acme/crm',
+          version: '0.1.0',
+          display_name: 'ACME CRM',
+          description: 'CRM extension',
+          manifest_hash: 'hash-1',
+          artifact_storage_backend: 'local_fs',
+          artifact_key: 'extensions/acme/crm/0.1.0/hash-1.tar.gz',
+          artifact_digest: 'artifact-hash-1',
+          artifact_size_bytes: 128,
+          install_root: '/tmp/extensions/acme/crm/0.1.0',
+          source: 'bundle',
+          trust_status: 'trusted_local',
+          trust_source: 'local_import',
+          hub_scope: null,
+          hub_package_id: null,
+          hub_package_version_id: null,
+          hub_artifact_digest: null,
+          installed_by: 'alice',
+          status: 'active',
+          created_at: '2026-03-08T00:00:00Z',
+          updated_at: '2026-03-08T00:00:00Z',
+          reference_summary: {
+            extension_binding_count: 0,
+            channel_binding_count: 0,
+            web_search_binding_count: 0,
+            binding_count: 0,
+            release_count: 0,
+            test_snapshot_count: 0,
+            saved_draft_count: 0,
+          },
+          contribution_summary: {
+            tools: [],
+            skills: [],
+            channel_providers: [],
+            web_search_providers: [],
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const manifest = new File(['{}'], 'manifest.json', {
+      type: 'application/json',
+    });
+    Object.defineProperty(manifest, 'webkitRelativePath', {
+      value: 'acme-bundle/manifest.json',
+    });
+
+    const result = await importExtensionBundle([manifest], { trustConfirmed: true });
+
+    expect(result.source).toBe('bundle');
+    const uploadCall = vi.mocked(fetch).mock.calls[0];
+    expect(uploadCall?.[0]).toEqual(
+      expect.stringContaining('/extensions/installations/import/bundle'),
+    );
+    const requestInit = uploadCall?.[1];
+    expect(requestInit).toBeDefined();
+    if (!requestInit) {
+      throw new Error('Missing extension bundle request options');
+    }
+    expect(requestInit.method).toBe('POST');
+    expect(requestInit.headers).toEqual(
+      expect.objectContaining({
+        Authorization: 'Bearer token-123',
+      }),
+    );
+    expect(requestInit.body).toBeInstanceOf(FormData);
+  });
+
+  it('previews extension bundles before local trust is granted', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          scope: 'acme',
+          name: 'providers',
+          package_id: '@acme/providers',
+          version: '1.0.0',
+          display_name: 'ACME Providers',
+          description: 'Provider package',
+          source: 'bundle',
+          trust_status: 'unverified',
+          trust_source: 'local_import',
+          manifest_hash: 'hash-preview',
+          contribution_summary: {
+            tools: [],
+            skills: [],
+            channel_providers: ['acme@chat'],
+            web_search_providers: ['acme@search'],
+          },
+          permissions: {
+            network: {
+              allow_hosts: ['api.acme.com'],
+            },
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const manifest = new File(['{}'], 'manifest.json', {
+      type: 'application/json',
+    });
+    Object.defineProperty(manifest, 'webkitRelativePath', {
+      value: 'acme-bundle/manifest.json',
+    });
+
+    const result = await previewExtensionBundle([manifest]);
+
+    expect(result.package_id).toBe('@acme/providers');
+    expect(result.trust_status).toBe('unverified');
+    const previewCall = vi.mocked(fetch).mock.calls[0];
+    expect(previewCall?.[0]).toEqual(
+      expect.stringContaining('/extensions/installations/import/bundle/preview'),
+    );
+    const requestInit = previewCall?.[1];
+    expect(requestInit).toBeDefined();
+    if (!requestInit) {
+      throw new Error('Missing extension preview request options');
+    }
+    expect(requestInit.method).toBe('POST');
+    expect(requestInit.body).toBeInstanceOf(FormData);
+  });
+
+  it('fetches agent extension package choices', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            scope: 'acme',
+            name: 'crm',
+            package_id: '@acme/crm',
+            display_name: 'ACME CRM',
+            description: 'CRM extension',
+            latest_version: '0.2.0',
+            active_version_count: 2,
+            disabled_version_count: 0,
+            has_update_available: true,
+            selected_binding: null,
+            versions: [],
+          },
+        ]),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await getAgentExtensionPackages(7);
+
+    expect(result).toHaveLength(1);
+    const requestCall = vi.mocked(fetch).mock.calls[0];
+    expect(requestCall?.[0]).toEqual(
+      expect.stringContaining('/agents/7/extensions/packages'),
+    );
+    const requestInit = requestCall?.[1];
+    expect(requestInit).toBeDefined();
+    if (!requestInit) {
+      throw new Error('Missing extension packages request options');
+    }
+    expect(requestInit.headers).toEqual(
+      expect.objectContaining({
+        Authorization: 'Bearer token-123',
+      }),
+    );
+  });
+
+  it('fetches extension hook executions with query filters', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify([
+          {
+            id: 1,
+            session_id: 'session-1',
+            task_id: 'task-1',
+            trace_id: 'trace-1',
+            iteration: 2,
+            agent_id: 7,
+            release_id: null,
+            extension_package_id: '@acme/hooks',
+            extension_version: '1.0.0',
+            hook_event: 'iteration.after_tool_result',
+            hook_callable: 'handle_task_event',
+            status: 'succeeded',
+            hook_context: { task_id: 'task-1' },
+            effects: [{ type: 'observe' }],
+            error: null,
+            started_at: '2026-03-08T00:00:00Z',
+            finished_at: '2026-03-08T00:00:01Z',
+            duration_ms: 10,
+          },
+        ]),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await getExtensionHookExecutions({
+      taskId: 'task-1',
+      traceId: 'trace-1',
+      iteration: 2,
+      extensionPackageId: '@acme/hooks',
+      limit: 10,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '/extensions/hook-executions?task_id=task-1&trace_id=trace-1&iteration=2&extension_package_id=%40acme%2Fhooks&limit=10',
+      ),
+      expect.any(Object),
+    );
+  });
+
+  it('replays one extension hook execution', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          execution_id: 1,
+          extension_package_id: '@acme/hooks',
+          extension_version: '1.0.0',
+          hook_event: 'task.before_start',
+          hook_callable: 'handle_task_event',
+          status: 'succeeded',
+          effects: [{ type: 'observe' }],
+          error: null,
+          replayed_at: '2026-03-08T00:10:00Z',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await replayExtensionHookExecution(1);
+
+    expect(result.status).toBe('succeeded');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/extensions/hook-executions/1/replay'),
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 });

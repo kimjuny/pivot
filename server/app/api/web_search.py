@@ -6,7 +6,6 @@ from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.models.agent import Agent
 from app.models.web_search import AgentWebSearchBinding
-from app.orchestration.web_search.registry import get_web_search_provider
 from app.schemas.web_search import (
     WebSearchBindingCreate,
     WebSearchBindingResponse,
@@ -16,6 +15,7 @@ from app.schemas.web_search import (
     WebSearchTestResponse,
 )
 from app.services.agent_snapshot_service import AgentSnapshotService
+from app.services.provider_registry_service import ProviderRegistryService
 from app.services.web_search_service import WebSearchService
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -24,10 +24,13 @@ router = APIRouter()
 
 
 @router.get("/web-search/providers/{provider_key}/logo", include_in_schema=False)
-async def get_web_search_provider_logo(provider_key: str) -> FileResponse:
+async def get_web_search_provider_logo(
+    provider_key: str,
+    db=Depends(get_db),
+) -> FileResponse:
     """Serve the optional built-in logo asset for one web-search provider."""
     try:
-        provider = get_web_search_provider(provider_key)
+        provider = ProviderRegistryService(db).get_web_search_provider(provider_key)
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Web search provider not found"
@@ -62,9 +65,9 @@ async def get_web_search_provider_manifest(
     current_user=Depends(get_current_user),
 ) -> dict[str, object]:
     """Return one web-search provider manifest by provider key."""
-    del db, current_user
+    del current_user
     try:
-        provider = get_web_search_provider(provider_key)
+        provider = ProviderRegistryService(db).get_web_search_provider(provider_key)
     except KeyError as exc:
         raise HTTPException(
             status_code=404, detail="Web search provider not found"

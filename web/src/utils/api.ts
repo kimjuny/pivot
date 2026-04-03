@@ -82,8 +82,8 @@ interface RequestOptions {
   headers?: Record<string, string>;
   /** HTTP method (GET, POST, DELETE, etc.) */
   method?: string;
-  /** Request body as JSON string */
-  body?: string;
+  /** Request body */
+  body?: BodyInit | null;
   /** Whether to skip adding auth header (for login endpoint) */
   skipAuth?: boolean;
   /** Whether to skip token validation check */
@@ -163,11 +163,14 @@ export class AuthError extends Error {
  */
 export const apiRequest = async (endpoint: string, options: RequestOptions = {}): Promise<unknown> => {
   const url = `${getApiBaseUrl()}${endpoint}`;
+  const isMultipartBody = options.body instanceof FormData;
 
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...options.headers,
   };
+  if (!isMultipartBody && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   // Add auth header if token exists and not explicitly skipped
   if (!options.skipAuth) {
@@ -213,6 +216,26 @@ export const apiRequest = async (endpoint: string, options: RequestOptions = {})
     console.error(`API request failed for ${url}:`, error);
     throw error;
   }
+};
+
+/**
+ * Send one multipart form-data request to the backend.
+ *
+ * Why: extension bundle import and file uploads should reuse the same auth and
+ * error handling path without forcing a JSON content type.
+ *
+ * @param endpoint - API endpoint path (e.g. '/extensions/installations/import/bundle')
+ * @param formData - Multipart payload to submit
+ * @returns Promise resolving to parsed JSON response data
+ */
+export const apiRequestFormData = async (
+  endpoint: string,
+  formData: FormData,
+): Promise<unknown> => {
+  return apiRequest(endpoint, {
+    method: 'POST',
+    body: formData,
+  });
 };
 
 /**
@@ -619,6 +642,9 @@ export interface ChannelManifest {
   transport_mode: 'webhook' | 'websocket' | 'polling';
   visibility: string;
   status: string;
+  extension_name?: string | null;
+  extension_version?: string | null;
+  extension_display_name?: string | null;
   capabilities: string[];
   auth_schema: ChannelConfigField[];
   config_schema: ChannelConfigField[];
@@ -832,6 +858,9 @@ export interface WebSearchProviderManifest {
   logo_url?: string | null;
   visibility: string;
   status: string;
+  extension_name?: string | null;
+  extension_version?: string | null;
+  extension_display_name?: string | null;
   auth_schema: WebSearchConfigField[];
   config_schema: WebSearchConfigField[];
   setup_steps: string[];
@@ -946,6 +975,500 @@ export const testWebSearchProviderDraft = async (
     method: 'POST',
     body: JSON.stringify(payload),
   }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
+};
+
+// ---------------------------------------------------------------------------
+// Extensions API
+// ---------------------------------------------------------------------------
+
+/**
+ * Installed extension version metadata returned by the backend.
+ */
+export interface ExtensionInstallation {
+  /** Normalized contribution names declared by this installed version. */
+  contribution_summary: ExtensionContributionSummary;
+  /** Persisted references that currently rely on this installation. */
+  reference_summary: ExtensionReferenceSummary | null;
+  /** Stable installation row id. */
+  id: number;
+  /** Stable package scope such as `acme`. */
+  scope: string;
+  /** Stable package name within the scope. */
+  name: string;
+  /** Canonical npm-style package id such as `@acme/providers`. */
+  package_id: string;
+  /** Installed package version. */
+  version: string;
+  /** Human-readable package title. */
+  display_name: string;
+  /** Package summary shown in Studio. */
+  description: string;
+  /** Stable manifest hash for pinning and replay. */
+  manifest_hash: string;
+  /** Storage backend used for the persisted package artifact. */
+  artifact_storage_backend: string;
+  /** Object-style key for the persisted package artifact. */
+  artifact_key: string;
+  /** Stable digest of the persisted package artifact bytes. */
+  artifact_digest: string;
+  /** Persisted package artifact size in bytes. */
+  artifact_size_bytes: number;
+  /** Absolute install root on disk. */
+  install_root: string;
+  /** Installation source such as `manual` or `bundle`. */
+  source: string;
+  /** Trust state such as `trusted_local` or `verified`. */
+  trust_status: string;
+  /** Trust provenance such as `local_import` or `official_hub`. */
+  trust_source: string;
+  /** Verified Hub scope when this installation came from the official Hub. */
+  hub_scope: string | null;
+  /** Canonical Hub package id when installed from the official Hub. */
+  hub_package_id: string | null;
+  /** Stable Hub-side package version identifier. */
+  hub_package_version_id: string | null;
+  /** Verified artifact digest returned by the official Hub. */
+  hub_artifact_digest: string | null;
+  /** Username that installed the package, if known. */
+  installed_by: string | null;
+  /** Installation lifecycle status. Expected values currently include active and disabled. */
+  status: string;
+  /** UTC timestamp when the installation was created. */
+  created_at: string;
+  /** UTC timestamp when the installation last changed. */
+  updated_at: string;
+}
+
+/**
+ * Normalized contribution names declared by one extension version.
+ */
+export interface ExtensionContributionSummary {
+  /** Optional lightweight tool names bundled in this version. */
+  tools: string[];
+  /** Optional lightweight skill names bundled in this version. */
+  skills: string[];
+  /** Channel provider keys contributed by this version. */
+  channel_providers: string[];
+  /** Web-search provider keys contributed by this version. */
+  web_search_providers: string[];
+}
+
+/**
+ * Grouped package view used by the global Extensions page.
+ */
+export interface ExtensionPackage {
+  /** Stable package scope. */
+  scope: string;
+  /** Stable package name within the scope. */
+  name: string;
+  /** Canonical npm-style package id. */
+  package_id: string;
+  /** Human-readable package title. */
+  display_name: string;
+  /** Package summary. */
+  description: string;
+  /** Highest available installed version. */
+  latest_version: string;
+  /** Count of active installed versions. */
+  active_version_count: number;
+  /** Count of disabled installed versions. */
+  disabled_version_count: number;
+  /** Installed versions ordered newest-first. */
+  versions: ExtensionInstallation[];
+}
+
+/**
+ * Persisted reference counts that block physical uninstall.
+ */
+export interface ExtensionReferenceSummary {
+  /** Direct agent-extension bindings referencing this installation. */
+  extension_binding_count: number;
+  /** Agent channel bindings using providers from this installation. */
+  channel_binding_count: number;
+  /** Agent web-search bindings using providers from this installation. */
+  web_search_binding_count: number;
+  /** Agent binding rows referencing this installation. */
+  binding_count: number;
+  /** Published releases that pin this installation. */
+  release_count: number;
+  /** Studio test snapshots that pin this installation. */
+  test_snapshot_count: number;
+  /** Saved drafts that pin this installation. */
+  saved_draft_count: number;
+}
+
+/**
+ * Trust preview shown before a local extension is installed.
+ */
+export interface ExtensionImportPreview {
+  /** Stable package scope such as `acme`. */
+  scope: string;
+  /** Stable package name within the scope. */
+  name: string;
+  /** Canonical npm-style package id. */
+  package_id: string;
+  /** Package version declared in `manifest.json`. */
+  version: string;
+  /** Human-readable package title shown in the trust dialog. */
+  display_name: string;
+  /** Package summary from the manifest. */
+  description: string;
+  /** Import source such as `bundle`. */
+  source: string;
+  /** Pre-install trust state, expected to be `unverified` for local imports. */
+  trust_status: string;
+  /** Trust provenance such as `local_import`. */
+  trust_source: string;
+  /** Stable manifest hash for audit and pinning previews. */
+  manifest_hash: string;
+  /** Normalized contribution names discovered during preview. */
+  contribution_summary: ExtensionContributionSummary;
+  /** Raw declared permissions from the manifest. */
+  permissions: Record<string, unknown>;
+}
+
+/**
+ * Result returned after uninstalling one extension version.
+ */
+export interface ExtensionUninstallResult {
+  /** Whether the uninstall was physical or logical. */
+  mode: string;
+  /** Reference counts observed during uninstall. */
+  references: ExtensionReferenceSummary;
+  /** Updated installation row when the uninstall was logical. */
+  installation: ExtensionInstallation | null;
+}
+
+/**
+ * Append-only packaged hook execution record exposed to Studio.
+ */
+export interface ExtensionHookExecution {
+  /** Stable execution log id. */
+  id: number;
+  /** Owning session id when the task belongs to a session. */
+  session_id: string | null;
+  /** Owning task id. */
+  task_id: string;
+  /** Current trace id when the execution happened inside a recursion. */
+  trace_id: string | null;
+  /** Iteration index associated with the hook invocation. */
+  iteration: number;
+  /** Agent that executed the hook bundle. */
+  agent_id: number;
+  /** Pinned release id when the runtime was release-backed. */
+  release_id: number | null;
+  /** Canonical package id such as `@acme/providers`. */
+  extension_package_id: string;
+  /** Installed extension version. */
+  extension_version: string;
+  /** Lifecycle event name such as `task.before_start`. */
+  hook_event: string;
+  /** Exported callable name inside the hook module. */
+  hook_callable: string;
+  /** Execution status such as `succeeded` or `failed`. */
+  status: string;
+  /** Historical hook input recorded for replay. */
+  hook_context: Record<string, unknown> | null;
+  /** Structured effects returned by the hook, when available. */
+  effects: Array<Record<string, unknown>> | null;
+  /** Structured error payload, when available. */
+  error: Record<string, unknown> | null;
+  /** UTC timestamp when execution started. */
+  started_at: string;
+  /** UTC timestamp when execution finished. */
+  finished_at: string;
+  /** Total wall-clock execution time in milliseconds. */
+  duration_ms: number;
+}
+
+/**
+ * Safe replay result for one historical hook execution.
+ */
+export interface ExtensionHookReplayResult {
+  /** Replayed execution record id. */
+  execution_id: number;
+  /** Canonical package id that was replayed. */
+  extension_package_id: string;
+  /** Extension version used during replay. */
+  extension_version: string;
+  /** Lifecycle event name that was replayed. */
+  hook_event: string;
+  /** Exported callable replayed from the hook module. */
+  hook_callable: string;
+  /** Replay status such as `succeeded` or `failed`. */
+  status: string;
+  /** Normalized replay effects, if replay succeeded. */
+  effects: Array<Record<string, unknown>> | null;
+  /** Structured replay error, if replay failed. */
+  error: Record<string, unknown> | null;
+  /** UTC timestamp when replay finished. */
+  replayed_at: string;
+}
+
+/**
+ * Agent-scoped extension binding row.
+ */
+export interface AgentExtensionBinding {
+  /** Stable binding row id. */
+  id: number;
+  /** Agent that owns this binding. */
+  agent_id: number;
+  /** Installed extension version referenced by the binding. */
+  extension_installation_id: number;
+  /** Whether the extension is enabled for the agent. */
+  enabled: boolean;
+  /** Lower numbers resolve earlier in the runtime bundle. */
+  priority: number;
+  /** Agent-local extension config payload. */
+  config: Record<string, unknown>;
+  /** UTC timestamp when the binding was created. */
+  created_at: string;
+  /** UTC timestamp when the binding last changed. */
+  updated_at: string;
+  /** Installation metadata for the selected version. */
+  installation: ExtensionInstallation;
+}
+
+/**
+ * Package-level extension view tailored for one agent.
+ */
+export interface AgentExtensionPackage {
+  /** Stable package scope. */
+  scope: string;
+  /** Stable package name within the scope. */
+  name: string;
+  /** Canonical npm-style package id. */
+  package_id: string;
+  /** Human-readable package title. */
+  display_name: string;
+  /** Package summary. */
+  description: string;
+  /** Highest installed version available for this package. */
+  latest_version: string;
+  /** Count of active installed versions. */
+  active_version_count: number;
+  /** Count of disabled installed versions. */
+  disabled_version_count: number;
+  /** Whether the selected version lags behind the newest installed version. */
+  has_update_available: boolean;
+  /** Current agent selection for this package, if any. */
+  selected_binding: AgentExtensionBinding | null;
+  /** Installed versions ordered newest-first. */
+  versions: ExtensionInstallation[];
+}
+
+/**
+ * Fetch the installed extension packages grouped by package name.
+ */
+export const getExtensionPackages = async (): Promise<ExtensionPackage[]> => {
+  return apiRequest('/extensions/packages') as Promise<ExtensionPackage[]>;
+};
+
+/**
+ * Preview one extension package folder bundle before installation.
+ *
+ * @param files - Files returned by a directory picker input.
+ * @returns Promise resolving to the trust preview shown before install.
+ */
+export const previewExtensionBundle = async (
+  files: File[],
+): Promise<ExtensionImportPreview> => {
+  if (files.length === 0) {
+    throw new Error('Choose an extension folder before importing.');
+  }
+
+  const bundleName =
+    files[0]?.webkitRelativePath.split('/')[0]?.trim() || files[0]?.name || 'extension-bundle';
+  const formData = new FormData();
+  formData.append('bundle_name', bundleName);
+  files.forEach((file) => {
+    formData.append('files', file);
+    formData.append('relative_paths', file.webkitRelativePath || file.name);
+  });
+
+  return apiRequestFormData(
+    '/extensions/installations/import/bundle/preview',
+    formData,
+  ) as Promise<ExtensionImportPreview>;
+};
+
+/**
+ * Import one extension package folder bundle selected from the local machine.
+ *
+ * @param files - Files returned by a directory picker input.
+ * @param options - Explicit trust confirmation collected from the operator.
+ * @returns Promise resolving to the installed extension version.
+ */
+export const importExtensionBundle = async (
+  files: File[],
+  options: { trustConfirmed: boolean },
+): Promise<ExtensionInstallation> => {
+  if (files.length === 0) {
+    throw new Error('Choose an extension folder before importing.');
+  }
+
+  const bundleName =
+    files[0]?.webkitRelativePath.split('/')[0]?.trim() || files[0]?.name || 'extension-bundle';
+  const formData = new FormData();
+  formData.append('bundle_name', bundleName);
+  formData.append('trust_confirmed', options.trustConfirmed ? 'true' : 'false');
+  files.forEach((file) => {
+    formData.append('files', file);
+    formData.append('relative_paths', file.webkitRelativePath || file.name);
+  });
+
+  return apiRequestFormData(
+    '/extensions/installations/import/bundle',
+    formData,
+  ) as Promise<ExtensionInstallation>;
+};
+
+/**
+ * Enable or disable one installed extension version.
+ */
+export const updateExtensionInstallationStatus = async (
+  installationId: number,
+  status: 'active' | 'disabled',
+): Promise<ExtensionInstallation> => {
+  return apiRequest(`/extensions/installations/${installationId}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+  }) as Promise<ExtensionInstallation>;
+};
+
+/**
+ * Fetch persisted reference counts for one installed extension version.
+ */
+export const getExtensionInstallationReferences = async (
+  installationId: number,
+): Promise<ExtensionReferenceSummary> => {
+  return apiRequest(
+    `/extensions/installations/${installationId}/references`,
+  ) as Promise<ExtensionReferenceSummary>;
+};
+
+/**
+ * Uninstall one installed extension version.
+ */
+export const uninstallExtensionInstallation = async (
+  installationId: number,
+): Promise<ExtensionUninstallResult> => {
+  return apiRequest(`/extensions/installations/${installationId}`, {
+    method: 'DELETE',
+  }) as Promise<ExtensionUninstallResult>;
+};
+
+/**
+ * Fetch recent packaged hook execution logs.
+ */
+export const getExtensionHookExecutions = async (filters?: {
+  sessionId?: string;
+  taskId?: string;
+  traceId?: string;
+  iteration?: number;
+  extensionPackageId?: string;
+  hookEvent?: string;
+  limit?: number;
+}): Promise<ExtensionHookExecution[]> => {
+  const params = new URLSearchParams();
+  if (filters?.sessionId) {
+    params.set('session_id', filters.sessionId);
+  }
+  if (filters?.taskId) {
+    params.set('task_id', filters.taskId);
+  }
+  if (filters?.traceId) {
+    params.set('trace_id', filters.traceId);
+  }
+  if (typeof filters?.iteration === 'number') {
+    params.set('iteration', String(filters.iteration));
+  }
+  if (filters?.extensionPackageId) {
+    params.set('extension_package_id', filters.extensionPackageId);
+  }
+  if (filters?.hookEvent) {
+    params.set('hook_event', filters.hookEvent);
+  }
+  if (typeof filters?.limit === 'number') {
+    params.set('limit', String(filters.limit));
+  }
+  const query = params.toString();
+  return apiRequest(
+    `/extensions/hook-executions${query ? `?${query}` : ''}`,
+  ) as Promise<ExtensionHookExecution[]>;
+};
+
+/**
+ * Safely replay one historical packaged hook execution.
+ */
+export const replayExtensionHookExecution = async (
+  executionId: number,
+): Promise<ExtensionHookReplayResult> => {
+  return apiRequest(`/extensions/hook-executions/${executionId}/replay`, {
+    method: 'POST',
+  }) as Promise<ExtensionHookReplayResult>;
+};
+
+/**
+ * Fetch package-level extension choices for one agent.
+ */
+export const getAgentExtensionPackages = async (
+  agentId: number,
+): Promise<AgentExtensionPackage[]> => {
+  return apiRequest(
+    `/agents/${agentId}/extensions/packages`,
+  ) as Promise<AgentExtensionPackage[]>;
+};
+
+/**
+ * Create or update one extension binding for an agent.
+ */
+export const upsertAgentExtensionBinding = async (
+  agentId: number,
+  extensionInstallationId: number,
+  payload: {
+    enabled?: boolean;
+    priority?: number;
+    config?: Record<string, unknown>;
+  },
+): Promise<AgentExtensionBinding> => {
+  return apiRequest(
+    `/agents/${agentId}/extensions/${extensionInstallationId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  ) as Promise<AgentExtensionBinding>;
+};
+
+/**
+ * Replace the full extension binding set for one agent.
+ */
+export const replaceAgentExtensionBindings = async (
+  agentId: number,
+  bindings: Array<{
+    extension_installation_id: number;
+    enabled: boolean;
+    priority: number;
+    config: Record<string, unknown>;
+  }>,
+): Promise<AgentExtensionBinding[]> => {
+  return apiRequest(`/agents/${agentId}/extensions`, {
+    method: 'PUT',
+    body: JSON.stringify({ bindings }),
+  }) as Promise<AgentExtensionBinding[]>;
+};
+
+/**
+ * Delete one extension binding from an agent.
+ */
+export const deleteAgentExtensionBinding = async (
+  agentId: number,
+  extensionInstallationId: number,
+): Promise<void> => {
+  await apiRequest(`/agents/${agentId}/extensions/${extensionInstallationId}`, {
+    method: 'DELETE',
+  });
 };
 
 /**

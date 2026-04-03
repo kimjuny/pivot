@@ -7,6 +7,11 @@ from app.models.channel import (
     ChannelSession,
     ExternalIdentityBinding,
 )
+from app.models.extension import (
+    AgentExtensionBinding,
+    ExtensionHookExecution,
+    ExtensionInstallation,
+)
 from app.models.file import FileAsset
 from app.models.llm import LLM
 from app.models.react import (
@@ -27,6 +32,7 @@ __all__ = [
     "LLM",
     "Agent",
     "AgentChannelBinding",
+    "AgentExtensionBinding",
     "AgentRelease",
     "AgentSavedDraft",
     "AgentTestSnapshot",
@@ -35,6 +41,8 @@ __all__ = [
     "ChannelLinkToken",
     "ChannelSession",
     "Connection",
+    "ExtensionHookExecution",
+    "ExtensionInstallation",
     "ExternalIdentityBinding",
     "FileAsset",
     "ReactPlanStep",

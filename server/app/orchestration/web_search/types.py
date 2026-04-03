@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from app.orchestration.web_search.normalization import (
     normalize_date_text,
@@ -45,6 +45,9 @@ class WebSearchProviderManifest(AppBaseModel):
     logo_url: str | None = None
     visibility: str = "builtin"
     status: str = "active"
+    extension_name: str | None = None
+    extension_version: str | None = None
+    extension_display_name: str | None = None
     auth_schema: list[WebSearchConfigField]
     config_schema: list[WebSearchConfigField]
     setup_steps: list[str]
@@ -206,6 +209,7 @@ class WebSearchTestResult(AppBaseModel):
     message: str
 
 
+@runtime_checkable
 class WebSearchProvider(Protocol):
     """Runtime contract implemented by each web-search adapter."""
 

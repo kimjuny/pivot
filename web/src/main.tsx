@@ -8,6 +8,9 @@ import LLMList from './components/LLMList'
 import ToolsPage from './components/ToolsPage'
 import SkillsPage from './components/SkillsPage'
 import ChannelsPage from './components/ChannelsPage'
+import WebSearchProvidersPage from './components/WebSearchProvidersPage'
+import ExtensionsPage from './components/ExtensionsPage'
+import ExtensionDetailPage from './components/ExtensionDetailPage'
 import ChannelLinkPage from './components/ChannelLinkPage'
 import StudioDashboardPage from './components/StudioDashboardPage'
 import Navigation from './components/Navigation'
@@ -104,12 +107,45 @@ export function SkillsListPage() {
 }
 
 /**
+ * Extensions Page with layout.
+ */
+export function ExtensionsListPage() {
+  return (
+    <AuthenticatedLayout>
+      <ExtensionsPage />
+    </AuthenticatedLayout>
+  );
+}
+
+/**
+ * Extension detail page with layout.
+ */
+export function ExtensionDetailRoute() {
+  return (
+    <AuthenticatedLayout>
+      <ExtensionDetailPage />
+    </AuthenticatedLayout>
+  );
+}
+
+/**
  * Channels Page with layout.
  */
 export function ChannelsListPage() {
   return (
     <AuthenticatedLayout>
       <ChannelsPage />
+    </AuthenticatedLayout>
+  );
+}
+
+/**
+ * Web-search providers page with layout.
+ */
+export function WebSearchProvidersListPage() {
+  return (
+    <AuthenticatedLayout>
+      <WebSearchProvidersPage />
     </AuthenticatedLayout>
   );
 }
@@ -160,8 +196,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/studio/assets/models" element={<LLMListPage />} />
             <Route path="/studio/assets/tools" element={<ToolsListPage />} />
             <Route path="/studio/assets/skills" element={<SkillsListPage />} />
+            <Route path="/studio/assets/extensions" element={<ExtensionsListPage />} />
+            <Route path="/studio/assets/extensions/:scope/:name" element={<ExtensionDetailRoute />} />
             <Route path="/studio/connections" element={<Navigate to="/studio/connections/channels" replace />} />
             <Route path="/studio/connections/channels" element={<ChannelsListPage />} />
+            <Route path="/studio/connections/web-search" element={<WebSearchProvidersListPage />} />
             <Route path="/studio/operations" element={<Navigate to="/studio/operations/sessions" replace />} />
             <Route path="/studio/operations/sessions" element={<AuthenticatedLayout><SessionHistoryPage /></AuthenticatedLayout>} />
             <Route path="/studio/operations/sessions/:sessionId" element={<AuthenticatedLayout><SessionDetailPage /></AuthenticatedLayout>} />
@@ -171,7 +210,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/llms" element={<LLMListPage />} />
             <Route path="/tools" element={<ToolsListPage />} />
             <Route path="/skills" element={<SkillsListPage />} />
+            <Route path="/extensions" element={<ExtensionsListPage />} />
+            <Route path="/extensions/:scope/:name" element={<ExtensionDetailRoute />} />
             <Route path="/channels" element={<ChannelsListPage />} />
+            <Route path="/web-search-providers" element={<WebSearchProvidersListPage />} />
             <Route path="/channel-link/:token" element={<ChannelLinkPage />} />
 
             {/* Catch-all redirect */}

@@ -92,6 +92,7 @@ describe("summarizeOperationsTasks", () => {
     expect(summary.attentionTaskCount).toBe(2);
     expect(summary.latestError?.message).toBe("Latest sandbox timeout");
     expect(summary.issueTasks[0]?.taskId).toBe("task-failed");
+    expect(summary.issueTasks[0]?.latestErrorIteration).toBe(1);
     expect(summary.issueTasks[1]?.taskId).toBe("task-waiting");
   });
 });

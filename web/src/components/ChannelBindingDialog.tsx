@@ -10,6 +10,8 @@ import { Switch } from '@/components/ui/switch';
 import DraggableDialog from './DraggableDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
 import ConfigFieldGroup from './ConfigFieldGroup';
+import { ProviderMetadataBadges } from './ProviderMetadataBadges';
+import { formatProviderExtensionLabel } from '@/utils/providerMetadata';
 import {
   createAgentChannel,
   pollAgentChannel,
@@ -71,6 +73,18 @@ function ChannelBindingDialog({
     }
     return catalog.find((item) => item.manifest.key === channelKey)?.manifest ?? null;
   }, [catalog, channelKey]);
+  const extensionLabel = useMemo(
+    () => (
+      manifest
+        ? formatProviderExtensionLabel(
+            manifest.extension_display_name,
+            manifest.extension_name,
+            manifest.extension_version,
+          )
+        : null
+    ),
+    [manifest],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -250,11 +264,24 @@ function ChannelBindingDialog({
           {manifest && (
             <>
               <div className="rounded-lg border border-border px-3 py-2">
-                <div className="text-sm font-medium text-foreground">Per-Agent Binding</div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  These credentials belong only to this agent binding. The channel catalog page never stores shared
-                  secrets or global bot config.
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Per-Agent Binding</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      These credentials belong only to this agent binding. The channel catalog page never stores shared
+                      secrets or global bot config.
+                    </div>
+                  </div>
+                  <ProviderMetadataBadges
+                    visibility={manifest.visibility}
+                    status={manifest.status}
+                  />
                 </div>
+                {extensionLabel ? (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Package: {extensionLabel}
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-2">

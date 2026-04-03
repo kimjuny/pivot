@@ -153,8 +153,10 @@ function Navigation() {
   const currentPath = location.pathname;
   const isDashboardActive = currentPath === '/studio' || currentPath === '/studio/dashboard';
   const isAgentsActive = currentPath.startsWith('/studio/agents') || currentPath.startsWith('/agent/') || currentPath === '/agents';
-  const isAssetsActive = currentPath.startsWith('/studio/assets') || currentPath === '/llms' || currentPath === '/tools' || currentPath === '/skills';
-  const isConnectionsActive = currentPath.startsWith('/studio/connections') || currentPath === '/channels';
+  const isAssetsActive = currentPath.startsWith('/studio/assets') || currentPath === '/llms' || currentPath === '/tools' || currentPath === '/skills' || currentPath === '/extensions';
+  const isConnectionsActive = currentPath.startsWith('/studio/connections')
+    || currentPath === '/channels'
+    || currentPath === '/web-search-providers';
   const isOperationsActive = currentPath.startsWith('/studio/operations');
 
   const assetsMenuItems: StudioMenuLinkItem[] = [
@@ -177,6 +179,12 @@ function Navigation() {
       icon: Zap,
     },
     {
+      title: 'Extensions',
+      description: 'Import package folders, inspect installed versions, and manage package lifecycle state.',
+      to: '/studio/assets/extensions',
+      icon: FileText,
+    },
+    {
       title: 'MCPs',
       description: 'Future shared connector inventory for structured external capability servers.',
       icon: Radio,
@@ -193,15 +201,15 @@ function Navigation() {
   const connectionsMenuItems: StudioMenuLinkItem[] = [
     {
       title: 'Channels',
-      description: 'Review built-in delivery surfaces such as chat platforms and transport modes.',
+      description: 'Review installed delivery surfaces such as built-in and extension-backed channels.',
       to: '/studio/connections/channels',
       icon: Radio,
     },
     {
       title: 'Web Search Providers',
-      description: 'Workspace-level provider visibility and governance for external search access.',
+      description: 'Review installed abstract search providers before binding them to agents.',
+      to: '/studio/connections/web-search',
       icon: Globe,
-      disabled: true,
     },
     {
       title: 'Desktop Connectors',

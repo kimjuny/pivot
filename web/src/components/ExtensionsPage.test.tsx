@@ -1,0 +1,197 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+  },
+}));
+
+vi.mock("@/utils/api", () => ({
+  getExtensionPackages: vi.fn(),
+  getExtensionInstallationReferences: vi.fn(),
+  importExtensionBundle: vi.fn(),
+  previewExtensionBundle: vi.fn(),
+  uninstallExtensionInstallation: vi.fn(),
+  updateExtensionInstallationStatus: vi.fn(),
+}));
+
+import { getExtensionPackages, importExtensionBundle, previewExtensionBundle } from "@/utils/api";
+
+import ExtensionsPage from "./ExtensionsPage";
+
+describe("ExtensionsPage", () => {
+  it("links each package card to its package detail page", async () => {
+    vi.mocked(getExtensionPackages).mockResolvedValue([
+      {
+        scope: "acme",
+        name: "providers",
+        package_id: "@acme/providers",
+        display_name: "ACME Providers",
+        description: "Provider package",
+        latest_version: "1.0.0",
+        active_version_count: 1,
+        disabled_version_count: 0,
+        versions: [
+          {
+            id: 1,
+            scope: "acme",
+            name: "providers",
+            package_id: "@acme/providers",
+            version: "1.0.0",
+            display_name: "ACME Providers",
+            description: "Provider package",
+            manifest_hash: "hash",
+            artifact_storage_backend: "local_fs",
+            artifact_key: "extensions/acme/providers/1.0.0/hash.tar.gz",
+            artifact_digest: "artifact-hash",
+            artifact_size_bytes: 128,
+            install_root: "/tmp/@acme/providers/1.0.0",
+            source: "bundle",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            status: "active",
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-01T00:00:00Z",
+            reference_summary: {
+              extension_binding_count: 0,
+              channel_binding_count: 2,
+              web_search_binding_count: 1,
+              binding_count: 3,
+              release_count: 1,
+              test_snapshot_count: 0,
+              saved_draft_count: 0,
+            },
+            contribution_summary: {
+              channel_providers: ["acme@chat"],
+              web_search_providers: ["acme@search"],
+              tools: ["search_accounts"],
+              skills: ["crm_research"],
+            },
+          },
+        ],
+      },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={["/studio/assets/extensions"]}>
+        <ExtensionsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("ACME Providers")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("In Use 3")).toBeInTheDocument();
+    expect(screen.getByText("Pinned 1")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "ACME Providers" })).toHaveAttribute(
+      "href",
+      "/studio/assets/extensions/acme/providers",
+    );
+    expect(screen.getByRole("link", { name: "Open Details" })).toHaveAttribute(
+      "href",
+      "/studio/assets/extensions/acme/providers",
+    );
+  });
+
+  it("requires an explicit trust step before importing a local bundle", async () => {
+    vi.mocked(getExtensionPackages).mockResolvedValue([]);
+    vi.mocked(previewExtensionBundle).mockResolvedValue({
+      scope: "acme",
+      name: "providers",
+      package_id: "@acme/providers",
+      version: "1.0.0",
+      display_name: "ACME Providers",
+      description: "Provider package",
+      source: "bundle",
+      trust_status: "unverified",
+      trust_source: "local_import",
+      manifest_hash: "hash-preview",
+      contribution_summary: {
+        channel_providers: ["acme@chat"],
+        web_search_providers: ["acme@search"],
+        tools: [],
+        skills: [],
+      },
+      permissions: {
+        network: {
+          allow_hosts: ["api.acme.com"],
+        },
+      },
+    });
+    vi.mocked(importExtensionBundle).mockResolvedValue({
+      id: 2,
+      scope: "acme",
+      name: "providers",
+      package_id: "@acme/providers",
+      version: "1.0.0",
+      display_name: "ACME Providers",
+      description: "Provider package",
+      manifest_hash: "hash",
+      artifact_storage_backend: "local_fs",
+      artifact_key: "extensions/acme/providers/1.0.0/hash.tar.gz",
+      artifact_digest: "artifact-hash",
+      artifact_size_bytes: 128,
+      install_root: "/tmp/@acme/providers/1.0.0",
+      source: "bundle",
+      trust_status: "trusted_local",
+      trust_source: "local_import",
+      hub_scope: null,
+      hub_package_id: null,
+      hub_package_version_id: null,
+      hub_artifact_digest: null,
+      installed_by: "alice",
+      status: "active",
+      created_at: "2026-04-01T00:00:00Z",
+      updated_at: "2026-04-01T00:00:00Z",
+      reference_summary: null,
+      contribution_summary: {
+        channel_providers: ["acme@chat"],
+        web_search_providers: ["acme@search"],
+        tools: [],
+        skills: [],
+      },
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ExtensionsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("No extensions installed yet.")).toBeInTheDocument();
+    });
+
+    const input = container.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Expected hidden file input");
+    }
+    const manifest = new File(["{}"], "manifest.json", { type: "application/json" });
+    Object.defineProperty(manifest, "webkitRelativePath", {
+      value: "acme-bundle/manifest.json",
+    });
+
+    fireEvent.change(input, { target: { files: [manifest] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Trust Extension")).toBeInTheDocument();
+    });
+    expect(screen.getByText("@acme/providers")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Trust and Install" }));
+
+    await waitFor(() => {
+      expect(importExtensionBundle).toHaveBeenCalledWith([manifest], {
+        trustConfirmed: true,
+      });
+    });
+  });
+});

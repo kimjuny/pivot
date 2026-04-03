@@ -791,6 +791,7 @@ def build_selected_skills_prompt_block(
     session: Session,
     username: str,
     selected_skills: list[str],
+    extra_skills: list[dict[str, str]] | None = None,
 ) -> str:
     """Build prompt-injection markdown from selected visible skills.
 
@@ -798,6 +799,8 @@ def build_selected_skills_prompt_block(
         session: Active database session.
         username: Authenticated username.
         selected_skills: Selected globally unique skill names.
+        extra_skills: Optional non-registry skill payloads such as extension
+            package skills.
 
     Returns:
         Concatenated markdown block for once-per-task bootstrap user-prompt injection.
@@ -808,18 +811,36 @@ def build_selected_skills_prompt_block(
     sync_skill_registry(session)
     visible_skills = _visible_skills_query(session, username)
     by_name = {skill.name: skill for skill in visible_skills}
+    extra_by_name = {
+        item["name"]: item
+        for item in extra_skills or []
+        if isinstance(item.get("name"), str) and isinstance(item.get("location"), str)
+    }
 
     blocks: list[str] = []
     for index, skill_name in enumerate(selected_skills, start=1):
         skill = by_name.get(skill_name)
+        block_skill_name = skill_name
         if skill is None:
-            continue
-        try:
-            content = _read_markdown(_skill_content_path(skill)).strip()
-        except FileNotFoundError:
-            logger.warning("Selected skill source disappeared: %s", skill.location)
-            continue
-        blocks.append(f"### Skill {index}: {skill.name}\n\n{content}\n")
+            extra_skill = extra_by_name.get(skill_name)
+            if extra_skill is None:
+                continue
+            try:
+                content = _read_markdown(Path(extra_skill["location"]) / "SKILL.md").strip()
+            except FileNotFoundError:
+                logger.warning(
+                    "Selected extension skill source disappeared: %s",
+                    extra_skill["location"],
+                )
+                continue
+        else:
+            block_skill_name = skill.name
+            try:
+                content = _read_markdown(_skill_content_path(skill)).strip()
+            except FileNotFoundError:
+                logger.warning("Selected skill source disappeared: %s", skill.location)
+                continue
+        blocks.append(f"### Skill {index}: {block_skill_name}\n\n{content}\n")
     return "\n".join(blocks).strip()
 
 
@@ -827,6 +848,7 @@ def build_skill_mounts(
     session: Session,
     username: str,
     skill_names: list[str],
+    extra_skills: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Build sandbox mount metadata for visible skills.
 
@@ -834,6 +856,8 @@ def build_skill_mounts(
         session: Active database session.
         username: Authenticated username.
         skill_names: Allowed globally unique skill names.
+        extra_skills: Optional non-registry skill payloads such as extension
+            package skills.
 
     Returns:
         List of ``{"name": ..., "location": ...}`` payloads for sandbox-manager.
@@ -841,6 +865,11 @@ def build_skill_mounts(
     sync_skill_registry(session)
     visible_skills = _visible_skills_query(session, username)
     by_name = {skill.name: skill for skill in visible_skills}
+    extra_by_name = {
+        item["name"]: item
+        for item in extra_skills or []
+        if isinstance(item.get("name"), str) and isinstance(item.get("location"), str)
+    }
 
     mounts: list[dict[str, str]] = []
     seen_names: set[str] = set()
@@ -849,6 +878,16 @@ def build_skill_mounts(
             continue
         skill = by_name.get(skill_name)
         if skill is None:
+            extra_skill = extra_by_name.get(skill_name)
+            if extra_skill is None:
+                continue
+            seen_names.add(skill_name)
+            mounts.append(
+                {
+                    "name": skill_name,
+                    "location": str(Path(extra_skill["location"]).resolve()),
+                }
+            )
             continue
         seen_names.add(skill_name)
         mounts.append({"name": skill.name, "location": skill.location})

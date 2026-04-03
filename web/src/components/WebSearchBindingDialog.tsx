@@ -8,7 +8,9 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import ConfigFieldGroup from './ConfigFieldGroup';
 import DraggableDialog from './DraggableDialog';
+import { ProviderMetadataBadges } from './ProviderMetadataBadges';
 import { WebSearchProviderBadge } from './WebSearchProviderBadge';
+import { formatProviderExtensionLabel } from '@/utils/providerMetadata';
 import {
   createAgentWebSearchBinding,
   testAgentWebSearchBinding,
@@ -69,6 +71,18 @@ function WebSearchBindingDialog({
     }
     return catalog.find((item) => item.manifest.key === providerKey)?.manifest ?? null;
   }, [catalog, providerKey]);
+  const extensionLabel = useMemo(
+    () => (
+      manifest
+        ? formatProviderExtensionLabel(
+            manifest.extension_display_name,
+            manifest.extension_name,
+            manifest.extension_version,
+          )
+        : null
+    ),
+    [manifest],
+  );
 
   const selectableCatalog = useMemo(() => {
     if (initialBinding) {
@@ -230,6 +244,17 @@ function WebSearchBindingDialog({
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 </div>
+                <div className="mt-3">
+                  <ProviderMetadataBadges
+                    visibility={manifest.visibility}
+                    status={manifest.status}
+                  />
+                </div>
+                {extensionLabel ? (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Package: {extensionLabel}
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">

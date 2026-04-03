@@ -26,14 +26,19 @@ from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
 from app.models.user import User
 from app.orchestration.react.engine import ReactEngine
 from app.orchestration.skills import select_skills_with_usage
-from app.orchestration.tool import get_tool_manager
-from app.orchestration.tool.builtin.programmatic_tool_call import (
-    make_programmatic_tool_call,
-)
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactStreamEvent, ReactStreamEventType, TokenUsage
 from app.services.agent_release_runtime_service import AgentReleaseRuntimeService
 from app.services.agent_service import AgentService
+from app.services.extension_hook_effect_service import (
+    ExtensionHookEffectService,
+    HookEffectApplicationResult,
+)
+from app.services.extension_hook_execution_service import (
+    ExtensionHookExecutionService,
+)
+from app.services.extension_hook_service import ExtensionHookService
+from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_service import SessionService
@@ -42,10 +47,6 @@ from app.services.skill_service import (
     build_selected_skills_prompt_block,
     build_skill_mounts,
     list_visible_skills,
-)
-from app.services.workspace_service import (
-    ensure_agent_workspace,
-    load_all_user_tool_metadata,
 )
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, col, desc, select
@@ -523,6 +524,11 @@ class ReactTaskSupervisor:
                 if agent is None:
                     raise ValueError(f"Agent {task.agent_id} not found")
                 runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(task)
+                hook_service = ExtensionHookService(
+                    runtime_config.extension_bundle,
+                    execution_service=ExtensionHookExecutionService(db),
+                )
+                hook_effect_service = ExtensionHookEffectService()
                 if runtime_config.llm_id is None:
                     raise ValueError(
                         f"Agent {runtime_config.agent_name} has no LLM configured"
@@ -563,12 +569,18 @@ class ReactTaskSupervisor:
                     ]
 
                 request_tool_manager = self._build_request_tool_manager(
+                    db=db,
                     username=launch.username,
                     agent_id=agent.id or 0,
                     raw_tool_ids=runtime_config.raw_tool_ids,
+                    extension_bundle=runtime_config.extension_bundle,
                 )
 
                 available_skills = list_visible_skills(db, launch.username)
+                extension_skills = ExtensionService(db).build_bundle_skill_payloads(
+                    runtime_config.extension_bundle
+                )
+                available_skills.extend(extension_skills)
                 total_skill_count = len(available_skills)
                 allowed_skills = _parse_name_allowlist(runtime_config.raw_skill_ids)
                 if allowed_skills is not None:
@@ -595,6 +607,7 @@ class ReactTaskSupervisor:
                     db,
                     launch.username,
                     allowed_skill_names,
+                    extra_skills=extension_skills,
                 )
 
                 engine = ReactEngine(
@@ -610,6 +623,17 @@ class ReactTaskSupervisor:
                     ),
                     stream_llm_responses=bool(llm_config.streaming),
                     llm_runtime_kwargs=llm_runtime_kwargs,
+                )
+
+                before_start_effects = await self._run_task_hooks(
+                    db=db,
+                    session_id=task.session_id,
+                    hook_service=hook_service,
+                    hook_effect_service=hook_effect_service,
+                    task=task,
+                    runtime_config=runtime_config,
+                    event_name="task.before_start",
+                    event_payload={"message": launch.message},
                 )
 
                 async with self._lock:
@@ -668,6 +692,7 @@ class ReactTaskSupervisor:
                                 session=db,
                                 username=launch.username,
                                 selected_skills=selected_skills,
+                                extra_skills=extension_skills,
                             )
                     except Exception as exc:
                         logger.warning(
@@ -709,6 +734,12 @@ class ReactTaskSupervisor:
                 async for event_data in engine.run_task(
                     task=task,
                     selected_skills_text=selected_skills_text,
+                    task_bootstrap_prefix_blocks=(
+                        before_start_effects.task_bootstrap_head_blocks
+                    ),
+                    task_bootstrap_suffix_blocks=(
+                        before_start_effects.task_bootstrap_tail_blocks
+                    ),
                     turn_user_message=launch.message,
                     turn_files=turn_files,
                     turn_file_blocks=turn_file_blocks,
@@ -717,6 +748,38 @@ class ReactTaskSupervisor:
                         db=db,
                         session_id=task.session_id,
                         event_data=event_data,
+                    )
+                    await self._run_iteration_hooks_for_event(
+                        db=db,
+                        session_id=task.session_id,
+                        hook_service=hook_service,
+                        hook_effect_service=hook_effect_service,
+                        task=task,
+                        runtime_config=runtime_config,
+                        event_data=event_data,
+                    )
+
+                if task.status == "completed":
+                    await self._run_task_hooks(
+                        db=db,
+                        session_id=task.session_id,
+                        hook_service=hook_service,
+                        hook_effect_service=hook_effect_service,
+                        task=task,
+                        runtime_config=runtime_config,
+                        event_name="task.completed",
+                        event_payload={},
+                    )
+                elif task.status == "waiting_input":
+                    await self._run_task_hooks(
+                        db=db,
+                        session_id=task.session_id,
+                        hook_service=hook_service,
+                        hook_effect_service=hook_effect_service,
+                        task=task,
+                        runtime_config=runtime_config,
+                        event_name="task.waiting_input",
+                        event_payload={},
                     )
         except Exception as exc:
             logger.error("Background ReAct task failed task_id=%s err=%s", task_id, exc)
@@ -743,6 +806,20 @@ class ReactTaskSupervisor:
                             "data": {"error": str(exc), "terminal": True},
                         },
                     )
+                    runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(task)
+                    await self._run_task_hooks(
+                        db=db,
+                        session_id=task.session_id,
+                        hook_service=ExtensionHookService(
+                            runtime_config.extension_bundle,
+                            execution_service=ExtensionHookExecutionService(db),
+                        ),
+                        hook_effect_service=ExtensionHookEffectService(),
+                        task=task,
+                        runtime_config=runtime_config,
+                        event_name="task.failed",
+                        event_payload={"error": str(exc)},
+                    )
         finally:
             async with self._lock:
                 self._active_jobs.pop(task_id, None)
@@ -751,41 +828,19 @@ class ReactTaskSupervisor:
     def _build_request_tool_manager(
         self,
         *,
+        db: Session,
         username: str,
         agent_id: int,
         raw_tool_ids: str | None,
+        extension_bundle: list[dict[str, Any]],
     ) -> ToolManager:
         """Build the request-scoped tool registry used for one task."""
-        ensure_agent_workspace(username, agent_id)
-        shared_manager = get_tool_manager()
-        request_tool_manager = ToolManager()
-        for meta in shared_manager.list_tools():
-            request_tool_manager.add_entry(meta)
-
-        private_metas = load_all_user_tool_metadata(username)
-        for meta in private_metas:
-            if request_tool_manager.get_tool(meta.name) is None:
-                request_tool_manager.add_entry(meta)
-            else:
-                logger.warning(
-                    "Private tool '%s' conflicts with a shared tool name and was skipped.",
-                    meta.name,
-                )
-
-        ptc_meta = request_tool_manager.get_tool("programmatic_tool_call")
-        if ptc_meta is not None:
-            full_callables = {m.name: m.func for m in request_tool_manager.list_tools()}
-            ptc_meta.func = make_programmatic_tool_call(full_callables)
-
-        allowed_tools = _parse_name_allowlist(raw_tool_ids)
-        if allowed_tools is None:
-            return request_tool_manager
-
-        filtered_manager = ToolManager()
-        for meta in request_tool_manager.list_tools():
-            if meta.name in allowed_tools:
-                filtered_manager.add_entry(meta)
-        return filtered_manager
+        return ExtensionService(db).build_request_tool_manager(
+            username=username,
+            agent_id=agent_id,
+            raw_tool_ids=raw_tool_ids,
+            extension_bundle=extension_bundle,
+        )
 
     async def _publish_event(
         self,
@@ -833,6 +888,173 @@ class ReactTaskSupervisor:
 
         payload = self._row_to_payload(row)
         await self._fan_out_live_event(payload=payload)
+
+    async def _run_task_hooks(
+        self,
+        *,
+        db: Session,
+        session_id: str | None,
+        hook_service: ExtensionHookService,
+        hook_effect_service: ExtensionHookEffectService,
+        task: ReactTask,
+        runtime_config: Any,
+        event_name: str,
+        event_payload: dict[str, Any],
+    ) -> HookEffectApplicationResult:
+        """Execute task-level extension hooks and publish emitted events."""
+        hook_context = {
+            "session_id": task.session_id,
+            "task_id": task.task_id,
+            "trace_id": None,
+            "iteration": task.iteration,
+            "agent_id": task.agent_id,
+            "release_id": runtime_config.release_id,
+            "execution_mode": "live",
+            "timestamp": datetime.now(UTC).isoformat(),
+            "task": self._build_task_hook_snapshot(db=db, task=task),
+            "runtime": {
+                "source": runtime_config.source,
+                "task_status": task.status,
+            },
+            "event_payload": event_payload,
+        }
+        try:
+            effects = await hook_service.run_task_hooks(
+                event_name=event_name,
+                hook_context=hook_context,
+            )
+            application_result = hook_effect_service.apply_effects(
+                event_name=event_name,
+                effects=effects,
+            )
+        except Exception:
+            logger.warning(
+                "Extension hooks failed task_id=%s event=%s",
+                task.task_id,
+                event_name,
+                exc_info=True,
+            )
+            return HookEffectApplicationResult()
+        for emitted_event in application_result.emitted_events:
+            await self._publish_event(
+                db=db,
+                session_id=session_id,
+                event_data=emitted_event,
+            )
+        return application_result
+
+    def _build_task_hook_snapshot(
+        self,
+        *,
+        db: Session,
+        task: ReactTask,
+    ) -> dict[str, Any]:
+        """Build stable task metadata exposed to lifecycle hooks.
+
+        Why: mutable extensions such as external memory providers need a small
+        amount of task context like the original user request and the final
+        answer, but they still should not depend on Pivot ORM objects directly.
+        """
+        return {
+            "user_message": task.user_message,
+            "status": task.status,
+            "total_tokens": task.total_tokens,
+            "agent_answer": self._extract_task_agent_answer(db=db, task_id=task.task_id),
+        }
+
+    def _extract_task_agent_answer(
+        self,
+        *,
+        db: Session,
+        task_id: str,
+    ) -> str | None:
+        """Return the latest persisted ANSWER payload for one task."""
+        statement = (
+            select(ReactRecursion)
+            .where(ReactRecursion.task_id == task_id)
+            .where(ReactRecursion.action_type == "ANSWER")
+            .order_by(desc(col(ReactRecursion.iteration_index)))
+        )
+        recursions = list(db.exec(statement).all())
+        for recursion in recursions:
+            if not recursion.action_output:
+                continue
+            try:
+                output = json.loads(recursion.action_output)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(output, dict):
+                continue
+            answer = output.get("answer")
+            if isinstance(answer, str) and answer.strip():
+                return answer.strip()
+        return None
+
+    async def _run_iteration_hooks_for_event(
+        self,
+        *,
+        db: Session,
+        session_id: str | None,
+        hook_service: ExtensionHookService,
+        hook_effect_service: ExtensionHookEffectService,
+        task: ReactTask,
+        runtime_config: Any,
+        event_data: dict[str, Any],
+    ) -> None:
+        """Translate stable runtime events into iteration hook invocations."""
+        event_type_value = str(event_data.get("type", "")).strip()
+        hook_event_name = {
+            "plan_update": "iteration.plan_updated",
+            "answer": "iteration.answer_ready",
+            "error": "iteration.error",
+            "tool_call": "iteration.before_tool_call",
+            "tool_result": "iteration.after_tool_result",
+        }.get(event_type_value)
+        if hook_event_name is None:
+            return
+
+        raw_data = event_data.get("data")
+        event_payload: dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+
+        hook_context = {
+            "session_id": task.session_id,
+            "task_id": task.task_id,
+            "trace_id": event_data.get("trace_id"),
+            "iteration": int(event_data.get("iteration", task.iteration) or 0),
+            "agent_id": task.agent_id,
+            "release_id": runtime_config.release_id,
+            "execution_mode": "live",
+            "timestamp": event_data.get("timestamp") or datetime.now(UTC).isoformat(),
+            "runtime": {
+                "source": runtime_config.source,
+                "task_status": task.status,
+            },
+            "event_payload": event_payload,
+        }
+        try:
+            effects = await hook_service.run_hooks(
+                event_name=hook_event_name,
+                hook_context=hook_context,
+            )
+            application_result = hook_effect_service.apply_effects(
+                event_name=hook_event_name,
+                effects=effects,
+            )
+        except Exception:
+            logger.warning(
+                "Extension iteration hooks failed task_id=%s event=%s",
+                task.task_id,
+                hook_event_name,
+                exc_info=True,
+            )
+            return
+
+        for emitted_event in application_result.emitted_events:
+            await self._publish_event(
+                db=db,
+                session_id=session_id,
+                event_data=emitted_event,
+            )
 
     async def _fan_out_live_event(self, *, payload: dict[str, Any]) -> None:
         """Push one event payload to all live subscribers of the owning session."""

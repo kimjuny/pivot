@@ -10,6 +10,7 @@ from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentTestSnapshot
 from app.models.session import Session as ConversationSession
 from app.services.agent_snapshot_service import AgentSnapshotService
+from app.services.extension_service import ExtensionService
 from sqlmodel import Session as DBSession, select
 
 if TYPE_CHECKING:
@@ -82,6 +83,7 @@ class AgentRuntimeConfig:
     max_iteration: int
     raw_tool_ids: str | None
     raw_skill_ids: str | None
+    extension_bundle: list[dict[str, Any]]
     source: str
 
 
@@ -126,6 +128,9 @@ class AgentReleaseRuntimeService:
             max_iteration=agent.max_iteration,
             raw_tool_ids=agent.tool_ids,
             raw_skill_ids=agent.skill_ids,
+            extension_bundle=ExtensionService(self.db).build_agent_extension_snapshot(
+                agent.id or 0
+            ),
             source="live",
         )
 
@@ -269,6 +274,15 @@ class AgentReleaseRuntimeService:
 
         tool_ids = self._normalize_allowlist(agent_payload.get("tool_ids"))
         skill_ids = self._normalize_allowlist(agent_payload.get("skill_ids"))
+        raw_extensions = snapshot.get("extensions")
+        if raw_extensions is None:
+            extension_bundle: list[dict[str, Any]] = []
+        elif isinstance(raw_extensions, list):
+            extension_bundle = [
+                item for item in raw_extensions if isinstance(item, dict)
+            ]
+        else:
+            raise ValueError("Snapshot extensions payload must be a list.")
 
         return AgentRuntimeConfig(
             agent_id=agent_id,
@@ -305,6 +319,7 @@ class AgentReleaseRuntimeService:
             ),
             raw_tool_ids=_dump_allowlist_json(tool_ids),
             raw_skill_ids=_dump_allowlist_json(skill_ids),
+            extension_bundle=extension_bundle,
             source=source,
         )
 

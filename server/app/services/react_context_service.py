@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
 from app.crud.llm import llm as llm_crud
@@ -16,20 +16,18 @@ from app.orchestration.react.prompt_template import (
     build_runtime_task_bootstrap_message,
     build_runtime_user_prompt,
 )
-from app.orchestration.tool import get_tool_manager
-from app.orchestration.tool.manager import ToolManager
 from app.schemas.react import ReactContextUsageResponse
 from app.services.agent_release_runtime_service import (
     AgentReleaseRuntimeService,
     AgentRuntimeConfig,
 )
+from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
-from app.services.workspace_service import (
-    ensure_agent_workspace,
-    load_all_user_tool_metadata,
-)
 from sqlmodel import Session as DBSession, select
+
+if TYPE_CHECKING:
+    from app.orchestration.tool.manager import ToolManager
 
 
 class ReactContextUsageService:
@@ -281,27 +279,12 @@ class ReactContextUsageService:
         runtime_config: AgentRuntimeConfig,
     ) -> ToolManager:
         """Rebuild the request-scoped tool catalog used in ReAct prompts."""
-        ensure_agent_workspace(username, runtime_config.agent_id)
-
-        shared_manager = get_tool_manager()
-        request_tool_manager = ToolManager()
-        for metadata in shared_manager.list_tools():
-            request_tool_manager.add_entry(metadata)
-
-        private_metas = load_all_user_tool_metadata(username)
-        for metadata in private_metas:
-            if request_tool_manager.get_tool(metadata.name) is None:
-                request_tool_manager.add_entry(metadata)
-
-        allowed_tool_names = self._parse_name_allowlist(runtime_config.raw_tool_ids)
-        if allowed_tool_names is None:
-            return request_tool_manager
-
-        filtered_manager = ToolManager()
-        for metadata in request_tool_manager.list_tools():
-            if metadata.name in allowed_tool_names:
-                filtered_manager.add_entry(metadata)
-        return filtered_manager
+        return ExtensionService(self.db).build_request_tool_manager(
+            username=username,
+            agent_id=runtime_config.agent_id,
+            raw_tool_ids=runtime_config.raw_tool_ids,
+            extension_bundle=runtime_config.extension_bundle,
+        )
 
     def _resolve_runtime_config(
         self,

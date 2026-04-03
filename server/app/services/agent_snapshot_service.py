@@ -12,6 +12,7 @@ from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSna
 from app.models.channel import AgentChannelBinding
 from app.models.web_search import AgentWebSearchBinding
 from app.services.agent_service import AgentService
+from app.services.extension_service import ExtensionService
 from sqlmodel import Session, col, desc, select
 
 
@@ -233,6 +234,9 @@ class AgentSnapshotService:
                 self._normalize_web_search_binding(binding)
                 for binding in web_search_bindings
             ],
+            "extensions": ExtensionService(self.db).build_agent_extension_snapshot(
+                agent_id
+            ),
         }
 
     def build_studio_test_snapshot(
@@ -399,6 +403,7 @@ class AgentSnapshotService:
             "scenes": normalized_scenes,
             "channel_bindings": base_snapshot["channel_bindings"],
             "web_search_bindings": base_snapshot["web_search_bindings"],
+            "extensions": base_snapshot["extensions"],
         }
 
     def build_studio_workspace_hash_payload(
@@ -416,6 +421,7 @@ class AgentSnapshotService:
             "schema_version": 1,
             "agent": normalized_snapshot["agent"],
             "scenes": normalized_snapshot["scenes"],
+            "extensions": normalized_snapshot["extensions"],
         }
 
     def create_test_snapshot(
@@ -662,6 +668,15 @@ class AgentSnapshotService:
                 key_field="id",
                 label_field="provider_key",
                 noun="Web search providers",
+            )
+        )
+        changes.extend(
+            self._compare_named_collection(
+                before_snapshot.get("extensions", []),
+                after_snapshot.get("extensions", []),
+                key_field="manifest_hash",
+                label_field="name",
+                noun="Extensions",
             )
         )
 

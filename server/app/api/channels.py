@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
-from app.channels.registry import get_channel_provider
 from app.models.agent import Agent
 from app.models.channel import AgentChannelBinding
 from app.schemas.channel import (
@@ -22,6 +21,7 @@ from app.schemas.channel import (
 )
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.channel_service import ChannelService
+from app.services.provider_registry_service import ProviderRegistryService
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -46,9 +46,9 @@ async def get_channel(
     current_user=Depends(get_current_user),
 ) -> dict[str, object]:
     """Return one channel manifest by provider key."""
-    del db, current_user
+    del current_user
     try:
-        provider = get_channel_provider(channel_key)
+        provider = ProviderRegistryService(db).get_channel_provider(channel_key)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Channel not found") from exc
     return {"manifest": provider.manifest.model_dump()}
@@ -166,7 +166,7 @@ async def test_agent_channel(
     if binding is None:
         raise HTTPException(status_code=404, detail="Channel binding not found")
 
-    provider = get_channel_provider(binding.channel_key)
+    provider = ProviderRegistryService(db).get_channel_provider(binding.channel_key)
     result = await run_in_threadpool(
         provider.test_connection,
         json.loads(binding.auth_config or "{}"),
@@ -267,7 +267,7 @@ async def channel_webhook(
     if not binding.enabled:
         raise HTTPException(status_code=409, detail="Channel binding is disabled")
 
-    provider = get_channel_provider(binding.channel_key)
+    provider = ProviderRegistryService(db).get_channel_provider(binding.channel_key)
     auth_config = json.loads(binding.auth_config or "{}")
     runtime_config = json.loads(binding.runtime_config or "{}")
     raw_body = await request.body()

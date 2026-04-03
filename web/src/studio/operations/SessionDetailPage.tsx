@@ -5,7 +5,7 @@
  * rendered with the same ConversationView used by the live chat.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -14,6 +14,7 @@ import {
   type OperationsTaskMessage,
 } from "@/studio/operations/api";
 import { buildOperationsDetailDiagnostics } from "@/studio/operations/diagnostics";
+import { OperationsHookReplayPanel } from "@/studio/operations/OperationsHookReplayPanel";
 import type { TaskMessage } from "@/utils/api";
 import { buildMessagesFromHistory } from "@/pages/chat/utils/chatData";
 import { ConversationView } from "@/pages/chat/components/ConversationView";
@@ -49,6 +50,7 @@ function adaptTasks(opsTasks: OperationsTaskMessage[]): TaskMessage[] {
 export default function SessionDetailPage() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
+  const hookPanelRef = useRef<HTMLDivElement | null>(null);
 
   const [sessionMeta, setSessionMeta] = useState<OperationsSessionDetail | null>(null);
   const [tasks, setTasks] = useState<OperationsTaskMessage[]>([]);
@@ -56,6 +58,11 @@ export default function SessionDetailPage() {
   const [expandedRecursions, setExpandedRecursions] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hookFocusRequest, setHookFocusRequest] = useState<{
+    taskId?: string | null;
+    traceId?: string | null;
+    iteration?: number | null;
+  } | null>(null);
 
   /** Fetch session detail and transform into renderable messages. */
   const loadDetail = useCallback(async () => {
@@ -111,6 +118,22 @@ export default function SessionDetailPage() {
     } catch {
       toast.error("Failed to copy diagnostics context");
     }
+  };
+
+  const focusHookDiagnostics = (payload: {
+    taskId?: string | null;
+    traceId?: string | null;
+    iteration?: number | null;
+  }) => {
+    setHookFocusRequest({
+      taskId: payload.taskId ?? null,
+      traceId: payload.traceId ?? null,
+      iteration: payload.iteration ?? null,
+    });
+    hookPanelRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   };
 
   return (
@@ -250,6 +273,26 @@ export default function SessionDetailPage() {
                         <Copy className="h-3.5 w-3.5" />
                         Copy Context
                       </Button>
+                      {diagnosticsSummary.latestError?.task_id && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => {
+                            focusHookDiagnostics({
+                              taskId: diagnosticsSummary.latestError?.task_id ?? null,
+                              traceId: diagnosticsSummary.latestError?.trace_id ?? null,
+                              iteration: diagnosticsSummary.issueTasks.find(
+                                (task) =>
+                                  task.taskId === diagnosticsSummary.latestError?.task_id,
+                              )?.latestErrorIteration ?? null,
+                            });
+                          }}
+                        >
+                          <History className="h-3.5 w-3.5" />
+                          Inspect Hooks
+                        </Button>
+                      )}
                     </div>
 
                     {diagnosticsSummary.latestError ? (
@@ -343,6 +386,23 @@ export default function SessionDetailPage() {
                             <div className="mt-1 text-xs text-muted-foreground">
                               Failed recursions: {task.failedRecursionCount}
                             </div>
+                            {task.latestError && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-2 gap-1.5"
+                                onClick={() => {
+                                  focusHookDiagnostics({
+                                    taskId: task.taskId,
+                                    traceId: task.latestError?.trace_id ?? null,
+                                    iteration: task.latestErrorIteration,
+                                  });
+                                }}
+                              >
+                                <History className="h-3.5 w-3.5" />
+                                Inspect Hooks
+                              </Button>
+                            )}
                             {task.latestError?.message && (
                               <p
                                 className="mt-2 line-clamp-2 text-xs text-danger/90"
@@ -360,6 +420,14 @@ export default function SessionDetailPage() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                <div ref={hookPanelRef}>
+                  <OperationsHookReplayPanel
+                    sessionId={sessionMeta.session_id}
+                    tasks={tasks}
+                    focusRequest={hookFocusRequest}
+                  />
                 </div>
               </TabsContent>
 

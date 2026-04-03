@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "scope": "acme",
+  "name": "memory",
+  "display_name": "ACME Memory",
+  "version": "1.0.0",
+  "description": "Sample external-memory extension that recalls stored notes at task start and persists new memories after task completion.",
+  "api_version": "1.x",
+  "contributions": {
+    "hooks": [
+      {
+        "event": "task.before_start",
+        "callable": "inject_memory",
+        "mode": "sync",
+        "entrypoint": "hooks/lifecycle.py"
+      },
+      {
+        "event": "task.completed",
+        "callable": "persist_memory",
+        "mode": "sync",
+        "entrypoint": "hooks/lifecycle.py"
+      }
+    ]
+  }
+}

@@ -9,7 +9,6 @@ from app.orchestration.tool import get_current_tool_execution_context, tool
 from app.orchestration.web_search.normalization import (
     normalize_web_search_request_payload,
 )
-from app.orchestration.web_search.registry import list_web_search_providers
 from app.orchestration.web_search.types import (
     SearchDepth,
     SearchTimeRange,
@@ -155,13 +154,11 @@ def web_search(
     return result.model_dump()
 
 
-_PROVIDER_ENUM = [provider.manifest.key for provider in list_web_search_providers()]
-
 cast(Any, web_search).__tool_metadata__.parameters = {
     "type": "object",
     "properties": {
         "query": {"type": "string"},
-        "provider": {"type": "string", "enum": _PROVIDER_ENUM},
+        "provider": {"type": "string"},
         "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
         "search_depth": {
             "type": "string",

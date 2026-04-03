@@ -15,7 +15,14 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
+import {
+  ProviderMetadataBadges,
+} from '@/components/ProviderMetadataBadges';
 import { getChannels, type ChannelCatalogItem, type ChannelManifest } from '@/utils/api';
+import {
+  formatProviderExtensionLabel,
+  formatProviderVisibilityLabel,
+} from '@/utils/providerMetadata';
 
 const PAGE_SIZE = 6;
 
@@ -27,6 +34,7 @@ const CHANNEL_ICON_PATHS: Record<string, string> = {
 };
 
 type TransportFilter = 'all' | 'webhook' | 'websocket' | 'polling';
+type SourceFilter = 'all' | 'builtin' | 'extension';
 
 /**
  * Build the page number list with ellipsis slots for a given total/current.
@@ -84,6 +92,7 @@ function ChannelsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [transportFilter, setTransportFilter] = useState<TransportFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
 
   const loadChannels = useCallback(async () => {
@@ -110,6 +119,9 @@ function ChannelsPage() {
       if (transportFilter !== 'all' && manifest.transport_mode !== transportFilter) {
         return false;
       }
+      if (sourceFilter !== 'all' && manifest.visibility !== sourceFilter) {
+        return false;
+      }
       if (!query) {
         return true;
       }
@@ -117,10 +129,11 @@ function ChannelsPage() {
         manifest.name.toLowerCase().includes(query)
         || manifest.description.toLowerCase().includes(query)
         || manifest.transport_mode.toLowerCase().includes(query)
+        || formatProviderVisibilityLabel(manifest.visibility).toLowerCase().includes(query)
         || manifest.capabilities.some((capability) => capability.toLowerCase().includes(query))
       );
     });
-  }, [manifests, searchQuery, transportFilter]);
+  }, [manifests, searchQuery, sourceFilter, transportFilter]);
 
   const transportCounts = useMemo(
     () => ({
@@ -132,9 +145,18 @@ function ChannelsPage() {
     [manifests]
   );
 
+  const sourceCounts = useMemo(
+    () => ({
+      all: manifests.length,
+      builtin: manifests.filter((manifest) => manifest.visibility !== 'extension').length,
+      extension: manifests.filter((manifest) => manifest.visibility === 'extension').length,
+    }),
+    [manifests]
+  );
+
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, transportFilter]);
+  }, [searchQuery, sourceFilter, transportFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredChannels.length / PAGE_SIZE));
 
@@ -149,63 +171,102 @@ function ChannelsPage() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Channels</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Browse the built-in channel providers available for agent-level bindings.
+            Browse installed channel providers, including built-in and extension-backed delivery surfaces.
           </p>
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+      <div className="mb-4 flex flex-col gap-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+            {(
+              [
+                { value: 'all', label: 'All', count: transportCounts.all },
+                { value: 'webhook', label: 'Webhook', count: transportCounts.webhook },
+                { value: 'websocket', label: 'WebSocket', count: transportCounts.websocket },
+                { value: 'polling', label: 'Polling', count: transportCounts.polling },
+              ] as const
+            ).map(({ value, label, count }) => (
+              <button
+                key={value}
+                onClick={() => setTransportFilter(value)}
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+              >
+                <Badge
+                  variant={transportFilter === value ? 'default' : 'outline'}
+                  className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                    transportFilter === value ? 'list-filter-badge-active' : ''
+                  }`}
+                >
+                  {label}
+                  <span className={transportFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                    {count}
+                  </span>
+                </Badge>
+              </button>
+            ))}
+            {transportFilter !== 'all' && (
+              <button
+                onClick={() => setTransportFilter('all')}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear transport filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <ButtonGroup className="list-search-group">
+            <Input
+              placeholder="Search by provider, transport, source, or capability…"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search channels"
+              autoComplete="off"
+            />
+            <Button variant="outline" size="sm" aria-label="Search channels" tabIndex={-1}>
+              <Search className="w-4 h-4" />
+              Search
+            </Button>
+          </ButtonGroup>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
           {(
             [
-              { value: 'all', label: 'All', count: transportCounts.all },
-              { value: 'webhook', label: 'Webhook', count: transportCounts.webhook },
-              { value: 'websocket', label: 'WebSocket', count: transportCounts.websocket },
-              { value: 'polling', label: 'Polling', count: transportCounts.polling },
+              { value: 'all', label: 'All Sources', count: sourceCounts.all },
+              { value: 'builtin', label: 'Built-in', count: sourceCounts.builtin },
+              { value: 'extension', label: 'Extension', count: sourceCounts.extension },
             ] as const
           ).map(({ value, label, count }) => (
             <button
               key={value}
-              onClick={() => setTransportFilter(value)}
+              onClick={() => setSourceFilter(value)}
               className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
             >
               <Badge
-                variant={transportFilter === value ? 'default' : 'outline'}
+                variant={sourceFilter === value ? 'default' : 'outline'}
                 className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
-                  transportFilter === value ? 'list-filter-badge-active' : ''
+                  sourceFilter === value ? 'list-filter-badge-active' : ''
                 }`}
               >
                 {label}
-                <span className={transportFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                <span className={sourceFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
                   {count}
                 </span>
               </Badge>
             </button>
           ))}
-          {transportFilter !== 'all' && (
+          {sourceFilter !== 'all' && (
             <button
-              onClick={() => setTransportFilter('all')}
+              onClick={() => setSourceFilter('all')}
               className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Clear filter"
+              aria-label="Clear source filter"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
-
-        <ButtonGroup className="list-search-group">
-          <Input
-            placeholder="Search by provider, transport, or capability…"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            aria-label="Search channels"
-            autoComplete="off"
-          />
-          <Button variant="outline" size="sm" aria-label="Search channels" tabIndex={-1}>
-            <Search className="w-4 h-4" />
-            Search
-          </Button>
-        </ButtonGroup>
       </div>
 
       {isLoading ? (
@@ -297,11 +358,16 @@ interface ChannelCardProps {
  */
 function ChannelCard({ manifest }: ChannelCardProps) {
   const iconPath = getChannelIconPath(manifest.key);
+  const extensionLabel = formatProviderExtensionLabel(
+    manifest.extension_display_name,
+    manifest.extension_name,
+    manifest.extension_version,
+  );
 
   return (
     <Card className="border-border/70">
-      <CardHeader className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
+        <CardHeader className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
               {iconPath ? (
@@ -331,6 +397,15 @@ function ChannelCard({ manifest }: ChannelCardProps) {
             </a>
           </Button>
         </div>
+        <ProviderMetadataBadges
+          visibility={manifest.visibility}
+          status={manifest.status}
+        />
+        {extensionLabel ? (
+          <CardDescription className="text-xs">
+            Package: {extensionLabel}
+          </CardDescription>
+        ) : null}
         <CardDescription className="leading-6">
           {manifest.description}
         </CardDescription>

@@ -7,17 +7,15 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from app.models.web_search import AgentWebSearchBinding
-from app.orchestration.web_search.registry import (
-    get_web_search_provider,
-    list_web_search_providers,
-)
 from app.orchestration.web_search.types import WebSearchProviderBinding
 from app.schemas.web_search import WebSearchBindingResponse
+from app.services.provider_registry_service import ProviderRegistryService
 from sqlmodel import Session, col, select
 
 if TYPE_CHECKING:
     from app.orchestration.web_search.types import (
         WebSearchExecutionResult,
+        WebSearchProvider,
         WebSearchQueryRequest,
     )
 
@@ -45,18 +43,26 @@ class WebSearchService:
         """Store the active database session for web-search operations."""
         self.db = db
 
+    def _list_web_search_providers(self) -> list[WebSearchProvider]:
+        """Return built-in and extension-backed web-search providers."""
+        return ProviderRegistryService(self.db).list_web_search_providers()
+
+    def _get_web_search_provider(self, provider_key: str) -> WebSearchProvider:
+        """Resolve one provider from the unified provider registry."""
+        return ProviderRegistryService(self.db).get_web_search_provider(provider_key)
+
     def list_catalog(self) -> list[dict[str, Any]]:
         """Return all installed web-search provider manifests."""
         return [
             {"manifest": provider.manifest.model_dump()}
-            for provider in list_web_search_providers()
+            for provider in self._list_web_search_providers()
         ]
 
     def _serialize_binding(
         self, binding: AgentWebSearchBinding
     ) -> WebSearchBindingResponse:
         """Render one binding with provider manifest metadata."""
-        provider = get_web_search_provider(binding.provider_key)
+        provider = self._get_web_search_provider(binding.provider_key)
         auth_config = _load_json_object(binding.auth_config)
         return WebSearchBindingResponse(
             id=binding.id or 0,
@@ -108,7 +114,7 @@ class WebSearchService:
         runtime_config: dict[str, Any],
     ) -> WebSearchBindingResponse:
         """Create a new agent web-search binding after provider validation."""
-        provider = get_web_search_provider(provider_key)
+        provider = self._get_web_search_provider(provider_key)
         provider.validate_config(auth_config, runtime_config)
 
         existing = self.db.exec(
@@ -150,7 +156,7 @@ class WebSearchService:
         if binding is None:
             raise ValueError("Web search binding not found.")
 
-        provider = get_web_search_provider(binding.provider_key)
+        provider = self._get_web_search_provider(binding.provider_key)
         next_auth = (
             auth_config
             if auth_config is not None
@@ -189,7 +195,7 @@ class WebSearchService:
         if binding is None:
             raise ValueError("Web search binding not found.")
 
-        provider = get_web_search_provider(binding.provider_key)
+        provider = self._get_web_search_provider(binding.provider_key)
         result = provider.test_connection(
             auth_config=_load_json_object(binding.auth_config),
             runtime_config=_load_json_object(binding.runtime_config),
@@ -210,7 +216,7 @@ class WebSearchService:
         runtime_config: dict[str, Any],
     ) -> dict[str, Any]:
         """Run a provider health check against unsaved form values."""
-        provider = get_web_search_provider(provider_key)
+        provider = self._get_web_search_provider(provider_key)
         provider.validate_config(auth_config, runtime_config)
         result = provider.test_connection(
             auth_config=auth_config,
@@ -268,7 +274,7 @@ class WebSearchService:
             agent_id=agent_id,
             provider_key=request.provider,
         )
-        provider = get_web_search_provider(binding.provider_key)
+        provider = self._get_web_search_provider(binding.provider_key)
         effective_request = request.model_copy(
             update={"provider": binding.provider_key}
         )

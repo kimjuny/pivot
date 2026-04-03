@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 from app.channels.providers import TelegramProvider
-from app.channels.registry import get_channel_provider, list_channel_providers
 from app.channels.work_wechat_socket import (
     decrypt_work_wechat_media,
     download_work_wechat_media,
@@ -32,11 +31,6 @@ from app.models.channel import (
 from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
 from app.orchestration.skills import select_skills_with_usage
-from app.orchestration.tool import get_tool_manager
-from app.orchestration.tool.builtin.programmatic_tool_call import (
-    make_programmatic_tool_call,
-)
-from app.orchestration.tool.manager import ToolManager
 from app.schemas.channel import (
     ChannelBindingResponse,
     ChannelLinkCompletionResponse,
@@ -44,7 +38,9 @@ from app.schemas.channel import (
     ChannelLinkTokenStatusResponse,
 )
 from app.services.agent_release_runtime_service import AgentReleaseRuntimeService
+from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
+from app.services.provider_registry_service import ProviderRegistryService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
@@ -53,10 +49,6 @@ from app.services.react_task_supervisor import (
 from app.services.session_service import SessionService
 from app.services.skill_service import (
     build_selected_skills_prompt_block,
-)
-from app.services.workspace_service import (
-    ensure_agent_workspace,
-    load_all_user_tool_metadata,
 )
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, col, desc, select
@@ -67,7 +59,9 @@ if TYPE_CHECKING:
         ChannelMessageContext,
         ChannelOutboundAction,
         ChannelProgressView,
+        ChannelProvider,
     )
+    from app.orchestration.tool.manager import ToolManager
 
 
 def _load_json_object(raw_value: str | None) -> dict[str, Any]:
@@ -105,18 +99,26 @@ class ChannelService:
         """Store the active database session for channel operations."""
         self.db = db
 
+    def _list_channel_providers(self) -> list[ChannelProvider]:
+        """Return built-in and extension-backed channel providers."""
+        return ProviderRegistryService(self.db).list_channel_providers()
+
+    def _get_channel_provider(self, channel_key: str) -> ChannelProvider:
+        """Resolve one channel provider from the unified provider registry."""
+        return ProviderRegistryService(self.db).get_channel_provider(channel_key)
+
     def list_catalog(self) -> list[dict[str, Any]]:
         """Return all installed channel manifests."""
         return [
             {"manifest": provider.manifest.model_dump()}
-            for provider in list_channel_providers()
+            for provider in self._list_channel_providers()
         ]
 
     def _serialize_binding(
         self, binding: AgentChannelBinding
     ) -> ChannelBindingResponse:
         """Render one binding with manifest metadata and generated endpoints."""
-        provider = get_channel_provider(binding.channel_key)
+        provider = self._get_channel_provider(binding.channel_key)
         auth_config = _load_json_object(binding.auth_config)
         return ChannelBindingResponse(
             id=binding.id or 0,
@@ -163,7 +165,7 @@ class ChannelService:
         runtime_config: dict[str, Any],
     ) -> ChannelBindingResponse:
         """Create a new agent channel binding after provider validation."""
-        provider = get_channel_provider(channel_key)
+        provider = self._get_channel_provider(channel_key)
         provider.validate_config(auth_config, runtime_config)
         binding = AgentChannelBinding(
             agent_id=agent_id,
@@ -194,7 +196,7 @@ class ChannelService:
         if binding is None:
             raise ValueError("Channel binding not found.")
 
-        provider = get_channel_provider(binding.channel_key)
+        provider = self._get_channel_provider(binding.channel_key)
         next_auth = (
             auth_config
             if auth_config is not None
@@ -259,7 +261,7 @@ class ChannelService:
         binding = self.db.get(AgentChannelBinding, binding_id)
         if binding is None:
             raise ValueError("Channel binding not found.")
-        provider = get_channel_provider(binding.channel_key)
+        provider = self._get_channel_provider(binding.channel_key)
         result = provider.test_connection(
             _load_json_object(binding.auth_config),
             _load_json_object(binding.runtime_config),
@@ -285,7 +287,7 @@ class ChannelService:
         Why: setup should let users validate credentials before persisting a
         new binding row, otherwise failed experiments leave behind junk rows.
         """
-        provider = get_channel_provider(channel_key)
+        provider = self._get_channel_provider(channel_key)
         provider.validate_config(auth_config, runtime_config)
         result = provider.test_connection(
             auth_config,
@@ -305,7 +307,7 @@ class ChannelService:
         binding = self.db.get(AgentChannelBinding, row.channel_binding_id)
         if binding is None:
             raise ValueError("Channel binding not found.")
-        provider = get_channel_provider(row.provider_key)
+        provider = self._get_channel_provider(row.provider_key)
         status = "used" if row.used_at is not None else "pending"
         if _ensure_utc(row.expires_at) < datetime.now(UTC):
             status = "expired"
@@ -1253,33 +1255,15 @@ class ChannelService:
         username: str,
         agent_id: int,
         raw_tool_ids: str | None,
+        extension_bundle: list[dict[str, Any]],
     ) -> ToolManager:
         """Build the request-scoped tool manager used by ReAct execution."""
-        ensure_agent_workspace(username, agent_id)
-        shared_manager = get_tool_manager()
-        request_tool_manager = ToolManager()
-        for meta in shared_manager.list_tools():
-            request_tool_manager.add_entry(meta)
-
-        private_metas = load_all_user_tool_metadata(username)
-        for meta in private_metas:
-            if request_tool_manager.get_tool(meta.name) is None:
-                request_tool_manager.add_entry(meta)
-
-        ptc_meta = request_tool_manager.get_tool("programmatic_tool_call")
-        if ptc_meta is not None:
-            full_callables = {m.name: m.func for m in request_tool_manager.list_tools()}
-            ptc_meta.func = make_programmatic_tool_call(full_callables)
-
-        allowed_tools = self._parse_name_allowlist(raw_tool_ids)
-        if allowed_tools is None:
-            return request_tool_manager
-
-        filtered_manager = ToolManager()
-        for meta in request_tool_manager.list_tools():
-            if meta.name in allowed_tools:
-                filtered_manager.add_entry(meta)
-        return filtered_manager
+        return ExtensionService(self.db).build_request_tool_manager(
+            username=username,
+            agent_id=agent_id,
+            raw_tool_ids=raw_tool_ids,
+            extension_bundle=extension_bundle,
+        )
 
     async def _resolve_skills_text(
         self,
@@ -1289,6 +1273,7 @@ class ChannelService:
         message: str,
         session_id: str,
         available_skills: list[dict[str, Any]],
+        extra_skills: list[dict[str, str]] | None = None,
     ) -> str:
         """Optionally resolve skills through the configured resolver LLM."""
         allowed_skill_names = self._allowed_skill_names(
@@ -1301,6 +1286,7 @@ class ChannelService:
                 session=self.db,
                 username=username,
                 selected_skills=allowed_skill_names,
+                extra_skills=extra_skills,
             )
 
         started_at = perf_counter()
@@ -1310,6 +1296,7 @@ class ChannelService:
                 session=self.db,
                 username=username,
                 selected_skills=allowed_skill_names,
+                extra_skills=extra_skills,
             )
 
         try:
@@ -1335,6 +1322,7 @@ class ChannelService:
                     session=self.db,
                     username=username,
                     selected_skills=selected,
+                    extra_skills=extra_skills,
                 )
         except Exception:
             elapsed_ms = int((perf_counter() - started_at) * 1000)
@@ -1343,6 +1331,7 @@ class ChannelService:
             session=self.db,
             username=username,
             selected_skills=allowed_skill_names,
+            extra_skills=extra_skills,
         )
 
     def _allowed_skill_names(
@@ -1389,7 +1378,7 @@ class ChannelService:
         binding = self.db.get(AgentChannelBinding, binding_id)
         if binding is None:
             raise ValueError("Channel binding not found.")
-        provider = get_channel_provider(binding.channel_key)
+        provider = self._get_channel_provider(binding.channel_key)
         if not isinstance(provider, TelegramProvider):
             raise ValueError("This binding does not support manual polling.")
 

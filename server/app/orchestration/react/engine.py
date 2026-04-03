@@ -1132,6 +1132,8 @@ class ReactEngine:
         self,
         task: ReactTask,
         selected_skills_text: str = "",
+        task_bootstrap_prefix_blocks: list[str] | None = None,
+        task_bootstrap_suffix_blocks: list[str] | None = None,
         turn_user_message: str | None = None,
         turn_files: list[FileAssetListItem] | None = None,
         turn_file_blocks: list[dict[str, Any]] | None = None,
@@ -1143,6 +1145,10 @@ class ReactEngine:
             task: The ReactTask to execute.
             selected_skills_text: Selected skill markdown block injected in the
                 once-per-task bootstrap user prompt.
+            task_bootstrap_prefix_blocks: Extra prompt blocks injected before the
+                standard task bootstrap body.
+            task_bootstrap_suffix_blocks: Extra prompt blocks injected after the
+                standard task bootstrap body.
             turn_user_message: User input of the current turn (used for chat history).
             turn_files: Uploaded file summaries for chat history and prompting.
             turn_file_blocks: Neutral multimodal content blocks for this turn.
@@ -1207,6 +1213,8 @@ class ReactEngine:
                 build_runtime_user_prompt(
                     tool_manager=self.tool_manager,
                     skills=selected_skills_text,
+                    prefix_blocks=task_bootstrap_prefix_blocks,
+                    suffix_blocks=task_bootstrap_suffix_blocks,
                 ),
             )
             self._log_messages_pretty(
@@ -1562,6 +1570,16 @@ class ReactEngine:
                         "iteration": task.iteration,
                         "data": {
                             "tool_calls": tool_calls_data,
+                            "tool_results": tool_results_data,
+                        },
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                    yield {
+                        "type": "tool_result",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "data": {
                             "tool_results": tool_results_data,
                         },
                         "timestamp": datetime.now(UTC).isoformat(),

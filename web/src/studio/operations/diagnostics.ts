@@ -20,6 +20,8 @@ export interface OperationsIssueTask {
   failedRecursionCount: number;
   /** Latest task-scoped error when one exists. */
   latestError: OperationsSessionLatestError | null;
+  /** Iteration index associated with the latest task-scoped recursion error. */
+  latestErrorIteration: number | null;
 }
 
 /**
@@ -99,9 +101,11 @@ function buildTaskLatestError(
 ): {
   failedRecursionCount: number;
   latestError: OperationsSessionLatestError | null;
+  latestErrorIteration: number | null;
 } {
   let failedRecursionCount = 0;
   let latestError: OperationsSessionLatestError | null = null;
+  let latestErrorIteration: number | null = null;
 
   task.recursions.forEach((recursion) => {
     if (recursion.status === "error") {
@@ -127,6 +131,7 @@ function buildTaskLatestError(
 
     if (isNewerTimestamp(candidate.timestamp, latestError?.timestamp ?? null)) {
       latestError = candidate;
+      latestErrorIteration = recursion.iteration;
     }
   });
 
@@ -141,6 +146,7 @@ function buildTaskLatestError(
   return {
     failedRecursionCount,
     latestError,
+    latestErrorIteration,
   };
 }
 
@@ -212,6 +218,7 @@ export function summarizeOperationsTasks(
       updatedAt: task.updated_at,
       failedRecursionCount: taskDiagnostics.failedRecursionCount,
       latestError: taskDiagnostics.latestError,
+      latestErrorIteration: taskDiagnostics.latestErrorIteration,
     });
   });
 

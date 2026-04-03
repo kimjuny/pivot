@@ -45,12 +45,18 @@ def build_runtime_system_prompt() -> str:
 def build_runtime_user_prompt(
     tool_manager: ToolManager | None = None,
     skills: str = "",
+    prefix_blocks: list[str] | None = None,
+    suffix_blocks: list[str] | None = None,
 ) -> str:
     """Build the task bootstrap user prompt injected once per task.
 
     Args:
         tool_manager: Optional tool manager to describe available tools.
         skills: Selected skills full-text block for prompt injection.
+        prefix_blocks: Additional prompt blocks inserted before the standard
+            bootstrap template body.
+        suffix_blocks: Additional prompt blocks inserted after the standard
+            bootstrap template body.
 
     Returns:
         Rendered user prompt text with task-scoped dynamic context injected.
@@ -59,9 +65,15 @@ def build_runtime_user_prompt(
     if tool_manager:
         tools_description = tool_manager.to_text_catalog()
 
-    return _REACT_USER_PROMPT.replace(
+    rendered_prompt = _REACT_USER_PROMPT.replace(
         "{{tools_description}}", tools_description
     ).replace("{{skills}}", skills)
+    ordered_sections = [
+        *[block.strip() for block in (prefix_blocks or []) if block.strip()],
+        rendered_prompt.strip(),
+        *[block.strip() for block in (suffix_blocks or []) if block.strip()],
+    ]
+    return "\n\n".join(ordered_sections)
 
 
 def build_runtime_task_bootstrap_message(user_prompt: str) -> dict[str, Any]:
