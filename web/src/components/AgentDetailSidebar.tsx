@@ -220,6 +220,9 @@ interface AgentDetailSidebarProps {
     onAgentDraftUpdate?: (agent: Agent) => void;
     onChannelBindingsLoaded?: (bindings: SidebarChannel[]) => void;
     onWebSearchBindingsLoaded?: (bindings: SidebarWebSearchBinding[]) => void;
+    onExtensionBindingsChanged?: () => void | Promise<void>;
+    onChannelBindingsChanged?: () => void | Promise<void>;
+    onWebSearchBindingsChanged?: () => void | Promise<void>;
 }
 
 /**
@@ -237,6 +240,9 @@ function AgentDetailSidebar({
     onAgentDraftUpdate,
     onChannelBindingsLoaded,
     onWebSearchBindingsLoaded,
+    onExtensionBindingsChanged,
+    onChannelBindingsChanged,
+    onWebSearchBindingsChanged,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
     const [isScenesOpen, setIsScenesOpen] = useState(true);
@@ -693,6 +699,7 @@ function AgentDetailSidebar({
             await deleteAgentChannel(bindingId);
             toast.success('Channel binding removed');
             await loadChannels();
+            await onChannelBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(error.message);
@@ -732,6 +739,7 @@ function AgentDetailSidebar({
             await deleteAgentWebSearchBinding(bindingId);
             toast.success('Web search provider removed');
             await loadWebSearchBindings();
+            await onWebSearchBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(error.message);
@@ -792,6 +800,7 @@ function AgentDetailSidebar({
             await deleteAgentExtensionBinding(agent.id, extensionInstallationId);
             toast.success('Extension removed');
             await loadExtensionPackages();
+            await onExtensionBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(error.message);
@@ -1691,6 +1700,7 @@ function AgentDetailSidebar({
                     initialPackage={editingExtensionPackage}
                     onSaved={async () => {
                         await loadExtensionPackages();
+                        await onExtensionBindingsChanged?.();
                     }}
                 />
             )}
@@ -1704,6 +1714,7 @@ function AgentDetailSidebar({
                     initialBinding={editingChannel}
                     onSaved={async () => {
                         await loadChannels();
+                        await onChannelBindingsChanged?.();
                     }}
                 />
             )}
@@ -1719,6 +1730,7 @@ function AgentDetailSidebar({
                     initialBinding={editingWebSearchBinding}
                     onSaved={async () => {
                         await loadWebSearchBindings();
+                        await onWebSearchBindingsChanged?.();
                     }}
                 />
             )}

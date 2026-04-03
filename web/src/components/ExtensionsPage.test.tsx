@@ -31,6 +31,7 @@ describe("ExtensionsPage", () => {
         package_id: "@acme/providers",
         display_name: "ACME Providers",
         description: "Provider package",
+        readme_markdown: "# Providers",
         latest_version: "1.0.0",
         active_version_count: 1,
         disabled_version_count: 0,

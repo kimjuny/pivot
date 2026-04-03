@@ -11,6 +11,7 @@ import {
   deleteChatImage,
   fetchChatFileBlob,
   fetchChatImageBlob,
+  getExtensionInstallationConfiguration,
   getAgentExtensionPackages,
   getExtensionHookExecutions,
   importExtensionBundle,
@@ -20,6 +21,7 @@ import {
   setHttpClient,
   uploadChatFile,
   uploadChatImage,
+  updateExtensionInstallationConfiguration,
   updateSession,
 } from './api';
 
@@ -304,6 +306,81 @@ describe('chat file api helpers', () => {
       }),
     );
     expect(requestInit.body).toBeInstanceOf(FormData);
+  });
+
+  it('loads and saves extension installation configuration', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            installation_id: 9,
+            package_id: '@acme/memory',
+            version: '1.0.0',
+            configuration_schema: {
+              installation: {
+                fields: [
+                  {
+                    key: 'base_url',
+                    label: 'Base URL',
+                    type: 'string',
+                    description: 'Memory service URL',
+                    required: true,
+                    default: 'http://localhost:8765',
+                    placeholder: 'http://localhost:8765',
+                  },
+                ],
+              },
+              binding: { fields: [] },
+            },
+            config: {
+              base_url: 'http://localhost:8765',
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            installation_id: 9,
+            package_id: '@acme/memory',
+            version: '1.0.0',
+            configuration_schema: {
+              installation: { fields: [] },
+              binding: { fields: [] },
+            },
+            config: {
+              base_url: 'http://mem0.local',
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+
+    const state = await getExtensionInstallationConfiguration(9);
+    expect(state.config.base_url).toBe('http://localhost:8765');
+
+    const updated = await updateExtensionInstallationConfiguration(9, {
+      base_url: 'http://mem0.local',
+    });
+    expect(updated.config.base_url).toBe('http://mem0.local');
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('/extensions/installations/9/configuration'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          config: {
+            base_url: 'http://mem0.local',
+          },
+        }),
+      }),
+    );
   });
 
   it('previews extension bundles before local trust is granted', async () => {

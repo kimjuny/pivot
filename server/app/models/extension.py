@@ -28,6 +28,8 @@ class ExtensionInstallation(SQLModel, table=True):
         artifact_size_bytes: Size of the persisted extension artifact in bytes.
         install_root: Absolute directory path containing the materialized runtime
             package used for local imports and Python module loading.
+        config_json: Persisted installation-scoped configuration values derived
+            from the package's declared configuration schema.
         source: Installation source such as ``manual``.
         trust_status: Trust state such as ``trusted_local`` or ``verified``.
         trust_source: Trust provenance such as ``local_import`` or
@@ -57,6 +59,7 @@ class ExtensionInstallation(SQLModel, table=True):
     artifact_digest: str = Field(index=True, max_length=64)
     artifact_size_bytes: int = Field(default=0)
     install_root: str = Field(unique=True, max_length=2048)
+    config_json: str | None = Field(default=None)
     source: str = Field(default="manual", max_length=32)
     trust_status: str = Field(default="trusted_local", index=True, max_length=32)
     trust_source: str = Field(default="local_import", max_length=32)

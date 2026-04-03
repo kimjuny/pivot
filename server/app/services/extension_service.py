@@ -36,11 +36,15 @@ from app.services.workspace_service import ensure_agent_workspace, workspace_roo
 from sqlmodel import Session, col, select
 
 _MANIFEST_FILENAME = "manifest.json"
+_README_MARKDOWN_FILENAME = "README.md"
 _SKILL_MARKDOWN_FILENAME = "SKILL.md"
 _VALID_EXTENSION_SCOPE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_EXTENSION_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_PROVIDER_LOCAL_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+_SUPPORTED_CONFIGURATION_FIELD_TYPES = frozenset(
+    {"string", "secret", "number", "boolean"}
+)
 _TOOL_ENTRY_TYPES = frozenset({"tools"})
 _ENTRYPOINT_TYPES = frozenset(
     {"hooks", "channel_providers", "web_search_providers"}
@@ -147,10 +151,24 @@ def _hash_payload(payload: Any) -> str:
 
 
 def _extensions_root() -> Path:
-    """Return the runtime materialization root for installed extension packages."""
+    """Return the package-centric local root for installed extension versions."""
     root = workspace_root() / "extensions"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _installation_version_root(*, scope: str, name: str, version: str) -> Path:
+    """Return the local directory that owns one package version."""
+    return _extensions_root() / scope / name / version
+
+
+def _installation_runtime_root(*, scope: str, name: str, version: str) -> Path:
+    """Return the extracted runtime directory for one package version."""
+    return _installation_version_root(
+        scope=scope,
+        name=name,
+        version=version,
+    ) / "runtime"
 
 
 def _package_id(scope: str, name: str) -> str:
@@ -207,6 +225,189 @@ def _build_contribution_summary(
             field_name="key",
         ),
     }
+
+
+def _normalize_configuration_schema(
+    raw_configuration: object,
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Validate and normalize one manifest ``configuration`` section."""
+    normalized_sections = {
+        "installation": {"fields": []},
+        "binding": {"fields": []},
+    }
+    if raw_configuration is None:
+        return normalized_sections
+    if not isinstance(raw_configuration, dict):
+        raise ValueError("manifest.json configuration must be an object.")
+
+    for section_name in ("installation", "binding"):
+        raw_section = raw_configuration.get(section_name)
+        if raw_section is None:
+            continue
+        if not isinstance(raw_section, dict):
+            raise ValueError(f"configuration.{section_name} must be an object.")
+        raw_fields = raw_section.get("fields", [])
+        if not isinstance(raw_fields, list):
+            raise ValueError(
+                f"configuration.{section_name}.fields must be a JSON array."
+            )
+
+        normalized_fields: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        for index, raw_field in enumerate(raw_fields, start=1):
+            if not isinstance(raw_field, dict):
+                raise ValueError(
+                    f"configuration.{section_name}.fields[{index}] must be an object."
+                )
+
+            raw_key = raw_field.get("key")
+            if not isinstance(raw_key, str) or not raw_key.strip():
+                raise ValueError(
+                    f"configuration.{section_name}.fields[{index}] must declare a key."
+                )
+            key = raw_key.strip()
+            if key in seen_keys:
+                raise ValueError(
+                    f"Duplicate configuration field '{key}' in {section_name}."
+                )
+            seen_keys.add(key)
+
+            raw_type = raw_field.get("type")
+            if not isinstance(raw_type, str) or not raw_type.strip():
+                raise ValueError(
+                    f"configuration.{section_name}.fields[{index}] must declare a type."
+                )
+            field_type = raw_type.strip().lower()
+            if field_type not in _SUPPORTED_CONFIGURATION_FIELD_TYPES:
+                raise ValueError(
+                    f"Unsupported configuration field type '{field_type}'."
+                )
+
+            raw_required = raw_field.get("required", False)
+            if not isinstance(raw_required, bool):
+                raise ValueError(
+                    f"configuration.{section_name}.fields[{index}].required must be a boolean."
+                )
+            raw_label = raw_field.get("label")
+            raw_description = raw_field.get("description")
+            raw_placeholder = raw_field.get("placeholder")
+            normalized_label = (
+                raw_label.strip()
+                if isinstance(raw_label, str) and raw_label.strip()
+                else key
+            )
+            normalized_description = (
+                raw_description.strip()
+                if isinstance(raw_description, str)
+                else ""
+            )
+            normalized_placeholder = (
+                raw_placeholder.strip()
+                if isinstance(raw_placeholder, str)
+                else ""
+            )
+
+            normalized_field: dict[str, Any] = {
+                "key": key,
+                "label": normalized_label,
+                "type": field_type,
+                "description": normalized_description,
+                "required": raw_required,
+                "placeholder": normalized_placeholder,
+            }
+            if "default" in raw_field:
+                normalized_field["default"] = raw_field.get("default")
+            _normalize_config_value(
+                value=normalized_field.get("default"),
+                field=normalized_field,
+                field_path=(
+                    f"configuration.{section_name}.fields[{index}].default"
+                ),
+                allow_missing=True,
+            )
+            normalized_fields.append(normalized_field)
+
+        normalized_sections[section_name] = {"fields": normalized_fields}
+    return normalized_sections
+
+
+def _normalize_config_value(
+    *,
+    value: Any,
+    field: dict[str, Any],
+    field_path: str,
+    allow_missing: bool = False,
+) -> Any:
+    """Validate one configuration value against a normalized field schema."""
+    if value is None:
+        if allow_missing:
+            return None
+        raise ValueError(f"{field_path} is required.")
+
+    field_type = str(field.get("type", "string"))
+    if field_type in {"string", "secret"}:
+        if not isinstance(value, str):
+            raise ValueError(f"{field_path} must be a string.")
+        return value
+    if field_type == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError(f"{field_path} must be a boolean.")
+        return value
+    if field_type == "number":
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise ValueError(f"{field_path} must be a number.")
+        return value
+    raise ValueError(f"{field_path} uses unsupported field type '{field_type}'.")
+
+
+def _normalize_config_payload(
+    *,
+    schema_section: dict[str, Any],
+    config: dict[str, Any] | None,
+    field_path: str,
+    enforce_required: bool = True,
+) -> dict[str, Any]:
+    """Validate one config payload against one normalized schema section."""
+    normalized_config = config or {}
+    if not isinstance(normalized_config, dict):
+        raise ValueError(f"{field_path} must be a JSON object.")
+
+    raw_fields = schema_section.get("fields", [])
+    fields = raw_fields if isinstance(raw_fields, list) else []
+    field_map = {
+        str(field.get("key")): field
+        for field in fields
+        if isinstance(field, dict) and isinstance(field.get("key"), str)
+    }
+    if not field_map:
+        return normalized_config
+    normalized_result: dict[str, Any] = {}
+
+    for key in normalized_config:
+        if key not in field_map:
+            raise ValueError(f"{field_path}.{key} is not declared by the extension.")
+
+    for key, field in field_map.items():
+        if key in normalized_config:
+            normalized_result[key] = _normalize_config_value(
+                value=normalized_config[key],
+                field=field,
+                field_path=f"{field_path}.{key}",
+            )
+            continue
+
+        if "default" in field:
+            normalized_result[key] = _normalize_config_value(
+                value=field.get("default"),
+                field=field,
+                field_path=f"{field_path}.{key}",
+            )
+            continue
+
+        if enforce_required and bool(field.get("required", False)):
+            raise ValueError(f"{field_path}.{key} is required.")
+
+    return normalized_result
 
 
 def _safe_relative_path(raw_path: str, *, field_name: str) -> PurePosixPath:
@@ -633,6 +834,9 @@ def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> di
     normalized_compatibility = (
         compatibility if isinstance(compatibility, dict) else {}
     )
+    normalized_configuration = _normalize_configuration_schema(
+        raw_manifest.get("configuration")
+    )
 
     publisher = raw_manifest.get("publisher")
     normalized_publisher = publisher if isinstance(publisher, dict) else {}
@@ -666,6 +870,7 @@ def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> di
             else None
         ),
         "contributions": normalized_contributions,
+        "configuration": normalized_configuration,
         "permissions": normalized_permissions,
         "compatibility": normalized_compatibility,
     }
@@ -780,6 +985,7 @@ class ExtensionService:
                     "name": latest.name,
                     "display_name": latest.display_name,
                     "description": latest.description,
+                    "readme_markdown": self._read_installation_readme_markdown(latest),
                     "latest_version": latest.version,
                     "active_version_count": sum(
                         1 for item in ordered_installations if item.status == "active"
@@ -792,6 +998,24 @@ class ExtensionService:
             )
 
         return sorted(packages, key=lambda item: str(item["package_id"]))
+
+    def _read_installation_readme_markdown(
+        self,
+        installation: ExtensionInstallation,
+    ) -> str:
+        """Return root-level README markdown for one installation, if present.
+
+        Why: extension detail pages should explain what one package does without
+        forcing operators to inspect the on-disk package contents manually.
+        """
+        install_root = self._ensure_materialized_installation_root(installation)
+        readme_path = install_root / _README_MARKDOWN_FILENAME
+        if not readme_path.is_file():
+            return ""
+        try:
+            return readme_path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
 
     def list_agent_package_choices(self, agent_id: int) -> list[dict[str, Any]]:
         """Return package-level extension choices for one agent."""
@@ -1017,23 +1241,30 @@ class ExtensionService:
             )
         ).first()
         if existing is not None:
-            raise ValueError(
-                "Extension version is already installed: "
-                f"{existing.package_id}@{existing.version}."
-            )
+            if existing.manifest_hash != manifest_hash:
+                raise ValueError(
+                    "A different extension payload is already installed at "
+                    f"{existing.package_id}@{existing.version}. Bump the version "
+                    "before importing updated contents."
+                )
+            self._ensure_materialized_installation_root(existing)
+            return existing
 
-        install_root = (
-            _extensions_root()
-            / normalized_manifest["scope"]
-            / normalized_manifest["name"]
-            / normalized_manifest["version"]
+        version_root = _installation_version_root(
+            scope=normalized_manifest["scope"],
+            name=normalized_manifest["name"],
+            version=normalized_manifest["version"],
         )
-        if install_root.exists():
-            raise ValueError(
-                f"Install destination already exists for "
-                f"{_package_id(normalized_manifest['scope'], normalized_manifest['name'])}@"
-                f"{normalized_manifest['version']}."
-            )
+        install_root = _installation_runtime_root(
+            scope=normalized_manifest["scope"],
+            name=normalized_manifest["name"],
+            version=normalized_manifest["version"],
+        )
+        if version_root.exists():
+            # Local package directories are runtime caches plus persisted
+            # artifacts. If the database record is gone, treat the leftover
+            # directory as an orphaned cache and recreate it from scratch.
+            shutil.rmtree(version_root, ignore_errors=True)
         stored_artifact = self.artifact_storage.store_directory(
             source_dir=package_root,
             scope=normalized_manifest["scope"],
@@ -1048,7 +1279,7 @@ class ExtensionService:
                 target_dir=install_root,
             )
         except Exception:
-            shutil.rmtree(install_root, ignore_errors=True)
+            shutil.rmtree(version_root, ignore_errors=True)
             self.artifact_storage.delete_artifact(
                 artifact_key=stored_artifact.artifact_key
             )
@@ -1069,6 +1300,17 @@ class ExtensionService:
             artifact_digest=stored_artifact.artifact_digest,
             artifact_size_bytes=stored_artifact.size_bytes,
             install_root=str(install_root.resolve()),
+            config_json=_dump_json(
+                _normalize_config_payload(
+                    schema_section=self._get_configuration_schema_section(
+                        manifest=normalized_manifest,
+                        section_name="installation",
+                    ),
+                    config={},
+                    field_path="installation_config",
+                    enforce_required=False,
+                )
+            ),
             source=source,
             trust_status=trust_status,
             trust_source=trust_source,
@@ -1087,11 +1329,51 @@ class ExtensionService:
             self.db.refresh(installation)
         except Exception:
             self.db.rollback()
-            shutil.rmtree(install_root, ignore_errors=True)
+            shutil.rmtree(version_root, ignore_errors=True)
             self.artifact_storage.delete_artifact(
                 artifact_key=stored_artifact.artifact_key
             )
             raise
+        return installation
+
+    def get_installation_configuration_state(
+        self,
+        *,
+        installation_id: int,
+    ) -> dict[str, Any]:
+        """Return one installation's declared configuration schema and values."""
+        installation = self._get_installation_or_raise(installation_id)
+        manifest = self._load_manifest_from_installation(installation)
+        return {
+            "installation_id": installation.id or 0,
+            "package_id": installation.package_id,
+            "version": installation.version,
+            "schema": manifest.get("configuration", {}),
+            "config": self._parse_config(installation.config_json),
+        }
+
+    def update_installation_config(
+        self,
+        *,
+        installation_id: int,
+        config: dict[str, Any],
+    ) -> ExtensionInstallation:
+        """Validate and persist installation-scoped configuration values."""
+        installation = self._get_installation_or_raise(installation_id)
+        manifest = self._load_manifest_from_installation(installation)
+        normalized_config = _normalize_config_payload(
+            schema_section=self._get_configuration_schema_section(
+                manifest=manifest,
+                section_name="installation",
+            ),
+            config=config,
+            field_path="installation_config",
+        )
+        installation.config_json = _dump_json(normalized_config)
+        installation.updated_at = datetime.now(UTC)
+        self.db.add(installation)
+        self.db.commit()
+        self.db.refresh(installation)
         return installation
 
     def install_bundle(
@@ -1165,6 +1447,7 @@ class ExtensionService:
     ) -> AgentExtensionBinding:
         """Create or update one agent-extension binding."""
         installation = self._get_installation_or_raise(extension_installation_id)
+        manifest = self._load_manifest_from_installation(installation)
         self._validate_installation_binding_state(
             installation=installation,
             enabled=enabled,
@@ -1175,6 +1458,14 @@ class ExtensionService:
             current_extension_installation_id=extension_installation_id,
         )
 
+        normalized_config = _normalize_config_payload(
+            schema_section=self._get_configuration_schema_section(
+                manifest=manifest,
+                section_name="binding",
+            ),
+            config=config or {},
+            field_path="binding_config",
+        )
         statement = select(AgentExtensionBinding).where(
             AgentExtensionBinding.agent_id == agent_id,
             AgentExtensionBinding.extension_installation_id == extension_installation_id,
@@ -1187,14 +1478,14 @@ class ExtensionService:
                 extension_installation_id=extension_installation_id,
                 enabled=enabled,
                 priority=priority,
-                config_json=_dump_json(config or {}),
+                config_json=_dump_json(normalized_config),
                 created_at=now,
                 updated_at=now,
             )
         else:
             binding.enabled = enabled
             binding.priority = priority
-            binding.config_json = _dump_json(config or {})
+            binding.config_json = _dump_json(normalized_config)
             binding.updated_at = now
 
         self.db.add(binding)
@@ -1256,6 +1547,7 @@ class ExtensionService:
                     raise ValueError("Each binding config must be a JSON object.")
 
                 installation = self._get_installation_or_raise(installation_id)
+                manifest = self._load_manifest_from_installation(installation)
                 self._validate_installation_binding_state(
                     installation=installation,
                     enabled=enabled,
@@ -1265,6 +1557,14 @@ class ExtensionService:
                         "Each extension package may appear only once in bindings."
                     )
                 requested_package_names.add(installation.package_id)
+                normalized_config = _normalize_config_payload(
+                    schema_section=self._get_configuration_schema_section(
+                        manifest=manifest,
+                        section_name="binding",
+                    ),
+                    config=config,
+                    field_path="binding_config",
+                )
 
                 binding = existing_bindings.get(installation_id)
                 if binding is None:
@@ -1276,7 +1576,7 @@ class ExtensionService:
 
                 binding.enabled = enabled
                 binding.priority = priority
-                binding.config_json = _dump_json(config)
+                binding.config_json = _dump_json(normalized_config)
                 binding.updated_at = now
                 self.db.add(binding)
 
@@ -1371,6 +1671,7 @@ class ExtensionService:
             }
 
         install_root = Path(installation.install_root)
+        version_root = install_root.parent
         binding_statement = select(AgentExtensionBinding).where(
             AgentExtensionBinding.extension_installation_id == installation_id
         )
@@ -1379,8 +1680,8 @@ class ExtensionService:
 
         self.db.delete(installation)
         self.db.commit()
-        if install_root.exists():
-            shutil.rmtree(install_root, ignore_errors=True)
+        if version_root.exists():
+            shutil.rmtree(version_root, ignore_errors=True)
         self.artifact_storage.delete_artifact(artifact_key=installation.artifact_key)
 
         return {
@@ -1534,7 +1835,9 @@ class ExtensionService:
             "hub_artifact_digest": installation.hub_artifact_digest,
             "install_root": str(install_root),
             "priority": priority,
-            "config": config or {},
+            "configuration": manifest.get("configuration", {}),
+            "installation_config": self._parse_config(installation.config_json),
+            "binding_config": config or {},
             "tools": [
                 {
                     "name": tool["name"],
@@ -1766,6 +2069,24 @@ class ExtensionService:
                 f"Stored manifest for {installation.package_id}@{installation.version} is invalid."
             )
         return parsed
+
+    @staticmethod
+    def _get_configuration_schema_section(
+        *,
+        manifest: dict[str, Any],
+        section_name: str,
+    ) -> dict[str, Any]:
+        """Return one normalized configuration schema section from a manifest."""
+        raw_configuration = manifest.get("configuration", {})
+        if not isinstance(raw_configuration, dict):
+            return {"fields": []}
+        raw_section = raw_configuration.get(section_name, {})
+        if not isinstance(raw_section, dict):
+            return {"fields": []}
+        raw_fields = raw_section.get("fields", [])
+        if not isinstance(raw_fields, list):
+            return {"fields": []}
+        return {"fields": raw_fields}
 
     @staticmethod
     def _parse_package_id(package_id: str) -> tuple[str, str]:

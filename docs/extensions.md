@@ -76,6 +76,7 @@ Ready-to-import examples in this repository:
 
 - [acme-memory](/Users/erickim/Documents/学习/TRAE/hackon-project/pivot/server/examples/extensions/acme-memory)
 - [acme-providers](/Users/erickim/Documents/学习/TRAE/hackon-project/pivot/server/examples/extensions/acme-providers)
+- [mem0 extension scaffold](/Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/extension)
 
 ## Manifest
 
@@ -164,6 +165,11 @@ Current contribution declarations:
 - `skills[*].name`
 - `skills[*].path`
 
+Packages may also declare runtime configuration:
+
+- `configuration.installation.fields[*]`
+- `configuration.binding.fields[*]`
+
 Validation rules worth knowing:
 
 - `scope` and `name` must be simple lowercase identifiers
@@ -172,6 +178,62 @@ Validation rules worth knowing:
 - provider key scope must match `manifest.json.scope`
 - hook `event` must be one of the supported lifecycle events
 - hook `mode` must be `sync` or `async`
+
+### Configuration Schema
+
+External-service extensions usually need setup values such as:
+
+- service base URL
+- optional service defaults that truly belong to Pivot-side setup
+
+Declare them in `manifest.json`:
+
+```json
+{
+  "configuration": {
+    "installation": {
+      "fields": [
+        {
+          "key": "base_url",
+          "label": "Mem0 Server URL",
+          "type": "string",
+          "required": true,
+          "placeholder": "http://localhost:8765"
+        }
+      ]
+    },
+    "binding": {
+      "fields": []
+    }
+  }
+}
+```
+
+Supported field types today:
+
+- `string`
+- `secret`
+- `number`
+- `boolean`
+
+Field shape:
+
+- `key`
+- `label`
+- `type`
+- `description`
+- `required`
+- `default`
+- `placeholder`
+
+Current behavior:
+
+- installation-level configuration can be edited in the Extension detail `Setup`
+  tab
+- installation-level values are injected into hook context as
+  `installation_config`
+- binding-level schema is already part of the manifest contract and binding
+  values are injected into hook context as `binding_config`
 
 ## Hooks
 
@@ -241,6 +303,9 @@ The exact shape depends on the event, but these top-level fields are stable:
 - `timestamp`
 - `runtime`
 - `event_payload`
+- `installation_config`
+- `binding_config`
+- `extension`
 
 Task-level hooks also receive a `task` snapshot. Today that includes:
 
@@ -278,6 +343,19 @@ Example task hook context:
 Iteration-level hooks receive `event_payload` instead of the task snapshot as
 their main event-specific input.
 
+For external-service extensions, the most important config fields are:
+
+- `installation_config`
+  Values configured once per installed extension version, such as `base_url`.
+- `binding_config`
+  Optional agent-level overrides. Keep this empty unless the extension truly
+  needs per-agent controls.
+
+If one external service needs runtime isolation, prefer deriving that scope
+inside the hook from stable context such as the current user and agent instead
+of hard-coding it in setup. For example, a memory extension can send one
+request-level namespace like `user:{user_id}:{username}:agent:{agent_id}`.
+
 ### Hook Return Value
 
 A hook must return a list of effect dictionaries:
@@ -303,9 +381,9 @@ return [
     {
         "type": "emit_event",
         "payload": {
-            "type": "memory_persisted",
+            "type": "observe",
             "data": {
-                "kind": "external_memory_write",
+                "type": "memory_persisted",
                 "stored_count": 3,
             },
         },
@@ -390,8 +468,8 @@ def persist_memory(context: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "type": "emit_event",
             "payload": {
-                "type": "memory_persisted",
-                "data": {"kind": "external_memory_write"},
+                "type": "observe",
+                "data": {"type": "memory_persisted"},
             },
         }
     ]
@@ -629,8 +707,33 @@ Recommended workflow:
 3. Import the folder or bundle from the Extensions UI
 4. Review the preview and trust prompt
 5. Install the package
-6. Bind it to one agent
-7. Use Studio Test or publish a new release before testing consumer traffic
+6. Open the Extension detail page and fill the `Setup` tab when the package
+   declares installation-level configuration
+7. Bind it to one agent
+8. Use Studio Test or publish a new release before testing consumer traffic
+
+Local install layout:
+
+```text
+server/workspace/extensions/
+  <scope>/
+    <name>/
+      <version>/
+        artifact/
+          <manifest_hash>.tar.gz
+        runtime/
+          manifest.json
+          ...
+```
+
+Meaning:
+
+- `artifact/` is the persisted package archive for that exact version
+- `runtime/` is the extracted working copy Pivot imports at runtime
+
+This keeps one installed version under one obvious directory while still
+preserving the architectural rule that the artifact is the long-lived source of
+truth and the runtime copy is rebuildable.
 
 Important note about releases:
 

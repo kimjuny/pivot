@@ -1054,6 +1054,44 @@ export interface ExtensionContributionSummary {
 }
 
 /**
+ * One manifest-declared extension configuration field.
+ */
+export interface ExtensionConfigurationField {
+  /** Stable configuration key. */
+  key: string;
+  /** Operator-facing field label. */
+  label: string;
+  /** Field type such as `string`, `secret`, `number`, or `boolean`. */
+  type: string;
+  /** Human-readable help text for this field. */
+  description: string;
+  /** Whether the field must be provided. */
+  required: boolean;
+  /** Optional default value declared by the manifest. */
+  default: unknown;
+  /** Optional input placeholder. */
+  placeholder: string;
+}
+
+/**
+ * One configuration schema section for installation or binding scope.
+ */
+export interface ExtensionConfigurationSection {
+  /** Fields declared for this scope. */
+  fields: ExtensionConfigurationField[];
+}
+
+/**
+ * Full normalized configuration schema declared by an extension package.
+ */
+export interface ExtensionConfigurationSchema {
+  /** Setup fields configured once per installed version. */
+  installation: ExtensionConfigurationSection;
+  /** Future agent-level binding fields. */
+  binding: ExtensionConfigurationSection;
+}
+
+/**
  * Grouped package view used by the global Extensions page.
  */
 export interface ExtensionPackage {
@@ -1067,6 +1105,8 @@ export interface ExtensionPackage {
   display_name: string;
   /** Package summary. */
   description: string;
+  /** Root-level README rendered in the package detail overview, if present. */
+  readme_markdown: string;
   /** Highest available installed version. */
   latest_version: string;
   /** Count of active installed versions. */
@@ -1203,6 +1243,22 @@ export interface ExtensionHookReplayResult {
   error: Record<string, unknown> | null;
   /** UTC timestamp when replay finished. */
   replayed_at: string;
+}
+
+/**
+ * Configuration schema and current values for one installed extension version.
+ */
+export interface ExtensionInstallationConfigurationState {
+  /** Stable installation row id. */
+  installation_id: number;
+  /** Canonical npm-style package id. */
+  package_id: string;
+  /** Installed extension version. */
+  version: string;
+  /** Declared configuration schema for installation and binding scopes. */
+  configuration_schema: ExtensionConfigurationSchema;
+  /** Current installation-scoped values. */
+  config: Record<string, unknown>;
 }
 
 /**
@@ -1356,6 +1412,30 @@ export const uninstallExtensionInstallation = async (
   return apiRequest(`/extensions/installations/${installationId}`, {
     method: 'DELETE',
   }) as Promise<ExtensionUninstallResult>;
+};
+
+/**
+ * Fetch setup schema and current installation-scoped values for one version.
+ */
+export const getExtensionInstallationConfiguration = async (
+  installationId: number,
+): Promise<ExtensionInstallationConfigurationState> => {
+  return apiRequest(
+    `/extensions/installations/${installationId}/configuration`,
+  ) as Promise<ExtensionInstallationConfigurationState>;
+};
+
+/**
+ * Save installation-scoped setup values for one version.
+ */
+export const updateExtensionInstallationConfiguration = async (
+  installationId: number,
+  config: Record<string, unknown>,
+): Promise<ExtensionInstallationConfigurationState> => {
+  return apiRequest(`/extensions/installations/${installationId}/configuration`, {
+    method: 'PUT',
+    body: JSON.stringify({ config }),
+  }) as Promise<ExtensionInstallationConfigurationState>;
 };
 
 /**

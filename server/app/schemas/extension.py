@@ -33,6 +33,35 @@ class ExtensionContributionSummaryResponse(AppBaseModel):
     web_search_providers: list[str] = Field(default_factory=list)
 
 
+class ExtensionConfigurationFieldResponse(AppBaseModel):
+    """One manifest-declared extension configuration field."""
+
+    key: str
+    label: str
+    type: str
+    description: str = ""
+    required: bool = False
+    default: Any = None
+    placeholder: str = ""
+
+
+class ExtensionConfigurationSectionResponse(AppBaseModel):
+    """Configuration schema section for installation or binding scope."""
+
+    fields: list[ExtensionConfigurationFieldResponse] = Field(default_factory=list)
+
+
+class ExtensionConfigurationSchemaResponse(AppBaseModel):
+    """Normalized configuration schema declared by one extension package."""
+
+    installation: ExtensionConfigurationSectionResponse = Field(
+        default_factory=ExtensionConfigurationSectionResponse
+    )
+    binding: ExtensionConfigurationSectionResponse = Field(
+        default_factory=ExtensionConfigurationSectionResponse
+    )
+
+
 class ExtensionHookExecutionResponse(AppBaseModel):
     """Serialized append-only lifecycle hook execution record."""
 
@@ -103,6 +132,24 @@ class ExtensionInstallationResponse(AppBaseModel):
     reference_summary: ExtensionReferenceSummaryResponse | None = None
 
 
+class ExtensionInstallationConfigRequest(AppBaseModel):
+    """Request payload for saving installation-scoped extension configuration."""
+
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtensionInstallationConfigResponse(AppBaseModel):
+    """Configuration schema and current values for one installed extension version."""
+
+    installation_id: int
+    package_id: str
+    version: str
+    configuration_schema: ExtensionConfigurationSchemaResponse = Field(
+        default_factory=ExtensionConfigurationSchemaResponse
+    )
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExtensionPackageResponse(AppBaseModel):
     """Installed package-level view grouped by extension name."""
 
@@ -111,6 +158,7 @@ class ExtensionPackageResponse(AppBaseModel):
     package_id: str
     display_name: str
     description: str
+    readme_markdown: str = ""
     latest_version: str
     active_version_count: int
     disabled_version_count: int

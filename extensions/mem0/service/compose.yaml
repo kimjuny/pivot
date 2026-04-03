@@ -1,0 +1,31 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  mem0-service:
+    build:
+      context: .
+      dockerfile: Containerfile
+    depends_on:
+      - qdrant
+    environment:
+      MEM0_SERVICE_HOST: 0.0.0.0
+      MEM0_SERVICE_PORT: 8765
+      MEM0_QDRANT_HOST: qdrant
+      MEM0_QDRANT_PORT: 6333
+      MEM0_COLLECTION_NAME: pivot_mem0
+      # Example: {"provider":"openai","config":{"model":"gpt-4.1-mini","api_key":"REPLACE_WITH_LLM_API_KEY"}}
+      # See: https://docs.mem0.ai/components/llms/config
+      MEM0_LLM_CONFIG_JSON: ${MEM0_LLM_CONFIG_JSON}
+      # Example: {"provider":"openai","config":{"model":"text-embedding-3-small","api_key":"REPLACE_WITH_EMBEDDER_API_KEY"}}
+      # See: https://docs.mem0.ai/components/embedders/config
+      MEM0_EMBEDDER_CONFIG_JSON: ${MEM0_EMBEDDER_CONFIG_JSON}
+    ports:
+      - "8765:8765"
+
+volumes:
+  qdrant_storage:

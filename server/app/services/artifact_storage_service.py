@@ -48,9 +48,9 @@ class StorageBackend(Protocol):
         ...
 
 
-def _artifacts_root() -> Path:
-    """Return the workspace-local persisted artifact root for development."""
-    root = workspace_root() / "artifacts"
+def _storage_root() -> Path:
+    """Return the workspace-local root used by the local storage backend."""
+    root = workspace_root()
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -68,7 +68,7 @@ class LocalFilesystemStorageBackend:
         parts = [part for part in normalized_key.split("/") if part not in {"", ".", ".."}]
         if not parts:
             raise ValueError("Artifact key must contain at least one safe path part.")
-        return _artifacts_root().joinpath(*parts)
+        return _storage_root().joinpath(*parts)
 
     def put_file(self, *, source_path: Path, key: str) -> StoredArtifact:
         """Persist one local file under the workspace artifact root.
@@ -133,7 +133,7 @@ class ExtensionArtifactStorageService:
     ) -> str:
         """Return the canonical artifact key for one extension version."""
         return (
-            f"extensions/{scope}/{name}/{version}/"
+            f"extensions/{scope}/{name}/{version}/artifact/"
             f"{manifest_hash}.tar.gz"
         )
 

@@ -112,6 +112,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
         web_search_provider_key: str | None = None,
         hook_event: str | None = None,
         hook_behavior: str = "emit_event",
+        installation_config_fields: list[dict[str, object]] | None = None,
+        binding_config_fields: list[dict[str, object]] | None = None,
     ) -> Path:
         """Create one local extension folder with a tool and a skill."""
         package_scope, package_basename = self._split_package_name(package_name)
@@ -142,6 +144,15 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 ],
             },
         }
+        if installation_config_fields or binding_config_fields:
+            manifest["configuration"] = {
+                "installation": {
+                    "fields": installation_config_fields or [],
+                },
+                "binding": {
+                    "fields": binding_config_fields or [],
+                },
+            }
         if channel_provider_key is not None:
             (extension_root / "channel_providers").mkdir(parents=True, exist_ok=True)
             channel_provider_filename = channel_provider_key.replace("@", "_")
@@ -326,6 +337,23 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "        }\n"
                     "    ]\n"
                 )
+            elif hook_behavior == "emit_configs":
+                hook_body = (
+                    "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
+                    "    return [\n"
+                    "        {\n"
+                    "            \"type\": \"emit_event\",\n"
+                    "            \"payload\": {\n"
+                    "                \"type\": \"observe\",\n"
+                    "                \"data\": {\n"
+                    "                    \"installation_config\": context.get(\"installation_config\"),\n"
+                    "                    \"binding_config\": context.get(\"binding_config\"),\n"
+                    "                    \"user\": context.get(\"user\"),\n"
+                    "                },\n"
+                    "            },\n"
+                    "        }\n"
+                    "    ]\n"
+                )
             (extension_root / "hooks" / "lifecycle.py").write_text(
                 hook_body,
                 encoding="utf-8",
@@ -475,6 +503,83 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(bundle[0]["hooks"][0]["callable"], "handle_task_event")
         self.assertTrue(Path(bundle[0]["hooks"][0]["source_path"]).is_file())
 
+    def test_installation_configuration_defaults_are_persisted(self) -> None:
+        """Installations should resolve manifest defaults for setup fields."""
+        extension_root = self._write_extension(
+            package_name="acme.memory",
+            tool_name="search_accounts_memory",
+            skill_name="crm_research_memory",
+            installation_config_fields=[
+                {
+                    "key": "base_url",
+                    "type": "string",
+                    "label": "Base URL",
+                    "required": True,
+                    "default": "http://localhost:8765",
+                }
+            ],
+        )
+        installation = ExtensionService(self.session).install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        state = ExtensionService(self.session).get_installation_configuration_state(
+            installation_id=installation.id or 0
+        )
+        self.assertEqual(
+            state["config"],
+            {"base_url": "http://localhost:8765"},
+        )
+
+    def test_update_installation_configuration_validates_declared_fields(self) -> None:
+        """Installation config writes should reject undeclared or invalid values."""
+        extension_root = self._write_extension(
+            package_name="acme.memory",
+            tool_name="search_accounts_memory",
+            skill_name="crm_research_memory",
+            installation_config_fields=[
+                {
+                    "key": "base_url",
+                    "type": "string",
+                    "required": True,
+                },
+                {
+                    "key": "timeout_seconds",
+                    "type": "number",
+                    "default": 5,
+                },
+            ],
+        )
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        updated = service.update_installation_config(
+            installation_id=installation.id or 0,
+            config={
+                "base_url": "http://mem0.local",
+                "timeout_seconds": 10,
+            },
+        )
+        self.assertEqual(
+            json.loads(updated.config_json or "{}"),
+            {
+                "base_url": "http://mem0.local",
+                "timeout_seconds": 10,
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "not declared by the extension"):
+            service.update_installation_config(
+                installation_id=installation.id or 0,
+                config={"unknown": "value"},
+            )
+
     def test_extension_hook_service_runs_task_hook_and_normalizes_emit_event(
         self,
     ) -> None:
@@ -504,6 +609,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "trace_id": None,
                     "iteration": 0,
                     "agent_id": self.agent.id or 0,
+                    "user": {"id": self.user.id, "username": "alice"},
                     "release_id": None,
                     "execution_mode": "live",
                     "timestamp": "2026-04-02T00:00:00Z",
@@ -520,6 +626,82 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(
             effects[0]["payload"]["data"]["extension_hook"]["package_id"],
             "@acme/crm",
+        )
+
+    def test_extension_hook_service_injects_installation_and_binding_config(self) -> None:
+        """Hooks should receive validated installation and binding config snapshots."""
+        extension_root = self._write_extension(
+            package_name="acme.memory",
+            tool_name="search_accounts_memory",
+            skill_name="crm_research_memory",
+            hook_event="task.before_start",
+            hook_behavior="emit_configs",
+            installation_config_fields=[
+                {
+                    "key": "base_url",
+                    "type": "string",
+                    "required": True,
+                    "default": "http://localhost:8765",
+                }
+            ],
+            binding_config_fields=[
+                {
+                    "key": "namespace",
+                    "type": "string",
+                    "default": "default",
+                }
+            ],
+        )
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.update_installation_config(
+            installation_id=installation.id or 0,
+            config={"base_url": "http://mem0.internal"},
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+            enabled=True,
+            config={"namespace": "agent-2"},
+        )
+        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
+            self.agent.id or 0
+        ).extension_bundle
+
+        effects = asyncio.run(
+            ExtensionHookService(bundle).run_task_hooks(
+                event_name="task.before_start",
+                hook_context={
+                    "session_id": "session-1",
+                    "task_id": "task-1",
+                    "trace_id": None,
+                    "iteration": 0,
+                    "agent_id": self.agent.id or 0,
+                    "user": {"id": self.user.id, "username": "alice"},
+                    "release_id": None,
+                    "execution_mode": "live",
+                    "timestamp": "2026-04-02T00:00:00Z",
+                    "runtime": {"source": "live", "task_status": "pending"},
+                    "event_payload": {"message": "hello"},
+                },
+            )
+        )
+
+        self.assertEqual(
+            effects[0]["payload"]["data"]["installation_config"],
+            {"base_url": "http://mem0.internal"},
+        )
+        self.assertEqual(
+            effects[0]["payload"]["data"]["binding_config"],
+            {"namespace": "agent-2"},
+        )
+        self.assertEqual(
+            effects[0]["payload"]["data"]["user"],
+            {"id": self.user.id, "username": "alice"},
         )
 
     def test_extension_hook_service_runs_iteration_hook(self) -> None:
@@ -1522,6 +1704,50 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 trust_confirmed=False,
             )
 
+    def test_install_from_path_is_idempotent_for_same_version_and_manifest(self) -> None:
+        """Re-importing the same package version should reuse the existing row."""
+        extension_root = self._write_extension()
+        service = ExtensionService(self.session)
+
+        first = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        second = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(first.artifact_key, second.artifact_key)
+        self.assertTrue(Path(second.install_root).joinpath("manifest.json").is_file())
+
+    def test_install_from_path_recreates_orphaned_version_directory(self) -> None:
+        """A stale local version directory should not block a reinstall after DB reset."""
+        extension_root = self._write_extension()
+        service = ExtensionService(self.session)
+
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        version_root = Path(installation.install_root).parent
+        self.session.delete(installation)
+        self.session.commit()
+
+        reinstall = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        self.assertEqual(reinstall.package_id, "@acme/crm")
+        self.assertEqual(reinstall.status, "active")
+        self.assertTrue(version_root.joinpath("runtime", "manifest.json").is_file())
+
     def test_install_bundle_requires_top_level_manifest(self) -> None:
         """Bundle imports should reject archives missing top-level manifest.json."""
         files = [
@@ -1891,7 +2117,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         )
 
         install_root = Path(installation.install_root)
-        artifact_path = self.workspace_root / "artifacts" / Path(installation.artifact_key)
+        artifact_path = self.workspace_root / Path(installation.artifact_key)
         result = service.uninstall_installation(
             installation_id=installation.id or 0,
         )

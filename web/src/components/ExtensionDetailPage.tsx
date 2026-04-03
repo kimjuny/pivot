@@ -8,9 +8,22 @@ import ExtensionHookReplayPanel from "@/components/ExtensionHookReplayPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getExtensionPackages, type ExtensionContributionSummary, type ExtensionPackage } from "@/utils/api";
+import {
+  getExtensionInstallationConfiguration,
+  getExtensionPackages,
+  updateExtensionInstallationConfiguration,
+  type ExtensionConfigurationField,
+  type ExtensionContributionSummary,
+  type ExtensionInstallation,
+  type ExtensionInstallationConfigurationState,
+  type ExtensionPackage,
+} from "@/utils/api";
 import { formatTimestamp } from "@/utils/timestamp";
+import { MarkdownRenderer } from "@/pages/chat/components/MarkdownRenderer";
 
 interface ContributionGroup {
   /** Human-readable group title shown in Overview and Versions. */
@@ -26,6 +39,16 @@ interface PackageStatusBadge {
   label: string;
   /** Visual tone that distinguishes live usage from neutral state. */
   tone: "provider" | "runtime" | "neutral";
+}
+
+interface SetupStateMap {
+  /** Configuration state keyed by installation id. */
+  [installationId: number]: ExtensionInstallationConfigurationState | undefined;
+}
+
+interface SetupDraftMap {
+  /** Draft editable values keyed by installation id. */
+  [installationId: number]: Record<string, unknown> | undefined;
 }
 
 /**
@@ -121,6 +144,54 @@ function formatTrustStatusLabel(trustStatus: string): string {
 }
 
 /**
+ * Normalize one input value into a UI-friendly string.
+ */
+function formatConfigValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return "";
+}
+
+/**
+ * Build an initial draft from one fetched setup state.
+ *
+ * Why: setup forms should start from persisted values and fall back to manifest
+ * defaults without hard-coding field names in the page component.
+ */
+function buildSetupDraft(
+  state: ExtensionInstallationConfigurationState,
+): Record<string, unknown> {
+  const draft: Record<string, unknown> = { ...state.config };
+  state.configuration_schema.installation.fields.forEach((field) => {
+    if (!(field.key in draft) && field.default !== undefined) {
+      draft[field.key] = field.default;
+    }
+  });
+  return draft;
+}
+
+/**
+ * Parse a draft input value according to one manifest field type.
+ */
+function parseConfigInputValue(
+  field: ExtensionConfigurationField,
+  rawValue: string | boolean,
+): unknown {
+  if (field.type === "boolean") {
+    return Boolean(rawValue);
+  }
+  if (field.type === "number") {
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : rawValue;
+  }
+  return rawValue;
+}
+
+/**
  * Render one package-scoped extension detail page.
  *
  * Why: extension inventory and extension debugging are different workflows.
@@ -132,6 +203,10 @@ export default function ExtensionDetailPage() {
   const location = useLocation();
   const [packages, setPackages] = useState<ExtensionPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [setupStates, setSetupStates] = useState<SetupStateMap>({});
+  const [setupDrafts, setSetupDrafts] = useState<SetupDraftMap>({});
+  const [loadingSetupIds, setLoadingSetupIds] = useState<number[]>([]);
+  const [savingSetupIds, setSavingSetupIds] = useState<number[]>([]);
   const listPath = location.pathname.startsWith("/studio/")
     ? "/studio/assets/extensions"
     : "/extensions";
@@ -157,6 +232,38 @@ export default function ExtensionDetailPage() {
     [name, packages, scope],
   );
 
+  const loadSetupState = useCallback(async (installationId: number) => {
+    setLoadingSetupIds((current) => [...new Set([...current, installationId])]);
+    try {
+      const state = await getExtensionInstallationConfiguration(installationId);
+      setSetupStates((current) => ({
+        ...current,
+        [installationId]: state,
+      }));
+      setSetupDrafts((current) => ({
+        ...current,
+        [installationId]: current[installationId] ?? buildSetupDraft(state),
+      }));
+    } catch (error) {
+      console.error("Failed to load extension setup state:", error);
+      toast.error("Failed to load extension setup");
+    } finally {
+      setLoadingSetupIds((current) => current.filter((item) => item !== installationId));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pkg) {
+      return;
+    }
+    pkg.versions.forEach((installation) => {
+      if (setupStates[installation.id]) {
+        return;
+      }
+      void loadSetupState(installation.id);
+    });
+  }, [loadSetupState, pkg, setupStates]);
+
   const latestInstallation = pkg?.versions[0] ?? null;
   const aggregatedContributions = useMemo(() => {
     if (!pkg) {
@@ -174,6 +281,46 @@ export default function ExtensionDetailPage() {
     };
     return buildContributionGroups(merged);
   }, [pkg]);
+
+  const updateDraftValue = useCallback(
+    (installationId: number, field: ExtensionConfigurationField, rawValue: string | boolean) => {
+      setSetupDrafts((current) => ({
+        ...current,
+        [installationId]: {
+          ...(current[installationId] ?? {}),
+          [field.key]: parseConfigInputValue(field, rawValue),
+        },
+      }));
+    },
+    [],
+  );
+
+  const saveSetup = useCallback(
+    async (installation: ExtensionInstallation) => {
+      const draft = setupDrafts[installation.id] ?? {};
+      setSavingSetupIds((current) => [...new Set([...current, installation.id])]);
+      try {
+        const state = await updateExtensionInstallationConfiguration(installation.id, draft);
+        setSetupStates((current) => ({
+          ...current,
+          [installation.id]: state,
+        }));
+        setSetupDrafts((current) => ({
+          ...current,
+          [installation.id]: buildSetupDraft(state),
+        }));
+        toast.success(`Saved setup for ${installation.package_id}@${installation.version}`);
+      } catch (error) {
+        console.error("Failed to save extension setup:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Failed to save extension setup",
+        );
+      } finally {
+        setSavingSetupIds((current) => current.filter((item) => item !== installation.id));
+      }
+    },
+    [setupDrafts],
+  );
 
   if (isLoading) {
     return (
@@ -269,13 +416,22 @@ export default function ExtensionDetailPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-3">
+        <TabsList className="grid h-auto w-full grid-cols-4">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="setup">Setup</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
           <TabsTrigger value="hook-replay">Hook Replay</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
+          {pkg.readme_markdown.trim() ? (
+            <Card>
+              <CardContent className="pt-6">
+                <MarkdownRenderer content={pkg.readme_markdown} variant="document" />
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Includes</CardTitle>
@@ -362,6 +518,122 @@ export default function ExtensionDetailPage() {
               ) : null}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="setup" className="space-y-4">
+          {pkg.versions.map((installation) => {
+            const setupState = setupStates[installation.id];
+            const setupDraft = setupDrafts[installation.id] ?? {};
+            const installationFields =
+              setupState?.configuration_schema.installation.fields ?? [];
+            const isLoadingSetup = loadingSetupIds.includes(installation.id);
+            const isSavingSetup = savingSetupIds.includes(installation.id);
+
+            return (
+              <Card key={`setup-${installation.id}`}>
+                <CardHeader className="space-y-3">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base">{installation.version}</CardTitle>
+                        <Badge variant={installation.status === "active" ? "default" : "outline"}>
+                          {installation.status}
+                        </Badge>
+                      </div>
+                      <CardDescription className="mt-1">
+                        Configure installation-level fields such as external service URLs,
+                        credentials, and defaults for this version.
+                      </CardDescription>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Installed {formatTimestamp(installation.created_at)}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isLoadingSetup ? (
+                    <div className="text-sm text-muted-foreground">Loading setup…</div>
+                  ) : (
+                    <>
+                      {installationFields.length === 0 ? (
+                        <div className="text-sm text-muted-foreground">
+                          This version does not declare installation configuration fields.
+                        </div>
+                      ) : (
+                        <div className="grid gap-4">
+                          {installationFields.map((field) => (
+                            <div key={`${installation.id}-${field.key}`} className="grid gap-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <Label htmlFor={`setup-${installation.id}-${field.key}`}>
+                                  {field.label}
+                                </Label>
+                                {field.required ? (
+                                  <Badge variant="outline" className="text-[10px] uppercase">
+                                    Required
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              {field.type === "boolean" ? (
+                                <div className="flex items-center gap-3 rounded-lg border border-border px-3 py-2">
+                                  <Switch
+                                    id={`setup-${installation.id}-${field.key}`}
+                                    checked={Boolean(setupDraft[field.key])}
+                                    onCheckedChange={(checked) => {
+                                      updateDraftValue(installation.id, field, checked);
+                                    }}
+                                  />
+                                  <span className="text-sm text-muted-foreground">
+                                    {field.description || "Toggle this setting on or off."}
+                                  </span>
+                                </div>
+                              ) : (
+                                <Input
+                                  id={`setup-${installation.id}-${field.key}`}
+                                  type={
+                                    field.type === "secret"
+                                      ? "password"
+                                      : field.type === "number"
+                                        ? "number"
+                                        : "text"
+                                  }
+                                  value={formatConfigValue(setupDraft[field.key])}
+                                  placeholder={field.placeholder || field.label}
+                                  onChange={(event) => {
+                                    updateDraftValue(
+                                      installation.id,
+                                      field,
+                                      event.currentTarget.value,
+                                    );
+                                  }}
+                                />
+                              )}
+                              {field.description && field.type !== "boolean" ? (
+                                <p className="text-xs text-muted-foreground">
+                                  {field.description}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex justify-end">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <Button
+                            onClick={() => {
+                              void saveSetup(installation);
+                            }}
+                            disabled={isSavingSetup}
+                          >
+                            {isSavingSetup ? "Saving…" : "Save Setup"}
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
         </TabsContent>
 
         <TabsContent value="versions" className="space-y-4">

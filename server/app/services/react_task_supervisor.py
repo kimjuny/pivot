@@ -908,6 +908,7 @@ class ReactTaskSupervisor:
             "trace_id": None,
             "iteration": task.iteration,
             "agent_id": task.agent_id,
+            "user": self._build_hook_user_snapshot(db=db, username=task.user),
             "release_id": runtime_config.release_id,
             "execution_mode": "live",
             "timestamp": datetime.now(UTC).isoformat(),
@@ -960,6 +961,25 @@ class ReactTaskSupervisor:
             "status": task.status,
             "total_tokens": task.total_tokens,
             "agent_answer": self._extract_task_agent_answer(db=db, task_id=task.task_id),
+        }
+
+    def _build_hook_user_snapshot(
+        self,
+        *,
+        db: Session,
+        username: str,
+    ) -> dict[str, Any]:
+        """Build stable user metadata exposed to lifecycle hooks.
+
+        Why: external extensions such as memory backends often need one stable
+        namespace that combines the current user and agent. Hooks should not
+        query Pivot models directly, so the supervisor provides a small user
+        snapshot as part of the hook context.
+        """
+        user = db.exec(select(User).where(User.username == username)).first()
+        return {
+            "id": user.id if user is not None else None,
+            "username": username,
         }
 
     def _extract_task_agent_answer(
@@ -1022,6 +1042,7 @@ class ReactTaskSupervisor:
             "trace_id": event_data.get("trace_id"),
             "iteration": int(event_data.get("iteration", task.iteration) or 0),
             "agent_id": task.agent_id,
+            "user": self._build_hook_user_snapshot(db=db, username=task.user),
             "release_id": runtime_config.release_id,
             "execution_mode": "live",
             "timestamp": event_data.get("timestamp") or datetime.now(UTC).isoformat(),

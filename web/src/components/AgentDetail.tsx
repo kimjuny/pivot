@@ -1318,6 +1318,23 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     void refreshDraftState();
   }, [refreshDraftState]);
 
+  /**
+   * Persist sidebar-managed binding changes into the saved draft baseline.
+   * Why: extensions, channel bindings, and web-search bindings are edited via
+   * immediate backend mutations, so Publish must refresh the saved draft rather
+   * than relying on the local scene/agent workstore dirty flag.
+   */
+  const handlePersistedBindingDraftChanged = useCallback(async () => {
+    try {
+      await saveAgentDraft(agentId);
+      await refreshDraftState();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      console.error('Failed to refresh saved draft after binding change:', error);
+      toast.error(`Failed to refresh saved draft: ${error.message}`);
+    }
+  }, [agentId, refreshDraftState]);
+
   return (
     <SidebarProvider defaultOpen={true}>
       <AgentDetailSidebar
@@ -1330,6 +1347,9 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         onAgentDraftUpdate={handleAgentDraftUpdate}
         onChannelBindingsLoaded={handleChannelBindingsLoaded}
         onWebSearchBindingsLoaded={handleWebSearchBindingsLoaded}
+        onExtensionBindingsChanged={handlePersistedBindingDraftChanged}
+        onChannelBindingsChanged={handlePersistedBindingDraftChanged}
+        onWebSearchBindingsChanged={handlePersistedBindingDraftChanged}
       />
 
       <SidebarInset className="flex flex-col bg-background overflow-hidden">

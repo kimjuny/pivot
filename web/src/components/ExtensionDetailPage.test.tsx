@@ -11,11 +11,14 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/utils/api", () => ({
   getExtensionPackages: vi.fn(),
+  getExtensionInstallationConfiguration: vi.fn(),
+  updateExtensionInstallationConfiguration: vi.fn(),
   getExtensionHookExecutions: vi.fn(),
   replayExtensionHookExecution: vi.fn(),
 }));
 
 import {
+  getExtensionInstallationConfiguration,
   getExtensionPackages,
 } from "@/utils/api";
 
@@ -30,6 +33,7 @@ describe("ExtensionDetailPage", () => {
         package_id: "@acme/memory",
         display_name: "ACME Memory",
         description: "External memory sample",
+        readme_markdown: "# ACME Memory\n\nThis package recalls memory.",
         latest_version: "1.0.0",
         active_version_count: 1,
         disabled_version_count: 0,
@@ -78,6 +82,30 @@ describe("ExtensionDetailPage", () => {
         ],
       },
     ]);
+    vi.mocked(getExtensionInstallationConfiguration).mockResolvedValue({
+      installation_id: 11,
+      package_id: "@acme/memory",
+      version: "1.0.0",
+      configuration_schema: {
+        installation: {
+          fields: [
+            {
+              key: "base_url",
+              label: "Base URL",
+              type: "string",
+              description: "Memory service base URL",
+              required: true,
+              default: "http://localhost:8765",
+              placeholder: "http://localhost:8765",
+            },
+          ],
+        },
+        binding: { fields: [] },
+      },
+      config: {
+        base_url: "http://localhost:8765",
+      },
+    });
     render(
       <MemoryRouter initialEntries={["/studio/assets/extensions/acme/memory"]}>
         <Routes>
@@ -87,12 +115,16 @@ describe("ExtensionDetailPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("ACME Memory")).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { level: 1, name: "ACME Memory" }),
+      ).toBeInTheDocument();
     });
 
     expect(screen.getAllByText("@acme/memory")).toHaveLength(2);
     expect(screen.getAllByText("Trusted Local")).toHaveLength(2);
+    expect(screen.getByText("This package recalls memory.")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Setup" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Versions" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Hook Replay" })).toBeInTheDocument();
   });

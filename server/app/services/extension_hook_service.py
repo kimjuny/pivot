@@ -104,17 +104,36 @@ class ExtensionHookService:
         record_execution: bool = True,
     ) -> list[dict[str, Any]]:
         """Execute one hook entry and normalize its returned effects."""
+        extension_hook_context = {
+            **hook_context,
+            "extension": {
+                "package_id": extension.get("package_id"),
+                "version": extension.get("version"),
+                "scope": extension.get("scope"),
+                "name": extension.get("name"),
+            },
+            "installation_config": (
+                extension.get("installation_config")
+                if isinstance(extension.get("installation_config"), dict)
+                else {}
+            ),
+            "binding_config": (
+                extension.get("binding_config")
+                if isinstance(extension.get("binding_config"), dict)
+                else {}
+            ),
+        }
         started_at = datetime.now(UTC)
         started_perf = perf_counter()
         hook_callable = self._load_hook_callable(extension=extension, hook=hook)
         try:
-            result = hook_callable(hook_context)
+            result = hook_callable(extension_hook_context)
             if inspect.isawaitable(result):
                 result = await result
             normalized_events = self._normalize_effects(
                 extension=extension,
                 hook=hook,
-                hook_context=hook_context,
+                hook_context=extension_hook_context,
                 result=result,
             )
         except Exception as exc:
@@ -122,7 +141,7 @@ class ExtensionHookService:
                 self._record_execution(
                     extension=extension,
                     hook=hook,
-                    hook_context=hook_context,
+                    hook_context=extension_hook_context,
                     status="failed",
                     started_at=started_at,
                     duration_ms=int((perf_counter() - started_perf) * 1000),
@@ -138,7 +157,7 @@ class ExtensionHookService:
             self._record_execution(
                 extension=extension,
                 hook=hook,
-                hook_context=hook_context,
+                hook_context=extension_hook_context,
                 status="succeeded",
                 started_at=started_at,
                 duration_ms=int((perf_counter() - started_perf) * 1000),

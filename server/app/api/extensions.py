@@ -18,10 +18,15 @@ from app.schemas.extension import (
     AgentExtensionBindingRequest,
     AgentExtensionBindingResponse,
     AgentExtensionPackageResponse,
+    ExtensionConfigurationFieldResponse,
+    ExtensionConfigurationSchemaResponse,
+    ExtensionConfigurationSectionResponse,
     ExtensionContributionSummaryResponse,
     ExtensionHookExecutionResponse,
     ExtensionHookReplayResponse,
     ExtensionImportPreviewResponse,
+    ExtensionInstallationConfigRequest,
+    ExtensionInstallationConfigResponse,
     ExtensionInstallationResponse,
     ExtensionInstallationStatusRequest,
     ExtensionInstallRequest,
@@ -148,6 +153,51 @@ def _serialize_installation(
         reference_summary=_serialize_reference_summary(
             service.get_reference_summary(installation_id=installation.id or 0).to_dict()
         ),
+    )
+
+
+def _serialize_configuration_schema(
+    payload: object,
+) -> ExtensionConfigurationSchemaResponse:
+    """Convert one normalized manifest configuration object into an API response."""
+    if not isinstance(payload, dict):
+        return ExtensionConfigurationSchemaResponse()
+
+    def _serialize_section(section_name: str) -> ExtensionConfigurationSectionResponse:
+        raw_section = payload.get(section_name, {})
+        if not isinstance(raw_section, dict):
+            return ExtensionConfigurationSectionResponse()
+        raw_fields = raw_section.get("fields", [])
+        if not isinstance(raw_fields, list):
+            return ExtensionConfigurationSectionResponse()
+
+        fields: list[ExtensionConfigurationFieldResponse] = []
+        for raw_field in raw_fields:
+            if not isinstance(raw_field, dict):
+                continue
+            if not isinstance(raw_field.get("key"), str):
+                continue
+            field_key = raw_field["key"]
+            raw_label = raw_field.get("label")
+            raw_type = raw_field.get("type")
+            raw_description = raw_field.get("description")
+            raw_placeholder = raw_field.get("placeholder")
+            fields.append(
+                ExtensionConfigurationFieldResponse(
+                    key=field_key,
+                    label=raw_label if isinstance(raw_label, str) else field_key,
+                    type=raw_type if isinstance(raw_type, str) else "string",
+                    description=raw_description if isinstance(raw_description, str) else "",
+                    required=bool(raw_field.get("required", False)),
+                    default=raw_field.get("default"),
+                    placeholder=raw_placeholder if isinstance(raw_placeholder, str) else "",
+                )
+            )
+        return ExtensionConfigurationSectionResponse(fields=fields)
+
+    return ExtensionConfigurationSchemaResponse(
+        installation=_serialize_section("installation"),
+        binding=_serialize_section("binding"),
     )
 
 
@@ -283,6 +333,7 @@ def _serialize_package(
         package_id=str(payload.get("package_id", "")),
         display_name=str(payload.get("display_name", "")),
         description=str(payload.get("description", "")),
+        readme_markdown=str(payload.get("readme_markdown", "")),
         latest_version=str(payload.get("latest_version", "")),
         active_version_count=(
             active_version_count if isinstance(active_version_count, int) else 0
@@ -371,6 +422,69 @@ async def list_extension_installations(
         _serialize_installation(item, service=service)
         for item in service.list_installations()
     ]
+
+
+@router.get(
+    "/extensions/installations/{installation_id}/configuration",
+    response_model=ExtensionInstallationConfigResponse,
+)
+async def get_extension_installation_configuration(
+    installation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ExtensionInstallationConfigResponse:
+    """Return manifest-declared configuration schema and values for one installation."""
+    del current_user
+    service = ExtensionService(db)
+    try:
+        state = service.get_installation_configuration_state(
+            installation_id=installation_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ExtensionInstallationConfigResponse(
+        installation_id=int(state["installation_id"]),
+        package_id=str(state["package_id"]),
+        version=str(state["version"]),
+        configuration_schema=_serialize_configuration_schema(state.get("schema")),
+        config=state.get("config", {})
+        if isinstance(state.get("config"), dict)
+        else {},
+    )
+
+
+@router.put(
+    "/extensions/installations/{installation_id}/configuration",
+    response_model=ExtensionInstallationConfigResponse,
+)
+async def update_extension_installation_configuration(
+    installation_id: int,
+    payload: ExtensionInstallationConfigRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ExtensionInstallationConfigResponse:
+    """Validate and persist installation-scoped configuration values."""
+    del current_user
+    service = ExtensionService(db)
+    try:
+        service.update_installation_config(
+            installation_id=installation_id,
+            config=payload.config,
+        )
+        state = service.get_installation_configuration_state(
+            installation_id=installation_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ExtensionInstallationConfigResponse(
+        installation_id=int(state["installation_id"]),
+        package_id=str(state["package_id"]),
+        version=str(state["version"]),
+        configuration_schema=_serialize_configuration_schema(state.get("schema")),
+        config=state.get("config", {})
+        if isinstance(state.get("config"), dict)
+        else {},
+    )
 
 
 @router.get(

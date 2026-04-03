@@ -133,6 +133,28 @@ class ExtensionsApiTestCase(unittest.TestCase):
             "display_name": "ACME Hooks",
             "version": "1.0.0",
             "description": "Sample hook extension for API replay tests.",
+            "configuration": {
+                "installation": {
+                    "fields": [
+                        {
+                            "key": "base_url",
+                            "type": "string",
+                            "label": "Base URL",
+                            "required": True,
+                            "default": "http://localhost:8080",
+                        }
+                    ]
+                },
+                "binding": {
+                    "fields": [
+                        {
+                            "key": "namespace",
+                            "type": "string",
+                            "default": "default",
+                        }
+                    ]
+                },
+            },
             "contributions": {
                 "hooks": [
                     {
@@ -237,10 +259,43 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.assertTrue(installation_payload["created_at"].endswith("+00:00"))
         self.assertTrue(installation_payload["updated_at"].endswith("+00:00"))
 
-        artifact_path = self.workspace_root / "artifacts" / Path(
-            installation_payload["artifact_key"]
-        )
+        artifact_path = self.workspace_root / Path(installation_payload["artifact_key"])
         self.assertTrue(artifact_path.is_file())
+
+    def test_installation_configuration_endpoints(self) -> None:
+        """Configuration endpoints should expose schema and persist values."""
+        extension_root = self._write_hook_extension()
+        install_parts = self._build_bundle_upload(
+            extension_root,
+            bundle_name="acme-hooks",
+            trust_confirmed=True,
+        )
+        install_response = self.client.post(
+            "/api/extensions/installations/import/bundle",
+            files=install_parts,
+        )
+        self.assertEqual(install_response.status_code, 200)
+        installation_id = int(install_response.json()["id"])
+
+        state_response = self.client.get(
+            f"/api/extensions/installations/{installation_id}/configuration"
+        )
+        self.assertEqual(state_response.status_code, 200)
+        state_payload = state_response.json()
+        self.assertEqual(state_payload["config"], {"base_url": "http://localhost:8080"})
+        self.assertEqual(
+            state_payload["configuration_schema"]["installation"]["fields"][0]["key"],
+            "base_url",
+        )
+        update_response = self.client.put(
+            f"/api/extensions/installations/{installation_id}/configuration",
+            json={"config": {"base_url": "http://mem0.local"}},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(
+            update_response.json()["config"],
+            {"base_url": "http://mem0.local"},
+        )
 
     def test_agent_extension_binding_api_flow(self) -> None:
         """Agent extension endpoints should expose selection state after binding."""

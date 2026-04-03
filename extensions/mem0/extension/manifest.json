@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "scope": "pivot",
+  "name": "mem0",
+  "display_name": "Mem0 Memory",
+  "version": "0.1.0",
+  "description": "External memory extension that recalls and persists memory through an external Mem0-compatible HTTP service.",
+  "api_version": "1.x",
+  "configuration": {
+    "installation": {
+      "fields": [
+        {
+          "key": "base_url",
+          "label": "Mem0 Server URL",
+          "type": "string",
+          "required": true,
+          "placeholder": "http://localhost:8765",
+          "description": "Base URL of the external memory service."
+        }
+      ]
+    },
+    "binding": {
+      "fields": []
+    }
+  },
+  "contributions": {
+    "hooks": [
+      {
+        "event": "task.before_start",
+        "callable": "inject_memory",
+        "mode": "sync",
+        "entrypoint": "hooks/lifecycle.py"
+      },
+      {
+        "event": "task.completed",
+        "callable": "persist_memory",
+        "mode": "sync",
+        "entrypoint": "hooks/lifecycle.py"
+      }
+    ]
+  }
+}

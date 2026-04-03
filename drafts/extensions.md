@@ -31,6 +31,7 @@ Developer-facing implementation guidance should stay in
 That document should explain the concrete package contract for:
 
 - `manifest.json`
+- `configuration.installation` and `configuration.binding`
 - lifecycle hooks
 - channel providers
 - web-search providers
@@ -591,24 +592,29 @@ Recommended development layout:
 
 ```text
 server/workspace/
-  artifacts/
-    extensions/
-      acme/
-        providers/
-          1.0.0/
-            <manifest_hash>.tar.gz
   extensions/
     acme/
       providers/
         1.0.0/
-          manifest.json
-          ...
+          artifact/
+            <manifest_hash>.tar.gz
+          runtime/
+            manifest.json
+            ...
 ```
 
 Meaning:
 
-- `artifacts/extensions/...` stores the persisted package archive
-- `extensions/...` stores the extracted runtime copy
+- `extensions/.../artifact/` stores the persisted package archive
+- `extensions/.../runtime/` stores the extracted runtime copy
+
+Why this layout is preferable in local development:
+
+- one package version lives under one obvious directory
+- operators do not need to guess whether cleanup belongs under `artifacts/`
+  or `extensions/`
+- the runtime copy still remains a cache that can be recreated from the
+  adjacent artifact when needed
 
 ### Production Backend
 
@@ -1049,6 +1055,16 @@ Recommended workflow:
 5. Bind the extension to an agent draft
 6. Run a Studio test session
 7. Publish the agent release after validation
+
+For external-service packages, the recommended layout is:
+
+- `extensions/<name>/extension`
+- `extensions/<name>/service`
+
+Where:
+
+- `extension` is the importable Pivot package
+- `service` is the independently deployable HTTP backend
 
 ### Local Validation
 
