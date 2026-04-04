@@ -85,7 +85,9 @@ def load_channel_provider_from_file(
     """Load one channel provider object exported from a Python entrypoint."""
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
-        raise ValueError(f"Unable to import channel provider entrypoint '{source_path}'.")
+        raise ValueError(
+            f"Unable to import channel provider entrypoint '{source_path}'."
+        )
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_key] = module
@@ -330,9 +332,7 @@ class ProviderRegistryService:
                     artifact_key=installation.artifact_key,
                     target_dir=Path(installation.install_root),
                 )
-                source_path = install_root.joinpath(
-                    *PurePosixPath(entrypoint).parts
-                )
+                source_path = install_root.joinpath(*PurePosixPath(entrypoint).parts)
                 provider = load_channel_provider_from_file(
                     source_path=source_path,
                     module_key=(
@@ -365,9 +365,7 @@ class ProviderRegistryService:
                     artifact_key=installation.artifact_key,
                     target_dir=Path(installation.install_root),
                 )
-                source_path = install_root.joinpath(
-                    *PurePosixPath(entrypoint).parts
-                )
+                source_path = install_root.joinpath(*PurePosixPath(entrypoint).parts)
                 provider = load_web_search_provider_from_file(
                     source_path=source_path,
                     module_key=(

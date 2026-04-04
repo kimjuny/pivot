@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -43,6 +44,7 @@ from app.services.extension_service import (
     ExtensionService,
 )
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi.responses import FileResponse
 from sqlmodel import Session, col, select
 
 if TYPE_CHECKING:
@@ -132,6 +134,7 @@ def _serialize_installation(
         version=installation.version,
         display_name=installation.display_name,
         description=installation.description,
+        logo_url=service.get_installation_logo_url(installation),
         manifest_hash=installation.manifest_hash,
         artifact_storage_backend=installation.artifact_storage_backend,
         artifact_key=installation.artifact_key,
@@ -151,7 +154,9 @@ def _serialize_installation(
         updated_at=_serialize_utc_timestamp(installation.updated_at),
         contribution_summary=_serialize_contribution_summary(installation),
         reference_summary=_serialize_reference_summary(
-            service.get_reference_summary(installation_id=installation.id or 0).to_dict()
+            service.get_reference_summary(
+                installation_id=installation.id or 0
+            ).to_dict()
         ),
     )
 
@@ -187,10 +192,14 @@ def _serialize_configuration_schema(
                     key=field_key,
                     label=raw_label if isinstance(raw_label, str) else field_key,
                     type=raw_type if isinstance(raw_type, str) else "string",
-                    description=raw_description if isinstance(raw_description, str) else "",
+                    description=raw_description
+                    if isinstance(raw_description, str)
+                    else "",
                     required=bool(raw_field.get("required", False)),
                     default=raw_field.get("default"),
-                    placeholder=raw_placeholder if isinstance(raw_placeholder, str) else "",
+                    placeholder=raw_placeholder
+                    if isinstance(raw_placeholder, str)
+                    else "",
                 )
             )
         return ExtensionConfigurationSectionResponse(fields=fields)
@@ -260,6 +269,16 @@ def _serialize_preview(
             ),
         ),
         permissions=preview.permissions,
+        existing_installation_id=preview.existing_installation_id,
+        existing_installation_status=preview.existing_installation_status,
+        identical_to_installed=preview.identical_to_installed,
+        requires_overwrite_confirmation=preview.requires_overwrite_confirmation,
+        overwrite_blocked_reason=preview.overwrite_blocked_reason,
+        existing_reference_summary=(
+            _serialize_reference_summary(preview.existing_reference_summary.to_dict())
+            if preview.existing_reference_summary is not None
+            else None
+        ),
     )
 
 
@@ -333,18 +352,21 @@ def _serialize_package(
         package_id=str(payload.get("package_id", "")),
         display_name=str(payload.get("display_name", "")),
         description=str(payload.get("description", "")),
+        logo_url=next(
+            (version.logo_url for version in versions if version.logo_url),
+            None,
+        ),
         readme_markdown=str(payload.get("readme_markdown", "")),
         latest_version=str(payload.get("latest_version", "")),
         active_version_count=(
             active_version_count if isinstance(active_version_count, int) else 0
         ),
         disabled_version_count=(
-            disabled_version_count
-            if isinstance(disabled_version_count, int)
-            else 0
+            disabled_version_count if isinstance(disabled_version_count, int) else 0
         ),
         versions=versions,
     )
+
 
 def _serialize_agent_package(
     payload: dict[str, object],
@@ -382,6 +404,7 @@ def _serialize_agent_package(
         package_id=package_response.package_id,
         display_name=package_response.display_name,
         description=package_response.description,
+        logo_url=package_response.logo_url,
         latest_version=package_response.latest_version,
         active_version_count=package_response.active_version_count,
         disabled_version_count=package_response.disabled_version_count,
@@ -404,7 +427,9 @@ async def list_extension_packages(
     """List installed extensions grouped by package name."""
     del current_user
     service = ExtensionService(db)
-    return [_serialize_package(item, service=service) for item in service.list_packages()]
+    return [
+        _serialize_package(item, service=service) for item in service.list_packages()
+    ]
 
 
 @router.get(
@@ -422,6 +447,32 @@ async def list_extension_installations(
         _serialize_installation(item, service=service)
         for item in service.list_installations()
     ]
+
+
+@router.get("/extensions/installations/{installation_id}/logo", include_in_schema=False)
+async def get_extension_installation_logo(
+    installation_id: int,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Serve one installation-scoped extension logo asset.
+
+    Why: browser image requests do not attach the Studio bearer token, so logo
+    assets need the same public-read behavior as other UI-only brand marks.
+    """
+    service = ExtensionService(db)
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Extension installation not found")
+
+    logo_path = service.get_installation_logo_path(installation)
+    if logo_path is None:
+        raise HTTPException(status_code=404, detail="Extension logo not found")
+
+    media_type, _ = mimetypes.guess_type(logo_path.name)
+    return FileResponse(
+        str(logo_path),
+        media_type=media_type or "application/octet-stream",
+    )
 
 
 @router.get(
@@ -447,9 +498,7 @@ async def get_extension_installation_configuration(
         package_id=str(state["package_id"]),
         version=str(state["version"]),
         configuration_schema=_serialize_configuration_schema(state.get("schema")),
-        config=state.get("config", {})
-        if isinstance(state.get("config"), dict)
-        else {},
+        config=state.get("config", {}) if isinstance(state.get("config"), dict) else {},
     )
 
 
@@ -481,9 +530,7 @@ async def update_extension_installation_configuration(
         package_id=str(state["package_id"]),
         version=str(state["version"]),
         configuration_schema=_serialize_configuration_schema(state.get("schema")),
-        config=state.get("config", {})
-        if isinstance(state.get("config"), dict)
-        else {},
+        config=state.get("config", {}) if isinstance(state.get("config"), dict) else {},
     )
 
 
@@ -553,6 +600,7 @@ async def install_extension(
             source_dir=body.source_dir,
             installed_by=current_user.username,
             trust_confirmed=body.trust_confirmed,
+            overwrite_confirmed=body.overwrite_confirmed,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -605,6 +653,7 @@ async def import_bundle_extension(
     relative_paths: list[str] = Form(...),
     bundle_name: str = Form(...),
     trust_confirmed: bool = Form(False),
+    overwrite_confirmed: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ExtensionInstallationResponse:
@@ -630,6 +679,7 @@ async def import_bundle_extension(
             files=bundle_files,
             installed_by=current_user.username,
             trust_confirmed=trust_confirmed,
+            overwrite_confirmed=overwrite_confirmed,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

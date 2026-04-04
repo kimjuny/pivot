@@ -65,7 +65,9 @@ class LocalFilesystemStorageBackend:
         normalized_key = key.strip().replace("\\", "/")
         if normalized_key == "":
             raise ValueError("Artifact key must not be empty.")
-        parts = [part for part in normalized_key.split("/") if part not in {"", ".", ".."}]
+        parts = [
+            part for part in normalized_key.split("/") if part not in {"", ".", ".."}
+        ]
         if not parts:
             raise ValueError("Artifact key must contain at least one safe path part.")
         return _storage_root().joinpath(*parts)
@@ -133,8 +135,7 @@ class ExtensionArtifactStorageService:
     ) -> str:
         """Return the canonical artifact key for one extension version."""
         return (
-            f"extensions/{scope}/{name}/{version}/artifact/"
-            f"{manifest_hash}.tar.gz"
+            f"extensions/{scope}/{name}/{version}/artifact/" f"{manifest_hash}.tar.gz"
         )
 
     def store_directory(

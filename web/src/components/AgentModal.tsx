@@ -233,7 +233,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                 </div>
               ) : (
                 <Select
-                  value={formData.llm_id?.toString() || ''}
+                  value={formData.llm_id?.toString() || '__none__'}
                   onValueChange={(value) => {
                     if (value === '__add_new__') {
                       // Why: creating the dependency in-place avoids forcing users to abandon the flow.
@@ -242,16 +242,17 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                     } else {
                       setFormData({
                         ...formData,
-                        llm_id: value ? Number.parseInt(value, 10) : undefined,
+                        llm_id: value === '__none__' ? undefined : Number.parseInt(value, 10),
                       });
                     }
                   }}
                   disabled={isSubmitting}
                 >
                   <SelectTrigger id="llm">
-                    <SelectValue placeholder="Select an LLM…" />
+                    <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
                     {availableLLMs.length === 0 ? (
                       <div className="px-2 py-6 text-center text-sm text-muted-foreground">
                         No LLMs available

@@ -1003,6 +1003,8 @@ export interface ExtensionInstallation {
   display_name: string;
   /** Package summary shown in Studio. */
   description: string;
+  /** Optional package logo served by the backend. */
+  logo_url: string | null;
   /** Stable manifest hash for pinning and replay. */
   manifest_hash: string;
   /** Storage backend used for the persisted package artifact. */
@@ -1105,6 +1107,8 @@ export interface ExtensionPackage {
   display_name: string;
   /** Package summary. */
   description: string;
+  /** Optional package logo resolved from the newest available installation. */
+  logo_url: string | null;
   /** Root-level README rendered in the package detail overview, if present. */
   readme_markdown: string;
   /** Highest available installed version. */
@@ -1165,6 +1169,18 @@ export interface ExtensionImportPreview {
   contribution_summary: ExtensionContributionSummary;
   /** Raw declared permissions from the manifest. */
   permissions: Record<string, unknown>;
+  /** Existing installation row using the same package id and version, if any. */
+  existing_installation_id: number | null;
+  /** Lifecycle status of the existing installation, if any. */
+  existing_installation_status: string | null;
+  /** Whether the uploaded bundle is byte-for-byte identical to the installed version. */
+  identical_to_installed: boolean;
+  /** Whether replacing the installed version is allowed after explicit confirmation. */
+  requires_overwrite_confirmation: boolean;
+  /** Human-readable reason when overwrite is blocked. */
+  overwrite_blocked_reason: string;
+  /** Existing references that still rely on the installed version, if any. */
+  existing_reference_summary: ExtensionReferenceSummary | null;
 }
 
 /**
@@ -1299,6 +1315,8 @@ export interface AgentExtensionPackage {
   display_name: string;
   /** Package summary. */
   description: string;
+  /** Optional package logo resolved from the installed package. */
+  logo_url: string | null;
   /** Highest installed version available for this package. */
   latest_version: string;
   /** Count of active installed versions. */
@@ -1357,7 +1375,7 @@ export const previewExtensionBundle = async (
  */
 export const importExtensionBundle = async (
   files: File[],
-  options: { trustConfirmed: boolean },
+  options: { trustConfirmed: boolean; overwriteConfirmed?: boolean },
 ): Promise<ExtensionInstallation> => {
   if (files.length === 0) {
     throw new Error('Choose an extension folder before importing.');
@@ -1368,6 +1386,7 @@ export const importExtensionBundle = async (
   const formData = new FormData();
   formData.append('bundle_name', bundleName);
   formData.append('trust_confirmed', options.trustConfirmed ? 'true' : 'false');
+  formData.append('overwrite_confirmed', options.overwriteConfirmed ? 'true' : 'false');
   files.forEach((file) => {
     formData.append('files', file);
     formData.append('relative_paths', file.webkitRelativePath || file.name);

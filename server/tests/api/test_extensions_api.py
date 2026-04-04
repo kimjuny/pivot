@@ -33,9 +33,7 @@ hook_execution_service_module = import_module(
     "app.services.extension_hook_execution_service"
 )
 extension_service_module = import_module("app.services.extension_service")
-artifact_storage_service_module = import_module(
-    "app.services.artifact_storage_service"
-)
+artifact_storage_service_module = import_module("app.services.artifact_storage_service")
 workspace_service = import_module("app.services.workspace_service")
 ExtensionHookExecutionService = (
     hook_execution_service_module.ExtensionHookExecutionService
@@ -175,11 +173,11 @@ class ExtensionsApiTestCase(unittest.TestCase):
                 "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
                 "    return [\n"
                 "        {\n"
-                "            \"type\": \"emit_event\",\n"
-                "            \"payload\": {\n"
-                "                \"type\": \"observe\",\n"
-                "                \"data\": {\n"
-                "                    \"task_id\": context.get(\"task_id\"),\n"
+                '            "type": "emit_event",\n'
+                '            "payload": {\n'
+                '                "type": "observe",\n'
+                '                "data": {\n'
+                '                    "task_id": context.get("task_id"),\n'
                 "                },\n"
                 "            },\n"
                 "        }\n"
@@ -208,15 +206,23 @@ class ExtensionsApiTestCase(unittest.TestCase):
                 )
             )
 
-        for file_path in sorted(path for path in extension_root.rglob("*") if path.is_file()):
+        for file_path in sorted(
+            path for path in extension_root.rglob("*") if path.is_file()
+        ):
             relative_path = file_path.relative_to(extension_root).as_posix()
             parts.append(
                 (
                     "files",
-                    (file_path.name, file_path.read_bytes(), "application/octet-stream"),
+                    (
+                        file_path.name,
+                        file_path.read_bytes(),
+                        "application/octet-stream",
+                    ),
                 )
             )
-            parts.append(("relative_paths", (None, f"{bundle_name}/{relative_path}", None)))
+            parts.append(
+                ("relative_paths", (None, f"{bundle_name}/{relative_path}", None))
+            )
 
         return parts
 
@@ -261,6 +267,57 @@ class ExtensionsApiTestCase(unittest.TestCase):
 
         artifact_path = self.workspace_root / Path(installation_payload["artifact_key"])
         self.assertTrue(artifact_path.is_file())
+
+    def test_extension_logo_endpoints_expose_installation_and_package_logo_urls(
+        self,
+    ) -> None:
+        """Extension APIs should expose one stable logo URL when a package ships a logo."""
+        extension_root = self._write_hook_extension()
+        (extension_root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        install_parts = self._build_bundle_upload(
+            extension_root,
+            bundle_name="acme-hooks",
+            trust_confirmed=True,
+        )
+
+        install_response = self.client.post(
+            "/api/extensions/installations/import/bundle",
+            files=install_parts,
+        )
+
+        self.assertEqual(install_response.status_code, 200)
+        installation_payload = install_response.json()
+        installation_id = int(installation_payload["id"])
+        self.assertEqual(
+            installation_payload["logo_url"],
+            f"/api/extensions/installations/{installation_id}/logo",
+        )
+
+        packages_response = self.client.get("/api/extensions/packages")
+        self.assertEqual(packages_response.status_code, 200)
+        packages_payload = packages_response.json()
+        self.assertEqual(len(packages_payload), 1)
+        self.assertEqual(
+            packages_payload[0]["logo_url"],
+            f"/api/extensions/installations/{installation_id}/logo",
+        )
+
+        logo_response = self.client.get(
+            f"/api/extensions/installations/{installation_id}/logo"
+        )
+        self.assertEqual(logo_response.status_code, 200)
+        self.assertEqual(logo_response.headers["content-type"], "image/png")
+        self.assertEqual(logo_response.content, b"\x89PNG\r\n\x1a\n")
+
+        del self.app.dependency_overrides[auth_module.get_current_user]
+        unauthenticated_logo_response = self.client.get(
+            f"/api/extensions/installations/{installation_id}/logo"
+        )
+        self.assertEqual(unauthenticated_logo_response.status_code, 200)
+        self.assertEqual(unauthenticated_logo_response.content, b"\x89PNG\r\n\x1a\n")
+        self.app.dependency_overrides[auth_module.get_current_user] = (
+            self._get_current_user
+        )
 
     def test_installation_configuration_endpoints(self) -> None:
         """Configuration endpoints should expose schema and persist values."""
@@ -323,7 +380,9 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.assertEqual(bind_response.status_code, 200)
         binding_payload = bind_response.json()
         self.assertEqual(binding_payload["priority"], 25)
-        self.assertEqual(binding_payload["installation"]["package_id"], "@acme/providers")
+        self.assertEqual(
+            binding_payload["installation"]["package_id"], "@acme/providers"
+        )
 
         packages_response = self.client.get(
             f"/api/agents/{self.agent.id}/extensions/packages"

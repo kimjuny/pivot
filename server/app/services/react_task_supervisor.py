@@ -806,7 +806,9 @@ class ReactTaskSupervisor:
                             "data": {"error": str(exc), "terminal": True},
                         },
                     )
-                    runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(task)
+                    runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(
+                        task
+                    )
                     await self._run_task_hooks(
                         db=db,
                         session_id=task.session_id,
@@ -960,7 +962,9 @@ class ReactTaskSupervisor:
             "user_message": task.user_message,
             "status": task.status,
             "total_tokens": task.total_tokens,
-            "agent_answer": self._extract_task_agent_answer(db=db, task_id=task.task_id),
+            "agent_answer": self._extract_task_agent_answer(
+                db=db, task_id=task.task_id
+            ),
         }
 
     def _build_hook_user_snapshot(

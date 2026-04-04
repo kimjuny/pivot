@@ -9,6 +9,7 @@ import json
 import re
 import shutil
 import sys
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -38,17 +39,19 @@ from sqlmodel import Session, col, select
 _MANIFEST_FILENAME = "manifest.json"
 _README_MARKDOWN_FILENAME = "README.md"
 _SKILL_MARKDOWN_FILENAME = "SKILL.md"
+_DEFAULT_EXTENSION_LOGO_PATH = PurePosixPath("logo.png")
 _VALID_EXTENSION_SCOPE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_EXTENSION_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_PROVIDER_LOCAL_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+_SUPPORTED_EXTENSION_LOGO_SUFFIXES = frozenset(
+    {".png", ".jpg", ".jpeg", ".svg", ".webp"}
+)
 _SUPPORTED_CONFIGURATION_FIELD_TYPES = frozenset(
     {"string", "secret", "number", "boolean"}
 )
 _TOOL_ENTRY_TYPES = frozenset({"tools"})
-_ENTRYPOINT_TYPES = frozenset(
-    {"hooks", "channel_providers", "web_search_providers"}
-)
+_ENTRYPOINT_TYPES = frozenset({"hooks", "channel_providers", "web_search_providers"})
 _VERSION_TOKEN_PATTERN = re.compile(r"\d+|[A-Za-z]+|[^A-Za-z0-9]+")
 _SUPPORTED_HOOK_EVENTS = frozenset(
     {
@@ -90,6 +93,12 @@ class ExtensionInstallPreview:
     manifest_hash: str
     contribution_summary: dict[str, list[str]]
     permissions: dict[str, Any]
+    existing_installation_id: int | None = None
+    existing_installation_status: str | None = None
+    identical_to_installed: bool = False
+    requires_overwrite_confirmation: bool = False
+    overwrite_blocked_reason: str = ""
+    existing_reference_summary: ExtensionReferenceSummary | None = None
 
 
 @dataclass(frozen=True)
@@ -164,11 +173,14 @@ def _installation_version_root(*, scope: str, name: str, version: str) -> Path:
 
 def _installation_runtime_root(*, scope: str, name: str, version: str) -> Path:
     """Return the extracted runtime directory for one package version."""
-    return _installation_version_root(
-        scope=scope,
-        name=name,
-        version=version,
-    ) / "runtime"
+    return (
+        _installation_version_root(
+            scope=scope,
+            name=name,
+            version=version,
+        )
+        / "runtime"
+    )
 
 
 def _package_id(scope: str, name: str) -> str:
@@ -297,14 +309,10 @@ def _normalize_configuration_schema(
                 else key
             )
             normalized_description = (
-                raw_description.strip()
-                if isinstance(raw_description, str)
-                else ""
+                raw_description.strip() if isinstance(raw_description, str) else ""
             )
             normalized_placeholder = (
-                raw_placeholder.strip()
-                if isinstance(raw_placeholder, str)
-                else ""
+                raw_placeholder.strip() if isinstance(raw_placeholder, str) else ""
             )
 
             normalized_field: dict[str, Any] = {
@@ -320,9 +328,7 @@ def _normalize_configuration_schema(
             _normalize_config_value(
                 value=normalized_field.get("default"),
                 field=normalized_field,
-                field_path=(
-                    f"configuration.{section_name}.fields[{index}].default"
-                ),
+                field_path=(f"configuration.{section_name}.fields[{index}].default"),
                 allow_missing=True,
             )
             normalized_fields.append(normalized_field)
@@ -465,6 +471,42 @@ def _validate_extension_provider_key(
     return normalized_key
 
 
+def _normalize_logo_path(
+    raw_logo_path: object,
+    *,
+    source_dir: Path,
+) -> str | None:
+    """Validate one optional extension logo asset declaration.
+
+    Why: package logos should be easy for authors to add via a root-level
+    convention, while still allowing larger packages to keep assets in a
+    dedicated folder without weakening path-safety checks.
+    """
+    if raw_logo_path is None:
+        default_logo_path = source_dir.joinpath(*_DEFAULT_EXTENSION_LOGO_PATH.parts)
+        return (
+            _DEFAULT_EXTENSION_LOGO_PATH.as_posix()
+            if default_logo_path.is_file()
+            else None
+        )
+
+    if not isinstance(raw_logo_path, str):
+        raise ValueError("manifest.json logo_path must be a string.")
+
+    relative_path = _safe_relative_path(raw_logo_path, field_name="logo_path")
+    if relative_path.suffix.lower() not in _SUPPORTED_EXTENSION_LOGO_SUFFIXES:
+        raise ValueError(
+            "logo_path must point to a supported image file "
+            "(.png, .jpg, .jpeg, .svg, or .webp)."
+        )
+
+    logo_path = source_dir.joinpath(*relative_path.parts)
+    if not logo_path.is_file():
+        raise ValueError(f"Logo path '{relative_path.as_posix()}' does not exist.")
+
+    return relative_path.as_posix()
+
+
 def _extract_bundle_extension_directory(
     *,
     bundle_name: str,
@@ -518,14 +560,18 @@ def _extract_bundle_extension_directory(
         )
 
 
-def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> dict[str, Any]:
+def _normalize_manifest(
+    raw_manifest: dict[str, Any], *, source_dir: Path
+) -> dict[str, Any]:
     """Validate and normalize one extension manifest."""
     schema_version = raw_manifest.get("schema_version")
     if schema_version != 1:
         raise ValueError("manifest.json schema_version must be 1.")
 
     scope = raw_manifest.get("scope")
-    if not isinstance(scope, str) or not _VALID_EXTENSION_SCOPE.fullmatch(scope.strip()):
+    if not isinstance(scope, str) or not _VALID_EXTENSION_SCOPE.fullmatch(
+        scope.strip()
+    ):
         raise ValueError("manifest.json must declare a valid extension scope.")
     normalized_scope = scope.strip()
 
@@ -547,6 +593,10 @@ def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> di
     )
     description = raw_manifest.get("description")
     normalized_description = description.strip() if isinstance(description, str) else ""
+    normalized_logo_path = _normalize_logo_path(
+        raw_manifest.get("logo_path"),
+        source_dir=source_dir,
+    )
 
     contributions = raw_manifest.get("contributions")
     if contributions is None:
@@ -787,8 +837,7 @@ def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> di
                         normalized_event_name = event_name.strip()
                         if normalized_event_name not in _SUPPORTED_HOOK_EVENTS:
                             raise ValueError(
-                                "Unsupported hook event "
-                                f"'{normalized_event_name}'."
+                                "Unsupported hook event " f"'{normalized_event_name}'."
                             )
 
                         callable_name = raw_item.get("callable")
@@ -831,9 +880,7 @@ def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> di
     normalized_permissions = permissions if isinstance(permissions, dict) else {}
 
     compatibility = raw_manifest.get("compatibility")
-    normalized_compatibility = (
-        compatibility if isinstance(compatibility, dict) else {}
-    )
+    normalized_compatibility = compatibility if isinstance(compatibility, dict) else {}
     normalized_configuration = _normalize_configuration_schema(
         raw_manifest.get("configuration")
     )
@@ -849,6 +896,7 @@ def _normalize_manifest(raw_manifest: dict[str, Any], *, source_dir: Path) -> di
         "version": normalized_version,
         "publisher": normalized_publisher,
         "description": normalized_description,
+        "logo_path": normalized_logo_path,
         "api_version": (
             raw_manifest.get("api_version")
             if isinstance(raw_manifest.get("api_version"), str)
@@ -927,9 +975,7 @@ def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
     if not isinstance(parsed, list):
         return set()
 
-    return {
-        item.strip() for item in parsed if isinstance(item, str) and item.strip()
-    }
+    return {item.strip() for item in parsed if isinstance(item, str) and item.strip()}
 
 
 class ExtensionService:
@@ -1017,12 +1063,62 @@ class ExtensionService:
         except OSError:
             return ""
 
+    def get_installation_logo_path(
+        self,
+        installation: ExtensionInstallation,
+    ) -> Path | None:
+        """Return one installation-scoped logo asset when the package declares one.
+
+        Why: UI surfaces should consume a stable package logo URL without
+        knowing whether the author relied on the explicit manifest field or the
+        root-level ``logo.png`` convention.
+        """
+        install_root = self._ensure_materialized_installation_root(installation)
+        manifest: dict[str, Any] = {}
+        try:
+            parsed_manifest = json.loads(installation.manifest_json)
+        except json.JSONDecodeError:
+            parsed_manifest = {}
+        if isinstance(parsed_manifest, dict):
+            manifest = parsed_manifest
+
+        logo_candidates: list[PurePosixPath] = []
+        raw_logo_path = manifest.get("logo_path")
+        if isinstance(raw_logo_path, str) and raw_logo_path.strip():
+            with suppress(ValueError):
+                logo_candidates.append(
+                    _safe_relative_path(raw_logo_path, field_name="logo_path")
+                )
+        if _DEFAULT_EXTENSION_LOGO_PATH not in logo_candidates:
+            logo_candidates.append(_DEFAULT_EXTENSION_LOGO_PATH)
+
+        for relative_path in logo_candidates:
+            if relative_path.suffix.lower() not in _SUPPORTED_EXTENSION_LOGO_SUFFIXES:
+                continue
+            candidate_path = install_root.joinpath(*relative_path.parts)
+            if candidate_path.is_file():
+                return candidate_path
+        return None
+
+    def get_installation_logo_url(
+        self,
+        installation: ExtensionInstallation,
+    ) -> str | None:
+        """Return one stable API URL for an installation logo, if present."""
+        installation_id = installation.id or 0
+        if installation_id <= 0:
+            return None
+        if self.get_installation_logo_path(installation) is None:
+            return None
+        return f"/api/extensions/installations/{installation_id}/logo"
+
     def list_agent_package_choices(self, agent_id: int) -> list[dict[str, Any]]:
         """Return package-level extension choices for one agent."""
         packages = self.list_packages()
         bindings = self.list_agent_bindings(agent_id)
         installations = {
-            installation.id or 0: installation for installation in self.list_installations()
+            installation.id or 0: installation
+            for installation in self.list_installations()
         }
         bindings_by_package: dict[str, AgentExtensionBinding] = {}
 
@@ -1105,6 +1201,36 @@ class ExtensionService:
 
         normalized_manifest = _normalize_manifest(raw_manifest, source_dir=package_root)
         manifest_hash = _hash_payload(normalized_manifest)
+        existing = self.db.exec(
+            select(ExtensionInstallation).where(
+                ExtensionInstallation.scope == normalized_manifest["scope"],
+                ExtensionInstallation.name == normalized_manifest["name"],
+                ExtensionInstallation.version == normalized_manifest["version"],
+            )
+        ).first()
+        existing_reference_summary: ExtensionReferenceSummary | None = None
+        identical_to_installed = False
+        requires_overwrite_confirmation = False
+        overwrite_blocked_reason = ""
+        existing_installation_id: int | None = None
+        existing_installation_status: str | None = None
+        if existing is not None:
+            existing_installation_id = existing.id
+            existing_installation_status = existing.status
+            identical_to_installed = existing.manifest_hash == manifest_hash
+            if not identical_to_installed:
+                existing_reference_summary = self.get_reference_summary(
+                    installation_id=existing.id or 0
+                )
+                if existing_reference_summary.has_references:
+                    overwrite_blocked_reason = (
+                        "This installed version is still referenced by agent "
+                        "bindings, releases, test snapshots, or saved drafts. "
+                        "Remove those references or bump the extension version "
+                        "before replacing it."
+                    )
+                else:
+                    requires_overwrite_confirmation = True
         return ExtensionInstallPreview(
             scope=normalized_manifest["scope"],
             name=normalized_manifest["name"],
@@ -1125,6 +1251,12 @@ class ExtensionService:
                 if isinstance(normalized_manifest.get("permissions"), dict)
                 else {}
             ),
+            existing_installation_id=existing_installation_id,
+            existing_installation_status=existing_installation_status,
+            identical_to_installed=identical_to_installed,
+            requires_overwrite_confirmation=requires_overwrite_confirmation,
+            overwrite_blocked_reason=overwrite_blocked_reason,
+            existing_reference_summary=existing_reference_summary,
         )
 
     def set_installation_status(
@@ -1188,6 +1320,7 @@ class ExtensionService:
         installed_by: str | None,
         source: str = "manual",
         trust_confirmed: bool,
+        overwrite_confirmed: bool = False,
     ) -> ExtensionInstallation:
         """Validate and install one extension folder into the workspace registry.
 
@@ -1197,6 +1330,9 @@ class ExtensionService:
             source: Installation source label such as ``manual`` or ``bundle``.
             trust_confirmed: Whether the operator explicitly trusted the local
                 package before installation.
+            overwrite_confirmed: Whether the operator explicitly approved
+                replacing one already-installed package with the same
+                ``scope/name/version`` but different contents.
 
         Returns:
             Persisted installation row.
@@ -1216,7 +1352,9 @@ class ExtensionService:
         )
         if not isinstance(normalized_manifest, dict):
             raise ValueError("manifest.json must contain a JSON object.")
-        normalized_manifest = _normalize_manifest(normalized_manifest, source_dir=package_root)
+        normalized_manifest = _normalize_manifest(
+            normalized_manifest, source_dir=package_root
+        )
         manifest_hash = preview.manifest_hash
         provider_registry = ProviderRegistryService(self.db)
         provider_conflicts = provider_registry.analyze_manifest_provider_conflicts(
@@ -1240,15 +1378,29 @@ class ExtensionService:
                 ExtensionInstallation.version == normalized_manifest["version"],
             )
         ).first()
+        should_overwrite_existing = False
         if existing is not None:
             if existing.manifest_hash != manifest_hash:
-                raise ValueError(
-                    "A different extension payload is already installed at "
-                    f"{existing.package_id}@{existing.version}. Bump the version "
-                    "before importing updated contents."
+                references = self.get_reference_summary(
+                    installation_id=existing.id or 0
                 )
-            self._ensure_materialized_installation_root(existing)
-            return existing
+                if references.has_references:
+                    raise ValueError(
+                        "This installed version is still referenced by agent "
+                        "bindings, releases, test snapshots, or saved drafts. "
+                        "Remove those references or bump the extension version "
+                        "before replacing it."
+                    )
+                if not overwrite_confirmed:
+                    raise ValueError(
+                        "A different extension payload is already installed at "
+                        f"{existing.package_id}@{existing.version}. Confirm "
+                        "overwrite to replace this version."
+                    )
+                should_overwrite_existing = True
+            else:
+                self._ensure_materialized_installation_root(existing)
+                return existing
 
         version_root = _installation_version_root(
             scope=normalized_manifest["scope"],
@@ -1260,7 +1412,7 @@ class ExtensionService:
             name=normalized_manifest["name"],
             version=normalized_manifest["version"],
         )
-        if version_root.exists():
+        if version_root.exists() and not should_overwrite_existing:
             # Local package directories are runtime caches plus persisted
             # artifacts. If the database record is gone, treat the leftover
             # directory as an orphaned cache and recreate it from scratch.
@@ -1273,6 +1425,8 @@ class ExtensionService:
             manifest_hash=manifest_hash,
         )
         install_root.parent.mkdir(parents=True, exist_ok=True)
+        if should_overwrite_existing:
+            shutil.rmtree(install_root, ignore_errors=True)
         try:
             self.artifact_storage.materialize_to_directory(
                 artifact_key=stored_artifact.artifact_key,
@@ -1287,6 +1441,28 @@ class ExtensionService:
 
         now = datetime.now(UTC)
         trust_status, trust_source = _local_trust_metadata(source=source)
+        if existing is not None and should_overwrite_existing:
+            old_artifact_key = existing.artifact_key
+            existing.display_name = normalized_manifest["display_name"]
+            existing.description = normalized_manifest["description"]
+            existing.manifest_json = _dump_json(normalized_manifest)
+            existing.manifest_hash = manifest_hash
+            existing.artifact_storage_backend = stored_artifact.storage_backend
+            existing.artifact_key = stored_artifact.artifact_key
+            existing.artifact_digest = stored_artifact.artifact_digest
+            existing.artifact_size_bytes = stored_artifact.size_bytes
+            existing.install_root = str(install_root)
+            existing.source = source
+            existing.trust_status = trust_status
+            existing.trust_source = trust_source
+            existing.installed_by = installed_by
+            existing.updated_at = now
+            self.db.add(existing)
+            self.db.commit()
+            self.db.refresh(existing)
+            self.artifact_storage.delete_artifact(artifact_key=old_artifact_key)
+            return existing
+
         installation = ExtensionInstallation(
             scope=normalized_manifest["scope"],
             name=normalized_manifest["name"],
@@ -1383,6 +1559,7 @@ class ExtensionService:
         files: list[ExtensionBundleImportFile],
         installed_by: str | None,
         trust_confirmed: bool,
+        overwrite_confirmed: bool = False,
     ) -> ExtensionInstallation:
         """Install one extension bundle uploaded from the local machine.
 
@@ -1406,6 +1583,7 @@ class ExtensionService:
                 installed_by=installed_by,
                 source="bundle",
                 trust_confirmed=trust_confirmed,
+                overwrite_confirmed=overwrite_confirmed,
             )
 
     def preview_bundle(
@@ -1468,7 +1646,8 @@ class ExtensionService:
         )
         statement = select(AgentExtensionBinding).where(
             AgentExtensionBinding.agent_id == agent_id,
-            AgentExtensionBinding.extension_installation_id == extension_installation_id,
+            AgentExtensionBinding.extension_installation_id
+            == extension_installation_id,
         )
         binding = self.db.exec(statement).first()
         now = datetime.now(UTC)
@@ -1693,7 +1872,9 @@ class ExtensionService:
     def validate_agent_bindings(self, *, agent_id: int) -> None:
         """Validate conflicts among the currently enabled bindings of one agent."""
         bundle = self.build_agent_extension_snapshot(agent_id)
-        seen_tool_names: set[str] = {tool.name for tool in get_tool_manager().list_tools()}
+        seen_tool_names: set[str] = {
+            tool.name for tool in get_tool_manager().list_tools()
+        }
         seen_skill_names: set[str] = set()
         for row in self.db.exec(
             select(Skill.name).where(Skill.kind != "private")
@@ -1723,7 +1904,9 @@ class ExtensionService:
                     )
                 seen_skill_names.add(skill_name)
 
-    def get_reference_summary(self, *, installation_id: int) -> ExtensionReferenceSummary:
+    def get_reference_summary(
+        self, *, installation_id: int
+    ) -> ExtensionReferenceSummary:
         """Return persisted references that still rely on one extension version."""
         installation = self.db.get(ExtensionInstallation, installation_id)
         if installation is None:

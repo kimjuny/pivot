@@ -5,6 +5,7 @@
   "display_name": "Mem0 Memory",
   "version": "0.1.0",
   "description": "External memory extension that recalls and persists memory through an external Mem0-compatible HTTP service.",
+  "logo_path": "logo.png",
   "api_version": "1.x",
   "configuration": {
     "installation": {

@@ -142,6 +142,7 @@ The following layout is recommended:
 ```text
 acme-crm/
   manifest.json
+  logo.png
   README.md
   assets/
   skills/
@@ -164,11 +165,14 @@ acme-crm/
 Rules:
 
 - `manifest.json` is required.
+- A root-level `logo.png` is optional and becomes the package logo by default.
 - Each skill directory must contain a `SKILL.md` file. This should not be
   configurable.
 - Contribution source code should live in dedicated top-level directories by
   type.
 - The package may contain shared assets and test fixtures.
+- `manifest.json.logo_path` may override the default root logo with another
+  package-relative image asset.
 
 The directory names are part of the package contract and should stay stable. A
 stable layout reduces loader complexity and makes documentation predictable.
@@ -188,6 +192,7 @@ Recommended example:
   "display_name": "ACME CRM",
   "version": "0.1.0",
   "description": "CRM-oriented tools, skills, and lifecycle integrations.",
+  "logo_path": "assets/logo.svg",
   "api_version": "1.x",
   "license": "Apache-2.0",
   "homepage_url": "https://example.com/acme-crm",

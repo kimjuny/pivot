@@ -16,6 +16,13 @@ class ExtensionInstallRequest(AppBaseModel):
         default=False,
         description="Whether the operator explicitly trusted this local package.",
     )
+    overwrite_confirmed: bool = Field(
+        default=False,
+        description=(
+            "Whether the operator explicitly approved overwriting an already "
+            "installed package with the same scope, name, and version."
+        ),
+    )
 
 
 class ExtensionInstallationStatusRequest(AppBaseModel):
@@ -109,6 +116,7 @@ class ExtensionInstallationResponse(AppBaseModel):
     version: str
     display_name: str
     description: str
+    logo_url: str | None = None
     manifest_hash: str
     artifact_storage_backend: str
     artifact_key: str
@@ -158,6 +166,7 @@ class ExtensionPackageResponse(AppBaseModel):
     package_id: str
     display_name: str
     description: str
+    logo_url: str | None = None
     readme_markdown: str = ""
     latest_version: str
     active_version_count: int
@@ -182,6 +191,12 @@ class ExtensionImportPreviewResponse(AppBaseModel):
         default_factory=ExtensionContributionSummaryResponse
     )
     permissions: dict[str, Any] = Field(default_factory=dict)
+    existing_installation_id: int | None = None
+    existing_installation_status: str | None = None
+    identical_to_installed: bool = False
+    requires_overwrite_confirmation: bool = False
+    overwrite_blocked_reason: str = ""
+    existing_reference_summary: ExtensionReferenceSummaryResponse | None = None
 
 
 class ExtensionReferenceSummaryResponse(AppBaseModel):
@@ -249,6 +264,7 @@ class AgentExtensionPackageResponse(AppBaseModel):
     package_id: str
     display_name: str
     description: str
+    logo_url: str | None = None
     latest_version: str
     active_version_count: int
     disabled_version_count: int

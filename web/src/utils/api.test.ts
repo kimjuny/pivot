@@ -306,6 +306,8 @@ describe('chat file api helpers', () => {
       }),
     );
     expect(requestInit.body).toBeInstanceOf(FormData);
+    const overwriteValue = (requestInit.body as FormData).get('overwrite_confirmed');
+    expect(overwriteValue).toBe('false');
   });
 
   it('loads and saves extension installation configuration', async () => {
@@ -408,6 +410,12 @@ describe('chat file api helpers', () => {
               allow_hosts: ['api.acme.com'],
             },
           },
+          existing_installation_id: null,
+          existing_installation_status: null,
+          identical_to_installed: false,
+          requires_overwrite_confirmation: false,
+          overwrite_blocked_reason: '',
+          existing_reference_summary: null,
         }),
         {
           status: 200,

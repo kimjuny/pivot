@@ -20,6 +20,14 @@ Endpoints:
 - `POST /v1/memories/recall`
 - `POST /v1/memories/persist`
 
+## Scope
+
+This example runs as a single Mem0 service instance plus one Qdrant instance.
+That is enough for local development and basic validation.
+
+If you want a scalable or highly available deployment, extend this service with
+your own replicas, ingress, persistence, and operations model.
+
 ## Configuration Model
 
 This service owns its own model and vector-store configuration. Pivot should
@@ -65,8 +73,7 @@ image.
 1. Copy the environment template:
 
 ```bash
-cp /Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/service/.env.example \
-  /Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/service/.env
+cp .env.example .env
 ```
 
 2. Edit `.env` with your real provider configuration.
@@ -74,12 +81,19 @@ cp /Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/ser
 3. Start the service stack:
 
 ```bash
-podman compose -f /Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/service/compose.yaml up --build
+podman compose up --build
 ```
 
-4. In Pivot, set the extension `Mem0 Server URL` to:
+4. In Pivot, set the extension `Mem0 Server URL` to one of these values:
 
+- `http://host.containers.internal:8765`
+  when Pivot backend runs in a container and this service stack is published on
+  the host with the default compose port mapping
 - `http://localhost:8765`
+  when Pivot backend runs directly on the host machine
+
+The provided compose file publishes `8765:8765`, so `8765` is the default host
+port unless you change it yourself.
 
 ## Request Semantics
 

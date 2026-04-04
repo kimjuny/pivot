@@ -826,7 +826,9 @@ def build_selected_skills_prompt_block(
             if extra_skill is None:
                 continue
             try:
-                content = _read_markdown(Path(extra_skill["location"]) / "SKILL.md").strip()
+                content = _read_markdown(
+                    Path(extra_skill["location"]) / "SKILL.md"
+                ).strip()
             except FileNotFoundError:
                 logger.warning(
                     "Selected extension skill source disappeared: %s",

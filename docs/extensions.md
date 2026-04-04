@@ -49,6 +49,7 @@ An extension is one folder with a required `manifest.json` file at its root.
 ```text
 acme-extension/
   manifest.json
+  logo.png
   README.md
   hooks/
     lifecycle.py
@@ -68,8 +69,11 @@ acme-extension/
 Rules:
 
 - `manifest.json` is required
+- A root-level `logo.png` is optional and will be picked up automatically
 - Skill directories must contain `SKILL.md`
 - Paths inside the manifest must be relative to the package root
+- `manifest.json.logo_path` may point to a different image file relative to the
+  package root
 - The folder name is not authoritative; `manifest.json` is
 
 Ready-to-import examples in this repository:
@@ -144,6 +148,7 @@ Common top-level fields:
 - `display_name`
 - `version`
 - `description`
+- `logo_path`
 - `api_version`
 - `license`
 - `homepage_url`
@@ -174,10 +179,29 @@ Validation rules worth knowing:
 
 - `scope` and `name` must be simple lowercase identifiers
 - `version` must be a non-empty version token
+- `logo_path`, when present, must be a relative image path inside the package
+- if `logo_path` is omitted, Pivot falls back to a root-level `logo.png`
 - provider keys must use `scope@provider_name`
 - provider key scope must match `manifest.json.scope`
 - hook `event` must be one of the supported lifecycle events
 - hook `mode` must be `sync` or `async`
+
+### Logo Asset
+
+Extension packages may provide one visual identity asset for list and detail
+pages.
+
+Recommended options:
+
+- Put `logo.png` at the package root and omit `logo_path`
+- Or declare `logo_path` explicitly when the asset lives elsewhere, for example
+  `assets/logo.svg`
+
+Current rules:
+
+- `logo_path` is optional
+- `logo_path` must stay inside the extension root
+- supported formats are `.png`, `.jpg`, `.jpeg`, `.svg`, and `.webp`
 
 ### Configuration Schema
 

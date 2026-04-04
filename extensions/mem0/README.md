@@ -3,10 +3,8 @@
 This directory contains the two deliverables required for a scalable external
 memory integration:
 
-- [extension](/Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/extension):
-  the package imported into Pivot
-- [service](/Users/erickim/Documents/学习/TRAE/hackon-project/pivot/extensions/mem0/service):
-  the standalone HTTP service that stores and recalls memory
+- `extension/`: the package imported into Pivot
+- `service/`: the standalone HTTP service that stores and recalls memory
 
 Why the split exists:
 

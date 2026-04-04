@@ -212,10 +212,15 @@ class ExtensionHookService:
             raise ValueError("Hook source path and callable must be defined.")
 
         module_key = (
-            "_pivot_extension_hook_"
-            f"{extension_name}_{extension_version}_{hook.get('event', 'hook')}_"
-            f"{callable_name}"
-        ).replace("@", "_").replace("/", "_").replace(".", "_")
+            (
+                "_pivot_extension_hook_"
+                f"{extension_name}_{extension_version}_{hook.get('event', 'hook')}_"
+                f"{callable_name}"
+            )
+            .replace("@", "_")
+            .replace("/", "_")
+            .replace(".", "_")
+        )
         spec = importlib.util.spec_from_file_location(module_key, source_path)
         if spec is None or spec.loader is None:
             raise ValueError(f"Unable to import hook entrypoint '{source_path}'.")
@@ -261,14 +266,14 @@ class ExtensionHookService:
             payload = effect.get("payload")
             if effect_type == "emit_event":
                 if not isinstance(payload, dict):
-                    raise ValueError("emit_event effects must declare a payload object.")
+                    raise ValueError(
+                        "emit_event effects must declare a payload object."
+                    )
                 event_type = str(payload.get("type", "")).strip()
                 if event_type == "":
                     raise ValueError("emit_event payload must declare an event type.")
                 payload_data = payload.get("data")
-                normalized_data = (
-                    payload_data if isinstance(payload_data, dict) else {}
-                )
+                normalized_data = payload_data if isinstance(payload_data, dict) else {}
 
                 normalized_effects.append(
                     {

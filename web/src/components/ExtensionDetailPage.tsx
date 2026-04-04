@@ -4,6 +4,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { ArrowLeft, Server } from "@/lib/lucide";
 import { toast } from "sonner";
 
+import { ExtensionLogoAvatar } from "@/components/ExtensionLogoAvatar";
 import ExtensionHookReplayPanel from "@/components/ExtensionHookReplayPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,15 @@ interface PackageStatusBadge {
   label: string;
   /** Visual tone that distinguishes live usage from neutral state. */
   tone: "provider" | "runtime" | "neutral";
+}
+
+interface ReferenceBadge {
+  /** Human-readable summary label for one reference type. */
+  label: string;
+  /** Count currently attached to this installation. */
+  count: number;
+  /** Tone keeps provider references visually distinct from runtime state. */
+  tone: "provider" | "runtime";
 }
 
 interface SetupStateMap {
@@ -125,6 +135,54 @@ function buildPackageStatusBadges(pkg: ExtensionPackage): PackageStatusBadge[] {
     });
   }
   return badges;
+}
+
+/**
+ * Build visible usage badges for one installed version.
+ *
+ * Why: once the list page becomes intentionally compact, version-level usage
+ * counts still need a clear home in the detail page before operators decide to
+ * disable or uninstall a specific installation.
+ */
+function buildReferenceBadges(installation: ExtensionInstallation): ReferenceBadge[] {
+  const summary = installation.reference_summary;
+  if (!summary) {
+    return [];
+  }
+
+  const badges: ReferenceBadge[] = [
+    {
+      label: "Extension Bindings",
+      count: summary.extension_binding_count,
+      tone: "runtime",
+    },
+    {
+      label: "Channel Bindings",
+      count: summary.channel_binding_count,
+      tone: "provider",
+    },
+    {
+      label: "Web Search Bindings",
+      count: summary.web_search_binding_count,
+      tone: "provider",
+    },
+    {
+      label: "Releases",
+      count: summary.release_count,
+      tone: "runtime",
+    },
+    {
+      label: "Test Snapshots",
+      count: summary.test_snapshot_count,
+      tone: "runtime",
+    },
+    {
+      label: "Saved Drafts",
+      count: summary.saved_draft_count,
+      tone: "runtime",
+    },
+  ];
+  return badges.filter((badge) => badge.count > 0);
 }
 
 /**
@@ -366,9 +424,13 @@ export default function ExtensionDetailPage() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <div className="rounded-xl border border-border bg-muted/40 p-3">
-                    <Server className="h-6 w-6 text-primary" />
-                  </div>
+                  <ExtensionLogoAvatar
+                    name={pkg.display_name}
+                    logoUrl={pkg.logo_url ?? latestInstallation?.logo_url ?? null}
+                    fallback={<Server className="h-6 w-6 text-primary" aria-hidden="true" />}
+                    containerClassName="flex size-12 items-center justify-center rounded-xl border border-border bg-muted/40"
+                    imageClassName="size-full rounded-xl object-cover"
+                  />
                   <div>
                     <CardTitle className="text-2xl">{pkg.display_name}</CardTitle>
                     <CardDescription className="mt-1 text-sm">
@@ -665,6 +727,25 @@ export default function ExtensionDetailPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
+                {buildReferenceBadges(installation).length > 0 ? (
+                  <div>
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Current Usage
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {buildReferenceBadges(installation).map((badge) => (
+                        <Badge
+                          key={`${installation.id}-${badge.label}`}
+                          variant={badge.tone === "provider" ? "default" : "outline"}
+                          className="font-normal"
+                        >
+                          {badge.label} {badge.count}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 {buildContributionGroups(installation.contribution_summary).map((group) => (
                   <div key={`${installation.id}-${group.label}`}>
                     <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from importlib import import_module
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine
@@ -114,6 +114,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
         hook_behavior: str = "emit_event",
         installation_config_fields: list[dict[str, object]] | None = None,
         binding_config_fields: list[dict[str, object]] | None = None,
+        logo_path: str | None = None,
+        include_default_logo: bool = False,
     ) -> Path:
         """Create one local extension folder with a tool and a skill."""
         package_scope, package_basename = self._split_package_name(package_name)
@@ -153,20 +155,24 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "fields": binding_config_fields or [],
                 },
             }
+        if logo_path is not None:
+            manifest["logo_path"] = logo_path
+            relative_logo_path = PurePosixPath(logo_path)
+            target_logo_path = extension_root.joinpath(*relative_logo_path.parts)
+            target_logo_path.parent.mkdir(parents=True, exist_ok=True)
+            target_logo_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+        elif include_default_logo:
+            (extension_root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
         if channel_provider_key is not None:
             (extension_root / "channel_providers").mkdir(parents=True, exist_ok=True)
             channel_provider_filename = channel_provider_key.replace("@", "_")
             manifest["contributions"].setdefault("channel_providers", []).append(
                 {
-                    "entrypoint": (
-                        f"channel_providers/{channel_provider_filename}.py"
-                    ),
+                    "entrypoint": (f"channel_providers/{channel_provider_filename}.py"),
                 }
             )
             (
-                extension_root
-                / "channel_providers"
-                / f"{channel_provider_filename}.py"
+                extension_root / "channel_providers" / f"{channel_provider_filename}.py"
             ).write_text(
                 (
                     "from app.channels.providers import BaseBuiltinProvider\n"
@@ -176,16 +182,16 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     ")\n\n"
                     "class DemoChannelProvider(BaseBuiltinProvider):\n"
                     "    manifest = ChannelManifest(\n"
-                    f"        key=\"{channel_provider_key}\",\n"
-                    "        name=\"Demo Channel\",\n"
-                    "        description=\"Extension-backed channel provider.\",\n"
-                    "        icon=\"message-square\",\n"
-                    "        docs_url=\"https://example.com/channel\",\n"
-                    "        transport_mode=\"webhook\",\n"
-                    "        capabilities=[\"receive_text\", \"send_text\"],\n"
+                    f'        key="{channel_provider_key}",\n'
+                    '        name="Demo Channel",\n'
+                    '        description="Extension-backed channel provider.",\n'
+                    '        icon="message-square",\n'
+                    '        docs_url="https://example.com/channel",\n'
+                    '        transport_mode="webhook",\n'
+                    '        capabilities=["receive_text", "send_text"],\n'
                     "        auth_schema=[],\n"
                     "        config_schema=[],\n"
-                    "        setup_steps=[\"Save the binding to enable the provider.\"],\n"
+                    '        setup_steps=["Save the binding to enable the provider."],\n'
                     "    )\n\n"
                     "    def test_connection(\n"
                     "        self,\n"
@@ -196,8 +202,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "        del auth_config, runtime_config, binding_id\n"
                     "        return ChannelTestResult(\n"
                     "            ok=True,\n"
-                    "            status=\"ok\",\n"
-                    "            message=\"Channel extension provider is healthy.\",\n"
+                    '            status="ok",\n'
+                    '            message="Channel extension provider is healthy.",\n'
                     "        )\n\n"
                     "PROVIDER = DemoChannelProvider()\n"
                 ),
@@ -230,14 +236,14 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     ")\n\n"
                     "class DemoWebSearchProvider(BaseWebSearchProvider):\n"
                     "    manifest = WebSearchProviderManifest(\n"
-                    f"        key=\"{web_search_provider_key}\",\n"
-                    "        name=\"Demo Search\",\n"
-                    "        description=\"Extension-backed web search provider.\",\n"
-                    "        docs_url=\"https://example.com/search\",\n"
+                    f'        key="{web_search_provider_key}",\n'
+                    '        name="Demo Search",\n'
+                    '        description="Extension-backed web search provider.",\n'
+                    '        docs_url="https://example.com/search",\n'
                     "        auth_schema=[],\n"
                     "        config_schema=[],\n"
-                    "        setup_steps=[\"Save the binding to enable the provider.\"],\n"
-                    "        supported_parameters=[\"query\", \"max_results\"],\n"
+                    '        setup_steps=["Save the binding to enable the provider."],\n'
+                    '        supported_parameters=["query", "max_results"],\n'
                     "    )\n\n"
                     "    def _search_with_binding(\n"
                     "        self,\n"
@@ -249,13 +255,13 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "        del api_key, runtime_config\n"
                     "        return WebSearchExecutionResult(\n"
                     "            query=request.query,\n"
-                    "            provider={\"key\": self.manifest.key, \"name\": self.manifest.name},\n"
-                    "            applied_parameters={\"max_results\": request.max_results},\n"
+                    '            provider={"key": self.manifest.key, "name": self.manifest.name},\n'
+                    '            applied_parameters={"max_results": request.max_results},\n'
                     "            results=[],\n"
                     "        )\n\n"
                     "    def get_api_key(self, binding):\n"
                     "        del binding\n"
-                    "        return \"demo-key\"\n\n"
+                    '        return "demo-key"\n\n'
                     "    def test_connection(\n"
                     "        self,\n"
                     "        *,\n"
@@ -265,15 +271,15 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "        del auth_config, runtime_config\n"
                     "        return WebSearchTestResult(\n"
                     "            ok=True,\n"
-                    "            status=\"ok\",\n"
-                    "            message=\"Web-search extension provider is healthy.\",\n"
+                    '            status="ok",\n'
+                    '            message="Web-search extension provider is healthy.",\n'
                     "        )\n\n"
                     "PROVIDER = DemoWebSearchProvider()\n"
                 ),
                 encoding="utf-8",
             )
             (provider_dir / "logo.svg").write_text(
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"></svg>\n",
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>\n',
                 encoding="utf-8",
             )
 
@@ -291,12 +297,12 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
                 "    return [\n"
                 "        {\n"
-                "            \"type\": \"emit_event\",\n"
-                "            \"payload\": {\n"
-                "                \"type\": \"observe\",\n"
-                "                \"data\": {\n"
-                "                    \"kind\": \"hook_observe\",\n"
-                "                    \"event\": context.get(\"event_payload\", {}),\n"
+                '            "type": "emit_event",\n'
+                '            "payload": {\n'
+                '                "type": "observe",\n'
+                '                "data": {\n'
+                '                    "kind": "hook_observe",\n'
+                '                    "event": context.get("event_payload", {}),\n'
                 "                },\n"
                 "            },\n"
                 "        }\n"
@@ -306,18 +312,18 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 hook_body = (
                     "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
                     "    del context\n"
-                    "    raise RuntimeError(\"hook boom\")\n"
+                    '    raise RuntimeError("hook boom")\n'
                 )
             elif hook_behavior == "append_prompt_block":
                 hook_body = (
                     "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
                     "    return [\n"
                     "        {\n"
-                    "            \"type\": \"append_prompt_block\",\n"
-                    "            \"payload\": {\n"
-                    "                \"target\": \"task_bootstrap\",\n"
-                    "                \"position\": \"head\",\n"
-                    "                \"content\": \"Remember the latest billing preferences.\",\n"
+                    '            "type": "append_prompt_block",\n'
+                    '            "payload": {\n'
+                    '                "target": "task_bootstrap",\n'
+                    '                "position": "head",\n'
+                    '                "content": "Remember the latest billing preferences.",\n'
                     "            },\n"
                     "        }\n"
                     "    ]\n"
@@ -327,11 +333,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
                     "    return [\n"
                     "        {\n"
-                    "            \"type\": \"emit_event\",\n"
-                    "            \"payload\": {\n"
-                    "                \"type\": \"observe\",\n"
-                    "                \"data\": {\n"
-                    "                    \"execution_mode\": context.get(\"execution_mode\"),\n"
+                    '            "type": "emit_event",\n'
+                    '            "payload": {\n'
+                    '                "type": "observe",\n'
+                    '                "data": {\n'
+                    '                    "execution_mode": context.get("execution_mode"),\n'
                     "                },\n"
                     "            },\n"
                     "        }\n"
@@ -342,13 +348,13 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "def handle_task_event(context: dict[str, object]) -> list[dict[str, object]]:\n"
                     "    return [\n"
                     "        {\n"
-                    "            \"type\": \"emit_event\",\n"
-                    "            \"payload\": {\n"
-                    "                \"type\": \"observe\",\n"
-                    "                \"data\": {\n"
-                    "                    \"installation_config\": context.get(\"installation_config\"),\n"
-                    "                    \"binding_config\": context.get(\"binding_config\"),\n"
-                    "                    \"user\": context.get(\"user\"),\n"
+                    '            "type": "emit_event",\n'
+                    '            "payload": {\n'
+                    '                "type": "observe",\n'
+                    '                "data": {\n'
+                    '                    "installation_config": context.get("installation_config"),\n'
+                    '                    "binding_config": context.get("binding_config"),\n'
+                    '                    "user": context.get("user"),\n'
                     "                },\n"
                     "            },\n"
                     "        }\n"
@@ -436,7 +442,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(snapshot["extensions"][0]["trust_status"], "trusted_local")
         self.assertEqual(snapshot["extensions"][0]["trust_source"], "local_import")
         self.assertIsNone(snapshot["extensions"][0]["hub_package_id"])
-        self.assertEqual(snapshot["extensions"][0]["tools"][0]["name"], "search_accounts")
+        self.assertEqual(
+            snapshot["extensions"][0]["tools"][0]["name"], "search_accounts"
+        )
         self.assertEqual(snapshot["extensions"][0]["skills"][0]["name"], "crm_research")
 
         runtime_config = AgentReleaseRuntimeService(self.session).resolve_for_agent(
@@ -460,7 +468,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
         )
         self.assertIsNotNone(tool_manager.get_tool("search_accounts"))
 
-        extra_skills = service.build_bundle_skill_payloads(runtime_config.extension_bundle)
+        extra_skills = service.build_bundle_skill_payloads(
+            runtime_config.extension_bundle
+        )
         prompt_block = skill_service.build_selected_skills_prompt_block(
             self.session,
             "alice",
@@ -494,9 +504,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             enabled=True,
         )
 
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
 
         self.assertEqual(len(bundle), 1)
         self.assertEqual(bundle[0]["hooks"][0]["event"], "task.before_start")
@@ -596,9 +608,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
 
         effects = asyncio.run(
             ExtensionHookService(bundle).run_task_hooks(
@@ -628,7 +642,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
             "@acme/crm",
         )
 
-    def test_extension_hook_service_injects_installation_and_binding_config(self) -> None:
+    def test_extension_hook_service_injects_installation_and_binding_config(
+        self,
+    ) -> None:
         """Hooks should receive validated installation and binding config snapshots."""
         extension_root = self._write_extension(
             package_name="acme.memory",
@@ -668,9 +684,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             enabled=True,
             config={"namespace": "agent-2"},
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
 
         effects = asyncio.run(
             ExtensionHookService(bundle).run_task_hooks(
@@ -718,9 +736,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
 
         effects = asyncio.run(
             ExtensionHookService(bundle).run_hooks(
@@ -785,9 +805,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             enabled=True,
             priority=20,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
         hook_service = ExtensionHookService(bundle)
 
         before_effects = asyncio.run(
@@ -862,9 +884,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
 
         effects = asyncio.run(
             ExtensionHookService(bundle).run_hooks(
@@ -920,9 +944,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
         execution_service = ExtensionHookExecutionService(self.session)
 
         effects = asyncio.run(
@@ -970,9 +996,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
         execution_service = ExtensionHookExecutionService(self.session)
         hook_context = {
             "session_id": "session-1",
@@ -1016,7 +1044,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
             replay_effects[0]["payload"]["data"]["extension_hook"]["package_id"],
             "@acme/crm",
         )
-        self.assertEqual(len(execution_service.list_executions(task_id="task-replay")), 1)
+        self.assertEqual(
+            len(execution_service.list_executions(task_id="task-replay")), 1
+        )
 
     def test_hook_replay_switches_execution_mode_to_replay(self) -> None:
         """Replay should expose replay mode so external hooks can skip live writes."""
@@ -1102,9 +1132,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
         execution_service = ExtensionHookExecutionService(self.session)
 
         with self.assertRaisesRegex(RuntimeError, "hook boom"):
@@ -1209,9 +1241,11 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extension_installation_id=installation.id or 0,
             enabled=True,
         )
-        bundle = AgentReleaseRuntimeService(self.session).resolve_for_agent(
-            self.agent.id or 0
-        ).extension_bundle
+        bundle = (
+            AgentReleaseRuntimeService(self.session)
+            .resolve_for_agent(self.agent.id or 0)
+            .extension_bundle
+        )
         memory_path = self.root / "external-memory.json"
 
         with patch.dict(
@@ -1277,7 +1311,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
             effects=recalled_effects,
         )
         self.assertEqual(len(applied.task_bootstrap_head_blocks), 1)
-        self.assertIn("Retrieved External Memory", applied.task_bootstrap_head_blocks[0])
+        self.assertIn(
+            "Retrieved External Memory", applied.task_bootstrap_head_blocks[0]
+        )
         self.assertIn("quarterly billing", applied.task_bootstrap_head_blocks[0])
 
     def test_binding_rejects_duplicate_extension_tool_names(self) -> None:
@@ -1354,6 +1390,48 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(packages[1]["scope"], "beta")
         self.assertEqual(packages[1]["name"], "sales")
         self.assertEqual(packages[1]["package_id"], "@beta/sales")
+
+    def test_root_logo_png_is_used_when_manifest_omits_logo_path(self) -> None:
+        """Root-level logo.png should become the package logo by convention."""
+        extension_root = self._write_extension(include_default_logo=True)
+        service = ExtensionService(self.session)
+
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        logo_path = service.get_installation_logo_path(installation)
+
+        self.assertIsNotNone(logo_path)
+        if logo_path is None:
+            return
+        self.assertEqual(logo_path.name, "logo.png")
+        self.assertEqual(
+            service.get_installation_logo_url(installation),
+            f"/api/extensions/installations/{installation.id}/logo",
+        )
+
+    def test_manifest_logo_path_supports_nested_assets(self) -> None:
+        """Manifest logo_path should allow package-relative image assets."""
+        extension_root = self._write_extension(logo_path="assets/branding/mem0.png")
+        service = ExtensionService(self.session)
+
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        logo_path = service.get_installation_logo_path(installation)
+
+        self.assertIsNotNone(logo_path)
+        if logo_path is None:
+            return
+        self.assertEqual(logo_path.name, "mem0.png")
+        parsed_manifest = json.loads(installation.manifest_json)
+        self.assertEqual(parsed_manifest["logo_path"], "assets/branding/mem0.png")
 
     def test_list_agent_package_choices_marks_selected_version_and_updates(
         self,
@@ -1507,7 +1585,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(bindings[0].extension_installation_id, second_install.id)
         self.assertEqual(bindings[0].priority, 5)
         self.assertEqual(
-            ExtensionService(self.session).list_agent_bindings(self.agent.id or 0)[0]
+            ExtensionService(self.session)
+            .list_agent_bindings(self.agent.id or 0)[0]
             .extension_installation_id,
             second_install.id,
         )
@@ -1571,7 +1650,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
             enabled=True,
         )
 
-        with self.assertRaisesRegex(ValueError, "only one version per extension package"):
+        with self.assertRaisesRegex(
+            ValueError, "only one version per extension package"
+        ):
             service.upsert_agent_binding(
                 agent_id=self.agent.id or 0,
                 extension_installation_id=second_install.id or 0,
@@ -1658,11 +1739,15 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertIsNone(installation.hub_package_id)
         self.assertIsNone(installation.hub_package_version_id)
         self.assertIsNone(installation.hub_artifact_digest)
-        self.assertTrue(Path(installation.install_root).joinpath("manifest.json").is_file())
+        self.assertTrue(
+            Path(installation.install_root).joinpath("manifest.json").is_file()
+        )
 
     def test_preview_bundle_returns_unverified_trust_metadata(self) -> None:
         """Bundle preview should stay unverified until the operator approves it."""
-        extension_root = self._write_extension(package_name="acme.providers", version="1.0.0")
+        extension_root = self._write_extension(
+            package_name="acme.providers", version="1.0.0"
+        )
         files = [
             ExtensionBundleImportFile(
                 relative_path="acme_bundle/manifest.json",
@@ -1704,7 +1789,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 trust_confirmed=False,
             )
 
-    def test_install_from_path_is_idempotent_for_same_version_and_manifest(self) -> None:
+    def test_install_from_path_is_idempotent_for_same_version_and_manifest(
+        self,
+    ) -> None:
         """Re-importing the same package version should reuse the existing row."""
         extension_root = self._write_extension()
         service = ExtensionService(self.session)
@@ -1723,6 +1810,98 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(first.id, second.id)
         self.assertEqual(first.artifact_key, second.artifact_key)
         self.assertTrue(Path(second.install_root).joinpath("manifest.json").is_file())
+
+    def test_preview_from_path_flags_safe_overwrite_for_changed_same_version(
+        self,
+    ) -> None:
+        """Preview should surface when one same-version import can overwrite safely."""
+        extension_root = self._write_extension()
+        service = ExtensionService(self.session)
+        service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        manifest_path = extension_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["description"] = "Updated package payload"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        preview = service.preview_from_path(source_dir=extension_root)
+
+        self.assertEqual(preview.package_id, "@acme/crm")
+        self.assertFalse(preview.identical_to_installed)
+        self.assertTrue(preview.requires_overwrite_confirmation)
+        self.assertEqual(preview.overwrite_blocked_reason, "")
+        self.assertIsNotNone(preview.existing_reference_summary)
+
+    def test_install_from_path_overwrites_same_version_after_confirmation(self) -> None:
+        """Operators may replace an unreferenced same-version install after confirming."""
+        extension_root = self._write_extension()
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        original_artifact_key = installation.artifact_key
+        original_manifest_hash = installation.manifest_hash
+        manifest_path = extension_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["description"] = "Overwritten package payload"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        overwritten = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+            overwrite_confirmed=True,
+        )
+
+        self.assertEqual(overwritten.id, installation.id)
+        self.assertNotEqual(overwritten.manifest_hash, original_manifest_hash)
+        self.assertNotEqual(overwritten.artifact_key, original_artifact_key)
+        self.assertEqual(overwritten.description, "Overwritten package payload")
+        self.assertFalse((self.workspace_root / original_artifact_key).exists())
+
+    def test_install_from_path_blocks_overwrite_when_references_exist(self) -> None:
+        """Same-version replacement should be rejected while references still exist."""
+        extension_root = self._write_extension()
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+            enabled=True,
+        )
+        manifest_path = extension_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["description"] = "Updated package payload"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "still referenced by agent bindings, releases, test snapshots, or saved drafts",
+        ):
+            service.install_from_path(
+                source_dir=extension_root,
+                installed_by="alice",
+                trust_confirmed=True,
+                overwrite_confirmed=True,
+            )
 
     def test_install_from_path_recreates_orphaned_version_directory(self) -> None:
         """A stale local version directory should not block a reinstall after DB reset."""
@@ -1830,9 +2009,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(
             web_search_binding.manifest["extension_name"], "@acme/providers"
         )
-        self.assertEqual(
-            web_search_binding.manifest["extension_version"], "1.0.0"
-        )
+        self.assertEqual(web_search_binding.manifest["extension_version"], "1.0.0")
 
         result = WebSearchService(self.session).execute_search(
             agent_id=self.agent.id or 0,
@@ -1926,7 +2103,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
             any(item["manifest"]["key"] == "acme@search" for item in catalog)
         )
 
-    def test_provider_installation_cannot_disable_or_uninstall_while_bound(self) -> None:
+    def test_provider_installation_cannot_disable_or_uninstall_while_bound(
+        self,
+    ) -> None:
         """Provider-backed extensions should protect active agent provider bindings."""
         extension_root = self._write_extension(
             package_name="acme.providers",

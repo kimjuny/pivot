@@ -1,14 +1,33 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Link, useLocation } from "react-router-dom";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
+import { useLocation, useNavigate } from "react-router-dom";
 
-import { Download, Search, Server, Upload, X } from "@/lib/lucide";
+import {
+  CheckCircle2,
+  Loader2,
+  MoreHorizontal,
+  Search,
+  Server,
+  Trash2,
+  Upload,
+  XCircle,
+} from "@/lib/lucide";
 import { toast } from 'sonner';
 
 import ConfirmationModal from './ConfirmationModal';
+import { ExtensionLogoAvatar } from '@/components/ExtensionLogoAvatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +38,11 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from '@/components/ui/hover-card';
+import {
   Pagination,
   PaginationContent,
   PaginationEllipsis,
@@ -27,6 +51,12 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   getExtensionInstallationReferences,
   getExtensionPackages,
@@ -40,7 +70,6 @@ import {
   type ExtensionPackage,
   type ExtensionReferenceSummary,
 } from '@/utils/api';
-import { formatTimestamp } from '@/utils/timestamp';
 
 const PAGE_SIZE = 6;
 
@@ -84,17 +113,6 @@ interface ContributionGroup {
   tone: 'provider' | 'lightweight';
 }
 
-interface ReferenceBadge {
-  label: string;
-  count: number;
-  tone: 'provider' | 'runtime';
-}
-
-interface PackageStatusBadge {
-  label: string;
-  tone: 'provider' | 'runtime' | 'neutral';
-}
-
 /**
  * Build stable contribution groups for one installed extension version.
  *
@@ -131,100 +149,6 @@ function buildContributionGroups(
 }
 
 /**
- * Build visible usage badges for one installed version.
- *
- * Why: extension operators should be able to see whether a provider package is
- * currently wired into live agent bindings before they attempt a disable or
- * uninstall action.
- */
-function buildReferenceBadges(
-  installation: ExtensionInstallation,
-): ReferenceBadge[] {
-  const summary = installation.reference_summary;
-  if (!summary) {
-    return [];
-  }
-
-  const badges: ReferenceBadge[] = [
-    {
-      label: 'Extension Bindings',
-      count: summary.extension_binding_count,
-      tone: 'runtime',
-    },
-    {
-      label: 'Channel Bindings',
-      count: summary.channel_binding_count,
-      tone: 'provider',
-    },
-    {
-      label: 'Web Search Bindings',
-      count: summary.web_search_binding_count,
-      tone: 'provider',
-    },
-    {
-      label: 'Releases',
-      count: summary.release_count,
-      tone: 'runtime',
-    },
-    {
-      label: 'Test Snapshots',
-      count: summary.test_snapshot_count,
-      tone: 'runtime',
-    },
-    {
-      label: 'Saved Drafts',
-      count: summary.saved_draft_count,
-      tone: 'runtime',
-    },
-  ];
-  return badges.filter((badge) => badge.count > 0);
-}
-
-/**
- * Build package-level risk badges from all installed versions.
- *
- * Why: operators first choose whether a package is safe to touch at all, then
- * drill into the version cards to inspect the exact source of those references.
- */
-function buildPackageStatusBadges(
-  pkg: ExtensionPackage,
-): PackageStatusBadge[] {
-  const totalBindingCount = pkg.versions.reduce(
-    (sum, version) => sum + (version.reference_summary?.binding_count ?? 0),
-    0,
-  );
-  const totalPinnedCount = pkg.versions.reduce(
-    (sum, version) => sum + (
-      (version.reference_summary?.release_count ?? 0)
-      + (version.reference_summary?.test_snapshot_count ?? 0)
-      + (version.reference_summary?.saved_draft_count ?? 0)
-    ),
-    0,
-  );
-
-  const badges: PackageStatusBadge[] = [];
-  if (totalBindingCount > 0) {
-    badges.push({
-      label: `In Use ${totalBindingCount}`,
-      tone: 'provider',
-    });
-  }
-  if (totalPinnedCount > 0) {
-    badges.push({
-      label: `Pinned ${totalPinnedCount}`,
-      tone: 'runtime',
-    });
-  }
-  if (totalBindingCount === 0 && totalPinnedCount === 0) {
-    badges.push({
-      label: pkg.active_version_count > 0 ? 'Safe To Disable' : 'Inactive',
-      tone: 'neutral',
-    });
-  }
-  return badges;
-}
-
-/**
  * Convert one trust status into a short human-readable badge label.
  */
 function formatTrustStatusLabel(trustStatus: string): string {
@@ -238,6 +162,24 @@ function formatTrustStatusLabel(trustStatus: string): string {
     default:
       return trustStatus;
   }
+}
+
+/**
+ * Pick the most recently installed version for one package.
+ *
+ * Why: the compact list card only shows one timestamp and one action menu, so
+ * both should map to the newest installation the operator most recently added.
+ */
+function getMostRecentInstallation(
+  pkg: ExtensionPackage,
+): ExtensionInstallation | null {
+  if (pkg.versions.length === 0) {
+    return null;
+  }
+
+  return pkg.versions.reduce((latest, installation) => (
+    installation.created_at > latest.created_at ? installation : latest
+  ));
 }
 
 /**
@@ -256,6 +198,7 @@ function ExtensionsPage() {
   const [pendingImport, setPendingImport] = useState<PendingImportState | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<PendingUninstallState | null>(null);
   const [isUninstalling, setIsUninstalling] = useState(false);
+  const [statusUpdatingIds, setStatusUpdatingIds] = useState<number[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const detailBasePath = location.pathname.startsWith("/studio/")
     ? "/studio/assets/extensions"
@@ -351,8 +294,19 @@ function ExtensionsPage() {
 
     setIsImporting(true);
     try {
-      await importExtensionBundle(pendingImport.files, { trustConfirmed: true });
-      toast.success('Extension imported');
+      const shouldOverwrite = pendingImport.preview.requires_overwrite_confirmation;
+      const reusesExisting = pendingImport.preview.identical_to_installed;
+      await importExtensionBundle(pendingImport.files, {
+        trustConfirmed: true,
+        overwriteConfirmed: shouldOverwrite,
+      });
+      toast.success(
+        shouldOverwrite
+          ? 'Extension version overwritten'
+          : reusesExisting
+            ? 'Existing extension version reused'
+            : 'Extension imported',
+      );
       setPendingImport(null);
       await loadPackages();
     } catch (error) {
@@ -368,6 +322,7 @@ function ExtensionsPage() {
     installation: ExtensionInstallation,
   ) => {
     const nextStatus = installation.status === 'active' ? 'disabled' : 'active';
+    setStatusUpdatingIds((current) => [...new Set([...current, installation.id])]);
     try {
       await updateExtensionInstallationStatus(installation.id, nextStatus);
       toast.success(
@@ -380,6 +335,8 @@ function ExtensionsPage() {
       toast.error(
         error instanceof Error ? error.message : 'Failed to update extension status',
       );
+    } finally {
+      setStatusUpdatingIds((current) => current.filter((item) => item !== installation.id));
     }
   };
 
@@ -431,10 +388,6 @@ function ExtensionsPage() {
             <p className="text-sm text-muted-foreground mt-0.5">
               Import, inspect, and operate extension packages before binding them to agents.
             </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Open one package for version details, included contributions, and package-scoped
-              hook replay. Operations still remains the session-first debugging entrypoint.
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -448,13 +401,16 @@ function ExtensionsPage() {
               type="button"
               onClick={handleImportClick}
               disabled={isImporting || isPreviewingImport}
+              size="sm"
+              variant="outline"
+              className="flex items-center gap-1.5"
             >
               {isImporting || isPreviewingImport ? (
-                <Download className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Upload className="mr-2 h-4 w-4" />
+                <Upload className="h-4 w-4" />
               )}
-              {isPreviewingImport ? 'Inspecting…' : isImporting ? 'Installing…' : 'Import Folder'}
+              {isPreviewingImport ? 'Inspecting…' : isImporting ? 'Installing…' : 'Import'}
             </Button>
           </div>
         </div>
@@ -490,7 +446,7 @@ function ExtensionsPage() {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               {pagedPackages.map((pkg) => (
                 <ExtensionPackageCard
                   key={pkg.package_id}
@@ -498,6 +454,9 @@ function ExtensionsPage() {
                   detailBasePath={detailBasePath}
                   onStatusToggle={handleStatusToggle}
                   onPromptUninstall={handlePromptUninstall}
+                  isStatusUpdating={statusUpdatingIds.includes(
+                    getMostRecentInstallation(pkg)?.id ?? -1,
+                  )}
                 />
               ))}
             </div>
@@ -633,6 +592,39 @@ function ExtensionsPage() {
                 </p>
               </div>
 
+              {pendingImport.preview.identical_to_installed ? (
+                <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  This exact package version is already installed. Confirming this import will
+                  reuse the existing installation instead of replacing files.
+                </div>
+              ) : null}
+
+              {pendingImport.preview.requires_overwrite_confirmation ? (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-foreground">
+                  A different payload is already installed at{' '}
+                  <code>{pendingImport.preview.package_id}@{pendingImport.preview.version}</code>.
+                  Confirming this import will replace that installed version because it currently
+                  has no bindings, releases, test snapshots, or saved drafts referencing it.
+                </div>
+              ) : null}
+
+              {pendingImport.preview.overwrite_blocked_reason ? (
+                <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-foreground">
+                  <p>{pendingImport.preview.overwrite_blocked_reason}</p>
+                  {pendingImport.preview.existing_reference_summary ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Bindings {pendingImport.preview.existing_reference_summary.binding_count}
+                      {' · '}
+                      Releases {pendingImport.preview.existing_reference_summary.release_count}
+                      {' · '}
+                      Test snapshots {pendingImport.preview.existing_reference_summary.test_snapshot_count}
+                      {' · '}
+                      Saved drafts {pendingImport.preview.existing_reference_summary.saved_draft_count}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-lg border border-border p-3">
                   <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -692,9 +684,15 @@ function ExtensionsPage() {
             <Button
               type="button"
               onClick={() => void handleConfirmImport()}
-              disabled={isImporting}
+              disabled={isImporting || pendingImport?.preview.overwrite_blocked_reason !== ''}
             >
-              {isImporting ? 'Installing…' : 'Trust and Install'}
+              {isImporting
+                ? 'Installing…'
+                : pendingImport?.preview.requires_overwrite_confirmation
+                  ? 'Trust and Overwrite'
+                  : pendingImport?.preview.identical_to_installed
+                    ? 'Trust and Reuse Existing'
+                    : 'Trust and Install'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -709,154 +707,165 @@ interface ExtensionPackageCardProps {
   detailBasePath: string;
   onStatusToggle: (installation: ExtensionInstallation) => void | Promise<void>;
   onPromptUninstall: (installation: ExtensionInstallation) => void | Promise<void>;
+  isStatusUpdating: boolean;
 }
 
 /**
- * Render one installed extension package card with version-level operations.
+ * Render one compact extension package card for the list page.
  */
 function ExtensionPackageCard({
   pkg,
   detailBasePath,
   onStatusToggle,
   onPromptUninstall,
+  isStatusUpdating,
 }: ExtensionPackageCardProps) {
+  const navigate = useNavigate();
   const detailPath = `${detailBasePath}/${pkg.scope}/${pkg.name}`;
+  const primaryInstallation = getMostRecentInstallation(pkg);
+
+  const handleCardClick = () => {
+    navigate(detailPath);
+  };
+
+  const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleCardClick();
+    }
+  };
+
+  const handleMenuClick = (event: MouseEvent) => {
+    event.stopPropagation();
+  };
+
   return (
-    <Card className="h-full">
-      <CardHeader className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Server className="h-4 w-4 text-primary" />
-              <Link
-                to={detailPath}
-                className="truncate transition-colors hover:text-primary"
-              >
-                {pkg.display_name}
-              </Link>
-            </CardTitle>
-            <CardDescription className="mt-1 break-words">
-              {pkg.description || 'No description provided.'}
-            </CardDescription>
-          </div>
-          <Badge variant="outline">{pkg.latest_version}</Badge>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="outline">Active {pkg.active_version_count}</Badge>
-          <Badge variant="outline">Disabled {pkg.disabled_version_count}</Badge>
-          {buildPackageStatusBadges(pkg).map((badge) => (
-            <Badge
-              key={`${pkg.package_id}-${badge.label}`}
-              variant={badge.tone === 'neutral' ? 'outline' : 'default'}
-            >
-              {badge.label}
-            </Badge>
-          ))}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex justify-end">
-          <Button asChild size="sm" variant="outline">
-            <Link to={detailPath}>Open Details</Link>
-          </Button>
-        </div>
-        {pkg.versions.map((installation) => (
-          <div
-            key={installation.id}
-            className="rounded-lg border border-border px-3 py-3"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">
-                    {installation.version}
-                  </span>
-                  <Badge
-                    variant={installation.status === 'active' ? 'default' : 'outline'}
-                  >
-                    {installation.status}
-                  </Badge>
-                  <Badge variant="outline">
-                    {formatTrustStatusLabel(installation.trust_status)}
-                  </Badge>
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  {installation.source}
-                  {' · '}
-                  {installation.trust_source}
-                  {' · '}
-                  {installation.installed_by || 'unknown'}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">
-                  Installed {formatTimestamp(installation.created_at)}
-                </div>
-                {buildReferenceBadges(installation).length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Current Usage
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {buildReferenceBadges(installation).map((badge) => (
-                        <Badge
-                          key={`${installation.id}-${badge.label}`}
-                          variant={badge.tone === 'provider' ? 'default' : 'outline'}
-                          className="font-normal"
-                        >
-                          {badge.label} {badge.count}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="mt-3 space-y-2">
-                  {buildContributionGroups(installation.contribution_summary).map((group) => (
-                    <div key={group.label}>
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {group.label}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-1.5">
-                        {group.values.map((value) => (
-                          <Badge
-                            key={`${group.label}-${value}`}
-                            variant={group.tone === 'provider' ? 'default' : 'outline'}
-                            className="font-normal"
-                          >
-                            {value}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+    <Card
+      className="group h-full cursor-pointer border-border/80 p-3 transition-colors duration-150 hover:border-primary/30 hover:bg-accent/30"
+      role="button"
+      tabIndex={0}
+      aria-label={`Open extension ${pkg.display_name}`}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+    >
+      <div className="flex items-start gap-3">
+        <ExtensionLogoAvatar
+          name={pkg.display_name}
+          logoUrl={pkg.logo_url ?? primaryInstallation?.logo_url ?? null}
+          fallback={<Server className="h-4.5 w-4.5" aria-hidden="true" />}
+          containerClassName="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
+          imageClassName="size-full rounded-xl object-cover"
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex h-10 flex-col justify-between">
+              <div className="flex items-center gap-1.5">
+                <span className="truncate text-sm font-medium leading-[1.1rem] text-foreground">
+                  {pkg.display_name}
+                </span>
+                <span className="shrink-0 text-[11px] leading-[1.1rem] text-muted-foreground">
+                  by {pkg.scope}
+                </span>
               </div>
-              <div className="flex flex-col items-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    void onStatusToggle(installation);
-                  }}
+              <HoverCard openDelay={150} closeDelay={100}>
+                <HoverCardTrigger asChild>
+                  <p className="line-clamp-1 text-[11px] leading-[1.1rem] text-muted-foreground">
+                    {pkg.description || 'No description provided.'}
+                  </p>
+                </HoverCardTrigger>
+                <HoverCardContent
+                  align="start"
+                  className="w-80"
+                  onClick={(event) => event.stopPropagation()}
                 >
-                  {installation.status === 'active' ? 'Disable' : 'Enable'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    void onPromptUninstall(installation);
-                  }}
-                  className="text-destructive hover:text-destructive"
-                >
-                  <X className="mr-1 h-3.5 w-3.5" />
-                  Uninstall
-                </Button>
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Description
+                    </div>
+                    <p className="text-sm leading-6 text-foreground">
+                      {pkg.description || 'No description provided.'}
+                    </p>
+                  </div>
+                </HoverCardContent>
+              </HoverCard>
               </div>
             </div>
+
+            {primaryInstallation ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    onClick={handleMenuClick}
+                    aria-label={`Extension options for ${pkg.display_name}`}
+                  >
+                    <MoreHorizontal className="h-3 w-3" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  size="medium"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <DropdownMenuItem
+                    onClick={(event) => {
+                      handleMenuClick(event as unknown as MouseEvent);
+                      void onStatusToggle(primaryInstallation);
+                    }}
+                    disabled={isStatusUpdating}
+                  >
+                    {isStatusUpdating ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : primaryInstallation.status === 'active' ? (
+                      <XCircle className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    {primaryInstallation.status === 'active' ? 'Disable' : 'Enable'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={(event) => {
+                      handleMenuClick(event as unknown as MouseEvent);
+                      void onPromptUninstall(primaryInstallation);
+                    }}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Uninstall
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
-        ))}
-      </CardContent>
+
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Badge variant="default" className="h-4 px-1.5 py-0 text-[10px]">
+              v{pkg.latest_version}
+            </Badge>
+            <Badge
+              variant="outline"
+              className="h-4 border-emerald-500/30 px-1.5 py-0 text-[10px] text-emerald-700 dark:text-emerald-300"
+            >
+              Enabled {pkg.active_version_count}
+            </Badge>
+            <Badge
+              variant="outline"
+              className="h-4 border-amber-500/30 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
+            >
+              Disabled {pkg.disabled_version_count}
+            </Badge>
+            {pkg.versions.length > 1 ? (
+              <Badge variant="outline" className="h-4 px-1.5 py-0 text-[10px]">
+                {pkg.versions.length} versions
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+      </div>
     </Card>
   );
 }
