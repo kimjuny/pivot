@@ -22,6 +22,7 @@ from app.schemas.extension import (
     ExtensionConfigurationFieldResponse,
     ExtensionConfigurationSchemaResponse,
     ExtensionConfigurationSectionResponse,
+    ExtensionContributionItemResponse,
     ExtensionContributionSummaryResponse,
     ExtensionHookExecutionResponse,
     ExtensionHookReplayResponse,
@@ -109,6 +110,10 @@ def _serialize_contribution_summary(
             contributions.get("skills"),
             primary_field="name",
         ),
+        hooks=_extract_manifest_names(
+            contributions.get("hooks"),
+            primary_field="name",
+        ),
         channel_providers=_extract_manifest_names(
             contributions.get("channel_providers"),
             primary_field="key",
@@ -153,6 +158,10 @@ def _serialize_installation(
         created_at=_serialize_utc_timestamp(installation.created_at),
         updated_at=_serialize_utc_timestamp(installation.updated_at),
         contribution_summary=_serialize_contribution_summary(installation),
+        contribution_items=[
+            ExtensionContributionItemResponse(**item)
+            for item in service.get_installation_contribution_items(installation)
+        ],
         reference_summary=_serialize_reference_summary(
             service.get_reference_summary(
                 installation_id=installation.id or 0
@@ -259,6 +268,7 @@ def _serialize_preview(
         contribution_summary=ExtensionContributionSummaryResponse(
             tools=preview.contribution_summary.get("tools", []),
             skills=preview.contribution_summary.get("skills", []),
+            hooks=preview.contribution_summary.get("hooks", []),
             channel_providers=preview.contribution_summary.get(
                 "channel_providers",
                 [],
@@ -268,6 +278,10 @@ def _serialize_preview(
                 [],
             ),
         ),
+        contribution_items=[
+            ExtensionContributionItemResponse(**item)
+            for item in preview.contribution_items
+        ],
         permissions=preview.permissions,
         existing_installation_id=preview.existing_installation_id,
         existing_installation_status=preview.existing_installation_status,

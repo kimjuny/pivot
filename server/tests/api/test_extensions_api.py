@@ -156,6 +156,8 @@ class ExtensionsApiTestCase(unittest.TestCase):
             "contributions": {
                 "hooks": [
                     {
+                        "name": "Recall Memory Context",
+                        "description": "Loads relevant memory before task execution begins.",
                         "event": "task.before_start",
                         "callable": "handle_task_event",
                         "mode": "sync",
@@ -245,6 +247,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
             preview_payload["contribution_summary"]["web_search_providers"],
             ["acme@search"],
         )
+        self.assertEqual(preview_payload["contribution_summary"]["hooks"], [])
 
         install_parts = self._build_bundle_upload(
             self._sample_extension_root(),
@@ -264,9 +267,78 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.assertGreater(installation_payload["artifact_size_bytes"], 0)
         self.assertTrue(installation_payload["created_at"].endswith("+00:00"))
         self.assertTrue(installation_payload["updated_at"].endswith("+00:00"))
+        self.assertEqual(installation_payload["contribution_summary"]["hooks"], [])
 
         artifact_path = self.workspace_root / Path(installation_payload["artifact_key"])
         self.assertTrue(artifact_path.is_file())
+
+        hook_install_parts = self._build_bundle_upload(
+            self._write_hook_extension(),
+            bundle_name="acme-hooks",
+            trust_confirmed=True,
+        )
+        hook_install_response = self.client.post(
+            "/api/extensions/installations/import/bundle",
+            files=hook_install_parts,
+        )
+        self.assertEqual(hook_install_response.status_code, 200)
+        self.assertEqual(
+            hook_install_response.json()["contribution_summary"]["hooks"],
+            ["Recall Memory Context"],
+        )
+
+    def test_hook_contributions_are_exposed_in_preview_and_install_payloads(
+        self,
+    ) -> None:
+        """Hook packages should expose lifecycle contributions in preview and install APIs."""
+        extension_root = self._write_hook_extension()
+        preview_parts = self._build_bundle_upload(
+            extension_root,
+            bundle_name="acme-hooks",
+            trust_confirmed=False,
+        )
+        preview_response = self.client.post(
+            "/api/extensions/installations/import/bundle/preview",
+            files=preview_parts,
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(
+            preview_response.json()["contribution_summary"]["hooks"],
+            ["Recall Memory Context"],
+        )
+        self.assertEqual(
+            preview_response.json()["contribution_items"][0],
+            {
+                "type": "hook",
+                "name": "Recall Memory Context",
+                "description": "Loads relevant memory before task execution begins.",
+            },
+        )
+
+        install_parts = self._build_bundle_upload(
+            extension_root,
+            bundle_name="acme-hooks",
+            trust_confirmed=True,
+        )
+        install_response = self.client.post(
+            "/api/extensions/installations/import/bundle",
+            files=install_parts,
+        )
+
+        self.assertEqual(install_response.status_code, 200)
+        self.assertEqual(
+            install_response.json()["contribution_summary"]["hooks"],
+            ["Recall Memory Context"],
+        )
+        self.assertEqual(
+            install_response.json()["contribution_items"][0],
+            {
+                "type": "hook",
+                "name": "Recall Memory Context",
+                "description": "Loads relevant memory before task execution begins.",
+            },
+        )
 
     def test_extension_logo_endpoints_expose_installation_and_package_logo_urls(
         self,

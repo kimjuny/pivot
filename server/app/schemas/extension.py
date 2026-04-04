@@ -36,8 +36,17 @@ class ExtensionContributionSummaryResponse(AppBaseModel):
 
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    hooks: list[str] = Field(default_factory=list)
     channel_providers: list[str] = Field(default_factory=list)
     web_search_providers: list[str] = Field(default_factory=list)
+
+
+class ExtensionContributionItemResponse(AppBaseModel):
+    """One operator-facing contribution declared by an extension version."""
+
+    type: str
+    name: str
+    description: str = ""
 
 
 class ExtensionConfigurationFieldResponse(AppBaseModel):
@@ -137,6 +146,9 @@ class ExtensionInstallationResponse(AppBaseModel):
     contribution_summary: ExtensionContributionSummaryResponse = Field(
         default_factory=ExtensionContributionSummaryResponse
     )
+    contribution_items: list[ExtensionContributionItemResponse] = Field(
+        default_factory=list
+    )
     reference_summary: ExtensionReferenceSummaryResponse | None = None
 
 
@@ -189,6 +201,9 @@ class ExtensionImportPreviewResponse(AppBaseModel):
     manifest_hash: str
     contribution_summary: ExtensionContributionSummaryResponse = Field(
         default_factory=ExtensionContributionSummaryResponse
+    )
+    contribution_items: list[ExtensionContributionItemResponse] = Field(
+        default_factory=list
     )
     permissions: dict[str, Any] = Field(default_factory=dict)
     existing_installation_id: int | None = None

@@ -111,6 +111,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
         channel_provider_key: str | None = None,
         web_search_provider_key: str | None = None,
         hook_event: str | None = None,
+        hook_name: str = "Recall CRM Context",
+        hook_description: str = "Restores CRM context before the task starts.",
         hook_behavior: str = "emit_event",
         installation_config_fields: list[dict[str, object]] | None = None,
         binding_config_fields: list[dict[str, object]] | None = None,
@@ -287,6 +289,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
             (extension_root / "hooks").mkdir(parents=True, exist_ok=True)
             manifest["contributions"].setdefault("hooks", []).append(
                 {
+                    "name": hook_name,
+                    "description": hook_description,
                     "event": hook_event,
                     "callable": "handle_task_event",
                     "mode": "sync",
@@ -1182,6 +1186,39 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 trust_confirmed=True,
             )
 
+    def test_hook_contributions_require_name_and_description(self) -> None:
+        """Hook declarations should stay operator-readable in package detail views."""
+        extension_root = self._write_extension(hook_event="task.before_start")
+        manifest_path = extension_root / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        hook = manifest["contributions"]["hooks"][0]
+        del hook["name"]
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "must declare a name"):
+            ExtensionService(self.session).install_from_path(
+                source_dir=extension_root,
+                installed_by="alice",
+                trust_confirmed=True,
+            )
+
+        hook["name"] = "Recall CRM Context"
+        del hook["description"]
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "must declare a description"):
+            ExtensionService(self.session).install_from_path(
+                source_dir=extension_root,
+                installed_by="alice",
+                trust_confirmed=True,
+            )
+
     def test_api_installation_serialization_includes_contribution_summary(self) -> None:
         """Expose normalized provider and lightweight contribution names in API payloads."""
         extension_root = self._write_extension(
@@ -1189,6 +1226,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
             version="1.0.0",
             channel_provider_key="acme@chat",
             web_search_provider_key="acme@search",
+            hook_event="task.before_start",
         )
         installation = ExtensionService(self.session).install_from_path(
             source_dir=extension_root,
@@ -1203,6 +1241,18 @@ class ExtensionServiceTestCase(unittest.TestCase):
 
         self.assertEqual(response.contribution_summary.tools, ["search_accounts"])
         self.assertEqual(response.contribution_summary.skills, ["crm_research"])
+        self.assertEqual(
+            response.contribution_summary.hooks,
+            ["Recall CRM Context"],
+        )
+        self.assertEqual(
+            response.contribution_items[0].model_dump(),
+            {
+                "type": "hook",
+                "name": "Recall CRM Context",
+                "description": "Restores CRM context before the task starts.",
+            },
+        )
         self.assertEqual(response.scope, "acme")
         self.assertEqual(response.name, "providers")
         self.assertEqual(response.package_id, "@acme/providers")
@@ -1746,7 +1796,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
     def test_preview_bundle_returns_unverified_trust_metadata(self) -> None:
         """Bundle preview should stay unverified until the operator approves it."""
         extension_root = self._write_extension(
-            package_name="acme.providers", version="1.0.0"
+            package_name="acme.providers",
+            version="1.0.0",
+            hook_event="task.before_start",
         )
         files = [
             ExtensionBundleImportFile(
@@ -1763,6 +1815,10 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     extension_root / "skills" / "crm_research" / "SKILL.md"
                 ).read_bytes(),
             ),
+            ExtensionBundleImportFile(
+                relative_path="acme_bundle/hooks/lifecycle.py",
+                content=(extension_root / "hooks" / "lifecycle.py").read_bytes(),
+            ),
         ]
 
         preview = ExtensionService(self.session).preview_bundle(
@@ -1774,6 +1830,18 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(preview.trust_status, "unverified")
         self.assertEqual(preview.trust_source, "local_import")
         self.assertEqual(preview.contribution_summary["tools"], ["search_accounts"])
+        self.assertEqual(
+            preview.contribution_summary["hooks"],
+            ["Recall CRM Context"],
+        )
+        self.assertEqual(
+            preview.contribution_items[0],
+            {
+                "type": "hook",
+                "name": "Recall CRM Context",
+                "description": "Restores CRM context before the task starts.",
+            },
+        )
 
     def test_install_from_path_requires_explicit_trust_confirmation(self) -> None:
         """Local installs should fail until the operator confirms trust."""

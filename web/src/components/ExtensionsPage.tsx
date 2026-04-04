@@ -18,6 +18,7 @@ import {
   Server,
   Trash2,
   Upload,
+  X,
   XCircle,
 } from "@/lib/lucide";
 import { toast } from 'sonner';
@@ -37,11 +38,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from '@/components/ui/hover-card';
 import {
   Pagination,
   PaginationContent,
@@ -83,6 +79,8 @@ interface PendingImportState {
   preview: ExtensionImportPreview;
 }
 
+type ExtensionStatusFilter = 'all' | 'enabled' | 'disabled';
+
 /**
  * Build a paginated page number list with ellipsis slots.
  */
@@ -110,15 +108,15 @@ function buildPageList(current: number, total: number): (number | 'ellipsis')[] 
 interface ContributionGroup {
   label: string;
   values: string[];
-  tone: 'provider' | 'lightweight';
+  tone: 'provider' | 'runtime' | 'lightweight';
 }
 
 /**
  * Build stable contribution groups for one installed extension version.
  *
- * Why: provider contributions are the primary package-level integration path,
- * while tools and skills remain optional lightweight additions. Grouping them
- * explicitly keeps that distinction visible in the UI.
+ * Why: extensions can ship providers, runtime hooks, and optional helper
+ * assets. Grouping them keeps import review readable without flattening every
+ * contribution into one noisy badge list.
  */
 function buildContributionGroups(
   summary: ExtensionContributionSummary,
@@ -135,6 +133,11 @@ function buildContributionGroups(
       tone: 'provider',
     },
     {
+      label: 'Lifecycle Hooks',
+      values: summary.hooks,
+      tone: 'runtime',
+    },
+    {
       label: 'Tools (Optional)',
       values: summary.tools,
       tone: 'lightweight',
@@ -146,6 +149,21 @@ function buildContributionGroups(
     },
   ];
   return groups.filter((group) => group.values.length > 0);
+}
+
+/**
+ * Keep contribution badges visually consistent across import review states.
+ */
+function getContributionBadgeVariant(
+  tone: ContributionGroup['tone'],
+): 'default' | 'secondary' | 'outline' {
+  if (tone === 'provider') {
+    return 'default';
+  }
+  if (tone === 'runtime') {
+    return 'secondary';
+  }
+  return 'outline';
 }
 
 /**
@@ -192,6 +210,7 @@ function ExtensionsPage() {
   const [packages, setPackages] = useState<ExtensionPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ExtensionStatusFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
@@ -226,17 +245,36 @@ function ExtensionsPage() {
     void loadPackages();
   }, [loadPackages]);
 
+  const enabledCount = useMemo(
+    () => packages.filter((pkg) => pkg.active_version_count > 0).length,
+    [packages],
+  );
+  const disabledCount = useMemo(
+    () => packages.filter((pkg) => pkg.active_version_count === 0).length,
+    [packages],
+  );
+
   const filteredPackages = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
-    if (!query) {
-      return packages;
-    }
     return packages.filter((pkg) => {
+      const matchesStatus = (
+        statusFilter === 'all'
+        || (statusFilter === 'enabled' && pkg.active_version_count > 0)
+        || (statusFilter === 'disabled' && pkg.active_version_count === 0)
+      );
+      if (!matchesStatus) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+
       const versionText = pkg.versions.map((version) => version.version).join(' ');
       const contributionText = pkg.versions
         .flatMap((version) => [
           ...version.contribution_summary.channel_providers,
           ...version.contribution_summary.web_search_providers,
+          ...version.contribution_summary.hooks,
           ...version.contribution_summary.tools,
           ...version.contribution_summary.skills,
         ])
@@ -249,11 +287,11 @@ function ExtensionsPage() {
         || contributionText.toLowerCase().includes(query)
       );
     });
-  }, [packages, searchQuery]);
+  }, [packages, searchQuery, statusFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+  }, [searchQuery, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredPackages.length / PAGE_SIZE));
   const pagedPackages = useMemo(() => {
@@ -416,8 +454,41 @@ function ExtensionsPage() {
         </div>
 
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-xs text-muted-foreground">
-            {packages.length} package{packages.length !== 1 ? 's' : ''} installed
+          <div className="flex items-center gap-1.5">
+            {(
+              [
+                { value: 'all', label: 'All', count: packages.length },
+                { value: 'enabled', label: 'Enabled', count: enabledCount },
+                { value: 'disabled', label: 'Disabled', count: disabledCount },
+              ] as const
+            ).map(({ value, label, count }) => (
+              <button
+                key={value}
+                onClick={() => setStatusFilter(value)}
+                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Badge
+                  variant={statusFilter === value ? 'default' : 'outline'}
+                  className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                    statusFilter === value ? 'list-filter-badge-active' : ''
+                  }`}
+                >
+                  {label}
+                  <span className={statusFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                    {count}
+                  </span>
+                </Badge>
+              </button>
+            ))}
+            {statusFilter !== 'all' ? (
+              <button
+                onClick={() => setStatusFilter('all')}
+                className="text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Clear extension filter"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
           <ButtonGroup className="list-search-group">
             <Input
@@ -441,7 +512,11 @@ function ExtensionsPage() {
         ) : filteredPackages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
             <p className="text-sm">
-              {packages.length === 0 ? 'No extensions installed yet.' : 'No extensions match your search.'}
+              {packages.length === 0
+                ? 'No extensions installed yet.'
+                : searchQuery || statusFilter !== 'all'
+                  ? 'No extensions match your current filters.'
+                  : 'No extensions match your search.'}
             </p>
           </div>
         ) : (
@@ -637,7 +712,10 @@ function ExtensionsPage() {
                           <div className="text-sm font-medium text-foreground">{group.label}</div>
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             {group.values.map((value) => (
-                              <Badge key={`${group.label}-${value}`} variant="outline">
+                              <Badge
+                                key={`${group.label}-${value}`}
+                                variant={getContributionBadgeVariant(group.tone)}
+                              >
                                 {value}
                               </Badge>
                             ))}
@@ -761,35 +839,17 @@ function ExtensionPackageCard({
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <div className="flex h-10 flex-col justify-between">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-sm font-medium leading-[1.1rem] text-foreground">
-                  {pkg.display_name}
-                </span>
-                <span className="shrink-0 text-[11px] leading-[1.1rem] text-muted-foreground">
-                  by {pkg.scope}
-                </span>
-              </div>
-              <HoverCard openDelay={150} closeDelay={100}>
-                <HoverCardTrigger asChild>
-                  <p className="line-clamp-1 text-[11px] leading-[1.1rem] text-muted-foreground">
-                    {pkg.description || 'No description provided.'}
-                  </p>
-                </HoverCardTrigger>
-                <HoverCardContent
-                  align="start"
-                  className="w-80"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Description
-                    </div>
-                    <p className="text-sm leading-6 text-foreground">
-                      {pkg.description || 'No description provided.'}
-                    </p>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
+                <div className="flex items-center gap-1.5">
+                  <span className="truncate text-sm font-medium leading-[1.1rem] text-foreground">
+                    {pkg.display_name}
+                  </span>
+                  <span className="shrink-0 text-[11px] leading-[1.1rem] text-muted-foreground">
+                    by {pkg.scope}
+                  </span>
+                </div>
+                <p className="line-clamp-1 text-[11px] leading-[1.1rem] text-muted-foreground">
+                  {pkg.description || 'No description provided.'}
+                </p>
               </div>
             </div>
 

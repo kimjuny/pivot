@@ -75,9 +75,11 @@ describe("ExtensionsPage", () => {
             contribution_summary: {
               channel_providers: ["acme@chat"],
               web_search_providers: ["acme@search"],
+              hooks: [],
               tools: ["search_accounts"],
               skills: ["crm_research"],
             },
+            contribution_items: [],
           },
         ],
       },
@@ -112,6 +114,132 @@ describe("ExtensionsPage", () => {
     });
   });
 
+  it("filters packages by enabled and disabled status", async () => {
+    vi.mocked(getExtensionPackages).mockResolvedValue([
+      {
+        scope: "acme",
+        name: "providers",
+        package_id: "@acme/providers",
+        display_name: "ACME Providers",
+        description: "Enabled package",
+        logo_url: null,
+        readme_markdown: "",
+        latest_version: "1.0.0",
+        active_version_count: 1,
+        disabled_version_count: 0,
+        versions: [
+          {
+            id: 1,
+            scope: "acme",
+            name: "providers",
+            package_id: "@acme/providers",
+            version: "1.0.0",
+            display_name: "ACME Providers",
+            description: "Enabled package",
+            logo_url: null,
+            manifest_hash: "hash-1",
+            artifact_storage_backend: "local_fs",
+            artifact_key: "extensions/acme/providers/1.0.0/hash.tar.gz",
+            artifact_digest: "artifact-hash-1",
+            artifact_size_bytes: 128,
+            install_root: "/tmp/@acme/providers/1.0.0",
+            source: "bundle",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            status: "active",
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-01T00:00:00Z",
+            reference_summary: null,
+            contribution_summary: {
+              channel_providers: [],
+              web_search_providers: [],
+              hooks: [],
+              tools: [],
+              skills: [],
+            },
+            contribution_items: [],
+          },
+        ],
+      },
+      {
+        scope: "pivot",
+        name: "mem0",
+        package_id: "@pivot/mem0",
+        display_name: "Mem0 Memory",
+        description: "Disabled package",
+        logo_url: null,
+        readme_markdown: "",
+        latest_version: "0.1.0",
+        active_version_count: 0,
+        disabled_version_count: 1,
+        versions: [
+          {
+            id: 2,
+            scope: "pivot",
+            name: "mem0",
+            package_id: "@pivot/mem0",
+            version: "0.1.0",
+            display_name: "Mem0 Memory",
+            description: "Disabled package",
+            logo_url: null,
+            manifest_hash: "hash-2",
+            artifact_storage_backend: "local_fs",
+            artifact_key: "extensions/pivot/mem0/0.1.0/hash.tar.gz",
+            artifact_digest: "artifact-hash-2",
+            artifact_size_bytes: 128,
+            install_root: "/tmp/@pivot/mem0/0.1.0",
+            source: "bundle",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            status: "disabled",
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-01T00:00:00Z",
+            reference_summary: null,
+            contribution_summary: {
+              channel_providers: [],
+              web_search_providers: [],
+              hooks: [],
+              tools: [],
+              skills: [],
+            },
+            contribution_items: [],
+          },
+        ],
+      },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <ExtensionsPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("ACME Providers")).toBeInTheDocument();
+      expect(screen.getByText("Mem0 Memory")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /enabled/i }));
+
+    expect(screen.getByText("ACME Providers")).toBeInTheDocument();
+    expect(screen.queryByText("Mem0 Memory")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /disabled/i }));
+
+    expect(screen.getByText("Mem0 Memory")).toBeInTheDocument();
+    expect(screen.queryByText("ACME Providers")).not.toBeInTheDocument();
+  });
+
   it("requires an explicit trust step before importing a local bundle", async () => {
     vi.mocked(getExtensionPackages).mockResolvedValue([]);
     vi.mocked(previewExtensionBundle).mockResolvedValue({
@@ -128,9 +256,11 @@ describe("ExtensionsPage", () => {
       contribution_summary: {
         channel_providers: ["acme@chat"],
         web_search_providers: ["acme@search"],
+        hooks: [],
         tools: [],
         skills: [],
       },
+      contribution_items: [],
       permissions: {
         network: {
           allow_hosts: ["api.acme.com"],
@@ -173,9 +303,11 @@ describe("ExtensionsPage", () => {
       contribution_summary: {
         channel_providers: ["acme@chat"],
         web_search_providers: ["acme@search"],
+        hooks: [],
         tools: [],
         skills: [],
       },
+      contribution_items: [],
     });
 
     const { container } = render(
@@ -229,9 +361,11 @@ describe("ExtensionsPage", () => {
       contribution_summary: {
         channel_providers: ["acme@chat"],
         web_search_providers: ["acme@search"],
+        hooks: [],
         tools: [],
         skills: [],
       },
+      contribution_items: [],
       permissions: {},
       existing_installation_id: 9,
       existing_installation_status: "active",
@@ -278,9 +412,11 @@ describe("ExtensionsPage", () => {
       contribution_summary: {
         channel_providers: ["acme@chat"],
         web_search_providers: ["acme@search"],
+        hooks: [],
         tools: [],
         skills: [],
       },
+      contribution_items: [],
     });
 
     const { container } = render(

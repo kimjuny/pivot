@@ -987,6 +987,8 @@ export const testWebSearchProviderDraft = async (
 export interface ExtensionInstallation {
   /** Normalized contribution names declared by this installed version. */
   contribution_summary: ExtensionContributionSummary;
+  /** Operator-facing contribution entries declared by this installed version. */
+  contribution_items: ExtensionContributionItem[];
   /** Persisted references that currently rely on this installation. */
   reference_summary: ExtensionReferenceSummary | null;
   /** Stable installation row id. */
@@ -1049,10 +1051,24 @@ export interface ExtensionContributionSummary {
   tools: string[];
   /** Optional lightweight skill names bundled in this version. */
   skills: string[];
+  /** Lifecycle hook labels declared by this version. */
+  hooks: string[];
   /** Channel provider keys contributed by this version. */
   channel_providers: string[];
   /** Web-search provider keys contributed by this version. */
   web_search_providers: string[];
+}
+
+/**
+ * One operator-facing capability contributed by an extension package.
+ */
+export interface ExtensionContributionItem {
+  /** Stable contribution type such as `hook`, `tool`, or `skill`. */
+  type: string;
+  /** Human-readable item name shown in detail views. */
+  name: string;
+  /** Plain-language description of what the item does. */
+  description: string;
 }
 
 /**
@@ -1167,6 +1183,8 @@ export interface ExtensionImportPreview {
   manifest_hash: string;
   /** Normalized contribution names discovered during preview. */
   contribution_summary: ExtensionContributionSummary;
+  /** Operator-facing contribution entries discovered during preview. */
+  contribution_items: ExtensionContributionItem[];
   /** Raw declared permissions from the manifest. */
   permissions: Record<string, unknown>;
   /** Existing installation row using the same package id and version, if any. */

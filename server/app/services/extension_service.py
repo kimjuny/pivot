@@ -92,6 +92,7 @@ class ExtensionInstallPreview:
     trust_source: str
     manifest_hash: str
     contribution_summary: dict[str, list[str]]
+    contribution_items: list[dict[str, str]]
     permissions: dict[str, Any]
     existing_installation_id: int | None = None
     existing_installation_status: str | None = None
@@ -228,6 +229,7 @@ def _build_contribution_summary(
     return {
         "tools": _extract_names(contributions.get("tools"), field_name="name"),
         "skills": _extract_names(contributions.get("skills"), field_name="name"),
+        "hooks": _extract_names(contributions.get("hooks"), field_name="name"),
         "channel_providers": _extract_names(
             contributions.get("channel_providers"),
             field_name="key",
@@ -237,6 +239,45 @@ def _build_contribution_summary(
             field_name="key",
         ),
     }
+
+
+def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract operator-facing contribution entries from one normalized manifest."""
+    contributions = manifest.get("contributions", {})
+    if not isinstance(contributions, dict):
+        contributions = {}
+
+    items: list[dict[str, str]] = []
+    contribution_order = [
+        ("hooks", "hook"),
+        ("channel_providers", "channel_provider"),
+        ("web_search_providers", "web_search_provider"),
+        ("tools", "tool"),
+        ("skills", "skill"),
+    ]
+    for manifest_key, contribution_type in contribution_order:
+        raw_items = contributions.get(manifest_key, [])
+        if not isinstance(raw_items, list):
+            continue
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+            raw_name = raw_item.get("name")
+            raw_description = raw_item.get("description")
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                continue
+            items.append(
+                {
+                    "type": contribution_type,
+                    "name": raw_name.strip(),
+                    "description": (
+                        raw_description.strip()
+                        if isinstance(raw_description, str)
+                        else ""
+                    ),
+                }
+            )
+    return items
 
 
 def _normalize_configuration_schema(
@@ -829,6 +870,19 @@ def _normalize_manifest(
                     }
                     normalized_item["entrypoint"] = relative_entrypoint.as_posix()
                     if key == "hooks":
+                        hook_name = raw_item.get("name")
+                        if not isinstance(hook_name, str) or not hook_name.strip():
+                            raise ValueError(
+                                f"Contribution '{key}' item #{index} must declare a name."
+                            )
+                        hook_description = raw_item.get("description")
+                        if (
+                            not isinstance(hook_description, str)
+                            or not hook_description.strip()
+                        ):
+                            raise ValueError(
+                                f"Contribution '{key}' item #{index} must declare a description."
+                            )
                         event_name = raw_item.get("event")
                         if not isinstance(event_name, str) or not event_name.strip():
                             raise ValueError(
@@ -858,6 +912,8 @@ def _normalize_manifest(
                                 f"Hook mode '{normalized_mode}' is not supported."
                             )
 
+                        normalized_item["name"] = hook_name.strip()
+                        normalized_item["description"] = hook_description.strip()
                         normalized_item["event"] = normalized_event_name
                         normalized_item["callable"] = callable_name.strip()
                         normalized_item["mode"] = normalized_mode
@@ -1112,6 +1168,15 @@ class ExtensionService:
             return None
         return f"/api/extensions/installations/{installation_id}/logo"
 
+    def get_installation_contribution_items(
+        self,
+        installation: ExtensionInstallation,
+    ) -> list[dict[str, str]]:
+        """Return operator-facing contribution items for one installation."""
+        return _build_contribution_items(
+            self._load_manifest_from_installation(installation)
+        )
+
     def list_agent_package_choices(self, agent_id: int) -> list[dict[str, Any]]:
         """Return package-level extension choices for one agent."""
         packages = self.list_packages()
@@ -1246,6 +1311,7 @@ class ExtensionService:
             trust_source="local_import",
             manifest_hash=manifest_hash,
             contribution_summary=_build_contribution_summary(normalized_manifest),
+            contribution_items=_build_contribution_items(normalized_manifest),
             permissions=(
                 normalized_manifest["permissions"]
                 if isinstance(normalized_manifest.get("permissions"), dict)
@@ -2053,6 +2119,8 @@ class ExtensionService:
             ],
             "hooks": [
                 {
+                    "name": hook["name"],
+                    "description": hook.get("description", ""),
                     "event": hook["event"],
                     "callable": hook["callable"],
                     "mode": hook.get("mode", "sync"),

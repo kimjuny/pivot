@@ -216,12 +216,16 @@ Recommended example:
     ],
     "hooks": [
       {
+        "name": "Recall Stored Memory",
+        "description": "Loads relevant memory before the task begins.",
         "event": "task.before_start",
         "entrypoint": "hooks/lifecycle.py",
         "callable": "before_task_start",
         "mode": "sync"
       },
       {
+        "name": "Capture Tool Outcome",
+        "description": "Persists useful tool results after each tool execution.",
         "event": "iteration.after_tool_result",
         "entrypoint": "hooks/lifecycle.py",
         "callable": "after_tool_result",

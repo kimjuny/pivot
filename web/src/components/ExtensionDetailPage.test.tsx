@@ -77,9 +77,17 @@ describe("ExtensionDetailPage", () => {
             contribution_summary: {
               channel_providers: [],
               web_search_providers: [],
+              hooks: ["Recall Stored Memory"],
               tools: [],
               skills: [],
             },
+            contribution_items: [
+              {
+                type: "hook",
+                name: "Recall Stored Memory",
+                description: "Loads relevant memory before the task starts.",
+              },
+            ],
           },
         ],
       },
@@ -124,7 +132,19 @@ describe("ExtensionDetailPage", () => {
 
     expect(screen.getAllByText("@acme/memory")).toHaveLength(2);
     expect(screen.getAllByText("Trusted Local")).toHaveLength(2);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "README.md" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Includes" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Information" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("This package recalls memory.")).toBeInTheDocument();
+    expect(screen.getByText("Recall Stored Memory")).toBeInTheDocument();
+    expect(screen.getByText("Loads relevant memory before the task starts.")).toBeInTheDocument();
+    expect(screen.getByText("Hook")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Setup" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Versions" })).toBeInTheDocument();

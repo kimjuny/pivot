@@ -98,12 +98,16 @@ Minimal hook-based package:
   "contributions": {
     "hooks": [
       {
+        "name": "Recall Stored Memory",
+        "description": "Loads relevant memory before the task starts.",
         "event": "task.before_start",
         "callable": "inject_memory",
         "mode": "sync",
         "entrypoint": "hooks/lifecycle.py"
       },
       {
+        "name": "Persist New Memory",
+        "description": "Stores useful outcomes after the task completes.",
         "event": "task.completed",
         "callable": "persist_memory",
         "mode": "sync",
@@ -159,6 +163,8 @@ Common top-level fields:
 
 Current contribution declarations:
 
+- `hooks[*].name`
+- `hooks[*].description`
 - `hooks[*].event`
 - `hooks[*].callable`
 - `hooks[*].mode`
@@ -183,6 +189,8 @@ Validation rules worth knowing:
 - if `logo_path` is omitted, Pivot falls back to a root-level `logo.png`
 - provider keys must use `scope@provider_name`
 - provider key scope must match `manifest.json.scope`
+- hook `name` must be a non-empty operator-facing label
+- hook `description` must explain what the hook does in plain language
 - hook `event` must be one of the supported lifecycle events
 - hook `mode` must be `sync` or `async`
 
@@ -283,6 +291,8 @@ Each manifest hook entry points at a Python file plus one callable name:
 
 ```json
 {
+  "name": "Recall Stored Memory",
+  "description": "Loads relevant memory before the task starts.",
   "event": "task.before_start",
   "callable": "inject_memory",
   "mode": "sync",

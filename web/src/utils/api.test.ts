@@ -269,9 +269,11 @@ describe('chat file api helpers', () => {
           contribution_summary: {
             tools: [],
             skills: [],
+            hooks: [],
             channel_providers: [],
             web_search_providers: [],
           },
+          contribution_items: [],
         }),
         {
           status: 200,
@@ -402,9 +404,11 @@ describe('chat file api helpers', () => {
           contribution_summary: {
             tools: [],
             skills: [],
+            hooks: [],
             channel_providers: ['acme@chat'],
             web_search_providers: ['acme@search'],
           },
+          contribution_items: [],
           permissions: {
             network: {
               allow_hosts: ['api.acme.com'],

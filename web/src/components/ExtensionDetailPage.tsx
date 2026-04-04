@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
-import { ArrowLeft, Server } from "@/lib/lucide";
+import {
+  ArrowLeft,
+  Brain,
+  Globe2,
+  Radio,
+  Server,
+  Wrench,
+  Zap,
+  type LucideIcon,
+} from "@/lib/lucide";
 import { toast } from "sonner";
 
 import { ExtensionLogoAvatar } from "@/components/ExtensionLogoAvatar";
@@ -18,6 +27,7 @@ import {
   getExtensionPackages,
   updateExtensionInstallationConfiguration,
   type ExtensionConfigurationField,
+  type ExtensionContributionItem,
   type ExtensionContributionSummary,
   type ExtensionInstallation,
   type ExtensionInstallationConfigurationState,
@@ -31,8 +41,19 @@ interface ContributionGroup {
   label: string;
   /** Contribution names or provider keys displayed as badges. */
   values: string[];
-  /** Visual emphasis for providers vs optional lightweight assets. */
-  tone: "provider" | "lightweight";
+  /** Visual emphasis for providers, runtime hooks, and optional assets. */
+  tone: "provider" | "runtime" | "lightweight";
+}
+
+interface ContributionItemPresentation {
+  /** Stable item key used while rendering aggregated rows. */
+  id: string;
+  /** Human-readable badge label shown next to the name. */
+  badgeLabel: string;
+  /** One contributed capability. */
+  item: ExtensionContributionItem;
+  /** Icon shown in the neutral circular marker. */
+  icon: LucideIcon;
 }
 
 interface PackageStatusBadge {
@@ -64,9 +85,9 @@ interface SetupDraftMap {
 /**
  * Build stable contribution groups for one installed extension version.
  *
- * Why: providers are the standardized package path, while tools and skills are
- * optional lightweight additions. Showing them separately keeps that product
- * boundary visible in the package detail page.
+ * Why: extensions can contribute infrastructure providers, runtime hooks, and
+ * optional helper assets. Showing each class separately makes the package
+ * surface area understandable before the operator enables it.
  */
 function buildContributionGroups(summary: ExtensionContributionSummary): ContributionGroup[] {
   const groups: ContributionGroup[] = [
@@ -81,6 +102,11 @@ function buildContributionGroups(summary: ExtensionContributionSummary): Contrib
       tone: "provider",
     },
     {
+      label: "Lifecycle Hooks",
+      values: summary.hooks,
+      tone: "runtime",
+    },
+    {
       label: "Tools (Optional)",
       values: summary.tools,
       tone: "lightweight",
@@ -92,6 +118,99 @@ function buildContributionGroups(summary: ExtensionContributionSummary): Contrib
     },
   ];
   return groups.filter((group) => group.values.length > 0);
+}
+
+/**
+ * Map one contribution tone to a shared badge variant.
+ */
+function getContributionBadgeVariant(
+  tone: ContributionGroup["tone"],
+): "default" | "secondary" | "outline" {
+  if (tone === "provider") {
+    return "default";
+  }
+  if (tone === "runtime") {
+    return "secondary";
+  }
+  return "outline";
+}
+
+/**
+ * Choose one stable visual language for each contribution type.
+ *
+ * Why: the overview list should stay readable across tools, skills, providers,
+ * and hooks without scattering icon and badge decisions throughout the JSX.
+ */
+function getContributionPresentation(
+  item: ExtensionContributionItem,
+): ContributionItemPresentation {
+  switch (item.type) {
+    case "hook":
+      return {
+        id: `hook-${item.name}`,
+        badgeLabel: "Hook",
+        item,
+        icon: Zap,
+      };
+    case "skill":
+      return {
+        id: `skill-${item.name}`,
+        badgeLabel: "Skill",
+        item,
+        icon: Brain,
+      };
+    case "tool":
+      return {
+        id: `tool-${item.name}`,
+        badgeLabel: "Tool",
+        item,
+        icon: Wrench,
+      };
+    case "channel_provider":
+      return {
+        id: `channel_provider-${item.name}`,
+        badgeLabel: "Channel",
+        item,
+        icon: Radio,
+      };
+    case "web_search_provider":
+      return {
+        id: `web_search_provider-${item.name}`,
+        badgeLabel: "Web Search",
+        item,
+        icon: Globe2,
+      };
+    default:
+      return {
+        id: `${item.type}-${item.name}`,
+        badgeLabel: item.type,
+        item,
+        icon: Server,
+      };
+  }
+}
+
+/**
+ * Merge package contribution items so the newest installed version wins.
+ *
+ * Why: package overview should describe the current package surface area once,
+ * even when multiple installed versions declare the same capability.
+ */
+function buildPackageContributionItems(pkg: ExtensionPackage): ContributionItemPresentation[] {
+  const seenItems = new Set<string>();
+  const items: ContributionItemPresentation[] = [];
+
+  pkg.versions.forEach((version) => {
+    version.contribution_items.forEach((item) => {
+      const normalizedKey = `${item.type}:${item.name.trim().toLowerCase()}`;
+      if (seenItems.has(normalizedKey)) {
+        return;
+      }
+      seenItems.add(normalizedKey);
+      items.push(getContributionPresentation(item));
+    });
+  });
+  return items;
 }
 
 /**
@@ -334,11 +453,16 @@ export default function ExtensionDetailPage() {
       web_search_providers: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.web_search_providers)),
       ),
+      hooks: Array.from(new Set(pkg.versions.flatMap((version) => version.contribution_summary.hooks))),
       tools: Array.from(new Set(pkg.versions.flatMap((version) => version.contribution_summary.tools))),
       skills: Array.from(new Set(pkg.versions.flatMap((version) => version.contribution_summary.skills))),
     };
     return buildContributionGroups(merged);
   }, [pkg]);
+  const aggregatedContributionItems = useMemo(
+    () => (pkg ? buildPackageContributionItems(pkg) : []),
+    [pkg],
+  );
 
   const updateDraftValue = useCallback(
     (installationId: number, field: ExtensionConfigurationField, rawValue: string | boolean) => {
@@ -487,99 +611,125 @@ export default function ExtensionDetailPage() {
 
         <TabsContent value="overview" className="space-y-6">
           {pkg.readme_markdown.trim() ? (
-            <Card>
-              <CardContent className="pt-6">
-                <MarkdownRenderer content={pkg.readme_markdown} variant="document" />
-              </CardContent>
-            </Card>
+            <section className="space-y-3">
+              <div className="space-y-1">
+                <h2 className="text-base font-semibold text-foreground">README.md</h2>
+                <p className="text-sm text-muted-foreground">
+                  Package-authored documentation and usage notes for this extension.
+                </p>
+              </div>
+              <Card>
+                <CardContent className="pt-6">
+                  <MarkdownRenderer content={pkg.readme_markdown} variant="document" />
+                </CardContent>
+              </Card>
+            </section>
           ) : null}
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Includes</CardTitle>
-              <CardDescription>
+          <section className="space-y-3">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-foreground">Includes</h2>
+              <p className="text-sm text-muted-foreground">
                 Package-level contribution summary across all installed versions.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {aggregatedContributions.length > 0 ? (
-                aggregatedContributions.map((group) => (
-                  <div key={group.label}>
-                    <div className="text-sm font-medium text-foreground">{group.label}</div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {group.values.map((value) => (
-                        <Badge
-                          key={`${group.label}-${value}`}
-                          variant={group.tone === "provider" ? "default" : "outline"}
-                          className="font-normal"
-                        >
-                          {value}
-                        </Badge>
-                      ))}
-                    </div>
+              </p>
+            </div>
+            <Card>
+              <CardContent className="pt-6">
+                {aggregatedContributionItems.length > 0 ? (
+                  <div className="overflow-hidden rounded-lg border border-border">
+                    {aggregatedContributionItems.map((entry, index) => {
+                      const Icon = entry.icon;
+                      return (
+                      <div
+                        key={entry.id}
+                        className={`flex items-center gap-3 px-4 py-3 ${
+                          index > 0 ? "border-t border-border" : ""
+                        }`}
+                      >
+                        <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground">
+                          <Icon className="h-4 w-4" aria-hidden="true" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="text-sm font-medium text-foreground">
+                              {entry.item.name}
+                            </div>
+                            <Badge variant="outline" className="font-normal">
+                              {entry.badgeLabel}
+                            </Badge>
+                          </div>
+                          <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                            {entry.item.description || "No description provided."}
+                          </p>
+                        </div>
+                      </div>
+                      );
+                    })}
                   </div>
-                ))
-              ) : (
-                <div className="text-sm text-muted-foreground">No contributions declared.</div>
-              )}
-            </CardContent>
-          </Card>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No contributions declared.</div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Information</CardTitle>
-              <CardDescription>
+          <section className="space-y-3">
+            <div className="space-y-1">
+              <h2 className="text-base font-semibold text-foreground">Information</h2>
+              <p className="text-sm text-muted-foreground">
                 Stable package metadata and the most recent installed version summary.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-lg border border-border p-4">
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Identity
-                </div>
-                <dl className="mt-3 space-y-2 text-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="text-muted-foreground">Package</dt>
-                    <dd className="text-right text-foreground">{pkg.package_id}</dd>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="text-muted-foreground">Latest version</dt>
-                    <dd className="text-right text-foreground">{pkg.latest_version}</dd>
-                  </div>
-                  <div className="flex items-start justify-between gap-3">
-                    <dt className="text-muted-foreground">Active versions</dt>
-                    <dd className="text-right text-foreground">{pkg.active_version_count}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              {latestInstallation ? (
+              </p>
+            </div>
+            <Card>
+              <CardContent className="grid gap-4 pt-6 md:grid-cols-2">
                 <div className="rounded-lg border border-border p-4">
                   <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Latest installation
+                    Identity
                   </div>
                   <dl className="mt-3 space-y-2 text-sm">
                     <div className="flex items-start justify-between gap-3">
-                      <dt className="text-muted-foreground">Trust</dt>
-                      <dd className="text-right text-foreground">
-                        {formatTrustStatusLabel(latestInstallation.trust_status)}
-                      </dd>
+                      <dt className="text-muted-foreground">Package</dt>
+                      <dd className="text-right text-foreground">{pkg.package_id}</dd>
                     </div>
                     <div className="flex items-start justify-between gap-3">
-                      <dt className="text-muted-foreground">Source</dt>
-                      <dd className="text-right text-foreground">{latestInstallation.source}</dd>
+                      <dt className="text-muted-foreground">Latest version</dt>
+                      <dd className="text-right text-foreground">{pkg.latest_version}</dd>
                     </div>
                     <div className="flex items-start justify-between gap-3">
-                      <dt className="text-muted-foreground">Installed</dt>
-                      <dd className="text-right text-foreground">
-                        {formatTimestamp(latestInstallation.created_at)}
-                      </dd>
+                      <dt className="text-muted-foreground">Active versions</dt>
+                      <dd className="text-right text-foreground">{pkg.active_version_count}</dd>
                     </div>
                   </dl>
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
+
+                {latestInstallation ? (
+                  <div className="rounded-lg border border-border p-4">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Latest installation
+                    </div>
+                    <dl className="mt-3 space-y-2 text-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <dt className="text-muted-foreground">Trust</dt>
+                        <dd className="text-right text-foreground">
+                          {formatTrustStatusLabel(latestInstallation.trust_status)}
+                        </dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-3">
+                        <dt className="text-muted-foreground">Source</dt>
+                        <dd className="text-right text-foreground">{latestInstallation.source}</dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-3">
+                        <dt className="text-muted-foreground">Installed</dt>
+                        <dd className="text-right text-foreground">
+                          {formatTimestamp(latestInstallation.created_at)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          </section>
         </TabsContent>
 
         <TabsContent value="setup" className="space-y-4">
@@ -755,7 +905,7 @@ export default function ExtensionDetailPage() {
                       {group.values.map((value) => (
                         <Badge
                           key={`${installation.id}-${group.label}-${value}`}
-                          variant={group.tone === "provider" ? "default" : "outline"}
+                          variant={getContributionBadgeVariant(group.tone)}
                           className="font-normal"
                         >
                           {value}

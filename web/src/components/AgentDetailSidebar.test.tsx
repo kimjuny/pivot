@@ -161,9 +161,11 @@ describe("AgentDetailSidebar", () => {
               contribution_summary: {
                 channel_providers: [],
                 web_search_providers: [],
+                hooks: [],
                 tools: [],
                 skills: [],
               },
+              contribution_items: [],
             },
           },
           latest_version: "0.1.0",

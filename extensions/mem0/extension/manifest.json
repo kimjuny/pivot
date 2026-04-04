@@ -27,12 +27,16 @@
   "contributions": {
     "hooks": [
       {
+        "name": "Recall Stored Memory",
+        "description": "Fetches relevant memory from the external Mem0 service before the task starts.",
         "event": "task.before_start",
         "callable": "inject_memory",
         "mode": "sync",
         "entrypoint": "hooks/lifecycle.py"
       },
       {
+        "name": "Persist New Memory",
+        "description": "Writes useful task outcomes back to the external Mem0 service after completion.",
         "event": "task.completed",
         "callable": "persist_memory",
         "mode": "sync",
