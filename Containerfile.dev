@@ -3,7 +3,7 @@
 # Targets:
 #   - frontend-dev: Vite development server
 #   - backend-dev: FastAPI/Poetry development server
-#   - sandbox-base: per-agent sandbox runtime with ripgrep preinstalled
+#   - sandbox-base: per-agent sandbox runtime with common CLI tools preinstalled
 # Pre-installs all dependencies so `podman compose up` is instant
 # =============================================================================
 
@@ -35,10 +35,17 @@ FROM docker.io/library/python:3.11-slim AS sandbox-base
 # Provide the default runtime utilities needed by sandboxed function execution.
 # We keep them in the image so every sidecar can start immediately without a
 # bootstrap step. Node/npm are installed here because some skills and sandboxed
-# tasks need a JavaScript runtime in addition to Python, and Chromium is
-# included for browser-driven workflows inside the sandbox.
+# tasks need a JavaScript runtime in addition to Python, Chromium supports
+# browser-driven workflows, and git/curl are bundled because sandboxed tasks
+# commonly need source control metadata and HTTP fetch helpers.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends chromium nodejs npm ripgrep && \
+    apt-get install -y --no-install-recommends \
+    chromium \
+    curl \
+    git \
+    nodejs \
+    npm \
+    ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

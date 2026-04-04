@@ -1,4 +1,7 @@
 ## 4. 可用工具
+
+**切记：** 你的环境中已安装git、node(with npm)、python(3.11)、curl、chromium可供调用。
+
 ```json
 {{tools_description}}
 ```
