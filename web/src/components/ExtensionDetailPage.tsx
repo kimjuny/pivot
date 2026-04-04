@@ -1,18 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ArrowLeft,
   Brain,
+  CheckCircle2,
   Globe2,
+  Loader2,
   Radio,
   Server,
+  Trash2,
   Wrench,
+  XCircle,
   Zap,
   type LucideIcon,
 } from "@/lib/lucide";
 import { toast } from "sonner";
 
+import ConfirmationModal from "@/components/ConfirmationModal";
 import { ExtensionLogoAvatar } from "@/components/ExtensionLogoAvatar";
 import ExtensionHookReplayPanel from "@/components/ExtensionHookReplayPanel";
 import { Badge } from "@/components/ui/badge";
@@ -25,12 +30,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getExtensionInstallationConfiguration,
   getExtensionPackages,
+  uninstallExtensionInstallation,
   updateExtensionInstallationConfiguration,
+  updateExtensionInstallationStatus,
   type ExtensionConfigurationField,
   type ExtensionContributionItem,
   type ExtensionContributionSummary,
   type ExtensionInstallation,
   type ExtensionInstallationConfigurationState,
+  type ExtensionUninstallResult,
   type ExtensionPackage,
 } from "@/utils/api";
 import { formatTimestamp } from "@/utils/timestamp";
@@ -60,7 +68,7 @@ interface PackageStatusBadge {
   /** Operator-facing summary label. */
   label: string;
   /** Visual tone that distinguishes live usage from neutral state. */
-  tone: "provider" | "runtime" | "neutral";
+  tone: "provider" | "runtime";
 }
 
 interface ReferenceBadge {
@@ -217,8 +225,7 @@ function buildPackageContributionItems(pkg: ExtensionPackage): ContributionItemP
  * Summarize package-level operational risk from every installed version.
  *
  * Why: the detail header should immediately tell operators whether the package
- * is active, pinned, or safe to disable before they inspect individual
- * versions.
+ * is currently in use or pinned before they inspect individual versions.
  */
 function buildPackageStatusBadges(pkg: ExtensionPackage): PackageStatusBadge[] {
   const totalBindingCount = pkg.versions.reduce(
@@ -245,12 +252,6 @@ function buildPackageStatusBadges(pkg: ExtensionPackage): PackageStatusBadge[] {
     badges.push({
       label: `Pinned ${totalPinnedCount}`,
       tone: "runtime",
-    });
-  }
-  if (totalBindingCount === 0 && totalPinnedCount === 0) {
-    badges.push({
-      label: pkg.active_version_count > 0 ? "Safe To Disable" : "Inactive",
-      tone: "neutral",
     });
   }
   return badges;
@@ -378,12 +379,16 @@ function parseConfigInputValue(
 export default function ExtensionDetailPage() {
   const { scope = "", name = "" } = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const [packages, setPackages] = useState<ExtensionPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [setupStates, setSetupStates] = useState<SetupStateMap>({});
   const [setupDrafts, setSetupDrafts] = useState<SetupDraftMap>({});
   const [loadingSetupIds, setLoadingSetupIds] = useState<number[]>([]);
   const [savingSetupIds, setSavingSetupIds] = useState<number[]>([]);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+  const [pendingUninstall, setPendingUninstall] = useState<ExtensionInstallation | null>(null);
+  const [uninstallingId, setUninstallingId] = useState<number | null>(null);
   const listPath = location.pathname.startsWith("/studio/")
     ? "/studio/assets/extensions"
     : "/extensions";
@@ -442,6 +447,8 @@ export default function ExtensionDetailPage() {
   }, [loadSetupState, pkg, setupStates]);
 
   const latestInstallation = pkg?.versions[0] ?? null;
+  const isLatestStatusUpdating = latestInstallation?.id === statusUpdatingId;
+  const isLatestUninstalling = latestInstallation?.id === uninstallingId;
   const aggregatedContributions = useMemo(() => {
     if (!pkg) {
       return [];
@@ -504,6 +511,60 @@ export default function ExtensionDetailPage() {
     [setupDrafts],
   );
 
+  const handleStatusToggle = useCallback(
+    async (installation: ExtensionInstallation) => {
+      const nextStatus = installation.status === "active" ? "disabled" : "active";
+      setStatusUpdatingId(installation.id);
+      try {
+        await updateExtensionInstallationStatus(installation.id, nextStatus);
+        toast.success(
+          nextStatus === "active"
+            ? `Enabled ${installation.package_id}@${installation.version}`
+            : `Disabled ${installation.package_id}@${installation.version}`,
+        );
+        await loadPackages();
+      } catch (error) {
+        console.error("Failed to update extension status:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Failed to update extension status",
+        );
+      } finally {
+        setStatusUpdatingId((current) => (current === installation.id ? null : current));
+      }
+    },
+    [loadPackages],
+  );
+
+  const handleConfirmUninstall = useCallback(
+    async (installation: ExtensionInstallation) => {
+      setUninstallingId(installation.id);
+      try {
+        const result: ExtensionUninstallResult = await uninstallExtensionInstallation(
+          installation.id,
+        );
+        toast.success(
+          result.mode === "physical"
+            ? "Extension version uninstalled"
+            : "Extension version disabled because it is still referenced",
+        );
+        setPendingUninstall(null);
+
+        if (pkg?.versions.length === 1 && result.mode === "physical") {
+          navigate(listPath, { replace: true });
+          return;
+        }
+
+        await loadPackages();
+      } catch (error) {
+        console.error("Failed to uninstall extension:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to uninstall extension");
+      } finally {
+        setUninstallingId((current) => (current === installation.id ? null : current));
+      }
+    },
+    [listPath, loadPackages, navigate, pkg?.versions.length],
+  );
+
   if (isLoading) {
     return (
       <div className="mx-auto flex h-64 max-w-5xl items-center justify-center px-6 text-sm text-muted-foreground">
@@ -535,29 +596,75 @@ export default function ExtensionDetailPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
-      <div className="mb-6">
-        <Button asChild variant="ghost" className="mb-3 -ml-3">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button asChild variant="ghost" className="-ml-3 w-fit">
           <Link to={listPath}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back To Extensions
           </Link>
         </Button>
+        {latestInstallation ? (
+          <div className="flex items-center gap-1 sm:ml-auto sm:justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={
+                latestInstallation.status === "active"
+                  ? "text-muted-foreground hover:bg-amber-500/10 hover:text-amber-700 dark:hover:text-amber-300"
+                  : "text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-700 dark:hover:text-emerald-300"
+              }
+              onClick={() => {
+                void handleStatusToggle(latestInstallation);
+              }}
+              disabled={isLatestStatusUpdating || isLatestUninstalling}
+            >
+              {isLatestStatusUpdating ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : latestInstallation.status === "active" ? (
+                <XCircle className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              {latestInstallation.status === "active" ? "Disable" : "Enable"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => {
+                setPendingUninstall(latestInstallation);
+              }}
+              disabled={isLatestStatusUpdating || isLatestUninstalling}
+            >
+              {isLatestUninstalling ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              )}
+              Uninstall
+            </Button>
+          </div>
+        ) : null}
+      </div>
 
+      <div className="mb-6">
         <Card>
           <CardHeader className="space-y-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
+              <div className="flex-1 space-y-3">
+                <div className="flex items-start gap-4">
                   <ExtensionLogoAvatar
                     name={pkg.display_name}
                     logoUrl={pkg.logo_url ?? latestInstallation?.logo_url ?? null}
                     fallback={<Server className="h-6 w-6 text-primary" aria-hidden="true" />}
-                    containerClassName="flex size-12 items-center justify-center rounded-xl border border-border bg-muted/40"
-                    imageClassName="size-full rounded-xl object-cover"
+                    containerClassName="flex aspect-square size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted/20 p-2.5"
+                    imageClassName="h-full w-full rounded-lg object-contain"
                   />
-                  <div>
-                    <CardTitle className="text-2xl">{pkg.display_name}</CardTitle>
-                    <CardDescription className="mt-1 text-sm">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <CardTitle className="min-w-0 text-2xl">{pkg.display_name}</CardTitle>
+                    <CardDescription className="text-sm">
                       {pkg.description || "No description provided."}
                     </CardDescription>
                   </div>
@@ -565,35 +672,16 @@ export default function ExtensionDetailPage() {
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="outline">{pkg.package_id}</Badge>
                   <Badge variant="outline">Latest {pkg.latest_version}</Badge>
-                  <Badge variant="outline">Active {pkg.active_version_count}</Badge>
-                  <Badge variant="outline">Disabled {pkg.disabled_version_count}</Badge>
+                  <Badge variant="outline">Enabled Versions {pkg.active_version_count}</Badge>
+                  <Badge variant="outline">Disabled Versions {pkg.disabled_version_count}</Badge>
                   {buildPackageStatusBadges(pkg).map((badge) => (
                     <Badge
                       key={`${pkg.package_id}-${badge.label}`}
-                      variant={badge.tone === "neutral" ? "outline" : "default"}
+                      variant="default"
                     >
                       {badge.label}
                     </Badge>
                   ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-sm">
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Current Package Status
-                </div>
-                <div className="mt-2 space-y-1 text-muted-foreground">
-                  <div>Scope: <code>{pkg.scope}</code></div>
-                  <div>Name: <code>{pkg.name}</code></div>
-                  <div>Installed versions: {pkg.versions.length}</div>
-                  <div>
-                    Latest trust:{" "}
-                    <span className="text-foreground">
-                      {latestInstallation
-                        ? formatTrustStatusLabel(latestInstallation.trust_status)
-                        : "Unknown"}
-                    </span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -923,6 +1011,31 @@ export default function ExtensionDetailPage() {
           <ExtensionHookReplayPanel packageId={pkg.package_id} />
         </TabsContent>
       </Tabs>
+
+      <ConfirmationModal
+        isOpen={pendingUninstall !== null}
+        title="Uninstall Extension Version"
+        message={
+          pendingUninstall
+            ? [
+                `${pendingUninstall.display_name} ${pendingUninstall.version}`,
+                "If this version is still referenced by bindings, releases, snapshots, or drafts,",
+                "Pivot will disable it instead of removing it physically.",
+              ].join(" ")
+            : ""
+        }
+        confirmText={isLatestUninstalling ? "Uninstalling…" : "Uninstall"}
+        onConfirm={() => {
+          if (pendingUninstall) {
+            void handleConfirmUninstall(pendingUninstall);
+          }
+        }}
+        onCancel={() => {
+          if (!isLatestUninstalling) {
+            setPendingUninstall(null);
+          }
+        }}
+      />
     </div>
   );
 }
