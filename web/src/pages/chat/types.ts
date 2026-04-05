@@ -314,6 +314,18 @@ export interface PendingUploadItem extends ChatAttachment {
 }
 
 /**
+ * One skill that the user explicitly selected as mandatory for the current task.
+ */
+export interface MandatorySkillSelection {
+  /** Stable globally unique skill name. */
+  name: string;
+  /** Optional picker description used while drafting. */
+  description?: string;
+  /** Canonical sandbox path visible to the runtime. */
+  path: string;
+}
+
+/**
  * Renderable chat message used by the conversation timeline.
  */
 export interface ChatMessage {
@@ -322,6 +334,7 @@ export interface ChatMessage {
   content: string;
   errorMessage?: string;
   attachments?: ChatAttachment[];
+  mandatorySkills?: MandatorySkillSelection[];
   assistantAttachments?: AssistantAttachment[];
   timestamp: string;
   task_id?: string;

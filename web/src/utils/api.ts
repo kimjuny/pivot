@@ -2066,6 +2066,10 @@ export interface TaskMessage {
   task_id: string;
   user_message: string;
   files?: ChatFileAsset[];
+  mandatory_skills?: Array<{
+    name: string;
+    path: string;
+  }>;
   assistant_attachments?: TaskAttachmentAsset[];
   agent_answer: string | null;
   status: string;
@@ -2128,6 +2132,18 @@ export interface ReactPendingUserActionResponse {
 }
 
 /**
+ * One runtime-visible skill option returned to the chat composer.
+ */
+export interface ReactRuntimeSkillItem {
+  /** Stable globally unique skill name. */
+  name: string;
+  /** Human-readable description shown in the mention picker. */
+  description: string;
+  /** Canonical sandbox path visible to the runtime. */
+  path: string;
+}
+
+/**
  * Prompt-context usage summary returned by the ReAct context estimator API.
  */
 export interface ReactContextUsageSummary {
@@ -2187,6 +2203,7 @@ export const startReactTask = async (payload: {
   file_ids?: string[];
   web_search_provider?: string | null;
   thinking_mode?: "auto" | "fast" | "thinking" | null;
+  mandatory_skill_names?: string[];
 }): Promise<ReactTaskStartResponse> => {
   return apiRequest('/react/tasks', {
     method: 'POST',
@@ -2239,11 +2256,30 @@ export const getReactContextUsage = async (payload: {
   file_ids?: string[];
   session_type?: ChatSessionType;
   test_snapshot?: StudioTestSnapshotPayload | null;
+  mandatory_skill_names?: string[];
 }): Promise<ReactContextUsageSummary> => {
   return apiRequest('/react/context-usage', {
     method: 'POST',
     body: JSON.stringify(payload),
   }) as Promise<ReactContextUsageSummary>;
+};
+
+/**
+ * Fetch the runtime-visible skills for the current chat surface.
+ *
+ * @param payload - Runtime resolution inputs matching the current chat state
+ * @returns Promise resolving to visible skill metadata for the mention picker
+ */
+export const getReactRuntimeSkills = async (payload: {
+  agent_id: number;
+  session_id?: string | null;
+  session_type?: ChatSessionType;
+  test_snapshot?: StudioTestSnapshotPayload | null;
+}): Promise<ReactRuntimeSkillItem[]> => {
+  return apiRequest('/react/runtime-skills', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<ReactRuntimeSkillItem[]>;
 };
 
 /**

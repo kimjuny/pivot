@@ -4,8 +4,9 @@ import type {
   FormEvent,
   KeyboardEvent,
   RefObject,
+  SyntheticEvent,
 } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Brain,
@@ -20,7 +21,14 @@ import {
   Zap,
 } from "@/lib/lucide";
 
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,13 +36,24 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupText,
+  InputGroupTextarea,
+} from "@/components/ui/input-group";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
 import type { ReactContextUsageSummary } from "@/utils/api";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
@@ -42,6 +61,7 @@ import type { ChatThinkingMode } from "@/utils/llmThinking";
 import type {
   ChatReplyTarget,
   ChatWebSearchProviderOption,
+  MandatorySkillSelection,
   PendingUploadItem,
   TaskPlanSnapshot,
 } from "../types";
@@ -67,9 +87,13 @@ interface ChatComposerProps {
   selectedThinkingMode: ChatThinkingMode | null;
   webSearchProviders: ChatWebSearchProviderOption[];
   selectedWebSearchProvider: string | null;
+  availableMandatorySkills: MandatorySkillSelection[];
+  selectedMandatorySkills: MandatorySkillSelection[];
   imageInputRef: RefObject<HTMLInputElement>;
   documentInputRef: RefObject<HTMLInputElement>;
   onInputChange: (value: string) => void;
+  onAddMandatorySkill: (skill: MandatorySkillSelection) => void;
+  onRemoveMandatorySkill: (skillName: string) => void;
   onThinkingModeChange: (mode: ChatThinkingMode) => void;
   onWebSearchProviderChange: (providerKey: string) => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -80,6 +104,40 @@ interface ChatComposerProps {
   onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onDocumentInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
   onRemovePendingFile: (clientId: string) => void | Promise<void>;
+}
+
+interface ActiveMandatorySkillMention {
+  start: number;
+  end: number;
+  query: string;
+}
+
+/**
+ * Detects the active slash-token near the caret so the composer can open the
+ * mandatory-skill picker without replacing the native textarea editor.
+ */
+function getActiveMandatorySkillMention(
+  value: string,
+  selectionStart: number,
+): ActiveMandatorySkillMention | null {
+  const safeSelectionStart = Math.max(Math.min(selectionStart, value.length), 0);
+  const beforeCaret = value.slice(0, safeSelectionStart);
+  const tokenStart = Math.max(beforeCaret.lastIndexOf(" "), beforeCaret.lastIndexOf("\n")) + 1;
+  const token = beforeCaret.slice(tokenStart);
+  if (!token.startsWith("/")) {
+    return null;
+  }
+
+  const query = token.slice(1);
+  if (query.includes("/") || query.includes(":")) {
+    return null;
+  }
+
+  return {
+    start: tokenStart,
+    end: safeSelectionStart,
+    query,
+  };
 }
 
 /**
@@ -103,9 +161,13 @@ export function ChatComposer({
   selectedThinkingMode,
   webSearchProviders,
   selectedWebSearchProvider,
+  availableMandatorySkills,
+  selectedMandatorySkills,
   imageInputRef,
   documentInputRef,
   onInputChange,
+  onAddMandatorySkill,
+  onRemoveMandatorySkill,
   onThinkingModeChange,
   onWebSearchProviderChange,
   onKeyDown,
@@ -138,7 +200,72 @@ export function ChatComposer({
         ? RefreshCw
         : Zap;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [composerSelectionStart, setComposerSelectionStart] = useState(0);
+  const [highlightedMandatorySkillIndex, setHighlightedMandatorySkillIndex] =
+    useState(0);
+  const [dismissedMandatorySkillMentionKey, setDismissedMandatorySkillMentionKey] =
+    useState<string | null>(null);
   const replyPreview = replyTarget?.question.replace(/\s+/g, " ").trim() ?? "";
+  const activeMandatorySkillMention = useMemo(
+    () => getActiveMandatorySkillMention(inputMessage, composerSelectionStart),
+    [composerSelectionStart, inputMessage],
+  );
+  const activeMandatorySkillMentionKey = activeMandatorySkillMention
+    ? `${activeMandatorySkillMention.start}:${activeMandatorySkillMention.query}`
+    : null;
+  const filteredMandatorySkills = useMemo(() => {
+    const selectedNames = new Set(
+      selectedMandatorySkills.map((skill) => skill.name),
+    );
+    const normalizedQuery =
+      activeMandatorySkillMention?.query.trim().toLowerCase() ?? "";
+    return availableMandatorySkills.filter((skill) => {
+      if (selectedNames.has(skill.name)) {
+        return false;
+      }
+      if (!normalizedQuery) {
+        return true;
+      }
+
+      return (
+        skill.name.toLowerCase().includes(normalizedQuery) ||
+        (skill.description ?? "").toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [
+    activeMandatorySkillMention?.query,
+    availableMandatorySkills,
+    selectedMandatorySkills,
+  ]);
+  const isMandatorySkillPickerOpen =
+    !isStreaming &&
+    activeMandatorySkillMention !== null &&
+    activeMandatorySkillMentionKey !== dismissedMandatorySkillMentionKey;
+
+  /**
+   * Centralizes mention dismissal so pointer and keyboard exits share the same
+   * rule: keep the raw slash text intact, but stop treating the current token
+   * as an active picker session until the user edits it again.
+   */
+  const dismissActiveMandatorySkillMention = () => {
+    if (activeMandatorySkillMentionKey !== null) {
+      setDismissedMandatorySkillMentionKey(activeMandatorySkillMentionKey);
+    }
+  };
+
+  /**
+   * Track the current caret so slash-trigger detection stays aligned with what
+   * the user is actually editing instead of assuming the cursor sits at the end.
+   */
+  const syncComposerSelection = (
+    event?: SyntheticEvent<HTMLTextAreaElement>,
+  ) => {
+    const nextSelectionStart =
+      event?.currentTarget.selectionStart ??
+      textareaRef.current?.selectionStart ??
+      0;
+    setComposerSelectionStart(nextSelectionStart);
+  };
 
   /**
    * When the assistant asks a clarify question, move focus into the composer
@@ -159,10 +286,128 @@ export function ChatComposer({
       nextTextarea.focus();
       const cursorPosition = nextTextarea.value.length;
       nextTextarea.setSelectionRange(cursorPosition, cursorPosition);
+      setComposerSelectionStart(cursorPosition);
     });
 
     return () => window.cancelAnimationFrame(frameId);
   }, [replyTarget]);
+
+  /**
+   * Keep the composer height aligned with the current draft so the reply and
+   * action rows can stay visually attached instead of trapping the user in a
+   * tiny scroll area.
+   */
+  useEffect(() => {
+    const nextTextarea = textareaRef.current;
+    if (!nextTextarea) {
+      return;
+    }
+
+    const minHeight = 60;
+    const maxHeight = 320;
+    nextTextarea.style.height = "0px";
+    nextTextarea.style.height = `${Math.min(
+      Math.max(nextTextarea.scrollHeight, minHeight),
+      maxHeight,
+    )}px`;
+  }, [inputMessage, replyTarget]);
+
+  useEffect(() => {
+    setHighlightedMandatorySkillIndex(0);
+  }, [activeMandatorySkillMention?.query]);
+
+  useEffect(() => {
+    if (activeMandatorySkillMentionKey === null) {
+      setDismissedMandatorySkillMentionKey(null);
+    }
+  }, [activeMandatorySkillMentionKey]);
+
+  /**
+   * Converts the active slash token into one structured mandatory-skill chip
+   * while keeping the remaining textarea content untouched.
+   */
+  const selectMandatorySkill = (skill: MandatorySkillSelection) => {
+    if (!activeMandatorySkillMention) {
+      return;
+    }
+
+    const beforeMention = inputMessage.slice(0, activeMandatorySkillMention.start);
+    const afterMention = inputMessage.slice(activeMandatorySkillMention.end);
+    const nextMessage =
+      beforeMention.endsWith(" ") && afterMention.startsWith(" ")
+        ? `${beforeMention}${afterMention.slice(1)}`
+        : `${beforeMention}${afterMention}`;
+    setDismissedMandatorySkillMentionKey(null);
+    onAddMandatorySkill(skill);
+    onInputChange(nextMessage);
+
+    window.requestAnimationFrame(() => {
+      const nextTextarea = textareaRef.current;
+      if (!nextTextarea) {
+        return;
+      }
+
+      const nextCursorPosition = Math.min(
+        activeMandatorySkillMention.start,
+        nextMessage.length,
+      );
+      nextTextarea.focus();
+      nextTextarea.setSelectionRange(nextCursorPosition, nextCursorPosition);
+      setComposerSelectionStart(nextCursorPosition);
+    });
+  };
+
+  /**
+   * Reserves arrow and enter handling for the open skill picker so chat send
+   * shortcuts do not steal those keystrokes while the user is choosing a skill.
+   */
+  const handleTextareaKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isMandatorySkillPickerOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (filteredMandatorySkills.length > 0) {
+          setHighlightedMandatorySkillIndex((previous) =>
+            Math.min(previous + 1, filteredMandatorySkills.length - 1),
+          );
+        }
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (filteredMandatorySkills.length > 0) {
+          setHighlightedMandatorySkillIndex((previous) =>
+            Math.max(previous - 1, 0),
+          );
+        }
+        return;
+      }
+
+      if (
+        (event.key === "Enter" || event.key === "Tab") &&
+        !event.shiftKey &&
+        filteredMandatorySkills.length > 0
+      ) {
+        event.preventDefault();
+        selectMandatorySkill(
+          filteredMandatorySkills[highlightedMandatorySkillIndex] ??
+            filteredMandatorySkills[0],
+        );
+        return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        dismissActiveMandatorySkillMention();
+      }
+
+      if (event.key === "Escape") {
+        dismissActiveMandatorySkillMention();
+        return;
+      }
+    }
+
+    onKeyDown(event);
+  };
 
   return (
     <div
@@ -224,198 +469,302 @@ export function ChatComposer({
             onRemovePendingFile={onRemovePendingFile}
           />
 
-          {replyTarget && (
-            <div className="px-3 pt-3">
-              <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/20 px-2.5 py-1.5 text-xs text-muted-foreground">
+          <InputGroup className="rounded-none border-0 bg-transparent shadow-none">
+            {replyTarget && (
+              <InputGroupAddon
+                align="block-start"
+                className="gap-1.5 bg-muted/20 px-3 pb-1.5 pt-2"
+              >
                 <MessageSquare className="h-3.5 w-3.5 shrink-0 text-primary/75" />
-                <span className="shrink-0 text-[11px] font-medium text-foreground/75">
+                <InputGroupText className="shrink-0 text-[11px] font-medium text-foreground/75">
                   Replying
-                </span>
+                </InputGroupText>
                 <p className="min-w-0 flex-1 truncate text-[12px] text-foreground/65">
                   {replyPreview}
                 </p>
-                <button
+                <InputGroupButton
                   type="button"
+                  size="icon-xs"
+                  variant="ghost"
                   onClick={onCancelReply}
-                  className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                  className="ml-auto rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
                   title="Clear reply context"
                   aria-label="Clear reply context"
                 >
                   <XCircle className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          )}
+                </InputGroupButton>
+              </InputGroupAddon>
+            )}
 
-          <Textarea
-            ref={textareaRef}
-            value={inputMessage}
-            onChange={(event) => onInputChange(event.target.value)}
-            onKeyDown={onKeyDown}
-            onPaste={onPaste}
-            placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
-            className={`min-h-[60px] w-full resize-none border-0 shadow-none focus:shadow-none focus:outline-none focus-visible:ring-0 focus-visible:shadow-none ${
-              replyTarget ? "px-4 pb-3 pt-2.5" : "p-4"
-            }`}
-            disabled={isStreaming}
-          />
-
-          <div className="flex items-center justify-between gap-3 px-4 pb-3">
-            <div className="flex min-w-0 items-center gap-1.5">
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full"
+            {selectedMandatorySkills.length > 0 && (
+              <InputGroupAddon
+                align="block-start"
+                className="flex-wrap gap-1.5 bg-background px-3 pb-1.5 pt-1"
+              >
+                <InputGroupText className="text-[11px] font-medium text-foreground/70">
+                  Skills
+                </InputGroupText>
+                {selectedMandatorySkills.map((skill) => (
+                  <Badge
+                    key={skill.name}
+                    variant="secondary"
+                    className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
                   >
-                    <Plus className="h-4 w-4" />
-                    <span className="sr-only">Attach</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="start"
-                  size="medium"
-                  className="z-[60]"
-                >
-                  {supportsImageInput && (
-                    <DropdownMenuItem
-                      onClick={() => imageInputRef.current?.click()}
+                    <span>{skill.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveMandatorySkill(skill.name)}
+                      className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+                      aria-label={`Remove ${skill.name}`}
+                      title={`Remove ${skill.name}`}
                     >
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      <span>Upload image</span>
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem
-                    onClick={() => documentInputRef.current?.click()}
-                  >
-                    <Paperclip className="mr-2 h-4 w-4" />
-                    <span>Upload file</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                      <XCircle className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </InputGroupAddon>
+            )}
 
-              {hasThinkingSelector && (
-                <Select
-                  value={selectedThinkingMode}
-                  onValueChange={(value) =>
-                    onThinkingModeChange(value as ChatThinkingMode)
+            <Popover
+              open={isMandatorySkillPickerOpen}
+              modal={false}
+              onOpenChange={(open) => {
+                if (!open) {
+                  dismissActiveMandatorySkillMention();
+                }
+              }}
+            >
+              <PopoverAnchor asChild>
+                <InputGroupTextarea
+                  ref={textareaRef}
+                  value={inputMessage}
+                  onChange={(event) => {
+                    onInputChange(event.target.value);
+                    setComposerSelectionStart(event.target.selectionStart ?? 0);
+                    setDismissedMandatorySkillMentionKey(null);
+                  }}
+                  onKeyDown={handleTextareaKeyDown}
+                  onFocus={syncComposerSelection}
+                  onClick={syncComposerSelection}
+                  onMouseUp={syncComposerSelection}
+                  onKeyUp={syncComposerSelection}
+                  onSelect={syncComposerSelection}
+                  onPaste={onPaste}
+                  placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
+                  className="min-h-[60px] max-h-80 overflow-y-auto px-4 [field-sizing:content]"
+                  disabled={isStreaming}
+                />
+              </PopoverAnchor>
+              <PopoverContent
+                align="start"
+                side="top"
+                sideOffset={10}
+                onOpenAutoFocus={(event) => event.preventDefault()}
+                onCloseAutoFocus={(event) => event.preventDefault()}
+                onInteractOutside={dismissActiveMandatorySkillMention}
+                className="w-[min(16rem,calc((100vw-3rem)*0.67))] overflow-hidden rounded-2xl p-0"
+              >
+                <Command
+                  shouldFilter={false}
+                  value={
+                    filteredMandatorySkills[highlightedMandatorySkillIndex]?.name ?? ""
                   }
+                  className="rounded-[inherit]"
                 >
-                  <SelectTrigger
-                    size="medium"
-                    aria-label="Thinking mode"
-                    className="h-7 w-auto min-w-[5.75rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <SelectedThinkingModeIcon className="h-3.5 w-3.5" />
-                      <span>{selectedThinkingModeLabel}</span>
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent size="medium">
-                    {thinkingModes.includes("auto") && (
-                      <SelectItem value="auto">
-                        <div className="flex items-center gap-2">
-                          <RefreshCw className="h-3.5 w-3.5" />
-                          <span>Auto</span>
-                        </div>
-                      </SelectItem>
-                    )}
-                    {thinkingModes.includes("fast") && (
-                      <SelectItem value="fast">
-                        <div className="flex items-center gap-2">
-                          <Zap className="h-3.5 w-3.5" />
-                          <span>Fast</span>
-                        </div>
-                      </SelectItem>
-                    )}
-                    {thinkingModes.includes("thinking") && (
-                      <SelectItem value="thinking">
-                        <div className="flex items-center gap-2">
-                          <Brain className="h-3.5 w-3.5" />
-                          <span>Thinking</span>
-                        </div>
-                      </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              )}
+                  <CommandList className="max-h-64">
+                    <CommandEmpty>
+                      {availableMandatorySkills.length === 0
+                        ? "No skills available for this agent."
+                        : "No matching skills found."}
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {filteredMandatorySkills.map((skill, index) => (
+                        <CommandItem
+                          key={skill.name}
+                          value={skill.name}
+                          onSelect={() => selectMandatorySkill(skill)}
+                          onMouseEnter={() =>
+                            setHighlightedMandatorySkillIndex(index)
+                          }
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate font-mono text-xs font-medium">
+                              {skill.name}
+                            </div>
+                            <div className="truncate text-xs text-muted-foreground">
+                              {skill.description || skill.path}
+                            </div>
+                          </div>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
 
-              {hasWebSearchSelector && (
-                <Select
-                  value={selectedWebSearchProvider}
-                  onValueChange={onWebSearchProviderChange}
-                >
-                  <SelectTrigger
+            <InputGroupAddon
+              align="block-end"
+              className="flex-wrap gap-2 bg-background/90"
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <InputGroupButton
+                      variant="ghost"
+                      size="icon-sm"
+                      className="rounded-full"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span className="sr-only">Attach</span>
+                    </InputGroupButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
                     size="medium"
-                    aria-label="Web search provider"
-                    className="h-7 w-auto min-w-[6.5rem] max-w-[7.25rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                    className="z-[60]"
                   >
-                    {selectedWebSearchProviderOption ? (
-                      <WebSearchProviderBadge
-                        name={selectedWebSearchProviderOption.name}
-                        logoUrl={selectedWebSearchProviderOption.logoUrl}
-                        textClassName="text-[11px]"
-                      />
-                    ) : (
-                      <SelectValue placeholder="Search" />
+                    {supportsImageInput && (
+                      <DropdownMenuItem
+                        onClick={() => imageInputRef.current?.click()}
+                      >
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        <span>Upload image</span>
+                      </DropdownMenuItem>
                     )}
-                  </SelectTrigger>
-                  <SelectContent size="medium">
-                    {webSearchProviders.map((provider) => (
-                      <SelectItem key={provider.key} value={provider.key}>
+                    <DropdownMenuItem
+                      onClick={() => documentInputRef.current?.click()}
+                    >
+                      <Paperclip className="mr-2 h-4 w-4" />
+                      <span>Upload file</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {hasThinkingSelector && (
+                  <Select
+                    value={selectedThinkingMode}
+                    onValueChange={(value) =>
+                      onThinkingModeChange(value as ChatThinkingMode)
+                    }
+                  >
+                    <SelectTrigger
+                      size="medium"
+                      aria-label="Thinking mode"
+                      className="h-7 w-auto min-w-[5.75rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <SelectedThinkingModeIcon className="h-3.5 w-3.5" />
+                        <span>{selectedThinkingModeLabel}</span>
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent size="medium">
+                      {thinkingModes.includes("auto") && (
+                        <SelectItem value="auto">
+                          <div className="flex items-center gap-2">
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            <span>Auto</span>
+                          </div>
+                        </SelectItem>
+                      )}
+                      {thinkingModes.includes("fast") && (
+                        <SelectItem value="fast">
+                          <div className="flex items-center gap-2">
+                            <Zap className="h-3.5 w-3.5" />
+                            <span>Fast</span>
+                          </div>
+                        </SelectItem>
+                      )}
+                      {thinkingModes.includes("thinking") && (
+                        <SelectItem value="thinking">
+                          <div className="flex items-center gap-2">
+                            <Brain className="h-3.5 w-3.5" />
+                            <span>Thinking</span>
+                          </div>
+                        </SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {hasWebSearchSelector && (
+                  <Select
+                    value={selectedWebSearchProvider}
+                    onValueChange={onWebSearchProviderChange}
+                  >
+                    <SelectTrigger
+                      size="medium"
+                      aria-label="Web search provider"
+                      className="h-7 w-auto min-w-[6.5rem] max-w-[7.25rem] rounded-full border-border/70 bg-background px-2 text-[11px] text-foreground shadow-none"
+                    >
+                      {selectedWebSearchProviderOption ? (
                         <WebSearchProviderBadge
-                          name={provider.name}
-                          logoUrl={provider.logoUrl}
+                          name={selectedWebSearchProviderOption.name}
+                          logoUrl={selectedWebSearchProviderOption.logoUrl}
+                          textClassName="text-[11px]"
                         />
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
+                      ) : (
+                        <SelectValue placeholder="Search" />
+                      )}
+                    </SelectTrigger>
+                    <SelectContent size="medium">
+                      {webSearchProviders.map((provider) => (
+                        <SelectItem key={provider.key} value={provider.key}>
+                          <WebSearchProviderBadge
+                            name={provider.name}
+                            logoUrl={provider.logoUrl}
+                          />
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
 
-            <div className="flex items-center gap-2">
-              {hasUploadingFiles && (
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Processing attachments...</span>
-                </div>
-              )}
-              {compactStatusMessage && (
-                <div className="hidden items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-foreground/80 sm:flex">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  <span>Compacting...</span>
-                </div>
-              )}
-              <ContextUsageRing
-                usage={contextUsage}
-                isLoading={isContextUsageLoading}
-              />
-              {isStreaming ? (
-                <Button
-                  type="button"
-                  onClick={onStop}
-                  size="icon"
-                  className="h-8 w-8 rounded-full bg-destructive/90 text-destructive-foreground hover:bg-destructive"
-                  title="Stop execution"
-                >
-                  <Square className="h-4 w-4" fill="currentColor" />
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  disabled={!canSendMessage}
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  title="Send message"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                  <span className="sr-only">Send</span>
-                </Button>
-              )}
-            </div>
-          </div>
+              <div className="flex min-w-0 items-center gap-2 sm:ml-auto">
+                {hasUploadingFiles && (
+                  <InputGroupText className="text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Processing attachments...</span>
+                  </InputGroupText>
+                )}
+                {compactStatusMessage && (
+                  <InputGroupText className="hidden rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-foreground/80 sm:flex">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                    <span>Compacting...</span>
+                  </InputGroupText>
+                )}
+                <ContextUsageRing
+                  usage={contextUsage}
+                  isLoading={isContextUsageLoading}
+                />
+                {isStreaming ? (
+                  <InputGroupButton
+                    type="button"
+                    onClick={onStop}
+                    variant="destructive"
+                    size="icon-sm"
+                    className="rounded-full"
+                    title="Stop execution"
+                  >
+                    <Square className="h-4 w-4" fill="currentColor" />
+                    <span className="sr-only">Stop execution</span>
+                  </InputGroupButton>
+                ) : (
+                  <InputGroupButton
+                    type="submit"
+                    disabled={!canSendMessage}
+                    size="icon-sm"
+                    className="rounded-full"
+                    title="Send message"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                    <span className="sr-only">Send</span>
+                  </InputGroupButton>
+                )}
+              </div>
+            </InputGroupAddon>
+          </InputGroup>
         </form>
       </div>
     </div>

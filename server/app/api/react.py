@@ -14,6 +14,8 @@ from app.schemas.react import (
     ReactContextUsageRequest,
     ReactContextUsageResponse,
     ReactPendingUserActionRequest,
+    ReactRuntimeSkillItem,
+    ReactRuntimeSkillsRequest,
     ReactSessionRuntimeDebugResponse,
     ReactStreamEvent,
     ReactTaskCancelResponse,
@@ -170,6 +172,7 @@ async def start_react_task(
                 file_ids=request.file_ids,
                 web_search_provider=request.web_search_provider,
                 thinking_mode=request.thinking_mode,
+                mandatory_skill_names=request.mandatory_skill_names,
                 task_id=request.task_id,
             )
         )
@@ -296,6 +299,7 @@ async def react_chat_stream(
                 file_ids=request.file_ids,
                 web_search_provider=request.web_search_provider,
                 thinking_mode=request.thinking_mode,
+                mandatory_skill_names=request.mandatory_skill_names,
                 task_id=request.task_id,
             )
         )
@@ -341,6 +345,34 @@ async def estimate_react_context_usage(
             task_id=request.task_id,
             draft_message=request.draft_message,
             file_ids=request.file_ids,
+            session_type=request.session_type,
+            test_snapshot=(
+                request.test_snapshot.model_dump()
+                if request.test_snapshot is not None
+                else None
+            ),
+            mandatory_skill_names=request.mandatory_skill_names,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post(
+    "/react/runtime-skills",
+    response_model=list[ReactRuntimeSkillItem],
+)
+async def list_react_runtime_skills(
+    request: ReactRuntimeSkillsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, str]]:
+    """List the skills currently visible to one chat runtime."""
+    service = ReactContextUsageService(db)
+    try:
+        return service.list_runtime_skills(
+            agent_id=request.agent_id,
+            username=current_user.username,
+            session_id=request.session_id,
             session_type=request.session_type,
             test_snapshot=(
                 request.test_snapshot.model_dump()

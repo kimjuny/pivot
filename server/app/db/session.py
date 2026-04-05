@@ -321,6 +321,13 @@ def ensure_react_schema_compatibility() -> None:
                         "ADD COLUMN pending_user_action_json VARCHAR"
                     )
                 )
+            if "mandatory_skill_names_json" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask "
+                        "ADD COLUMN mandatory_skill_names_json VARCHAR"
+                    )
+                )
             conn.execute(
                 text(
                     "UPDATE reacttask "

@@ -9,6 +9,7 @@ import type {
   ChatAttachment,
   AssistantAttachment,
   ChatMessage,
+  MandatorySkillSelection,
   ChatPendingUserAction,
   ReactStreamEvent,
   TokenUsage,
@@ -160,6 +161,18 @@ export function toAssistantAttachment(
 }
 
 /**
+ * Converts persisted mandatory-skill payloads into the UI model shared by chat views.
+ */
+export function toMandatorySkillSelection(
+  mandatorySkill: NonNullable<TaskMessage["mandatory_skills"]>[number],
+): MandatorySkillSelection {
+  return {
+    name: mandatorySkill.name,
+    path: mandatorySkill.path,
+  };
+}
+
+/**
  * Restores a stable clipboard filename so upload APIs receive predictable extensions.
  */
 export function normalizeClipboardFile(file: File, index: number): File {
@@ -277,6 +290,9 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       role: "user",
       content: task.user_message,
       attachments: (task.files ?? []).map((file) => toChatAttachment(file)),
+      mandatorySkills: (task.mandatory_skills ?? []).map((mandatorySkill) =>
+        toMandatorySkillSelection(mandatorySkill),
+      ),
       timestamp: task.created_at,
     });
 

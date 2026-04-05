@@ -18,6 +18,7 @@ vi.mock("@/utils/api", async () => {
     getFullSessionHistory: vi.fn(),
     getLLMById: vi.fn(),
     getReactContextUsage: vi.fn(),
+    getReactRuntimeSkills: vi.fn(),
     getReactSessionRuntimeDebug: vi.fn(),
     httpClient: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
       fetch(input, init),
@@ -46,6 +47,7 @@ import {
   getFullSessionHistory,
   getLLMById,
   getReactContextUsage,
+  getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
   httpClient,
   listProjects,
@@ -130,6 +132,7 @@ describe("ChatContainer session rollover", () => {
     });
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(getReactContextUsage).mockResolvedValue(buildContextUsage());
+    vi.mocked(getReactRuntimeSkills).mockResolvedValue([]);
     vi.mocked(getReactSessionRuntimeDebug).mockResolvedValue({
       session_id: "session-1",
       runtime_message_count: 0,
@@ -287,7 +290,7 @@ describe("ChatContainer session rollover", () => {
       expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
     });
 
-    await user.click(screen.getByText("Focused thread"));
+    await user.click(await screen.findByText("Focused thread"));
 
     await waitFor(() => {
       expect(getFullSessionHistory).toHaveBeenCalledWith(selectedSessionId);
@@ -309,6 +312,7 @@ describe("ChatContainer session rollover", () => {
       file_ids: [],
       web_search_provider: null,
       thinking_mode: null,
+      mandatory_skill_names: [],
     });
   });
 
@@ -438,6 +442,7 @@ describe("ChatContainer session rollover", () => {
         file_ids: [],
         web_search_provider: "baidu",
         thinking_mode: null,
+        mandatory_skill_names: [],
       });
     });
   });
@@ -514,6 +519,7 @@ describe("ChatContainer session rollover", () => {
         file_ids: [],
         web_search_provider: null,
         thinking_mode: "auto",
+        mandatory_skill_names: [],
       });
     });
   });
@@ -586,6 +592,7 @@ describe("ChatContainer session rollover", () => {
         file_ids: [],
         web_search_provider: null,
         thinking_mode: "fast",
+        mandatory_skill_names: [],
       });
     });
   });
@@ -867,6 +874,7 @@ describe("ChatContainer session rollover", () => {
         file_ids: [],
         web_search_provider: null,
         thinking_mode: null,
+        mandatory_skill_names: [],
       });
     });
 
@@ -1252,6 +1260,7 @@ describe("ChatContainer session rollover", () => {
         file_ids: [],
         web_search_provider: null,
         thinking_mode: null,
+        mandatory_skill_names: [],
       });
     });
 
@@ -1369,6 +1378,7 @@ describe("ChatContainer session rollover", () => {
         file_ids: [],
         web_search_provider: null,
         thinking_mode: null,
+        mandatory_skill_names: [],
       });
     });
     await waitFor(() => {

@@ -24,7 +24,11 @@ from app.services.agent_release_runtime_service import (
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
-from app.services.skill_service import build_skills_metadata_prompt_json
+from app.services.skill_service import (
+    build_mandatory_skills_prompt_json,
+    build_skills_metadata_prompt_json,
+    build_skills_metadata_prompt_payload,
+)
 from sqlmodel import Session as DBSession, select
 
 if TYPE_CHECKING:
@@ -55,6 +59,7 @@ class ReactContextUsageService:
         file_ids: list[str] | None = None,
         session_type: str = "consumer",
         test_snapshot: dict[str, Any] | None = None,
+        mandatory_skill_names: list[str] | None = None,
     ) -> ReactContextUsageResponse:
         """Estimate the prompt window used by the current chat surface.
 
@@ -68,6 +73,8 @@ class ReactContextUsageService:
             session_type: Session type used before a session has been created.
             test_snapshot: Optional Studio working-copy snapshot used before the
                 first studio_test session is created.
+            mandatory_skill_names: Ordered mandatory skill names whose full
+                prompt payload should be included in the estimate.
 
         Returns:
             Structured prompt-usage estimate for the chat surface.
@@ -119,6 +126,20 @@ class ReactContextUsageService:
             base_messages = [dict(message) for message in runtime_state.messages]
             estimation_mode = "active_task"
             if draft_message or attachment_blocks:
+                if mandatory_skill_names:
+                    resume_prompt_object = build_runtime_task_bootstrap_message(
+                        self._build_user_prompt(
+                            runtime_config=runtime_config,
+                            username=username,
+                            session_id=effective_session_id,
+                            mandatory_skill_names=mandatory_skill_names,
+                        )
+                    )
+                    messages.append(resume_prompt_object)
+                    bootstrap_tokens = estimate_messages_tokens(
+                        [resume_prompt_object]
+                    )
+                    includes_task_bootstrap = True
                 draft_message_payload = self._build_task_user_payload(
                     task=task,
                     draft_message=draft_message,
@@ -145,6 +166,7 @@ class ReactContextUsageService:
                 include_system_prompt=(
                     not messages or messages[0].get("role") != "system"
                 ),
+                mandatory_skill_names=mandatory_skill_names,
             )
             if preview_messages:
                 messages.extend(preview_messages)
@@ -228,6 +250,7 @@ class ReactContextUsageService:
         draft_message: str,
         attachment_blocks: list[dict[str, Any]],
         include_system_prompt: bool,
+        mandatory_skill_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build preview messages for the next new task in a session."""
         messages: list[dict[str, Any]] = []
@@ -240,6 +263,7 @@ class ReactContextUsageService:
             runtime_config=runtime_config,
             username=username,
             session_id=session_id,
+            mandatory_skill_names=mandatory_skill_names,
         )
         messages.append(build_runtime_task_bootstrap_message(user_prompt))
         payload = {
@@ -262,6 +286,7 @@ class ReactContextUsageService:
         runtime_config: AgentRuntimeConfig,
         username: str,
         session_id: str | None,
+        mandatory_skill_names: list[str] | None = None,
     ) -> str:
         """Build the task bootstrap user prompt used for next-turn previews."""
         tool_manager = self._build_request_tool_manager(
@@ -279,6 +304,51 @@ class ReactContextUsageService:
                 raw_skill_ids=runtime_config.raw_skill_ids,
                 extra_skills=extension_skills,
             ),
+            mandatory_skills=build_mandatory_skills_prompt_json(
+                self.db,
+                username,
+                raw_skill_ids=runtime_config.raw_skill_ids,
+                selected_skill_names=mandatory_skill_names or [],
+                extra_skills=extension_skills,
+            ),
+        )
+
+    def list_runtime_skills(
+        self,
+        *,
+        agent_id: int,
+        username: str,
+        session_id: str | None = None,
+        session_type: str = "consumer",
+        test_snapshot: dict[str, Any] | None = None,
+    ) -> list[dict[str, str]]:
+        """List runtime-visible skill metadata for the current chat surface.
+
+        Args:
+            agent_id: Agent whose runtime-visible skills should be listed.
+            username: Authenticated username.
+            session_id: Optional session ID used for release-pinned resolution.
+            session_type: Session type used before a session exists.
+            test_snapshot: Optional Studio working-copy snapshot for previews.
+
+        Returns:
+            Deterministic list of runtime-visible skill metadata.
+        """
+        runtime_config = self._resolve_runtime_config(
+            agent_id=agent_id,
+            session_id=session_id,
+            task=None,
+            session_type=session_type,
+            test_snapshot=test_snapshot,
+        )
+        extension_skills = ExtensionService(self.db).build_bundle_skill_payloads(
+            runtime_config.extension_bundle
+        )
+        return build_skills_metadata_prompt_payload(
+            self.db,
+            username,
+            raw_skill_ids=runtime_config.raw_skill_ids,
+            extra_skills=extension_skills,
         )
 
     def _build_request_tool_manager(

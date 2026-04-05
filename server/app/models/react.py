@@ -28,6 +28,8 @@ class ReactTask(SQLModel, table=True):
         user: Username of the user who initiated the task.
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
+        mandatory_skill_names_json: Serialized ordered mandatory skill names
+            explicitly selected by the user for this task.
         pending_user_action_json: Serialized system-owned waiting action payload
             such as a skill approval request that must survive refreshes.
         status: Current status (pending, running, completed, failed, cancelled).
@@ -55,6 +57,10 @@ class ReactTask(SQLModel, table=True):
     user: str = Field(index=True, description="Username")
     user_message: str = Field(description="Original user input")
     user_intent: str = Field(description="Task user intent")
+    mandatory_skill_names_json: str | None = Field(
+        default=None,
+        description="Serialized ordered mandatory skill names for the task",
+    )
     pending_user_action_json: str | None = Field(
         default=None,
         description=(

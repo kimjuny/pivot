@@ -219,6 +219,13 @@ class SkillChangeApprovalRequestPayload(AppBaseModel):
     total_bytes: int = 0
 
 
+class MandatorySkillPayload(AppBaseModel):
+    """One explicit mandatory skill selection attached to a task."""
+
+    name: str
+    path: str
+
+
 class PendingUserActionPayload(AppBaseModel):
     """System-owned waiting action persisted on a task."""
 
@@ -232,6 +239,7 @@ class TaskMessage(AppBaseModel):
     task_id: str
     user_message: str
     files: list[FileAssetListItem] = Field(default_factory=list)
+    mandatory_skills: list[MandatorySkillPayload] = Field(default_factory=list)
     assistant_attachments: list[TaskAttachmentListItem] = Field(default_factory=list)
     agent_answer: str | None = None
     status: str

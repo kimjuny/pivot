@@ -921,13 +921,41 @@ def build_skills_metadata_prompt_json(
     Returns:
         Stable JSON array text used by the task bootstrap prompt.
     """
+    prompt_payload = build_skills_metadata_prompt_payload(
+        session,
+        username,
+        raw_skill_ids=raw_skill_ids,
+        extra_skills=extra_skills,
+    )
+    return json.dumps(prompt_payload, ensure_ascii=False, indent=2)
+
+
+def build_skills_metadata_prompt_payload(
+    session: Session,
+    username: str,
+    raw_skill_ids: str | None,
+    extra_skills: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    """Build runtime-visible skill metadata payload for prompts and APIs.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        raw_skill_ids: Optional JSON allowlist matching the agent row format.
+        extra_skills: Optional non-registry skill payloads such as extension
+            package skills.
+
+    Returns:
+        Deterministic metadata records containing name, description, and the
+        canonical sandbox path used by the ReAct runtime.
+    """
     visible_skills = list_allowed_visible_skills(
         session,
         username,
         raw_skill_ids=raw_skill_ids,
         extra_skills=extra_skills,
     )
-    prompt_payload = [
+    return [
         {
             "name": skill["name"],
             "description": skill["description"],
@@ -935,6 +963,73 @@ def build_skills_metadata_prompt_json(
         }
         for skill in visible_skills
     ]
+
+
+def build_mandatory_skills_prompt_json(
+    session: Session,
+    username: str,
+    *,
+    raw_skill_ids: str | None,
+    selected_skill_names: list[str],
+    extra_skills: list[dict[str, str]] | None = None,
+) -> str:
+    """Build prompt JSON for user-selected mandatory skills.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        raw_skill_ids: Optional JSON allowlist matching the agent row format.
+        selected_skill_names: Ordered skill names explicitly selected by the
+            user for the current task.
+        extra_skills: Optional non-registry skill payloads such as extension
+            package skills.
+
+    Returns:
+        Deterministic JSON array text used by the task bootstrap prompt.
+
+    Raises:
+        ValueError: If a selected skill is invalid or not visible to the
+            current runtime.
+    """
+    normalized_names: list[str] = []
+    seen_names: set[str] = set()
+    for raw_name in selected_skill_names:
+        skill_name = raw_name.strip()
+        if not skill_name or skill_name in seen_names:
+            continue
+        _validate_skill_name(skill_name)
+        normalized_names.append(skill_name)
+        seen_names.add(skill_name)
+
+    if not normalized_names:
+        return "[]"
+
+    visible_skills = list_allowed_visible_skills(
+        session,
+        username,
+        raw_skill_ids=raw_skill_ids,
+        extra_skills=extra_skills,
+    )
+    visible_by_name = {skill["name"]: skill for skill in visible_skills}
+
+    prompt_payload: list[dict[str, str]] = []
+    for skill_name in normalized_names:
+        skill = visible_by_name.get(skill_name)
+        if skill is None:
+            raise ValueError(
+                f"Mandatory skill '{skill_name}' is not visible to this agent runtime."
+            )
+
+        content_path = Path(skill["location"]) / skill["filename"]
+        prompt_payload.append(
+            {
+                "name": skill_name,
+                "description": skill["description"],
+                "path": _sandbox_skill_entry_path(skill_name),
+                "content": _read_markdown(content_path),
+            }
+        )
+
     return json.dumps(prompt_payload, ensure_ascii=False, indent=2)
 
 

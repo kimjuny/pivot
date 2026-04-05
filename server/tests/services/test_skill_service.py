@@ -193,7 +193,7 @@ class SkillServiceTestCase(unittest.TestCase):
         prompt_block = skill_service.build_skills_metadata_prompt_json(
             self.session,
             "alice",
-            ["qa-playbook"],
+            json.dumps(["qa-playbook"]),
         )
         self.assertEqual(
             json.loads(prompt_block),
@@ -344,7 +344,7 @@ class SkillServiceTestCase(unittest.TestCase):
         prompt_block = skill_service.build_skills_metadata_prompt_json(
             self.session,
             "alice",
-            ["research-kit-imported"],
+            json.dumps(["research-kit-imported"]),
         )
         self.assertEqual(
             json.loads(prompt_block),
@@ -353,6 +353,41 @@ class SkillServiceTestCase(unittest.TestCase):
                     "name": "research-kit-imported",
                     "description": "Imported research workflow",
                     "path": "/workspace/skills/research-kit-imported/SKILL.md",
+                }
+            ],
+        )
+
+    def test_build_mandatory_skills_prompt_json_reads_full_skill_content(self) -> None:
+        """Mandatory skill prompt payloads should inline the full markdown body."""
+        self._write_skill(
+            self.workspace_root / "alice" / "skills",
+            "sample-skill",
+            "Sample mandatory skill",
+            "Follow the sample workflow carefully.",
+        )
+
+        prompt_block = skill_service.build_mandatory_skills_prompt_json(
+            self.session,
+            "alice",
+            raw_skill_ids=json.dumps(["sample-skill"]),
+            selected_skill_names=["sample-skill"],
+        )
+
+        self.assertEqual(
+            json.loads(prompt_block),
+            [
+                {
+                    "name": "sample-skill",
+                    "description": "Sample mandatory skill",
+                    "path": "/workspace/skills/sample-skill/SKILL.md",
+                    "content": (
+                        "---\n"
+                        "name: sample-skill\n"
+                        "description: Sample mandatory skill\n"
+                        "---\n\n"
+                        "# sample-skill\n\n"
+                        "Follow the sample workflow carefully.\n"
+                    ),
                 }
             ],
         )

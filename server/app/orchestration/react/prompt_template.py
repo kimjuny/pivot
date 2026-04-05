@@ -45,6 +45,7 @@ def build_runtime_system_prompt() -> str:
 def build_runtime_user_prompt(
     tool_manager: ToolManager | None = None,
     skills: str = "",
+    mandatory_skills: str = "[]",
     prefix_blocks: list[str] | None = None,
     suffix_blocks: list[str] | None = None,
 ) -> str:
@@ -53,6 +54,8 @@ def build_runtime_user_prompt(
     Args:
         tool_manager: Optional tool manager to describe available tools.
         skills: Runtime-visible skill metadata JSON for prompt injection.
+        mandatory_skills: User-selected mandatory skill payload JSON injected
+            into the task bootstrap prompt.
         prefix_blocks: Additional prompt blocks inserted before the standard
             bootstrap template body.
         suffix_blocks: Additional prompt blocks inserted after the standard
@@ -67,7 +70,9 @@ def build_runtime_user_prompt(
 
     rendered_prompt = _REACT_USER_PROMPT.replace(
         "{{tools_description}}", tools_description
-    ).replace("{{skills}}", skills)
+    ).replace("{{skills}}", skills).replace(
+        "{{mandatory_skills}}", mandatory_skills
+    )
     ordered_sections = [
         *[block.strip() for block in (prefix_blocks or []) if block.strip()],
         rendered_prompt.strip(),

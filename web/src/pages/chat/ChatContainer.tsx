@@ -10,6 +10,7 @@ import {
   getAgentWebSearchBindings,
   getFullSessionHistory,
   getReactContextUsage,
+  getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
   listProjects,
   listSessions,
@@ -46,6 +47,7 @@ import type {
   ChatWebSearchProviderOption,
   ChatPageProps,
   ChatMessage,
+  MandatorySkillSelection,
   ChatReplyTarget,
   ChatSidebarProjectItem,
   PlanStepData,
@@ -392,6 +394,12 @@ function ChatContainer({
   >(null);
   const [selectedThinkingMode, setSelectedThinkingMode] =
     useState<ChatThinkingMode | null>(null);
+  const [runtimeSkills, setRuntimeSkills] = useState<MandatorySkillSelection[]>(
+    [],
+  );
+  const [selectedMandatorySkills, setSelectedMandatorySkills] = useState<
+    MandatorySkillSelection[]
+  >([]);
   const messagesRef = useRef<ChatMessage[]>([]);
   const currentSessionIdRef = useRef<string | null>(null);
   const sessionStreamAbortControllerRef = useRef<AbortController | null>(null);
@@ -1554,6 +1562,52 @@ function ChatContainer({
   const readyPendingFileIdsKey = readyPendingFileIds.join(",");
 
   useEffect(() => {
+    let isCancelled = false;
+
+    const loadRuntimeSkills = async () => {
+      try {
+        const visibleSkills = await getReactRuntimeSkills({
+          agent_id: agentId,
+          session_id: currentSessionId,
+          session_type: sessionType,
+          test_snapshot: currentSessionId ? undefined : testSnapshot,
+        });
+        if (isCancelled) {
+          return;
+        }
+
+        setRuntimeSkills(
+          visibleSkills.map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+            path: skill.path,
+          })),
+        );
+      } catch (loadError) {
+        if (isCancelled) {
+          return;
+        }
+
+        console.error("Failed to load runtime-visible skills:", loadError);
+        setRuntimeSkills([]);
+      }
+    };
+
+    void loadRuntimeSkills();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [agentId, currentSessionId, sessionType, testSnapshot]);
+
+  useEffect(() => {
+    const visibleSkillNames = new Set(runtimeSkills.map((skill) => skill.name));
+    setSelectedMandatorySkills((previous) =>
+      previous.filter((skill) => visibleSkillNames.has(skill.name)),
+    );
+  }, [runtimeSkills]);
+
+  useEffect(() => {
     if (!canUseWebSearch) {
       setWebSearchProviders([]);
       setSelectedWebSearchProvider(null);
@@ -1624,6 +1678,7 @@ function ChatContainer({
         file_ids: draftFileIds,
         session_type: sessionType,
         test_snapshot: currentSessionId ? undefined : testSnapshot,
+        mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
       })
         .then((usage) => {
           if (contextUsageRequestIdRef.current === requestId) {
@@ -1653,6 +1708,7 @@ function ChatContainer({
     isStreaming,
     readyPendingFileIdsKey,
     replyTaskId,
+    selectedMandatorySkills,
     sessionType,
     testSnapshot,
   ]);
@@ -1719,6 +1775,7 @@ function ChatContainer({
       currentSessionIdRef.current = null;
       commitMessages([]);
       setReplyTaskId(null);
+      setSelectedMandatorySkills([]);
       setActiveContextTaskId(null);
       setActiveContextIteration(null);
       setContextUsage(null);
@@ -1841,6 +1898,7 @@ function ChatContainer({
     currentSessionIdRef.current = sessionId;
     setIsLoadingSession(true);
     setReplyTaskId(null);
+    setSelectedMandatorySkills([]);
     setActiveContextTaskId(null);
     setActiveContextIteration(null);
     setContextUsage(null);
@@ -2062,6 +2120,7 @@ function ChatContainer({
         role: "user",
         content: pendingMessage,
         attachments: sentAttachments,
+        mandatorySkills: selectedMandatorySkills,
         timestamp: messageTimestamp,
       };
       assistantMessageId = `assistant-${Date.now()}`;
@@ -2080,6 +2139,7 @@ function ChatContainer({
         updateMessages((previous) => [...previous, userMessage, assistantMessage]);
       }
       setInputMessage("");
+      setSelectedMandatorySkills([]);
       if (!options?.messageOverride) {
         discardReadyPendingFiles();
       }
@@ -2098,6 +2158,7 @@ function ChatContainer({
         file_ids: filesToSend.map((file) => file.fileId),
         web_search_provider: selectedWebSearchProvider,
         thinking_mode: selectedThinkingMode,
+        mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
       });
 
       if (!sessionStreamAbortControllerRef.current && activeSessionId) {
@@ -2371,9 +2432,23 @@ function ChatContainer({
           selectedThinkingMode={selectedThinkingMode}
           webSearchProviders={webSearchProviders}
           selectedWebSearchProvider={selectedWebSearchProvider}
+          availableMandatorySkills={runtimeSkills}
+          selectedMandatorySkills={selectedMandatorySkills}
           imageInputRef={imageInputRef}
           documentInputRef={documentInputRef}
           onInputChange={setInputMessage}
+          onAddMandatorySkill={(skill) =>
+            setSelectedMandatorySkills((previous) =>
+              previous.some((item) => item.name === skill.name)
+                ? previous
+                : [...previous, skill],
+            )
+          }
+          onRemoveMandatorySkill={(skillName) =>
+            setSelectedMandatorySkills((previous) =>
+              previous.filter((skill) => skill.name !== skillName),
+            )
+          }
           onThinkingModeChange={setSelectedThinkingMode}
           onWebSearchProviderChange={setSelectedWebSearchProvider}
           onKeyDown={handleKeyDown}

@@ -477,7 +477,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         prompt_block = skill_service.build_skills_metadata_prompt_json(
             self.session,
             "alice",
-            ["crm_research"],
+            json.dumps(["crm_research"]),
             extra_skills=extra_skills,
         )
         self.assertEqual(

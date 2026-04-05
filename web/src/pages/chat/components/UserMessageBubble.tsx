@@ -1,4 +1,5 @@
 import { formatTimestamp } from "@/utils/timestamp";
+import { Badge } from "@/components/ui/badge";
 
 import type { ChatMessage } from "../types";
 import { AttachmentList } from "./AttachmentList";
@@ -20,6 +21,19 @@ export function UserMessageBubble({ message }: UserMessageBubbleProps) {
         <div className="mb-1 font-mono text-[10px] opacity-70">
           {formatTimestamp(message.timestamp)}
         </div>
+        {message.mandatorySkills && message.mandatorySkills.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {message.mandatorySkills.map((skill) => (
+              <Badge
+                key={skill.name}
+                variant="secondary"
+                className="border border-primary-foreground/15 bg-primary-foreground/10 px-2 py-0 text-[10px] font-medium text-primary-foreground"
+              >
+                {skill.name}
+              </Badge>
+            ))}
+          </div>
+        )}
         {message.attachments && message.attachments.length > 0 && (
           <AttachmentList attachments={message.attachments} />
         )}

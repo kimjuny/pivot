@@ -1218,6 +1218,7 @@ class ReactEngine:
         self,
         task: ReactTask,
         skills_metadata_json: str = "[]",
+        mandatory_skills_json: str = "[]",
         task_bootstrap_prefix_blocks: list[str] | None = None,
         task_bootstrap_suffix_blocks: list[str] | None = None,
         turn_user_message: str | None = None,
@@ -1231,6 +1232,9 @@ class ReactEngine:
             task: The ReactTask to execute.
             skills_metadata_json: Visible skill metadata JSON injected in the
                 once-per-task bootstrap user prompt.
+            mandatory_skills_json: Full mandatory skill payload JSON injected
+                into the task bootstrap prompt when the user explicitly selects
+                one or more skills for the current send.
             task_bootstrap_prefix_blocks: Extra prompt blocks injected before the
                 standard task bootstrap body.
             task_bootstrap_suffix_blocks: Extra prompt blocks injected after the
@@ -1299,6 +1303,7 @@ class ReactEngine:
                 build_runtime_user_prompt(
                     tool_manager=self.tool_manager,
                     skills=skills_metadata_json,
+                    mandatory_skills=mandatory_skills_json,
                     prefix_blocks=task_bootstrap_prefix_blocks,
                     suffix_blocks=task_bootstrap_suffix_blocks,
                 ),
@@ -1308,6 +1313,25 @@ class ReactEngine:
                 task_id=task.task_id,
                 iteration=task.iteration + 1,
                 trace_id="task-bootstrap",
+                phase="send",
+                start_index=logged_message_count,
+                iteration_message_start=0,
+            )
+            logged_message_count = len(runtime_state.messages)
+        elif mandatory_skills_json != "[]" and turn_user_message is not None:
+            runtime_state = self.runtime_service.append_task_bootstrap_prompt(
+                task,
+                build_runtime_user_prompt(
+                    tool_manager=self.tool_manager,
+                    skills=skills_metadata_json,
+                    mandatory_skills=mandatory_skills_json,
+                ),
+            )
+            self._log_messages_pretty(
+                messages=runtime_state.messages,
+                task_id=task.task_id,
+                iteration=task.iteration + 1,
+                trace_id="task-bootstrap-resume",
                 phase="send",
                 start_index=logged_message_count,
                 iteration_message_start=0,

@@ -780,6 +780,26 @@ class SessionService:
                         pending_user_action = parsed_pending_action
                 except json.JSONDecodeError:
                     pending_user_action = None
+            mandatory_skills: list[dict[str, str]] = []
+            if task.mandatory_skill_names_json:
+                try:
+                    parsed_mandatory_skills = json.loads(
+                        task.mandatory_skill_names_json
+                    )
+                    if isinstance(parsed_mandatory_skills, list):
+                        for item in parsed_mandatory_skills:
+                            if isinstance(item, str) and item.strip():
+                                mandatory_skills.append(
+                                    {
+                                        "name": item.strip(),
+                                        "path": (
+                                            "/workspace/skills/"
+                                            f"{item.strip()}/SKILL.md"
+                                        ),
+                                    }
+                                )
+                except json.JSONDecodeError:
+                    mandatory_skills = []
 
             # Get recursions for this task
             recursion_stmt = (
@@ -831,6 +851,7 @@ class SessionService:
                     "task_id": task.task_id,
                     "user_message": task.user_message,
                     "files": file_history.get(task.task_id, []),
+                    "mandatory_skills": mandatory_skills,
                     "assistant_attachments": attachment_history.get(task.task_id, []),
                     "agent_answer": agent_answer,
                     "status": task.status,

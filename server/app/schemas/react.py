@@ -50,6 +50,10 @@ class ReactChatRequest(AppBaseModel):
         default=None,
         description="Optional chat-selected thinking mode for the primary LLM",
     )
+    mandatory_skill_names: list[str] = Field(
+        default_factory=list,
+        description="Ordered mandatory skill names explicitly selected by the user",
+    )
 
 
 class ReactContextUsageRequest(AppBaseModel):
@@ -79,6 +83,45 @@ class ReactContextUsageRequest(AppBaseModel):
     test_snapshot: StudioTestSnapshotPayload | None = Field(
         default=None,
         description="Working-copy snapshot used for studio_test draft estimation",
+    )
+    mandatory_skill_names: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ordered mandatory skill names whose full prompt payload should be "
+            "included in the estimate"
+        ),
+    )
+
+
+class ReactRuntimeSkillsRequest(AppBaseModel):
+    """Request schema for listing runtime-visible skill metadata."""
+
+    agent_id: int = Field(..., description="Agent ID whose runtime skills to list")
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session ID used for runtime release resolution",
+    )
+    session_type: Literal["consumer", "studio_test"] = Field(
+        default="consumer",
+        description="Session type used when no session has been created yet",
+    )
+    test_snapshot: StudioTestSnapshotPayload | None = Field(
+        default=None,
+        description="Working-copy snapshot used for studio_test previews",
+    )
+
+
+class ReactRuntimeSkillItem(AppBaseModel):
+    """One runtime-visible skill option returned to the chat composer."""
+
+    name: str = Field(..., description="Stable globally unique skill name")
+    description: str = Field(
+        default="",
+        description="Short skill description shown in the picker",
+    )
+    path: str = Field(
+        ...,
+        description="Canonical sandbox SKILL.md path visible to the runtime",
     )
 
 

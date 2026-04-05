@@ -42,6 +42,7 @@ from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_service import SessionService
 from app.services.skill_change_service import apply_skill_change_submission
 from app.services.skill_service import (
+    build_mandatory_skills_prompt_json,
     build_skills_metadata_prompt_json,
     list_allowed_visible_skills,
 )
@@ -62,6 +63,7 @@ class ReactTaskLaunchRequest:
     file_ids: list[str]
     web_search_provider: str | None = None
     thinking_mode: Literal["auto", "fast", "thinking"] | None = None
+    mandatory_skill_names: list[str] | None = None
     task_id: str | None = None
 
 
@@ -402,6 +404,28 @@ class ReactTaskSupervisor:
             raise ValueError("Session does not belong to the requested agent")
         if runtime_config.llm_id is None:
             raise ValueError(f"Agent {runtime_config.agent_name} has no LLM configured")
+        extension_skills = ExtensionService(db).build_bundle_skill_payloads(
+            runtime_config.extension_bundle
+        )
+        normalized_mandatory_skill_names = self._normalize_selected_skill_names(
+            launch.mandatory_skill_names or []
+        )
+        if normalized_mandatory_skill_names:
+            visible_skill_names = {
+                skill["name"]
+                for skill in list_allowed_visible_skills(
+                    db,
+                    launch.username,
+                    raw_skill_ids=runtime_config.raw_skill_ids,
+                    extra_skills=extension_skills,
+                )
+            }
+            for skill_name in normalized_mandatory_skill_names:
+                if skill_name not in visible_skill_names:
+                    raise ValueError(
+                        f"Mandatory skill '{skill_name}' is not visible to this agent runtime."
+                    )
+        launch.mandatory_skill_names = normalized_mandatory_skill_names
 
         session_cursor = self._get_last_event_cursor(
             db=db,
@@ -428,6 +452,11 @@ class ReactTaskSupervisor:
                     )
                 if launch.message is None or launch.message.strip() == "":
                     raise ValueError("Reply message cannot be empty")
+                if normalized_mandatory_skill_names:
+                    existing_task.mandatory_skill_names_json = json.dumps(
+                        normalized_mandatory_skill_names,
+                        ensure_ascii=False,
+                    )
                 self._inject_clarify_reply(
                     db=db,
                     task=existing_task,
@@ -460,6 +489,11 @@ class ReactTaskSupervisor:
                 user=launch.username,
                 user_message=launch.message,
                 user_intent=launch.message,
+                mandatory_skill_names_json=(
+                    json.dumps(normalized_mandatory_skill_names, ensure_ascii=False)
+                    if normalized_mandatory_skill_names
+                    else None
+                ),
                 status="pending",
                 iteration=0,
                 max_iteration=runtime_config.max_iteration,
@@ -476,6 +510,19 @@ class ReactTaskSupervisor:
             db.refresh(task)
 
         return task, session_cursor
+
+    @staticmethod
+    def _normalize_selected_skill_names(skill_names: list[str]) -> list[str]:
+        """Normalize ordered skill selections while preserving first-seen order."""
+        normalized_names: list[str] = []
+        seen_names: set[str] = set()
+        for raw_name in skill_names:
+            skill_name = raw_name.strip()
+            if not skill_name or skill_name in seen_names:
+                continue
+            normalized_names.append(skill_name)
+            seen_names.add(skill_name)
+        return normalized_names
 
     def _load_pending_user_action(
         self,
@@ -619,6 +666,13 @@ class ReactTaskSupervisor:
                     raw_skill_ids=runtime_config.raw_skill_ids,
                     extra_skills=extension_skills,
                 )
+                mandatory_skills_json = build_mandatory_skills_prompt_json(
+                    db,
+                    launch.username,
+                    raw_skill_ids=runtime_config.raw_skill_ids,
+                    selected_skill_names=launch.mandatory_skill_names or [],
+                    extra_skills=extension_skills,
+                )
 
                 engine = ReactEngine(
                     llm=llm,
@@ -660,6 +714,7 @@ class ReactTaskSupervisor:
                 async for event_data in engine.run_task(
                     task=task,
                     skills_metadata_json=skills_metadata_json,
+                    mandatory_skills_json=mandatory_skills_json,
                     task_bootstrap_prefix_blocks=(
                         before_start_effects.task_bootstrap_head_blocks
                     ),
