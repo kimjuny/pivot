@@ -1,5 +1,6 @@
 """Tests for the database-backed skill registry service."""
 
+import json
 import sys
 import tempfile
 import unittest
@@ -189,13 +190,21 @@ class SkillServiceTestCase(unittest.TestCase):
             ],
         )
 
-        prompt_block = skill_service.build_selected_skills_prompt_block(
+        prompt_block = skill_service.build_skills_metadata_prompt_json(
             self.session,
             "alice",
             ["qa-playbook"],
         )
-        self.assertIn("### Skill 1: qa-playbook", prompt_block)
-        self.assertIn("Shared QA body.", prompt_block)
+        self.assertEqual(
+            json.loads(prompt_block),
+            [
+                {
+                    "name": "qa-playbook",
+                    "description": "Bob shared QA workflow",
+                    "path": "/workspace/skills/qa-playbook/SKILL.md",
+                }
+            ],
+        )
 
     def test_shared_skills_are_read_only_for_non_creators(self) -> None:
         """Shared skills should remain editable only by their creator."""
@@ -332,13 +341,21 @@ class SkillServiceTestCase(unittest.TestCase):
             ["research-kit-imported"],
         )
         self.assertEqual(mounts[0]["name"], "research-kit-imported")
-        prompt_block = skill_service.build_selected_skills_prompt_block(
+        prompt_block = skill_service.build_skills_metadata_prompt_json(
             self.session,
             "alice",
             ["research-kit-imported"],
         )
-        self.assertIn("### Skill 1: research-kit-imported", prompt_block)
-        self.assertIn("Use imported guidance.", prompt_block)
+        self.assertEqual(
+            json.loads(prompt_block),
+            [
+                {
+                    "name": "research-kit-imported",
+                    "description": "Imported research workflow",
+                    "path": "/workspace/skills/research-kit-imported/SKILL.md",
+                }
+            ],
+        )
 
     def test_shared_import_is_visible_immediately(self) -> None:
         """Imported shared skills should be visible to other users immediately."""

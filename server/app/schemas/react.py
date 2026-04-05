@@ -197,8 +197,6 @@ class ReactStreamEventType(str, Enum):
     SUMMARY = "summary"
     ACTION = "action"
     TOOL_CALL = "tool_call"
-    SKILL_RESOLUTION_START = "skill_resolution_start"
-    SKILL_RESOLUTION_RESULT = "skill_resolution_result"
     TOKEN_RATE = "token_rate"
     COMPACT_START = "compact_start"
     COMPACT_COMPLETE = "compact_complete"

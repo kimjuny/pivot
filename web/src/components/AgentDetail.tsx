@@ -199,7 +199,6 @@ function buildDraftChangeSummary(
     originalAgent.is_active !== workspaceAgent.is_active;
   const runtimeChanged =
     originalAgent.llm_id !== workspaceAgent.llm_id ||
-    originalAgent.skill_resolution_llm_id !== workspaceAgent.skill_resolution_llm_id ||
     originalAgent.session_idle_timeout_minutes !==
       workspaceAgent.session_idle_timeout_minutes ||
     originalAgent.sandbox_timeout_seconds !==
@@ -1198,7 +1197,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         name: workspaceAgent.name,
         description: workspaceAgent.description,
         llm_id: workspaceAgent.llm_id,
-        skill_resolution_llm_id: workspaceAgent.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: workspaceAgent.session_idle_timeout_minutes,
         sandbox_timeout_seconds: workspaceAgent.sandbox_timeout_seconds,
         compact_threshold_percent: workspaceAgent.compact_threshold_percent,

@@ -1217,7 +1217,7 @@ class ReactEngine:
     async def run_task(
         self,
         task: ReactTask,
-        selected_skills_text: str = "",
+        skills_metadata_json: str = "[]",
         task_bootstrap_prefix_blocks: list[str] | None = None,
         task_bootstrap_suffix_blocks: list[str] | None = None,
         turn_user_message: str | None = None,
@@ -1229,7 +1229,7 @@ class ReactEngine:
 
         Args:
             task: The ReactTask to execute.
-            selected_skills_text: Selected skill markdown block injected in the
+            skills_metadata_json: Visible skill metadata JSON injected in the
                 once-per-task bootstrap user prompt.
             task_bootstrap_prefix_blocks: Extra prompt blocks injected before the
                 standard task bootstrap body.
@@ -1298,7 +1298,7 @@ class ReactEngine:
                 task,
                 build_runtime_user_prompt(
                     tool_manager=self.tool_manager,
-                    skills=selected_skills_text,
+                    skills=skills_metadata_json,
                     prefix_blocks=task_bootstrap_prefix_blocks,
                     suffix_blocks=task_bootstrap_suffix_blocks,
                 ),

@@ -24,12 +24,12 @@ class Workspace(SQLModel, table=True):
     """
 
     id: int | None = Field(default=None, primary_key=True)
-    workspace_id: str = Field(index=True, unique=True, description="Public workspace ID")
+    workspace_id: str = Field(
+        index=True, unique=True, description="Public workspace ID"
+    )
     agent_id: int = Field(foreign_key="agent.id", index=True)
     user: str = Field(index=True, description="Workspace owner username")
-    scope: str = Field(
-        description="Workspace scope: session_private or project_shared"
-    )
+    scope: str = Field(description="Workspace scope: session_private or project_shared")
     session_id: str | None = Field(default=None, index=True)
     project_id: str | None = Field(default=None, index=True)
     status: str = Field(default="active", description="Workspace lifecycle status")

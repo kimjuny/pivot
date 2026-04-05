@@ -32,7 +32,6 @@ export interface AgentFormData {
   name: string;
   description: string | undefined;
   llm_id: number | undefined;
-  skill_resolution_llm_id?: number | null;
   /** Minutes of inactivity before chat starts a fresh session. */
   session_idle_timeout_minutes: number;
   /** Seconds to wait for sandbox-manager before surfacing a timeout. */
@@ -56,7 +55,6 @@ function createDefaultFormData(): AgentFormData {
     name: '',
     description: '',
     llm_id: undefined,
-    skill_resolution_llm_id: null,
     session_idle_timeout_minutes: 15,
     sandbox_timeout_seconds: 60,
     compact_threshold_percent: 60,
@@ -83,7 +81,6 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           name: initialData.name || '',
           description: initialData.description || '',
           llm_id: initialData.llm_id,
-          skill_resolution_llm_id: initialData.skill_resolution_llm_id ?? null,
           session_idle_timeout_minutes:
             initialData.session_idle_timeout_minutes ?? 15,
           sandbox_timeout_seconds: initialData.sandbox_timeout_seconds ?? 60,
@@ -157,7 +154,6 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         name: formData.name.trim(),
         description: formData.description?.trim() || undefined,
         llm_id: formData.llm_id,
-        skill_resolution_llm_id: formData.skill_resolution_llm_id ?? null,
         session_idle_timeout_minutes: formData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: formData.sandbox_timeout_seconds,
         compact_threshold_percent: formData.compact_threshold_percent,
@@ -288,50 +284,6 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="skill_resolution_llm">Skill Resolution</Label>
-              {loadingLLMs ? (
-                <div className="flex h-9 w-full items-center rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm text-muted-foreground">
-                  Loading LLMs…
-                </div>
-              ) : (
-                <Select
-                  value={formData.skill_resolution_llm_id?.toString() || '__none__'}
-                  onValueChange={(value) => {
-                    setFormData({
-                      ...formData,
-                      skill_resolution_llm_id:
-                        value === '__none__' ? null : Number.parseInt(value, 10),
-                    });
-                  }}
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger id="skill_resolution_llm">
-                    <SelectValue placeholder="Optional: select an LLM…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None</SelectItem>
-                    {availableLLMs.map((llm) => (
-                      <SelectItem
-                        key={`skill-resolution-${llm.id}`}
-                        value={llm.id.toString()}
-                      >
-                        <div className="flex min-w-0 items-center gap-2">
-                          <LLMBrandAvatar
-                            model={llm.model}
-                            containerClassName="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10"
-                            imageClassName="size-3.5"
-                            fallback={<Bot className="size-3.5 text-primary" aria-hidden="true" />}
-                          />
-                          <span className="truncate font-medium">{llm.name}</span>
-                          <span className="shrink-0 text-xs text-muted-foreground">({llm.model})</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
           </TabsContent>
 
           <TabsContent value="advanced" className="space-y-4 pt-4">

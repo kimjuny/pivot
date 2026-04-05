@@ -206,8 +206,7 @@ function applyTaskPlanHeuristics(
 
   if (
     messageStatus === "running" ||
-    messageStatus === "waiting_input" ||
-    messageStatus === "skill_resolving"
+    messageStatus === "waiting_input"
   ) {
     if (!nextSteps.some((step) => step.status === "running")) {
       const firstPendingIndex = nextSteps.findIndex(

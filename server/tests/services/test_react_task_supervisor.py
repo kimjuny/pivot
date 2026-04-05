@@ -31,9 +31,6 @@ ReactTaskSupervisor = import_module(
 ToolExecutionContext = import_module(
     "app.orchestration.tool.manager"
 ).ToolExecutionContext
-_should_run_skill_resolution = import_module(
-    "app.services.react_task_supervisor"
-)._should_run_skill_resolution
 react_task_supervisor_module = import_module("app.services.react_task_supervisor")
 
 
@@ -96,7 +93,6 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                         "name": agent.name,
                         "description": None,
                         "llm_id": release_llm.id,
-                        "skill_resolution_llm_id": None,
                         "session_idle_timeout_minutes": 15,
                         "sandbox_timeout_seconds": 90,
                         "compact_threshold_percent": 60,
@@ -152,34 +148,6 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         """Release the in-memory database after each test."""
         self.get_engine_patch.stop()
         self.session.close()
-
-    def test_runs_skill_resolution_for_new_task(self) -> None:
-        """Fresh tasks should keep the pre-task skill matcher enabled."""
-        task = ReactTask(
-            task_id="task-1",
-            agent_id=1,
-            user="alice",
-            user_message="Help me",
-            user_intent="Help me",
-            status="pending",
-            iteration=0,
-        )
-
-        self.assertTrue(_should_run_skill_resolution(task=task, resolver_llm_id=2))
-
-    def test_skips_skill_resolution_for_waiting_input_resume(self) -> None:
-        """Clarify resumes should continue the task instead of matching skills again."""
-        task = ReactTask(
-            task_id="task-clarify",
-            agent_id=1,
-            user="alice",
-            user_message="Help me export",
-            user_intent="Help me export",
-            status="waiting_input",
-            iteration=1,
-        )
-
-        self.assertFalse(_should_run_skill_resolution(task=task, resolver_llm_id=2))
 
     def test_prepare_task_updates_session_activity_for_new_turns(self) -> None:
         """Launching a fresh turn should let the backend own sidebar ordering."""

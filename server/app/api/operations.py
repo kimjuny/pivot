@@ -258,7 +258,6 @@ async def get_operations_session_detail(
                 agent_answer=task_data["agent_answer"],
                 status=task_data["status"],
                 total_tokens=task_data["total_tokens"],
-                skill_selection_result=task_data.get("skill_selection_result"),
                 pending_user_action=(
                     PendingUserActionPayload.model_validate(
                         task_data["pending_user_action"]

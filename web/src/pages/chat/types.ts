@@ -115,8 +115,6 @@ export interface ChatPageProps extends ReactChatInterfaceProps {
  * All stream event labels emitted by the ReAct backend.
  */
 export type ReactStreamEventType =
-  | "skill_resolution_start"
-  | "skill_resolution_result"
   | "token_rate"
   | "compact_start"
   | "compact_complete"
@@ -271,17 +269,6 @@ export interface RecursionRecord {
 }
 
 /**
- * Skill matching summary shown before recursive execution starts.
- */
-export interface SkillSelectionState {
-  status: "loading" | "done";
-  count: number;
-  selectedSkills: string[];
-  durationMs?: number;
-  tokens?: TokenUsage;
-}
-
-/**
  * Normalized attachment shape shared by message history and composer queue.
  */
 export interface ChatAttachment {
@@ -344,11 +331,9 @@ export interface ChatMessage {
   pendingUserAction?: ChatPendingUserAction;
   status?:
     | "running"
-    | "skill_resolving"
     | "completed"
     | "stopped"
     | "error"
     | "waiting_input";
   totalTokens?: TokenUsage;
-  skillSelection?: SkillSelectionState;
 }

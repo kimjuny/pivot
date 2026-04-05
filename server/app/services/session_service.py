@@ -121,12 +121,16 @@ class SessionService:
                 raise ValueError("Project does not belong to the requested agent.")
             workspace_id = project.workspace_id
         else:
-            workspace_id = WorkspaceService(self.db).create_workspace(
-                agent_id=agent_id,
-                username=user,
-                scope="session_private",
-                session_id=session_id,
-            ).workspace_id
+            workspace_id = (
+                WorkspaceService(self.db)
+                .create_workspace(
+                    agent_id=agent_id,
+                    username=user,
+                    scope="session_private",
+                    session_id=session_id,
+                )
+                .workspace_id
+            )
 
         # Create session
         session = Session(
@@ -156,7 +160,9 @@ class SessionService:
         return session
 
     @staticmethod
-    def get_workspace_scope(session: Session) -> Literal["session_private", "project_shared"] | None:
+    def get_workspace_scope(
+        session: Session,
+    ) -> Literal["session_private", "project_shared"] | None:
         """Return the public workspace scope for one session row."""
         if session.project_id:
             return "project_shared"
@@ -563,9 +569,9 @@ class SessionService:
             get_sandbox_service().destroy(
                 username=workspace.user,
                 workspace_id=workspace.workspace_id,
-                workspace_backend_path=WorkspaceService(self.db).get_workspace_backend_path(
-                    workspace
-                ),
+                workspace_backend_path=WorkspaceService(
+                    self.db
+                ).get_workspace_backend_path(workspace),
             )
         except RuntimeError:
             return
@@ -573,7 +579,9 @@ class SessionService:
     def _delete_task_rows_for_session(self, session_id: str) -> None:
         """Delete all persisted task rows that belong to one session."""
         task_rows = list(
-            self.db.exec(select(ReactTask).where(ReactTask.session_id == session_id)).all()
+            self.db.exec(
+                select(ReactTask).where(ReactTask.session_id == session_id)
+            ).all()
         )
         task_ids = [task.task_id for task in task_rows]
 
@@ -590,7 +598,9 @@ class SessionService:
 
             event_rows = list(
                 self.db.exec(
-                    select(ReactTaskEvent).where(col(ReactTaskEvent.task_id).in_(task_ids))
+                    select(ReactTaskEvent).where(
+                        col(ReactTaskEvent.task_id).in_(task_ids)
+                    )
                 ).all()
             )
             for event_row in event_rows:
@@ -762,15 +772,6 @@ class SessionService:
 
         result = []
         for task in tasks:
-            skill_selection_result: dict[str, Any] | None = None
-            if task.skill_selection_result:
-                try:
-                    parsed_skill_selection = json.loads(task.skill_selection_result)
-                    if isinstance(parsed_skill_selection, dict):
-                        skill_selection_result = parsed_skill_selection
-                except json.JSONDecodeError:
-                    skill_selection_result = None
-
             pending_user_action: dict[str, Any] | None = None
             if task.pending_user_action_json:
                 try:
@@ -834,7 +835,6 @@ class SessionService:
                     "agent_answer": agent_answer,
                     "status": task.status,
                     "total_tokens": task.total_tokens,
-                    "skill_selection_result": skill_selection_result,
                     "pending_user_action": pending_user_action,
                     "current_plan": current_plan_by_task.get(task.task_id, []),
                     "recursions": recursion_list,

@@ -33,7 +33,6 @@ class AgentReleaseRuntimeServiceTestCase(unittest.TestCase):
         agent = Agent(
             name="agent-1",
             llm_id=99,
-            skill_resolution_llm_id=98,
             session_idle_timeout_minutes=21,
             sandbox_timeout_seconds=33,
             compact_threshold_percent=77,
@@ -57,7 +56,6 @@ class AgentReleaseRuntimeServiceTestCase(unittest.TestCase):
                         "name": agent.name,
                         "description": "Released description",
                         "llm_id": 3,
-                        "skill_resolution_llm_id": 4,
                         "session_idle_timeout_minutes": 45,
                         "sandbox_timeout_seconds": 90,
                         "compact_threshold_percent": 55,
@@ -107,7 +105,6 @@ class AgentReleaseRuntimeServiceTestCase(unittest.TestCase):
         self.assertEqual(runtime_config.source, "release")
         self.assertEqual(runtime_config.release_id, self.release.id or 0)
         self.assertEqual(runtime_config.llm_id, 3)
-        self.assertEqual(runtime_config.skill_resolution_llm_id, 4)
         self.assertEqual(runtime_config.session_idle_timeout_minutes, 45)
         self.assertEqual(runtime_config.sandbox_timeout_seconds, 90)
         self.assertEqual(runtime_config.compact_threshold_percent, 55)
@@ -141,7 +138,6 @@ class AgentReleaseRuntimeServiceTestCase(unittest.TestCase):
                         "name": "Draft agent",
                         "description": "Working copy",
                         "llm_id": 88,
-                        "skill_resolution_llm_id": None,
                         "session_idle_timeout_minutes": 19,
                         "sandbox_timeout_seconds": 44,
                         "compact_threshold_percent": 61,

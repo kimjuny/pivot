@@ -14,7 +14,6 @@ import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from time import perf_counter
 from typing import Any, Literal
 
 from app.crud.llm import llm as llm_crud
@@ -25,7 +24,6 @@ from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
 from app.models.session import Session as SessionModel
 from app.models.user import User
 from app.orchestration.react.engine import ReactEngine
-from app.orchestration.skills import select_skills_with_usage
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.react import ReactStreamEvent, ReactStreamEventType, TokenUsage
 from app.services.agent_release_runtime_service import AgentReleaseRuntimeService
@@ -44,12 +42,10 @@ from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_service import SessionService
 from app.services.skill_change_service import apply_skill_change_submission
 from app.services.skill_service import (
-    build_selected_skills_prompt_block,
-    build_skill_mounts,
-    list_visible_skills,
+    build_skills_metadata_prompt_json,
+    list_allowed_visible_skills,
 )
 from app.services.workspace_service import WorkspaceService
-from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, col, desc, select
 
 logger = logging.getLogger(__name__)
@@ -85,49 +81,6 @@ class _SessionSubscriber:
 
     queue: asyncio.Queue[dict[str, Any]]
     task_id: str | None = None
-
-
-def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
-    """Parse optional JSON allowlist text into a normalized set."""
-    if raw_json is None:
-        return None
-
-    text = raw_json.strip()
-    if text == "":
-        return None
-
-    try:
-        parsed = json.loads(text)
-    except (ValueError, TypeError):
-        return set()
-
-    if not isinstance(parsed, list):
-        return set()
-
-    result: set[str] = set()
-    for item in parsed:
-        if isinstance(item, str):
-            normalized = item.strip()
-            if normalized:
-                result.add(normalized)
-    return result
-
-
-def _should_run_skill_resolution(
-    *,
-    task: ReactTask,
-    resolver_llm_id: int | None,
-) -> bool:
-    """Return whether this launch should execute pre-task skill matching.
-
-    Why: when a task resumes from a persisted CLARIFY pause, the runtime window
-    already contains the selected-skill bootstrap context. Re-running skill
-    resolution adds latency and duplicate UI events without changing the task.
-    """
-    if resolver_llm_id is None:
-        return False
-
-    return task.iteration == 0 and task.status in {"pending", "running"}
 
 
 class ReactTaskSupervisor:
@@ -403,7 +356,10 @@ class ReactTaskSupervisor:
         )
         active_tasks = list(db.exec(statement).all())
         for active_task in active_tasks:
-            if excluding_task_id is not None and active_task.task_id == excluding_task_id:
+            if (
+                excluding_task_id is not None
+                and active_task.task_id == excluding_task_id
+            ):
                 continue
             raise ValueError(
                 "Another task is already active in this workspace. "
@@ -603,9 +559,9 @@ class ReactTaskSupervisor:
                 workspace = WorkspaceService(db).get_workspace(session_row.workspace_id)
                 if workspace is None:
                     raise ValueError("Workspace not found for the current session.")
-                workspace_backend_path = WorkspaceService(db).get_workspace_backend_path(
-                    workspace
-                )
+                workspace_backend_path = WorkspaceService(
+                    db
+                ).get_workspace_backend_path(workspace)
 
                 llm_config = llm_crud.get(runtime_config.llm_id, db)
                 if llm_config is None:
@@ -641,37 +597,26 @@ class ReactTaskSupervisor:
                     extension_bundle=runtime_config.extension_bundle,
                 )
 
-                available_skills = list_visible_skills(db, launch.username)
                 extension_skills = ExtensionService(db).build_bundle_skill_payloads(
                     runtime_config.extension_bundle
                 )
-                available_skills.extend(extension_skills)
-                total_skill_count = len(available_skills)
-                allowed_skills = _parse_name_allowlist(runtime_config.raw_skill_ids)
-                if allowed_skills is not None:
-                    available_skills = [
-                        item
-                        for item in available_skills
-                        if item.get("name") in allowed_skills
-                    ]
-                candidate_skill_count = len(available_skills)
-                allowed_skill_names: list[str] = []
-                seen_skill_names: set[str] = set()
-                for skill_item in available_skills:
-                    skill_name = skill_item.get("name")
-                    if (
-                        not isinstance(skill_name, str)
-                        or not skill_name
-                        or skill_name in seen_skill_names
-                    ):
-                        continue
-                    seen_skill_names.add(skill_name)
-                    allowed_skill_names.append(skill_name)
-
-                allowed_skill_mounts = build_skill_mounts(
+                allowed_visible_skills = list_allowed_visible_skills(
                     db,
                     launch.username,
-                    allowed_skill_names,
+                    raw_skill_ids=runtime_config.raw_skill_ids,
+                    extra_skills=extension_skills,
+                )
+                allowed_skill_mounts = [
+                    {
+                        "name": skill["name"],
+                        "location": skill["location"],
+                    }
+                    for skill in allowed_visible_skills
+                ]
+                skills_metadata_json = build_skills_metadata_prompt_json(
+                    db,
+                    launch.username,
+                    raw_skill_ids=runtime_config.raw_skill_ids,
                     extra_skills=extension_skills,
                 )
 
@@ -712,101 +657,9 @@ class ReactTaskSupervisor:
                 async with self._lock:
                     self._active_engines[task_id] = engine
 
-                selected_skills: list[str] = []
-                skill_resolution_tokens: dict[str, int] | None = None
-                selected_skills_text = ""
-                resolution_duration_ms = 0
-
-                resolver_llm_id = runtime_config.skill_resolution_llm_id
-                if resolver_llm_id is not None and _should_run_skill_resolution(
-                    task=task,
-                    resolver_llm_id=resolver_llm_id,
-                ):
-                    await self._publish_event(
-                        db=db,
-                        session_id=task.session_id,
-                        event_data={
-                            "type": "skill_resolution_start",
-                            "task_id": task_id,
-                            "iteration": task.iteration,
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        },
-                    )
-
-                    resolution_started_at = perf_counter()
-                    try:
-                        resolver_llm_config = llm_crud.get(resolver_llm_id, db)
-                        if resolver_llm_config is not None:
-                            resolver_llm = create_llm_from_config(resolver_llm_config)
-                            session_context = {}
-                            if task.session_id:
-                                session_context = ReactRuntimeService(
-                                    db
-                                ).build_session_context_payload(task.session_id)
-
-                            selection_result = await run_in_threadpool(
-                                select_skills_with_usage,
-                                resolver_llm,
-                                task.user_message,
-                                available_skills,
-                                session_context,
-                            )
-                            raw_selected_skills = selection_result.get(
-                                "selected_skills", []
-                            )
-                            if isinstance(raw_selected_skills, list):
-                                selected_skills = [
-                                    item
-                                    for item in raw_selected_skills
-                                    if isinstance(item, str)
-                                ]
-                            skill_resolution_tokens = selection_result.get("tokens")
-                            selected_skills_text = build_selected_skills_prompt_block(
-                                session=db,
-                                username=launch.username,
-                                selected_skills=selected_skills,
-                                extra_skills=extension_skills,
-                            )
-                    except Exception as exc:
-                        logger.warning(
-                            "Skill resolution failed task_id=%s: %s", task_id, exc
-                        )
-
-                    resolution_duration_ms = int(
-                        (perf_counter() - resolution_started_at) * 1000
-                    )
-                    skill_result_event = {
-                        "type": "skill_resolution_result",
-                        "task_id": task_id,
-                        "iteration": task.iteration,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "data": {
-                            "count": len(selected_skills),
-                            "selected_skills": selected_skills,
-                            "total_skill_count": total_skill_count,
-                            "candidate_skill_count": candidate_skill_count,
-                            "duration_ms": resolution_duration_ms,
-                            "tokens": skill_resolution_tokens,
-                        },
-                    }
-                    task.skill_selection_result = json.dumps(
-                        skill_result_event["data"],
-                        ensure_ascii=False,
-                    )
-                    task.updated_at = datetime.now(UTC)
-                    db.add(task)
-                    db.commit()
-                    if engine.cancelled or task.status == "cancelled":
-                        return
-                    await self._publish_event(
-                        db=db,
-                        session_id=task.session_id,
-                        event_data=skill_result_event,
-                    )
-
                 async for event_data in engine.run_task(
                     task=task,
-                    selected_skills_text=selected_skills_text,
+                    skills_metadata_json=skills_metadata_json,
                     task_bootstrap_prefix_blocks=(
                         before_start_effects.task_bootstrap_head_blocks
                     ),

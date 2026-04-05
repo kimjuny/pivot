@@ -217,7 +217,6 @@ class AgentSnapshotService:
                 "name": agent.name,
                 "description": agent.description,
                 "llm_id": agent.llm_id,
-                "skill_resolution_llm_id": agent.skill_resolution_llm_id,
                 "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
                 "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
                 "compact_threshold_percent": agent.compact_threshold_percent,
@@ -280,11 +279,6 @@ class AgentSnapshotService:
             "llm_id": (
                 int(raw_agent_payload["llm_id"])
                 if isinstance(raw_agent_payload.get("llm_id"), int)
-                else None
-            ),
-            "skill_resolution_llm_id": (
-                int(raw_agent_payload["skill_resolution_llm_id"])
-                if isinstance(raw_agent_payload.get("skill_resolution_llm_id"), int)
                 else None
             ),
             "session_idle_timeout_minutes": int(
@@ -491,10 +485,7 @@ class AgentSnapshotService:
         agent_payload = snapshot["agent"]
         if agent_payload["name"] or agent_payload["description"]:
             changes.append("Agent basics configured")
-        if (
-            agent_payload["llm_id"] is not None
-            or agent_payload["skill_resolution_llm_id"] is not None
-        ):
+        if agent_payload["llm_id"] is not None:
             changes.append("Runtime settings configured")
         tool_ids = agent_payload["tool_ids"]
         if tool_ids is not None:
@@ -604,7 +595,6 @@ class AgentSnapshotService:
         basics_keys = {"name", "description", "is_active"}
         runtime_keys = {
             "llm_id",
-            "skill_resolution_llm_id",
             "session_idle_timeout_minutes",
             "sandbox_timeout_seconds",
             "compact_threshold_percent",

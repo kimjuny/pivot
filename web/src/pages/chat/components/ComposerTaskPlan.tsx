@@ -17,7 +17,7 @@ interface ComposerTaskPlanProps {
 
 const PLAN_ENTER_DELAY_MS = 16;
 const PLAN_AUTO_COLLAPSE_DELAY_MS = 720;
-const ACTIVE_TASK_PLAN_STATUSES = new Set(["running", "skill_resolving"]);
+const ACTIVE_TASK_PLAN_STATUSES = new Set(["running"]);
 
 function isSettledTaskPlan(taskPlan: TaskPlanSnapshot): boolean {
   return (

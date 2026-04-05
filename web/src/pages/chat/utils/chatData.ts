@@ -11,7 +11,6 @@ import type {
   ChatMessage,
   ChatPendingUserAction,
   ReactStreamEvent,
-  SkillSelectionState,
   TokenUsage,
 } from "../types";
 import { toPendingUserAction } from "./chatSelectors";
@@ -205,53 +204,6 @@ export function getUniqueClipboardFiles(clipboardData: DataTransfer): File[] {
   return Array.from(uniqueFiles.values()).map((file, index) =>
     normalizeClipboardFile(file, index),
   );
-}
-
-/**
- * Rebuilds persisted skill matching results into the timeline UI model.
- */
-export function buildSkillSelectionFromTask(
-  task: TaskMessage,
-): SkillSelectionState | undefined {
-  const raw = task.skill_selection_result;
-  if (!raw || typeof raw !== "object") {
-    return undefined;
-  }
-
-  const selectedSkills = Array.isArray(raw.selected_skills)
-    ? raw.selected_skills.filter(
-        (item): item is string => typeof item === "string" && item.length > 0,
-      )
-    : [];
-  const count = typeof raw.count === "number" ? raw.count : selectedSkills.length;
-  const durationMs =
-    typeof raw.duration_ms === "number" ? raw.duration_ms : undefined;
-
-  const rawTokens = raw.tokens;
-  const tokens: TokenUsage | undefined =
-    rawTokens &&
-    typeof rawTokens === "object" &&
-    typeof rawTokens.prompt_tokens === "number" &&
-    typeof rawTokens.completion_tokens === "number" &&
-    typeof rawTokens.total_tokens === "number"
-      ? {
-          prompt_tokens: rawTokens.prompt_tokens,
-          completion_tokens: rawTokens.completion_tokens,
-          total_tokens: rawTokens.total_tokens,
-          cached_input_tokens:
-            typeof rawTokens.cached_input_tokens === "number"
-              ? rawTokens.cached_input_tokens
-              : 0,
-        }
-      : undefined;
-
-  return {
-    status: "done",
-    count,
-    selectedSkills,
-    durationMs,
-    tokens,
-  };
 }
 
 /**
@@ -469,7 +421,6 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       pendingUserAction,
       currentPlan: task.current_plan,
       recursions,
-      skillSelection: buildSkillSelectionFromTask(task),
       status:
         task.status === "completed"
           ? ("completed" as const)

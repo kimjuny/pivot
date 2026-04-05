@@ -120,7 +120,9 @@ class TaskAttachmentService:
         if workspace is None:
             return []
 
-        workspace_dir = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        workspace_dir = (
+            WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        )
         attachments_dir = (
             workspace_root() / username / "task_attachments" / task_id
         ).resolve()

@@ -16,7 +16,6 @@ import {
 import { AssistantAttachmentList } from "./AssistantAttachmentList";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { RecursionCard } from "./RecursionCard";
-import { SkillSelectionCard } from "./SkillSelectionCard";
 import { TokenUsageLabel } from "./TokenUsageLabel";
 
 interface AssistantMessageBlockProps {
@@ -36,7 +35,7 @@ interface AssistantMessageBlockProps {
 }
 
 /**
- * Renders the assistant side of the timeline, including skill resolution, recursions, and final answer state.
+ * Renders the assistant side of the timeline, including recursions and final answer state.
  */
 export function AssistantMessageBlock({
   message,
@@ -56,10 +55,6 @@ export function AssistantMessageBlock({
 
   return (
     <div className="space-y-2">
-      {message.skillSelection && (
-        <SkillSelectionCard skillSelection={message.skillSelection} />
-      )}
-
       {message.recursions && message.recursions.length > 0 && (
         <div className="space-y-2">
           {message.recursions.map((recursion) => (

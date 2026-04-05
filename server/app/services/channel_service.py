@@ -18,8 +18,6 @@ from app.channels.work_wechat_socket import (
     infer_work_wechat_filename,
 )
 from app.config import get_settings
-from app.crud.llm import llm as llm_crud
-from app.llm.llm_factory import create_llm_from_config
 from app.models.agent import Agent
 from app.models.channel import (
     AgentChannelBinding,
@@ -30,7 +28,6 @@ from app.models.channel import (
 )
 from app.models.react import ReactRecursion, ReactTask
 from app.models.user import User
-from app.orchestration.skills import select_skills_with_usage
 from app.schemas.channel import (
     ChannelBindingResponse,
     ChannelLinkCompletionResponse,
@@ -41,15 +38,11 @@ from app.services.agent_release_runtime_service import AgentReleaseRuntimeServic
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.provider_registry_service import ProviderRegistryService
-from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
     get_react_task_supervisor,
 )
 from app.services.session_service import SessionService
-from app.services.skill_service import (
-    build_selected_skills_prompt_block,
-)
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, col, desc, select
 
@@ -933,20 +926,6 @@ class ChannelService:
                     )
                     last_progress_text = compact_text
                     last_progress_sent_at = perf_counter()
-            elif event_type == "skill_resolution_result":
-                resolution_text = self._render_skill_resolution_result_text(
-                    event_data=event_data
-                )
-                if resolution_text and resolution_text != last_progress_text:
-                    yield ChannelOutboundAction(
-                        kind="progress",
-                        text=resolution_text,
-                        delivery_hint="stream",
-                        slot="assistant_turn",
-                        metadata=self._build_action_metadata(event_data),
-                    )
-                    last_progress_text = resolution_text
-                    last_progress_sent_at = perf_counter()
             elif event_type == "answer":
                 answer_emitted = True
                 yield ChannelOutboundAction(
@@ -1093,26 +1072,6 @@ class ChannelService:
         if delta:
             return str(delta)
         return "The agent returned an empty response."
-
-    def _render_skill_resolution_result_text(
-        self,
-        *,
-        event_data: dict[str, Any],
-    ) -> str:
-        """Render one skill-resolution event into channel-safe text."""
-        payload = event_data.get("data")
-        if not isinstance(payload, dict):
-            return ""
-
-        raw_selected_skills = payload.get("selected_skills", [])
-        selected_skills = [
-            item.strip()
-            for item in raw_selected_skills
-            if isinstance(item, str) and item.strip()
-        ]
-        if selected_skills:
-            return f"Matched skills: {', '.join(selected_skills)}"
-        return "Matched skills: none"
 
     def _build_channel_progress_view(
         self,
@@ -1264,114 +1223,6 @@ class ChannelService:
             raw_tool_ids=raw_tool_ids,
             extension_bundle=extension_bundle,
         )
-
-    async def _resolve_skills_text(
-        self,
-        *,
-        agent: Agent,
-        username: str,
-        message: str,
-        session_id: str,
-        available_skills: list[dict[str, Any]],
-        extra_skills: list[dict[str, str]] | None = None,
-    ) -> str:
-        """Optionally resolve skills through the configured resolver LLM."""
-        allowed_skill_names = self._allowed_skill_names(
-            username=username,
-            available_skills=available_skills,
-            raw_skill_ids=agent.skill_ids,
-        )
-        if agent.skill_resolution_llm_id is None:
-            return build_selected_skills_prompt_block(
-                session=self.db,
-                username=username,
-                selected_skills=allowed_skill_names,
-                extra_skills=extra_skills,
-            )
-
-        started_at = perf_counter()
-        resolver_llm_config = llm_crud.get(agent.skill_resolution_llm_id, self.db)
-        if resolver_llm_config is None:
-            return build_selected_skills_prompt_block(
-                session=self.db,
-                username=username,
-                selected_skills=allowed_skill_names,
-                extra_skills=extra_skills,
-            )
-
-        try:
-            resolver_llm = create_llm_from_config(resolver_llm_config)
-            session_context = ReactRuntimeService(
-                self.db
-            ).build_session_context_payload(session_id)
-            selection_result = await run_in_threadpool(
-                select_skills_with_usage,
-                resolver_llm,
-                message,
-                available_skills,
-                session_context,
-            )
-            raw_selected = selection_result.get("selected_skills", [])
-            selected = [
-                item
-                for item in raw_selected
-                if isinstance(item, str) and item in allowed_skill_names
-            ]
-            if selected:
-                return build_selected_skills_prompt_block(
-                    session=self.db,
-                    username=username,
-                    selected_skills=selected,
-                    extra_skills=extra_skills,
-                )
-        except Exception:
-            elapsed_ms = int((perf_counter() - started_at) * 1000)
-            del elapsed_ms
-        return build_selected_skills_prompt_block(
-            session=self.db,
-            username=username,
-            selected_skills=allowed_skill_names,
-            extra_skills=extra_skills,
-        )
-
-    def _allowed_skill_names(
-        self,
-        *,
-        username: str,
-        available_skills: list[dict[str, Any]],
-        raw_skill_ids: str | None,
-    ) -> list[str]:
-        """Filter visible skills by the agent allowlist."""
-        del username
-        allowed = self._parse_name_allowlist(raw_skill_ids)
-        seen: set[str] = set()
-        result: list[str] = []
-        for skill in available_skills:
-            skill_name = skill.get("name")
-            if not isinstance(skill_name, str) or not skill_name or skill_name in seen:
-                continue
-            if allowed is not None and skill_name not in allowed:
-                continue
-            seen.add(skill_name)
-            result.append(skill_name)
-        return result
-
-    def _parse_name_allowlist(self, raw_json: str | None) -> set[str] | None:
-        """Parse the existing JSON allowlist format used by agents."""
-        if raw_json is None:
-            return None
-        text = raw_json.strip()
-        if not text:
-            return None
-        try:
-            parsed = json.loads(text)
-        except (TypeError, ValueError):
-            return set()
-        if not isinstance(parsed, list):
-            return set()
-        return {
-            item.strip() for item in parsed if isinstance(item, str) and item.strip()
-        }
 
     async def poll_binding_once(self, binding_id: int) -> dict[str, Any]:
         """Poll one Telegram binding once and route any fetched updates."""

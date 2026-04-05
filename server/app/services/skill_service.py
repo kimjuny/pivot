@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ _SKILLS_DIRNAME = "skills"
 _ALLOWED_KINDS = {"private", "shared"}
 _ALLOWED_USER_SOURCES = {"manual", "network", "bundle", "agent"}
 _LEGACY_USER_SKILL_DIRS = frozenset(_ALLOWED_KINDS)
+_CANONICAL_SKILL_ENTRY_FILENAME = "SKILL.md"
 
 
 @dataclass(frozen=True)
@@ -102,11 +104,15 @@ def _legacy_user_skills_dir(username: str, kind: str, *, create: bool) -> Path:
 
 
 def _canonical_skill_path(base_dir: Path, skill_name: str) -> Path:
-    return base_dir / skill_name / f"{skill_name}.md"
+    return base_dir / skill_name / _CANONICAL_SKILL_ENTRY_FILENAME
 
 
 def _legacy_skill_path(base_dir: Path, skill_name: str) -> Path:
     return base_dir / f"{skill_name}.md"
+
+
+def _sandbox_skill_entry_path(skill_name: str) -> str:
+    return f"/workspace/skills/{skill_name}/{_CANONICAL_SKILL_ENTRY_FILENAME}"
 
 
 def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
@@ -127,6 +133,19 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
     if legacy.exists():
         return legacy
     return None
+
+
+def _canonicalize_skill_entry_filename(skill_path: Path) -> Path:
+    """Rename one discovered entry file to the canonical ``SKILL.md`` path."""
+    if skill_path.name == _CANONICAL_SKILL_ENTRY_FILENAME:
+        return skill_path
+
+    canonical_path = skill_path.parent / _CANONICAL_SKILL_ENTRY_FILENAME
+    if canonical_path.exists():
+        return canonical_path
+
+    skill_path.replace(canonical_path)
+    return canonical_path
 
 
 def _list_skill_paths(
@@ -175,7 +194,7 @@ def _fallback_skill_name(base_dir: Path, skill_path: Path) -> str:
 
 def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
     """Normalize legacy flat files into directory layout for stable locations."""
-    canonical = _canonical_skill_path(base_dir, skill_name)
+    canonical = base_dir / skill_name / _CANONICAL_SKILL_ENTRY_FILENAME
     legacy = _legacy_skill_path(base_dir, skill_name)
     if canonical.exists():
         return canonical
@@ -217,13 +236,15 @@ def _migrate_legacy_user_skill_to_unified_root(
         shutil.move(str(legacy_dir), str(target_dir))
         logger.info("Migrated legacy skill directory: %s -> %s", legacy_dir, target_dir)
 
-    canonical_path = target_dir / f"{skill_name}.md"
-    if not canonical_path.exists():
-        for filename in SKILL_MARKDOWN_FILENAMES:
-            candidate = target_dir / filename
-            if candidate.exists():
-                candidate.replace(canonical_path)
-                break
+    canonical_path = target_dir / _CANONICAL_SKILL_ENTRY_FILENAME
+    if canonical_path.exists():
+        return canonical_path
+
+    for filename in SKILL_MARKDOWN_FILENAMES:
+        candidate = target_dir / filename
+        if candidate.exists():
+            candidate.replace(canonical_path)
+            break
     return canonical_path
 
 
@@ -315,7 +336,7 @@ def _discover_builtin_skills() -> list[_DiscoveredSkill]:
     return [
         _discover_skill(
             base_dir=root,
-            skill_path=skill_path,
+            skill_path=_canonicalize_skill_entry_filename(skill_path),
             kind="shared",
             source="builtin",
             builtin=True,
@@ -364,6 +385,7 @@ def _discover_user_skills(
                     skill_path = _migrate_legacy_user_skill(unified_root, fallback_name)
                 if not skill_path.exists():
                     continue
+                skill_path = _canonicalize_skill_entry_filename(skill_path)
                 kind, source = _kind_for_unified_skill(
                     user=user,
                     skill_name=fallback_name,
@@ -396,7 +418,7 @@ def _discover_user_skills(
                 discovered.append(
                     _discover_skill(
                         base_dir=unified_root,
-                        skill_path=migrated_path,
+                        skill_path=_canonicalize_skill_entry_filename(migrated_path),
                         kind=kind,
                         source="manual",
                         builtin=False,
@@ -428,6 +450,25 @@ def _assert_unique_discovered_names(discovered: list[_DiscoveredSkill]) -> None:
 
 def _skill_content_path(skill: Skill) -> Path:
     return Path(skill.location) / skill.filename
+
+
+def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
+    if raw_json is None:
+        return None
+
+    text = raw_json.strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return set()
+
+    if not isinstance(parsed, list):
+        return set()
+
+    return {item.strip() for item in parsed if isinstance(item, str) and item.strip()}
 
 
 def _creator_name_map(session: Session) -> dict[int, str]:
@@ -695,6 +736,81 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
     ]
 
 
+def list_allowed_visible_skills(
+    session: Session,
+    username: str,
+    *,
+    raw_skill_ids: str | None,
+    extra_skills: list[dict[str, str]] | None = None,
+) -> list[dict[str, str]]:
+    """Return deterministic visible skill metadata for one runtime.
+
+    Args:
+        session: Active database session.
+        username: Authenticated username.
+        raw_skill_ids: Optional JSON allowlist matching the agent row format.
+        extra_skills: Optional non-registry skill payloads such as extension
+            package skills.
+
+    Returns:
+        Sorted visible skill metadata including storage location for mounting.
+    """
+    sync_skill_registry(session)
+    visible_skills = _visible_skills_query(session, username)
+    allowed_names = _parse_name_allowlist(raw_skill_ids)
+    results: list[dict[str, str]] = []
+    seen_names: set[str] = set()
+
+    for skill in visible_skills:
+        if allowed_names is not None and skill.name not in allowed_names:
+            continue
+        if skill.name in seen_names:
+            continue
+        seen_names.add(skill.name)
+        results.append(
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "location": skill.location,
+                "filename": skill.filename,
+            }
+        )
+
+    for extra_skill in extra_skills or []:
+        skill_name = extra_skill.get("name")
+        skill_location = extra_skill.get("location")
+        if (
+            not isinstance(skill_name, str)
+            or not skill_name
+            or not isinstance(skill_location, str)
+        ):
+            continue
+        if allowed_names is not None and skill_name not in allowed_names:
+            continue
+        if skill_name in seen_names:
+            continue
+        seen_names.add(skill_name)
+        entry_file = (
+            str(extra_skill.get("entry_file"))
+            if isinstance(extra_skill.get("entry_file"), str)
+            else _CANONICAL_SKILL_ENTRY_FILENAME
+        )
+        results.append(
+            {
+                "name": skill_name,
+                "description": (
+                    str(extra_skill.get("description"))
+                    if isinstance(extra_skill.get("description"), str)
+                    else ""
+                ),
+                "location": str(Path(skill_location).resolve()),
+                "filename": entry_file,
+            }
+        )
+
+    return sorted(results, key=lambda item: item["name"])
+
+
 def _read_skill_payload(
     session: Session,
     *,
@@ -787,63 +903,39 @@ def read_shared_skill(
     return _read_skill_payload(session, skill=skill, username=username)
 
 
-def build_selected_skills_prompt_block(
+def build_skills_metadata_prompt_json(
     session: Session,
     username: str,
-    selected_skills: list[str],
+    raw_skill_ids: str | None,
     extra_skills: list[dict[str, str]] | None = None,
 ) -> str:
-    """Build prompt-injection markdown from selected visible skills.
+    """Build prompt-injection JSON from runtime-visible skill metadata.
 
     Args:
         session: Active database session.
         username: Authenticated username.
-        selected_skills: Selected globally unique skill names.
+        raw_skill_ids: Optional JSON allowlist matching the agent row format.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
 
     Returns:
-        Concatenated markdown block for once-per-task bootstrap user-prompt injection.
+        Stable JSON array text used by the task bootstrap prompt.
     """
-    if not selected_skills:
-        return ""
-
-    sync_skill_registry(session)
-    visible_skills = _visible_skills_query(session, username)
-    by_name = {skill.name: skill for skill in visible_skills}
-    extra_by_name = {
-        item["name"]: item
-        for item in extra_skills or []
-        if isinstance(item.get("name"), str) and isinstance(item.get("location"), str)
-    }
-
-    blocks: list[str] = []
-    for index, skill_name in enumerate(selected_skills, start=1):
-        skill = by_name.get(skill_name)
-        block_skill_name = skill_name
-        if skill is None:
-            extra_skill = extra_by_name.get(skill_name)
-            if extra_skill is None:
-                continue
-            try:
-                content = _read_markdown(
-                    Path(extra_skill["location"]) / "SKILL.md"
-                ).strip()
-            except FileNotFoundError:
-                logger.warning(
-                    "Selected extension skill source disappeared: %s",
-                    extra_skill["location"],
-                )
-                continue
-        else:
-            block_skill_name = skill.name
-            try:
-                content = _read_markdown(_skill_content_path(skill)).strip()
-            except FileNotFoundError:
-                logger.warning("Selected skill source disappeared: %s", skill.location)
-                continue
-        blocks.append(f"### Skill {index}: {block_skill_name}\n\n{content}\n")
-    return "\n".join(blocks).strip()
+    visible_skills = list_allowed_visible_skills(
+        session,
+        username,
+        raw_skill_ids=raw_skill_ids,
+        extra_skills=extra_skills,
+    )
+    prompt_payload = [
+        {
+            "name": skill["name"],
+            "description": skill["description"],
+            "path": _sandbox_skill_entry_path(skill["name"]),
+        }
+        for skill in visible_skills
+    ]
+    return json.dumps(prompt_payload, ensure_ascii=False, indent=2)
 
 
 def build_skill_mounts(

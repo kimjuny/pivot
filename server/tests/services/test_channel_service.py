@@ -466,8 +466,8 @@ class ChannelServiceTestCase(unittest.TestCase):
         self.assertEqual(actions[2].text, "Done processing.")
         self.assertTrue(actions[2].is_terminal)
 
-    def test_collect_outbound_actions_emit_ack_then_skill_match_progress(self) -> None:
-        """Channel turns should acknowledge receipt before skill matching completes."""
+    def test_collect_outbound_actions_emit_ack_then_summary_progress(self) -> None:
+        """Channel turns should acknowledge receipt before normal progress events."""
         self.agent.llm_id = 42
         self.session.add(self.agent)
         self.session.commit()
@@ -506,16 +506,6 @@ class ChannelServiceTestCase(unittest.TestCase):
         task_events = [
             {
                 "event_id": 1,
-                "type": "skill_resolution_result",
-                "task_id": "task-1",
-                "iteration": 0,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "data": {
-                    "selected_skills": ["coding", "ui-ux-pro-max"],
-                },
-            },
-            {
-                "event_id": 2,
                 "type": "summary",
                 "task_id": "task-1",
                 "iteration": 1,
@@ -524,7 +514,7 @@ class ChannelServiceTestCase(unittest.TestCase):
                 "data": {"current_plan": []},
             },
             {
-                "event_id": 3,
+                "event_id": 2,
                 "type": "answer",
                 "task_id": "task-1",
                 "iteration": 1,
@@ -532,7 +522,7 @@ class ChannelServiceTestCase(unittest.TestCase):
                 "data": {"answer": "All set."},
             },
             {
-                "event_id": 4,
+                "event_id": 3,
                 "type": "task_complete",
                 "task_id": "task-1",
                 "iteration": 1,
@@ -591,14 +581,13 @@ class ChannelServiceTestCase(unittest.TestCase):
             [action.text for action in actions],
             [
                 "Received, starting the task...",
-                "Matched skills: coding, ui-ux-pro-max",
                 "Drafting the first implementation plan",
                 "All set.",
             ],
         )
         self.assertEqual(
             [action.kind for action in actions],
-            ["progress", "progress", "progress", "answer"],
+            ["progress", "progress", "answer"],
         )
         self.assertTrue(actions[-1].is_terminal)
 

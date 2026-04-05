@@ -652,7 +652,7 @@ function ChatContainer({
         (message) =>
           message.role === "assistant" &&
           message.task_id &&
-          (message.status === "running" || message.status === "skill_resolving"),
+          message.status === "running",
       );
     const activeRecursion = [...(runningAssistant?.recursions ?? [])]
       .reverse()
@@ -706,15 +706,6 @@ function ChatContainer({
             ...message,
             status: "stopped" as const,
             timestamp,
-            skillSelection:
-              message.skillSelection?.status === "loading"
-                ? {
-                    ...message.skillSelection,
-                    status: "done",
-                    count: 0,
-                    selectedSkills: [],
-                  }
-                : message.skillSelection,
             recursions: (message.recursions || []).map((recursion) =>
               recursion.status === "running"
                 ? {
@@ -865,71 +856,6 @@ function ChatContainer({
         );
       }
 
-      if (event.type === "skill_resolution_start") {
-        setIsStreaming(true);
-        liveTaskIdRef.current = event.task_id;
-        liveAssistantMessageIdRef.current = targetMessageId;
-        liveRecursionRef.current = null;
-        setActiveContextTaskId(event.task_id);
-        setActiveContextIteration(null);
-        updateMessages((messagesSnapshot) =>
-          messagesSnapshot.map((message) =>
-            message.id === targetMessageId
-              ? {
-                  ...message,
-                  task_id: event.task_id,
-                  status: "skill_resolving" as const,
-                  skillSelection: {
-                    status: "loading",
-                    count: 0,
-                    selectedSkills: [],
-                  },
-                }
-              : message,
-          ),
-        );
-        return;
-      }
-
-      if (event.type === "skill_resolution_result") {
-        setIsStreaming(true);
-        const skillData = event.data as
-          | {
-              count?: number;
-              selected_skills?: string[];
-              duration_ms?: number;
-              tokens?: TokenUsage;
-            }
-          | undefined;
-        const selectedSkills = skillData?.selected_skills ?? [];
-        const selectedCount =
-          typeof skillData?.count === "number"
-            ? skillData.count
-            : selectedSkills.length;
-
-        liveTaskIdRef.current = event.task_id;
-        liveAssistantMessageIdRef.current = targetMessageId;
-        updateMessages((messagesSnapshot) =>
-          messagesSnapshot.map((message) =>
-            message.id === targetMessageId
-              ? {
-                  ...message,
-                  task_id: event.task_id,
-                  status: "running" as const,
-                  skillSelection: {
-                    status: "done",
-                    count: selectedCount,
-                    selectedSkills,
-                    durationMs: skillData?.duration_ms,
-                    tokens: skillData?.tokens,
-                  },
-                }
-              : message,
-          ),
-        );
-        return;
-      }
-
       if (event.type === "recursion_start") {
         setIsStreaming(true);
         setActiveContextTaskId(event.task_id);
@@ -1025,15 +951,6 @@ function ChatContainer({
                   : message.content,
               pendingUserAction: undefined,
               recursions: [...updatedRecursions, newRecursion],
-              skillSelection:
-                message.skillSelection?.status === "loading"
-                  ? {
-                      ...message.skillSelection,
-                      status: "done",
-                      count: 0,
-                      selectedSkills: [],
-                    }
-                  : message.skillSelection,
             };
           }),
         );
@@ -1239,15 +1156,6 @@ function ChatContainer({
                 pendingUserAction: undefined,
                 status: "stopped" as const,
                 timestamp: event.timestamp,
-                skillSelection:
-                  message.skillSelection?.status === "loading"
-                    ? {
-                        ...message.skillSelection,
-                        status: "done",
-                        count: 0,
-                        selectedSkills: [],
-                      }
-                    : message.skillSelection,
                 errorMessage: undefined,
               };
             }
@@ -2157,16 +2065,13 @@ function ChatContainer({
         timestamp: messageTimestamp,
       };
       assistantMessageId = `assistant-${Date.now()}`;
-      const assistantMessageStatus = currentReplyTaskId
-        ? ("running" as const)
-        : ("skill_resolving" as const);
       const assistantMessage: ChatMessage = {
         id: assistantMessageId,
         role: "assistant",
         content: "",
         timestamp: messageTimestamp,
         recursions: [],
-        status: assistantMessageStatus,
+        status: "running" as const,
       };
 
       if (shouldResetConversation) {
@@ -2213,7 +2118,7 @@ function ChatContainer({
             ? {
                 ...message,
                 task_id: launchResult.task_id,
-                status: assistantMessageStatus,
+                status: "running" as const,
               }
             : message,
         ),

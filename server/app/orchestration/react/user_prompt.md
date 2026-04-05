@@ -9,7 +9,7 @@
 
 ## 6. Related Skills
 
-- Skills如有注入，请仔细阅读，**并立即采取`action = RE_PLAN`仔细制定策划执行计划**，在step的`specific_description`中讲计划用哪些tools/functions
+- 以下罗列了所有你能使用的Skill技能，但是只罗列了梗概meta信息，包括`name`、`description`和`path`。在iteration过程中，如果你发现你是需要发动某个技能且在上下文中没有该技能的详细信息，你可以顺着path去阅读一遍这个skill（比如read_file工具或使用bash命令阅读）。
 
 ```json
 {{skills}}

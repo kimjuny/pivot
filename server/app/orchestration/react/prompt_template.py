@@ -52,7 +52,7 @@ def build_runtime_user_prompt(
 
     Args:
         tool_manager: Optional tool manager to describe available tools.
-        skills: Selected skills full-text block for prompt injection.
+        skills: Runtime-visible skill metadata JSON for prompt injection.
         prefix_blocks: Additional prompt blocks inserted before the standard
             bootstrap template body.
         suffix_blocks: Additional prompt blocks inserted after the standard

@@ -24,6 +24,7 @@ from app.services.agent_release_runtime_service import (
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
+from app.services.skill_service import build_skills_metadata_prompt_json
 from sqlmodel import Session as DBSession, select
 
 if TYPE_CHECKING:
@@ -267,9 +268,17 @@ class ReactContextUsageService:
             username=username,
             runtime_config=runtime_config,
         )
+        extension_skills = ExtensionService(self.db).build_bundle_skill_payloads(
+            runtime_config.extension_bundle
+        )
         return build_runtime_user_prompt(
             tool_manager=tool_manager,
-            skills="",
+            skills=build_skills_metadata_prompt_json(
+                self.db,
+                username,
+                raw_skill_ids=runtime_config.raw_skill_ids,
+                extra_skills=extension_skills,
+            ),
         )
 
     def _build_request_tool_manager(

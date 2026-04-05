@@ -36,7 +36,6 @@ def _serialize_consumer_agent_response(
         "name": agent.name,
         "description": agent.description,
         "llm_id": agent.llm_id,
-        "skill_resolution_llm_id": agent.skill_resolution_llm_id,
         "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
         "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
         "compact_threshold_percent": agent.compact_threshold_percent,

@@ -120,7 +120,6 @@ export interface OperationsTaskMessage {
   agent_answer: string | null;
   status: string;
   total_tokens: number;
-  skill_selection_result: unknown;
   pending_user_action: unknown;
   current_plan: unknown[];
   recursions: OperationsRecursion[];

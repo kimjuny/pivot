@@ -67,8 +67,6 @@ export interface StudioTestSnapshotAgent {
   description?: string | null;
   /** Primary LLM identifier. */
   llm_id?: number | null;
-  /** Optional skill-resolution LLM identifier. */
-  skill_resolution_llm_id?: number | null;
   /** Idle timeout used by the chat shell. */
   session_idle_timeout_minutes: number;
   /** Sandbox timeout used for tool execution. */
@@ -152,7 +150,6 @@ export function buildStudioTestSnapshotPayload(
       name: agent.name,
       description: agent.description ?? null,
       llm_id: agent.llm_id ?? null,
-      skill_resolution_llm_id: agent.skill_resolution_llm_id ?? null,
       session_idle_timeout_minutes: agent.session_idle_timeout_minutes,
       sandbox_timeout_seconds: agent.sandbox_timeout_seconds,
       compact_threshold_percent: agent.compact_threshold_percent,

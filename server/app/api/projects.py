@@ -101,6 +101,8 @@ async def delete_project(
     current_user: User = Depends(get_current_user),
 ) -> Response:
     """Hard-delete one owned project and all of its sessions."""
-    if not ProjectService(db).delete_project(project_id, username=current_user.username):
+    if not ProjectService(db).delete_project(
+        project_id, username=current_user.username
+    ):
         raise HTTPException(status_code=404, detail="Project not found")
     return Response(status_code=204)

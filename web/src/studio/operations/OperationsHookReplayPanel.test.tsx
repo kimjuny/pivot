@@ -70,7 +70,6 @@ describe("OperationsHookReplayPanel", () => {
             agent_answer: null,
             status: "failed",
             total_tokens: 12,
-            skill_selection_result: null,
             pending_user_action: null,
             current_plan: [],
             recursions: [

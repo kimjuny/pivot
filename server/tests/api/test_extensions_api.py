@@ -80,7 +80,6 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.agent = Agent(
             name="api-agent",
             llm_id=1,
-            skill_resolution_llm_id=None,
             active_release_id=None,
         )
         self.user = User(username="alice", password_hash="hash")

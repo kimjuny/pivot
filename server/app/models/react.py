@@ -28,7 +28,6 @@ class ReactTask(SQLModel, table=True):
         user: Username of the user who initiated the task.
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
-        skill_selection_result: Serialized skill resolution summary payload.
         pending_user_action_json: Serialized system-owned waiting action payload
             such as a skill approval request that must survive refreshes.
         status: Current status (pending, running, completed, failed, cancelled).
@@ -56,13 +55,6 @@ class ReactTask(SQLModel, table=True):
     user: str = Field(index=True, description="Username")
     user_message: str = Field(description="Original user input")
     user_intent: str = Field(description="Task user intent")
-    skill_selection_result: str | None = Field(
-        default=None,
-        description=(
-            "Serialized skill resolution result payload for UI/history, "
-            "e.g. {'count':2,'selected_skills':['coding'],'duration_ms':1200,'tokens':...}."
-        ),
-    )
     pending_user_action_json: str | None = Field(
         default=None,
         description=(

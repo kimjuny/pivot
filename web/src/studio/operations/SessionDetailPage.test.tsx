@@ -77,7 +77,6 @@ describe("SessionDetailPage", () => {
           agent_answer: null,
           status: "failed",
           total_tokens: 22,
-          skill_selection_result: null,
           pending_user_action: null,
           current_plan: [],
           recursions: [

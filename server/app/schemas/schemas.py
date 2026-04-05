@@ -37,9 +37,6 @@ class AgentCreate(AppBaseModel):
     name: str = Field(..., description="Agent name")
     description: str | None = Field(None, description="Agent description")
     llm_id: int = Field(..., description="LLM configuration ID")
-    skill_resolution_llm_id: int | None = Field(
-        None, description="Optional LLM ID for skill selection only"
-    )
     session_idle_timeout_minutes: int = Field(
         default=15,
         ge=1,
@@ -66,7 +63,6 @@ class AgentUpdate(AppBaseModel):
     name: str | None = None
     description: str | None = None
     llm_id: int | None = None
-    skill_resolution_llm_id: int | None = None
     session_idle_timeout_minutes: int | None = Field(default=None, ge=1)
     sandbox_timeout_seconds: int | None = Field(default=None, ge=1)
     compact_threshold_percent: int | None = Field(default=None, ge=1, le=100)
@@ -92,7 +88,6 @@ class AgentResponse(AppBaseModel):
     name: str
     description: str | None
     llm_id: int | None
-    skill_resolution_llm_id: int | None
     session_idle_timeout_minutes: int
     sandbox_timeout_seconds: int
     compact_threshold_percent: int

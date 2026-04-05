@@ -36,7 +36,6 @@ class Agent(SQLModel, table=True):
         name: Unique name of the agent.
         description: Optional description of the agent's purpose.
         llm_id: Foreign key to the LLM configuration to use.
-        skill_resolution_llm_id: Optional LLM used only for skill selection.
         session_idle_timeout_minutes: Minutes of inactivity before the chat UI
             automatically starts a fresh session for this agent.
         sandbox_timeout_seconds: Maximum seconds the backend will wait for one
@@ -63,11 +62,6 @@ class Agent(SQLModel, table=True):
     name: str = Field(index=True, unique=True)
     description: str | None = Field(default=None)
     llm_id: int | None = Field(default=None, foreign_key="llm.id", index=True)
-    skill_resolution_llm_id: int | None = Field(
-        default=None,
-        foreign_key="llm.id",
-        index=True,
-    )
     session_idle_timeout_minutes: int = Field(
         default=15,
         description=(

@@ -56,7 +56,6 @@ def _serialize_agent_response(
         "name": agent.name,
         "description": agent.description,
         "llm_id": agent.llm_id,
-        "skill_resolution_llm_id": agent.skill_resolution_llm_id,
         "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
         "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
         "compact_threshold_percent": agent.compact_threshold_percent,
@@ -141,17 +140,6 @@ async def create_agent(
             status_code=400,
             detail=f"LLM with ID {agent_data.llm_id} does not exist",
         )
-    if agent_data.skill_resolution_llm_id is not None:
-        skill_llm = llm_crud.get(agent_data.skill_resolution_llm_id, db)
-        if not skill_llm:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Skill resolution LLM with ID "
-                    f"{agent_data.skill_resolution_llm_id} does not exist"
-                ),
-            )
-
     existing_agent = agent_crud.get_by_name(agent_data.name, db)
     if existing_agent:
         raise HTTPException(
@@ -163,7 +151,6 @@ async def create_agent(
         name=agent_data.name,
         description=agent_data.description,
         llm_id=agent_data.llm_id,
-        skill_resolution_llm_id=agent_data.skill_resolution_llm_id,
         session_idle_timeout_minutes=agent_data.session_idle_timeout_minutes,
         sandbox_timeout_seconds=agent_data.sandbox_timeout_seconds,
         compact_threshold_percent=agent_data.compact_threshold_percent,
@@ -317,17 +304,6 @@ async def update_agent(
                 status_code=400,
                 detail=f"LLM with ID {agent_data.llm_id} does not exist",
             )
-    if agent_data.skill_resolution_llm_id is not None:
-        skill_llm = llm_crud.get(agent_data.skill_resolution_llm_id, db)
-        if not skill_llm:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Skill resolution LLM with ID "
-                    f"{agent_data.skill_resolution_llm_id} does not exist"
-                ),
-            )
-
     # Check if name change conflicts with existing agent
     if agent_data.name and agent_data.name != agent.name:
         existing_agent = agent_crud.get_by_name(agent_data.name, db)
@@ -344,8 +320,6 @@ async def update_agent(
         update_data["description"] = agent_data.description
     if agent_data.llm_id is not None:
         update_data["llm_id"] = agent_data.llm_id
-    if agent_data.skill_resolution_llm_id is not None:
-        update_data["skill_resolution_llm_id"] = agent_data.skill_resolution_llm_id
     if agent_data.session_idle_timeout_minutes is not None:
         update_data["session_idle_timeout_minutes"] = (
             agent_data.session_idle_timeout_minutes

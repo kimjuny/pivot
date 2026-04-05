@@ -71,7 +71,6 @@ const baseAgent: Agent = {
   name: "Qwen Agent",
   description: "Test agent",
   llm_id: 1,
-  skill_resolution_llm_id: null,
   session_idle_timeout_minutes: 30,
   sandbox_timeout_seconds: 60,
   compact_threshold_percent: 80,

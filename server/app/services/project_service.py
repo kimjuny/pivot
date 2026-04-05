@@ -135,7 +135,9 @@ class ProjectService:
         from app.services.session_service import SessionService
 
         sessions = list(
-            self.db.exec(select(Session).where(Session.project_id == project.project_id)).all()
+            self.db.exec(
+                select(Session).where(Session.project_id == project.project_id)
+            ).all()
         )
         session_service = SessionService(self.db)
         for session in sessions:

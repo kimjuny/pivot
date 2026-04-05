@@ -17,7 +17,6 @@ function buildTask(overrides: Partial<OperationsTaskMessage>): OperationsTaskMes
     agent_answer: null,
     status: "running",
     total_tokens: 120,
-    skill_selection_result: null,
     pending_user_action: null,
     current_plan: [],
     recursions: [],

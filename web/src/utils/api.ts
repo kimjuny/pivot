@@ -257,7 +257,6 @@ export const createAgent = async (agentData: {
   name: string;
   description?: string;
   llm_id: number;
-  skill_resolution_llm_id?: number | null;
   session_idle_timeout_minutes?: number;
   sandbox_timeout_seconds?: number;
   compact_threshold_percent?: number;
@@ -522,7 +521,6 @@ export const updateAgent = async (
     name?: string;
     description?: string;
     llm_id?: number;
-    skill_resolution_llm_id?: number | null;
     session_idle_timeout_minutes?: number;
     sandbox_timeout_seconds?: number;
     compact_threshold_percent?: number;
@@ -2072,17 +2070,6 @@ export interface TaskMessage {
   agent_answer: string | null;
   status: string;
   total_tokens: number;
-  skill_selection_result?: {
-    count?: number;
-    selected_skills?: string[];
-    duration_ms?: number;
-    tokens?: {
-      prompt_tokens: number;
-      completion_tokens: number;
-      total_tokens: number;
-      cached_input_tokens?: number;
-    };
-  } | null;
   pending_user_action?: {
     kind: string;
     approval_request?: {

@@ -85,7 +85,6 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.agent = Agent(
             name="ext-agent",
             llm_id=1,
-            skill_resolution_llm_id=None,
             active_release_id=None,
         )
         self.user = User(username="alice", password_hash="hash")
@@ -475,14 +474,22 @@ class ExtensionServiceTestCase(unittest.TestCase):
         extra_skills = service.build_bundle_skill_payloads(
             runtime_config.extension_bundle
         )
-        prompt_block = skill_service.build_selected_skills_prompt_block(
+        prompt_block = skill_service.build_skills_metadata_prompt_json(
             self.session,
             "alice",
             ["crm_research"],
             extra_skills=extra_skills,
         )
-        self.assertIn("### Skill 1: crm_research", prompt_block)
-        self.assertIn("Use CRM playbooks.", prompt_block)
+        self.assertEqual(
+            json.loads(prompt_block),
+            [
+                {
+                    "name": "crm_research",
+                    "description": "Research CRM accounts",
+                    "path": "/workspace/skills/crm_research/SKILL.md",
+                }
+            ],
+        )
 
         mounts = skill_service.build_skill_mounts(
             self.session,

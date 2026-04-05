@@ -15,8 +15,6 @@ export interface Agent {
   description?: string;
   /** LLM configuration ID used by this agent */
   llm_id?: number;
-  /** Optional LLM configuration ID for skill resolution only */
-  skill_resolution_llm_id?: number | null;
   /**
    * Minutes of inactivity before chat should start a fresh session for this
    * agent instead of continuing the previous one.

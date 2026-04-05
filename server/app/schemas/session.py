@@ -1,6 +1,6 @@
 """Schemas for Session API requests and responses."""
 
-from typing import Any, Literal
+from typing import Literal
 
 from app.schemas.base import AppBaseModel
 from app.schemas.file import FileAssetListItem
@@ -46,7 +46,6 @@ class StudioTestSnapshotAgentPayload(AppBaseModel):
     name: str
     description: str | None = None
     llm_id: int | None = None
-    skill_resolution_llm_id: int | None = None
     session_idle_timeout_minutes: int = Field(default=15, ge=1)
     sandbox_timeout_seconds: int = Field(default=60, ge=1)
     compact_threshold_percent: int = Field(default=60, ge=1, le=100)
@@ -237,7 +236,6 @@ class TaskMessage(AppBaseModel):
     agent_answer: str | None = None
     status: str
     total_tokens: int = 0
-    skill_selection_result: dict[str, Any] | None = None
     pending_user_action: PendingUserActionPayload | None = None
     current_plan: list[CurrentPlanStep] = Field(default_factory=list)
     recursions: list[RecursionDetail] = Field(default_factory=list)

@@ -70,7 +70,6 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
             snapshot_json=(
                 f'{{"schema_version":1,"agent":{{"id":{agent.id},"name":"agent-1",'
                 f'"description":null,"llm_id":{release_llm.id},'
-                '"skill_resolution_llm_id":null,'
                 '"session_idle_timeout_minutes":15,'
                 '"sandbox_timeout_seconds":60,'
                 '"compact_threshold_percent":60,'
@@ -193,7 +192,6 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
                     "name": "agent-1 draft",
                     "description": "Draft preview",
                     "llm_id": self.llm.id,
-                    "skill_resolution_llm_id": None,
                     "session_idle_timeout_minutes": 15,
                     "sandbox_timeout_seconds": 60,
                     "compact_threshold_percent": 60,

@@ -61,7 +61,6 @@ class AgentRuntimeConfig:
         agent_name: Human-readable agent name for error reporting.
         release_id: Published release pinned to the session, if any.
         llm_id: Primary LLM backing the runtime.
-        skill_resolution_llm_id: Optional resolver-only LLM.
         session_idle_timeout_minutes: Idle timeout used by the client shell.
         sandbox_timeout_seconds: Sandbox timeout applied to tool execution.
         compact_threshold_percent: Context-usage threshold for compaction.
@@ -76,7 +75,6 @@ class AgentRuntimeConfig:
     agent_name: str
     release_id: int | None
     llm_id: int | None
-    skill_resolution_llm_id: int | None
     session_idle_timeout_minutes: int
     sandbox_timeout_seconds: int
     compact_threshold_percent: int
@@ -121,7 +119,6 @@ class AgentReleaseRuntimeService:
             agent_name=agent.name,
             release_id=None,
             llm_id=agent.llm_id,
-            skill_resolution_llm_id=agent.skill_resolution_llm_id,
             session_idle_timeout_minutes=agent.session_idle_timeout_minutes,
             sandbox_timeout_seconds=agent.sandbox_timeout_seconds,
             compact_threshold_percent=agent.compact_threshold_percent,
@@ -293,10 +290,6 @@ class AgentReleaseRuntimeService:
             ),
             release_id=release_id,
             llm_id=self._read_snapshot_int_or_none(agent_payload, "llm_id"),
-            skill_resolution_llm_id=self._read_snapshot_int_or_none(
-                agent_payload,
-                "skill_resolution_llm_id",
-            ),
             session_idle_timeout_minutes=self._read_snapshot_int(
                 agent_payload,
                 "session_idle_timeout_minutes",

@@ -8,9 +8,8 @@ state if_first_time_in_session <<choice>>
 if_first_time_in_session --> [message]system_prompt: if this is the first task for the user input
 if_first_time_in_session --> skill_search: if this isn't
 
-[message]system_prompt --> skill_search
-skill_search --> skill_memory_tools_injection
-skill_memory_tools_injection --> [message]user_prompt
+[message]system_prompt --> tools_injection
+tools_injection --> [message]user_prompt
 [message]user_prompt --> RECURSION
 state RECURSION {
   [message][recursion_1]prepare --> [message][recursion_1]user
