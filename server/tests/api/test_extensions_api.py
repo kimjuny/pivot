@@ -359,9 +359,13 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.assertEqual(install_response.status_code, 200)
         installation_payload = install_response.json()
         installation_id = int(installation_payload["id"])
+        expected_logo_url = (
+            f"/api/extensions/installations/{installation_id}/logo"
+            f"?v={installation_payload['artifact_digest']}"
+        )
         self.assertEqual(
             installation_payload["logo_url"],
-            f"/api/extensions/installations/{installation_id}/logo",
+            expected_logo_url,
         )
 
         packages_response = self.client.get("/api/extensions/packages")
@@ -370,7 +374,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.assertEqual(len(packages_payload), 1)
         self.assertEqual(
             packages_payload[0]["logo_url"],
-            f"/api/extensions/installations/{installation_id}/logo",
+            expected_logo_url,
         )
 
         logo_response = self.client.get(
@@ -389,6 +393,31 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.app.dependency_overrides[auth_module.get_current_user] = (
             self._get_current_user
         )
+
+    def test_extension_logo_endpoint_returns_webp_media_type(self) -> None:
+        """The logo endpoint should preserve explicit webp assets for browsers."""
+        extension_root = self._write_hook_extension()
+        (extension_root / "logo.webp").write_bytes(b"RIFFtestWEBP")
+        install_parts = self._build_bundle_upload(
+            extension_root,
+            bundle_name="acme-hooks",
+            trust_confirmed=True,
+        )
+
+        install_response = self.client.post(
+            "/api/extensions/installations/import/bundle",
+            files=install_parts,
+        )
+
+        self.assertEqual(install_response.status_code, 200)
+        installation_id = int(install_response.json()["id"])
+        logo_response = self.client.get(
+            f"/api/extensions/installations/{installation_id}/logo"
+        )
+
+        self.assertEqual(logo_response.status_code, 200)
+        self.assertEqual(logo_response.headers["content-type"], "image/webp")
+        self.assertEqual(logo_response.content, b"RIFFtestWEBP")
 
     def test_installation_configuration_endpoints(self) -> None:
         """Configuration endpoints should expose schema and persist values."""

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "scope": "wasp",
+  "name": "plugin",
+  "display_name": "Wasp Plugin",
+  "version": "0.1.0",
+  "description": "Wasp framework skills for guided app development, plugin initialization, debugging, and deployment workflows.",
+  "api_version": "1.x",
+  "license": "MIT",
+  "homepage_url": "https://wasp.sh",
+  "repository_url": "https://github.com/wasp-lang/wasp-agent-plugins",
+  "contributions": {
+    "skills": [
+      {
+        "name": "add-feature",
+        "path": "skills/add-feature"
+      },
+      {
+        "name": "deploying-app",
+        "path": "skills/deploying-app"
+      },
+      {
+        "name": "expert-advice",
+        "path": "skills/expert-advice"
+      },
+      {
+        "name": "start-dev-server",
+        "path": "skills/start-dev-server"
+      },
+      {
+        "name": "wasp-plugin-help",
+        "path": "skills/wasp-plugin-help"
+      },
+      {
+        "name": "wasp-plugin-init",
+        "path": "skills/wasp-plugin-init"
+      }
+    ]
+  }
+}

@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -323,6 +330,96 @@ describe("ChatComposer", () => {
     expect(screen.queryByText("beta_skill")).not.toBeInTheDocument();
     expect(handleAddMandatorySkill).not.toHaveBeenCalled();
   });
+
+  it("scrolls the highlighted mandatory skill into view during keyboard navigation", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatComposer
+        {...buildComposerProps({
+          inputMessage: "/",
+          availableMandatorySkills: [
+            {
+              name: "alpha_skill",
+              description: "Alpha",
+              path: "/workspace/skills/alpha_skill/SKILL.md",
+            },
+            {
+              name: "beta_skill",
+              description: "Beta",
+              path: "/workspace/skills/beta_skill/SKILL.md",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask anything");
+    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected the composer to render a textarea element.");
+    }
+
+    await user.click(textarea);
+    placeComposerCaret(textarea, 1);
+
+    const betaSkill = await screen.findByText("beta_skill");
+    const betaItem = betaSkill.closest("[cmdk-item]");
+    expect(betaItem).not.toBeNull();
+    if (!(betaItem instanceof HTMLElement)) {
+      throw new Error("Expected the highlighted skill to render as an element.");
+    }
+
+    const scrollIntoViewSpy = vi.fn();
+    betaItem.scrollIntoView = scrollIntoViewSpy;
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+
+    await waitFor(() => {
+      expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "nearest" });
+    });
+  });
+
+  it("shows the full skill description in a hover card after hovering an item", async () => {
+    const user = userEvent.setup();
+    const fullDescription =
+      "This skill sets up the Wasp starter flow and explains every follow-up step.";
+
+    render(
+      <ChatComposer
+        {...buildComposerProps({
+          inputMessage: "/wasp",
+          availableMandatorySkills: [
+            {
+              name: "wasp-plugin-init",
+              description: fullDescription,
+              path: "/workspace/skills/wasp-plugin-init/SKILL.md",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask anything");
+    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected the composer to render a textarea element.");
+    }
+
+    await user.click(textarea);
+    placeComposerCaret(textarea, 5);
+
+    const skillName = await screen.findByText("wasp-plugin-init");
+    const skillItem = skillName.closest("[cmdk-item]");
+    expect(skillItem).not.toBeNull();
+    expect(screen.getAllByText(fullDescription)).toHaveLength(1);
+
+    await user.hover(skillItem as Element);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(fullDescription)).toHaveLength(2);
+    }, { timeout: 2000 });
+  }, 10000);
 
   it("collapses and expands the task plan from the header control", async () => {
     const user = userEvent.setup();

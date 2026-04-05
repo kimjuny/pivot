@@ -1219,6 +1219,7 @@ class ReactEngine:
         task: ReactTask,
         skills_metadata_json: str = "[]",
         mandatory_skills_json: str = "[]",
+        workspace_guidance: str = "",
         task_bootstrap_prefix_blocks: list[str] | None = None,
         task_bootstrap_suffix_blocks: list[str] | None = None,
         turn_user_message: str | None = None,
@@ -1235,6 +1236,8 @@ class ReactEngine:
             mandatory_skills_json: Full mandatory skill payload JSON injected
                 into the task bootstrap prompt when the user explicitly selects
                 one or more skills for the current send.
+            workspace_guidance: Full markdown workspace guidance injected into
+                the task bootstrap prompt for the active runtime workspace.
             task_bootstrap_prefix_blocks: Extra prompt blocks injected before the
                 standard task bootstrap body.
             task_bootstrap_suffix_blocks: Extra prompt blocks injected after the
@@ -1304,6 +1307,7 @@ class ReactEngine:
                     tool_manager=self.tool_manager,
                     skills=skills_metadata_json,
                     mandatory_skills=mandatory_skills_json,
+                    workspace_guidance=workspace_guidance,
                     prefix_blocks=task_bootstrap_prefix_blocks,
                     suffix_blocks=task_bootstrap_suffix_blocks,
                 ),
@@ -1325,6 +1329,7 @@ class ReactEngine:
                     tool_manager=self.tool_manager,
                     skills=skills_metadata_json,
                     mandatory_skills=mandatory_skills_json,
+                    workspace_guidance=workspace_guidance,
                 ),
             )
             self._log_messages_pretty(

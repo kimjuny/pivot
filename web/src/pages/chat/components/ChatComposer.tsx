@@ -30,6 +30,11 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -55,6 +60,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
+import { cn } from "@/lib/utils";
 import type { ReactContextUsageSummary } from "@/utils/api";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
 
@@ -200,6 +206,9 @@ export function ChatComposer({
         ? RefreshCw
         : Zap;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const mandatorySkillItemRefs = useRef<
+    Record<string, HTMLDivElement | null>
+  >({});
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [highlightedMandatorySkillIndex, setHighlightedMandatorySkillIndex] =
     useState(0);
@@ -321,6 +330,35 @@ export function ChatComposer({
       setDismissedMandatorySkillMentionKey(null);
     }
   }, [activeMandatorySkillMentionKey]);
+
+  /**
+   * Keeps keyboard navigation visible inside the bounded picker viewport so
+   * ArrowDown/ArrowUp feel like moving a real selection instead of sending the
+   * active item out of sight.
+   */
+  useEffect(() => {
+    if (!isMandatorySkillPickerOpen) {
+      return;
+    }
+
+    const highlightedSkill =
+      filteredMandatorySkills[highlightedMandatorySkillIndex] ?? null;
+    if (!highlightedSkill) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      mandatorySkillItemRefs.current[highlightedSkill.name]?.scrollIntoView({
+        block: "nearest",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    filteredMandatorySkills,
+    highlightedMandatorySkillIndex,
+    isMandatorySkillPickerOpen,
+  ]);
 
   /**
    * Converts the active slash token into one structured mandatory-skill chip
@@ -579,23 +617,50 @@ export function ChatComposer({
                     </CommandEmpty>
                     <CommandGroup>
                       {filteredMandatorySkills.map((skill, index) => (
-                        <CommandItem
+                        <HoverCard
                           key={skill.name}
-                          value={skill.name}
-                          onSelect={() => selectMandatorySkill(skill)}
-                          onMouseEnter={() =>
-                            setHighlightedMandatorySkillIndex(index)
-                          }
+                          openDelay={450}
+                          closeDelay={120}
                         >
-                          <div className="min-w-0">
-                            <div className="truncate font-mono text-xs font-medium">
+                          <HoverCardTrigger asChild>
+                            <CommandItem
+                              ref={(node) => {
+                                mandatorySkillItemRefs.current[skill.name] =
+                                  node;
+                              }}
+                              value={skill.name}
+                              onSelect={() => selectMandatorySkill(skill)}
+                              onMouseEnter={() =>
+                                setHighlightedMandatorySkillIndex(index)
+                              }
+                              className={cn(
+                                "cursor-pointer items-start",
+                                "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                              )}
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate font-mono text-xs font-medium">
+                                  {skill.name}
+                                </div>
+                                <div className="truncate text-xs text-muted-foreground">
+                                  {skill.description || skill.path}
+                                </div>
+                              </div>
+                            </CommandItem>
+                          </HoverCardTrigger>
+                          <HoverCardContent
+                            side="right"
+                            align="start"
+                            className="w-80 space-y-2 p-3"
+                          >
+                            <div className="font-mono text-xs font-medium text-foreground">
                               {skill.name}
                             </div>
-                            <div className="truncate text-xs text-muted-foreground">
-                              {skill.description || skill.path}
-                            </div>
-                          </div>
-                        </CommandItem>
+                            <p className="text-xs leading-relaxed text-muted-foreground">
+                              {skill.description || "No description provided."}
+                            </p>
+                          </HoverCardContent>
+                        </HoverCard>
                       ))}
                     </CommandGroup>
                   </CommandList>

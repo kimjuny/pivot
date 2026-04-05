@@ -39,7 +39,7 @@ from sqlmodel import Session, col, select
 _MANIFEST_FILENAME = "manifest.json"
 _README_MARKDOWN_FILENAME = "README.md"
 _SKILL_MARKDOWN_FILENAME = "SKILL.md"
-_DEFAULT_EXTENSION_LOGO_PATH = PurePosixPath("logo.png")
+_DEFAULT_EXTENSION_LOGO_BASENAME = "logo"
 _VALID_EXTENSION_SCOPE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_EXTENSION_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _VALID_PROVIDER_LOCAL_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
@@ -524,12 +524,11 @@ def _normalize_logo_path(
     dedicated folder without weakening path-safety checks.
     """
     if raw_logo_path is None:
-        default_logo_path = source_dir.joinpath(*_DEFAULT_EXTENSION_LOGO_PATH.parts)
-        return (
-            _DEFAULT_EXTENSION_LOGO_PATH.as_posix()
-            if default_logo_path.is_file()
-            else None
-        )
+        for relative_path in _default_extension_logo_paths():
+            candidate_path = source_dir.joinpath(*relative_path.parts)
+            if candidate_path.is_file():
+                return relative_path.as_posix()
+        return None
 
     if not isinstance(raw_logo_path, str):
         raise ValueError("manifest.json logo_path must be a string.")
@@ -546,6 +545,14 @@ def _normalize_logo_path(
         raise ValueError(f"Logo path '{relative_path.as_posix()}' does not exist.")
 
     return relative_path.as_posix()
+
+
+def _default_extension_logo_paths() -> list[PurePosixPath]:
+    """Return the supported root-level extension logo conventions in priority order."""
+    return [
+        PurePosixPath(f"{_DEFAULT_EXTENSION_LOGO_BASENAME}{suffix}")
+        for suffix in (".png", ".jpg", ".jpeg", ".svg", ".webp")
+    ]
 
 
 def _extract_bundle_extension_directory(
@@ -1145,8 +1152,9 @@ class ExtensionService:
                 logo_candidates.append(
                     _safe_relative_path(raw_logo_path, field_name="logo_path")
                 )
-        if _DEFAULT_EXTENSION_LOGO_PATH not in logo_candidates:
-            logo_candidates.append(_DEFAULT_EXTENSION_LOGO_PATH)
+        for default_logo_path in _default_extension_logo_paths():
+            if default_logo_path not in logo_candidates:
+                logo_candidates.append(default_logo_path)
 
         for relative_path in logo_candidates:
             if relative_path.suffix.lower() not in _SUPPORTED_EXTENSION_LOGO_SUFFIXES:
@@ -1160,12 +1168,25 @@ class ExtensionService:
         self,
         installation: ExtensionInstallation,
     ) -> str | None:
-        """Return one stable API URL for an installation logo, if present."""
+        """Return one versioned API URL for an installation logo, if present.
+
+        Why: local SQLite development can recycle integer primary keys after
+        rows or the whole database are removed. Versioning the image URL with
+        the persisted artifact digest prevents browsers from showing an older
+        extension's cached logo when a new installation later receives the
+        same numeric id.
+        """
         installation_id = installation.id or 0
         if installation_id <= 0:
             return None
         if self.get_installation_logo_path(installation) is None:
             return None
+        version_token = installation.artifact_digest or installation.manifest_hash
+        if version_token:
+            return (
+                f"/api/extensions/installations/{installation_id}/logo"
+                f"?v={version_token}"
+            )
         return f"/api/extensions/installations/{installation_id}/logo"
 
     def get_installation_contribution_items(

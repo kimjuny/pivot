@@ -69,7 +69,8 @@ acme-extension/
 Rules:
 
 - `manifest.json` is required
-- A root-level `logo.png` is optional and will be picked up automatically
+- A root-level `logo.png`, `logo.jpg`, `logo.jpeg`, `logo.svg`, or `logo.webp`
+  is optional and will be picked up automatically
 - Skill directories must contain `SKILL.md`
 - Paths inside the manifest must be relative to the package root
 - `manifest.json.logo_path` may point to a different image file relative to the
@@ -186,7 +187,8 @@ Validation rules worth knowing:
 - `scope` and `name` must be simple lowercase identifiers
 - `version` must be a non-empty version token
 - `logo_path`, when present, must be a relative image path inside the package
-- if `logo_path` is omitted, Pivot falls back to a root-level `logo.png`
+- if `logo_path` is omitted, Pivot falls back to a supported root-level
+  `logo.*` file
 - provider keys must use `scope@provider_name`
 - provider key scope must match `manifest.json.scope`
 - hook `name` must be a non-empty operator-facing label
@@ -201,7 +203,8 @@ pages.
 
 Recommended options:
 
-- Put `logo.png` at the package root and omit `logo_path`
+- Put `logo.png`, `logo.jpg`, `logo.jpeg`, `logo.svg`, or `logo.webp` at the
+  package root and omit `logo_path`
 - Or declare `logo_path` explicitly when the asset lives elsewhere, for example
   `assets/logo.svg`
 

@@ -15,7 +15,7 @@ def submit_skill_change(
 
     Use this tool for any skill work written under ``/workspace/skills``.
 
-    **Important:** This tool is to submit skill file change only, other files are not allowed to submit.
+    **Important:** This tool is to submit skill files change only, other files are not allowed to submit.
 
     Workflow:
     1. Create or edit one skill directory inside ``/workspace/skills/<name>``.

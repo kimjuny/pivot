@@ -46,6 +46,7 @@ import ChannelBindingDialog from './ChannelBindingDialog';
 import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
+import { ExtensionLogoAvatar } from './ExtensionLogoAvatar';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
 import { WebSearchProviderBadge } from './WebSearchProviderBadge';
 import {
@@ -349,6 +350,20 @@ function AgentDetailSidebar({
             ])
         ),
         [webSearchCatalog]
+    );
+
+    /**
+     * Prefer installation-backed branding because one package card may point at
+     * an older package-level snapshot while the selected binding targets the
+     * concrete installed version the agent is actively using.
+     */
+    const getExtensionLogoUrl = useCallback(
+        (pkg: AgentExtensionPackage): string | null => (
+            pkg.selected_binding?.installation.logo_url
+            ?? pkg.logo_url
+            ?? null
+        ),
+        []
     );
 
     /**
@@ -1337,7 +1352,13 @@ function AgentDetailSidebar({
                                                                     onClick={() => handleEditExtension(pkg)}
                                                                     className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                                                                 >
-                                                                    <Server className="size-3.5 shrink-0" />
+                                                                    <ExtensionLogoAvatar
+                                                                        name={pkg.display_name}
+                                                                        logoUrl={getExtensionLogoUrl(pkg)}
+                                                                        fallback={<Server className="size-3.5" aria-hidden="true" />}
+                                                                        containerClassName="flex size-3.5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-sidebar-foreground/60"
+                                                                        imageClassName="size-full object-contain"
+                                                                    />
                                                                     <span className="truncate flex-1">
                                                                         {pkg.display_name}
                                                                     </span>

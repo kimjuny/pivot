@@ -165,7 +165,8 @@ acme-crm/
 Rules:
 
 - `manifest.json` is required.
-- A root-level `logo.png` is optional and becomes the package logo by default.
+- A root-level `logo.png`, `logo.jpg`, `logo.jpeg`, `logo.svg`, or `logo.webp`
+  is optional and becomes the package logo by default.
 - Each skill directory must contain a `SKILL.md` file. This should not be
   configurable.
 - Contribution source code should live in dedicated top-level directories by

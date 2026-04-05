@@ -53,6 +53,14 @@ if TYPE_CHECKING:
 
 router = APIRouter()
 
+_EXTENSION_LOGO_MEDIA_TYPES: dict[str, str] = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+}
+
 
 def _serialize_utc_timestamp(timestamp: datetime) -> str:
     """Return one explicit UTC ISO timestamp string for API responses."""
@@ -482,7 +490,9 @@ async def get_extension_installation_logo(
     if logo_path is None:
         raise HTTPException(status_code=404, detail="Extension logo not found")
 
-    media_type, _ = mimetypes.guess_type(logo_path.name)
+    media_type = _EXTENSION_LOGO_MEDIA_TYPES.get(logo_path.suffix.lower())
+    if media_type is None:
+        media_type, _ = mimetypes.guess_type(logo_path.name)
     return FileResponse(
         str(logo_path),
         media_type=media_type or "application/octet-stream",

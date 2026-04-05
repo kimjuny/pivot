@@ -1467,8 +1467,30 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(logo_path.name, "logo.png")
         self.assertEqual(
             service.get_installation_logo_url(installation),
-            f"/api/extensions/installations/{installation.id}/logo",
+            (
+                f"/api/extensions/installations/{installation.id}/logo"
+                f"?v={installation.artifact_digest}"
+            ),
         )
+
+    def test_root_logo_webp_is_used_when_manifest_omits_logo_path(self) -> None:
+        """Root-level logo.webp should also be accepted by convention."""
+        extension_root = self._write_extension()
+        (extension_root / "logo.webp").write_bytes(b"RIFFtestWEBP")
+        service = ExtensionService(self.session)
+
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+
+        logo_path = service.get_installation_logo_path(installation)
+
+        self.assertIsNotNone(logo_path)
+        if logo_path is None:
+            return
+        self.assertEqual(logo_path.name, "logo.webp")
 
     def test_manifest_logo_path_supports_nested_assets(self) -> None:
         """Manifest logo_path should allow package-relative image assets."""

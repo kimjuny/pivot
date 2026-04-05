@@ -215,4 +215,108 @@ describe("AgentDetailSidebar", () => {
       expect(onExtensionBindingsChanged).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("renders the extension logo in the sidebar when one is available", async () => {
+    vi.mocked(getSharedTools).mockResolvedValue([]);
+    vi.mocked(getPrivateTools).mockResolvedValue([]);
+    vi.mocked(getSharedSkills).mockResolvedValue([]);
+    vi.mocked(getPrivateSkills).mockResolvedValue([]);
+    vi.mocked(getChannels).mockResolvedValue([]);
+    vi.mocked(getAgentChannels).mockResolvedValue([]);
+    vi.mocked(getWebSearchProviders).mockResolvedValue([]);
+    vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
+    vi.mocked(getAgentExtensionPackages).mockResolvedValue([
+      {
+        scope: "wasp",
+        name: "plugin",
+        package_id: "@wasp/plugin",
+        display_name: "Wasp Plugin",
+        description: "Wasp framework skills",
+        logo_url: "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
+        active_version_count: 1,
+        disabled_version_count: 0,
+        has_update_available: false,
+        selected_binding: {
+          id: 3,
+          agent_id: 2,
+          extension_installation_id: 7,
+          enabled: true,
+          priority: 0,
+          config: {},
+          created_at: "2026-04-03T00:00:00+00:00",
+          updated_at: "2026-04-03T00:00:00+00:00",
+          installation: {
+            id: 7,
+            scope: "wasp",
+            name: "plugin",
+            package_id: "@wasp/plugin",
+            version: "0.1.0",
+            display_name: "Wasp Plugin",
+            description: "Wasp framework skills",
+            logo_url: "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
+            manifest_hash: "hash",
+            artifact_storage_backend: "local_fs",
+            artifact_key: "extensions/wasp/plugin/0.1.0/hash.tar.gz",
+            artifact_digest: "digest",
+            artifact_size_bytes: 128,
+            install_root: "/tmp/extensions/wasp/plugin/0.1.0",
+            source: "bundle",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            status: "active",
+            created_at: "2026-04-03T00:00:00+00:00",
+            updated_at: "2026-04-03T00:00:00+00:00",
+            reference_summary: {
+              extension_binding_count: 1,
+              channel_binding_count: 0,
+              web_search_binding_count: 0,
+              binding_count: 1,
+              release_count: 0,
+              test_snapshot_count: 0,
+              saved_draft_count: 0,
+            },
+            contribution_summary: {
+              channel_providers: [],
+              web_search_providers: [],
+              hooks: [],
+              tools: [],
+              skills: [],
+            },
+            contribution_items: [],
+          },
+        },
+        latest_version: "0.1.0",
+        versions: [],
+      },
+    ]);
+
+    render(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar
+          agent={baseAgent}
+          scenes={[] as Scene[]}
+          selectedScene={null}
+          onSceneSelect={vi.fn()}
+          onCreateScene={vi.fn()}
+          onDeleteScene={vi.fn()}
+        />
+      </SidebarProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getAgentExtensionPackages).toHaveBeenCalledWith(2);
+    });
+
+    await userEvent.setup().click(screen.getAllByText("Extensions")[1]);
+
+    expect(screen.getByAltText("Wasp Plugin logo")).toHaveAttribute(
+      "src",
+      "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
+    );
+  });
 });

@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.crud.llm import llm as llm_crud
 from app.llm.token_estimator import estimate_messages_tokens
 from app.models.react import ReactTask
+from app.models.session import Session as SessionModel
 from app.orchestration.react.context import ReactContext
 from app.orchestration.react.prompt_template import (
     build_runtime_payload_message,
@@ -29,6 +30,8 @@ from app.services.skill_service import (
     build_skills_metadata_prompt_json,
     build_skills_metadata_prompt_payload,
 )
+from app.services.workspace_guidance_service import build_workspace_guidance_prompt
+from app.services.workspace_service import WorkspaceService
 from sqlmodel import Session as DBSession, select
 
 if TYPE_CHECKING:
@@ -311,6 +314,34 @@ class ReactContextUsageService:
                 selected_skill_names=mandatory_skill_names or [],
                 extra_skills=extension_skills,
             ),
+            workspace_guidance=self._build_workspace_guidance(session_id=session_id),
+        )
+
+    def _build_workspace_guidance(self, *, session_id: str | None) -> str:
+        """Build the active workspace guidance block for one session.
+
+        Args:
+            session_id: Session whose workspace guidance should be injected.
+
+        Returns:
+            Rendered workspace guidance markdown, or an empty string when the
+            session has no runtime workspace or no supported guidance file.
+        """
+        if session_id is None:
+            return ""
+
+        statement = select(SessionModel).where(SessionModel.session_id == session_id)
+        session_row = self.db.exec(statement).first()
+        if session_row is None or session_row.workspace_id is None:
+            return ""
+
+        workspace_service = WorkspaceService(self.db)
+        workspace = workspace_service.get_workspace(session_row.workspace_id)
+        if workspace is None:
+            return ""
+
+        return build_workspace_guidance_prompt(
+            workspace_service.get_workspace_path(workspace)
         )
 
     def list_runtime_skills(
