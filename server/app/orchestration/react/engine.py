@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 from app.config import get_settings
 from app.crud.llm import llm as llm_crud
 from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
+from app.llm.thinking_policy import build_runtime_thinking_kwargs
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
 from app.llm.usage_accumulator import StreamingUsageAccumulator, usage_to_token_counter
 from app.models.agent import Agent
@@ -33,7 +34,7 @@ from app.services.react_state_service import ReactStateService
 from app.services.session_service import SessionService
 from app.services.task_attachment_service import TaskAttachmentService
 from fastapi.concurrency import run_in_threadpool
-from sqlmodel import Session
+from sqlmodel import Session, desc, select
 
 from .context import ReactContext
 from .parser import (
@@ -69,6 +70,7 @@ class ReactEngine:
         tool_execution_context: ToolExecutionContext | None = None,
         stream_llm_responses: bool = True,
         llm_runtime_kwargs: dict[str, Any] | None = None,
+        thinking_runtime_config: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize ReAct engine.
@@ -84,9 +86,94 @@ class ReactEngine:
         self.tool_execution_context = tool_execution_context
         self.stream_llm_responses = stream_llm_responses
         self.llm_runtime_kwargs = llm_runtime_kwargs or {}
+        self.thinking_runtime_config = thinking_runtime_config or {}
         self.runtime_service = ReactRuntimeService(db)
         self.state_service = ReactStateService(db)
         self.cancelled = False  # Flag to signal cancellation
+
+    def _previous_recursion_failed(self, task: ReactTask) -> bool:
+        """Return whether the latest persisted recursion ended in failure.
+
+        Why: Auto thinking should stay cheap for normal steady-state execution,
+        but it should unlock deeper reasoning when the agent needs to recover
+        from the previous recursion failing, especially after tool errors.
+
+        Args:
+            task: Task whose latest recursion should be inspected.
+
+        Returns:
+            ``True`` when the previous recursion failed at the recursion level or
+            any tool call in that recursion reported an error.
+        """
+        if task.id is None:
+            return False
+
+        statement = (
+            select(ReactRecursion)
+            .where(ReactRecursion.react_task_id == task.id)
+            .order_by(desc(ReactRecursion.iteration_index), desc(ReactRecursion.id))
+        )
+        previous_recursion = self.db.exec(statement).first()
+        if previous_recursion is None:
+            return False
+        if previous_recursion.status == "error":
+            return True
+
+        raw_tool_results = previous_recursion.tool_call_results
+        if not raw_tool_results:
+            return False
+
+        try:
+            parsed_tool_results = json.loads(raw_tool_results)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Failed to parse tool_call_results while resolving Auto thinking. "
+                "task_id=%s trace_id=%s",
+                task.task_id,
+                previous_recursion.trace_id,
+            )
+            return True
+
+        if not isinstance(parsed_tool_results, list):
+            return True
+
+        for item in parsed_tool_results:
+            if not isinstance(item, dict):
+                continue
+            if item.get("success") is False:
+                return True
+            error_message = item.get("error")
+            if isinstance(error_message, str) and error_message.strip():
+                return True
+        return False
+
+    def _build_iteration_llm_runtime_kwargs(self, task: ReactTask) -> dict[str, Any]:
+        """Build runtime LLM kwargs for the current recursion.
+
+        Args:
+            task: Task whose current recursion is about to run.
+
+        Returns:
+            Provider kwargs combining static settings with dynamic thinking mode.
+        """
+        runtime_kwargs = dict(self.llm_runtime_kwargs)
+        if not self.thinking_runtime_config:
+            return runtime_kwargs
+
+        runtime_kwargs.update(
+            build_runtime_thinking_kwargs(
+                protocol=str(self.thinking_runtime_config["protocol"]),
+                thinking_policy=str(self.thinking_runtime_config["thinking_policy"]),
+                thinking_effort=self.thinking_runtime_config.get("thinking_effort"),
+                thinking_budget_tokens=self.thinking_runtime_config.get(
+                    "thinking_budget_tokens"
+                ),
+                thinking_mode=self.thinking_runtime_config.get("thinking_mode"),
+                iteration_index=task.iteration,
+                previous_iteration_failed=self._previous_recursion_failed(task),
+            )
+        )
+        return runtime_kwargs
 
     def _new_token_counter(self) -> dict[str, int]:
         """Create a token counter used across parse retries.
@@ -169,7 +256,6 @@ class ReactEngine:
         attachment_service = TaskAttachmentService(self.db)
         attachments = attachment_service.create_from_answer_paths(
             username=task.user,
-            agent_id=task.agent_id,
             task_id=task.task_id,
             session_id=task.session_id,
             paths=declared_paths,
@@ -1294,7 +1380,7 @@ class ReactEngine:
 
                 messages_for_llm = runtime_state.messages
                 llm_chat_kwargs: dict[str, Any] = {
-                    **self.llm_runtime_kwargs,
+                    **self._build_iteration_llm_runtime_kwargs(task),
                     "_pivot_task_id": task.task_id,
                 }
                 if (

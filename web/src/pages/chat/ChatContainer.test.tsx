@@ -10,7 +10,9 @@ vi.mock("@/utils/api", async () => {
   return {
     ...actual,
     cancelReactTask: vi.fn(),
+    createProject: vi.fn(),
     createSession: vi.fn(),
+    deleteProject: vi.fn(),
     deleteSession: vi.fn(),
     getAgentWebSearchBindings: vi.fn(),
     getFullSessionHistory: vi.fn(),
@@ -20,9 +22,11 @@ vi.mock("@/utils/api", async () => {
     httpClient: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
       fetch(input, init),
     ),
+    listProjects: vi.fn(),
     listSessions: vi.fn(),
     startReactTask: vi.fn(),
     submitReactUserAction: vi.fn(),
+    updateProject: vi.fn(),
     updateSession: vi.fn(),
   };
 });
@@ -36,6 +40,7 @@ vi.mock("@/contexts/auth-core", () => ({
 
 import {
   cancelReactTask,
+  createProject,
   createSession,
   getAgentWebSearchBindings,
   getFullSessionHistory,
@@ -43,9 +48,11 @@ import {
   getReactContextUsage,
   getReactSessionRuntimeDebug,
   httpClient,
+  listProjects,
   listSessions,
   startReactTask,
   submitReactUserAction,
+  updateProject,
 } from "@/utils/api";
 
 import ChatContainer from "./ChatContainer";
@@ -111,6 +118,16 @@ describe("ChatContainer session rollover", () => {
       thinking_policy: "auto",
       thinking_effort: null,
     } as Awaited<ReturnType<typeof getLLMById>>);
+    vi.mocked(createProject).mockResolvedValue({
+      id: 1,
+      project_id: "project-1",
+      agent_id: 7,
+      name: "New project",
+      description: null,
+      workspace_id: "workspace-1",
+      created_at: "2026-03-19T00:00:00.000Z",
+      updated_at: "2026-03-19T00:00:00.000Z",
+    });
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(getReactContextUsage).mockResolvedValue(buildContextUsage());
     vi.mocked(getReactSessionRuntimeDebug).mockResolvedValue({
@@ -127,6 +144,20 @@ describe("ChatContainer session rollover", () => {
       last_event_id: 0,
       resume_from_event_id: 0,
       tasks: [],
+    });
+    vi.mocked(listProjects).mockResolvedValue({
+      projects: [],
+      total: 0,
+    });
+    vi.mocked(updateProject).mockResolvedValue({
+      id: 1,
+      project_id: "project-1",
+      agent_id: 7,
+      name: "Renamed project",
+      description: null,
+      workspace_id: "workspace-1",
+      created_at: "2026-03-19T00:00:00.000Z",
+      updated_at: "2026-03-19T01:00:00.000Z",
     });
     vi.mocked(httpClient).mockResolvedValue(
       new Response(
@@ -411,7 +442,7 @@ describe("ChatContainer session rollover", () => {
     });
   });
 
-  it("defaults to Thinking mode when the primary LLM exposes a non-fast thinking tier", async () => {
+  it("defaults to Auto mode when the primary LLM exposes a non-fast thinking tier", async () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
     vi.mocked(getLLMById).mockResolvedValue({
       image_input: false,
@@ -465,6 +496,12 @@ describe("ChatContainer session rollover", () => {
       ).toBeInTheDocument();
     });
 
+    await user.click(screen.getByRole("combobox", { name: "Thinking mode" }));
+    expect(screen.getByRole("option", { name: "Auto" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Fast" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Thinking" })).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Auto" }));
+
     await user.type(screen.getByPlaceholderText("Ask anything"), "Think first");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
@@ -476,7 +513,7 @@ describe("ChatContainer session rollover", () => {
         task_id: null,
         file_ids: [],
         web_search_provider: null,
-        thinking_mode: "thinking",
+        thinking_mode: "auto",
       });
     });
   });
@@ -578,6 +615,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     await user.click(screen.getByRole("combobox", { name: "Thinking mode" }));
+    expect(screen.queryByRole("option", { name: "Auto" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Fast" })).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: "Thinking" }),

@@ -23,6 +23,8 @@ class ToolExecutionContext:
 
     username: str
     agent_id: int
+    workspace_id: str
+    workspace_backend_path: str
     sandbox_timeout_seconds: int = 60
     web_search_provider: str | None = None
     allowed_skills: tuple[dict[str, str], ...] = ()

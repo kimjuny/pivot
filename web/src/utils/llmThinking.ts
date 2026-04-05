@@ -3,7 +3,7 @@ import type { LLM } from "@/types";
 /**
  * User-facing runtime mode exposed by the chat composer.
  */
-export type ChatThinkingMode = "fast" | "thinking";
+export type ChatThinkingMode = "auto" | "fast" | "thinking";
 
 /**
  * Top-level provider families shown in the LLM Thinking section.
@@ -479,7 +479,7 @@ export function getChatThinkingModes(
       llm?.thinking_effort ?? null,
     )
   ) {
-    return ["fast", "thinking"];
+    return ["auto", "fast", "thinking"];
   }
   return ["fast"];
 }
@@ -496,7 +496,7 @@ export function getDefaultChatThinkingMode(
       llm?.thinking_effort ?? null,
     )
   ) {
-    return "thinking";
+    return "auto";
   }
   return "fast";
 }

@@ -14,6 +14,7 @@ from app.models.extension import (
 )
 from app.models.file import FileAsset
 from app.models.llm import LLM
+from app.models.project import Project
 from app.models.react import (
     ReactPlanStep,
     ReactRecursion,
@@ -27,6 +28,7 @@ from app.models.skill_change_submission import SkillChangeSubmission
 from app.models.task_attachment import TaskAttachment
 from app.models.user import User, UserLogin, UserResponse
 from app.models.web_search import AgentWebSearchBinding
+from app.models.workspace import Workspace
 
 __all__ = [
     "LLM",
@@ -45,6 +47,7 @@ __all__ = [
     "ExtensionInstallation",
     "ExternalIdentityBinding",
     "FileAsset",
+    "Project",
     "ReactPlanStep",
     "ReactRecursion",
     "ReactRecursionState",
@@ -59,4 +62,5 @@ __all__ = [
     "User",
     "UserLogin",
     "UserResponse",
+    "Workspace",
 ]

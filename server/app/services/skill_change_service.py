@@ -12,7 +12,7 @@ from io import BytesIO
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
-from app.db.session import get_engine
+from app.db.session import managed_session
 from app.models.skill import Skill
 from app.models.skill_change_submission import SkillChangeSubmission
 from app.models.user import User
@@ -145,12 +145,15 @@ def _export_draft_snapshot(
     *,
     username: str,
     agent_id: int,
+    workspace_id: str,
+    workspace_backend_path: str,
     draft_dir_path: str,
 ) -> tuple[bytes, int, int]:
     """Archive one sandbox draft skill directory and return its bytes."""
     result = get_sandbox_service().exec(
         username=username,
-        agent_id=agent_id,
+        workspace_id=workspace_id,
+        workspace_backend_path=workspace_backend_path,
         cmd=_sandbox_export_command(draft_dir_path),
     )
     if result.exit_code != 0:
@@ -270,6 +273,8 @@ def stage_skill_change_submission(
     current_user: User,
     *,
     agent_id: int,
+    workspace_id: str,
+    workspace_backend_path: str,
     draft_dir_path: str,
     message: str = "",
 ) -> dict[str, object]:
@@ -279,6 +284,8 @@ def stage_skill_change_submission(
         session: Active database session.
         current_user: Authenticated owner of the target private skill namespace.
         agent_id: Agent workspace that holds the draft.
+        workspace_id: Owning runtime workspace identifier.
+        workspace_backend_path: Backend-container workspace path.
         draft_dir_path: Sandbox-local path under ``/workspace/skills``.
         message: Optional agent-authored explanation shown to the user.
 
@@ -292,6 +299,8 @@ def stage_skill_change_submission(
     archive_bytes, file_count, total_bytes = _export_draft_snapshot(
         username=current_user.username,
         agent_id=agent_id,
+        workspace_id=workspace_id,
+        workspace_backend_path=workspace_backend_path,
         draft_dir_path=normalized_path,
     )
 
@@ -383,6 +392,8 @@ def submit_skill_change_for_agent(
     *,
     username: str,
     agent_id: int,
+    workspace_id: str,
+    workspace_backend_path: str,
     skill_path: str,
     message: str = "",
 ) -> dict[str, object]:
@@ -394,6 +405,8 @@ def submit_skill_change_for_agent(
     Args:
         username: Authenticated username from the tool execution context.
         agent_id: Agent workspace that authored the draft.
+        workspace_id: Owning runtime workspace identifier.
+        workspace_backend_path: Backend-container workspace path.
         skill_path: Sandbox-local skill directory under ``/workspace/skills``.
         message: Optional reviewer-facing explanation of the staged change.
 
@@ -403,7 +416,7 @@ def submit_skill_change_for_agent(
     Raises:
         ValueError: If the user cannot be resolved or the draft is invalid.
     """
-    with Session(get_engine()) as session:
+    with managed_session() as session:
         current_user = session.exec(
             select(User).where(User.username == username)
         ).first()
@@ -414,6 +427,8 @@ def submit_skill_change_for_agent(
             session,
             current_user,
             agent_id=agent_id,
+            workspace_id=workspace_id,
+            workspace_backend_path=workspace_backend_path,
             draft_dir_path=skill_path,
             message=message,
         )

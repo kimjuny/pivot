@@ -8,7 +8,7 @@ DEFAULT_CLAUDE_EXTENDED_BUDGET_TOKENS = 10000
 DEFAULT_CLAUDE_ADAPTIVE_EFFORT = "high"
 DEFAULT_OPENAI_RESPONSE_REASONING_EFFORT = "medium"
 
-ThinkingMode = Literal["fast", "thinking"]
+ThinkingMode = Literal["auto", "fast", "thinking"]
 
 PROTOCOL_THINKING_POLICIES: dict[str, tuple[str, ...]] = {
     "openai_completion_llm": (
@@ -174,9 +174,48 @@ def get_default_thinking_mode(
         thinking_effort: Optional effort tier.
 
     Returns:
-        ``thinking`` when a thinking tier exists, otherwise ``fast``.
+        ``auto`` when a thinking tier exists, otherwise ``fast``.
     """
     if policy_supports_thinking_mode(thinking_policy, thinking_effort):
+        return "auto"
+    return "fast"
+
+
+def resolve_runtime_thinking_mode(
+    *,
+    thinking_policy: str,
+    thinking_effort: str | None = None,
+    thinking_mode: ThinkingMode | None = None,
+    iteration_index: int | None = None,
+    previous_iteration_failed: bool = False,
+) -> Literal["fast", "thinking"]:
+    """Resolve the effective runtime mode for one recursion.
+
+    Args:
+        thinking_policy: Stored thinking policy.
+        thinking_effort: Optional effort tier.
+        thinking_mode: User-selected runtime mode.
+        iteration_index: Zero-based iteration index of the current recursion.
+        previous_iteration_failed: Whether the immediately preceding recursion
+            failed and should unlock deeper reasoning for recovery.
+
+    Returns:
+        The concrete runtime mode to apply for this recursion.
+    """
+    if not policy_supports_thinking_mode(thinking_policy, thinking_effort):
+        return "fast"
+
+    effective_mode = thinking_mode or get_default_thinking_mode(
+        thinking_policy,
+        thinking_effort,
+    )
+    if effective_mode == "thinking":
+        return "thinking"
+    if effective_mode == "fast":
+        return "fast"
+
+    current_iteration_index = iteration_index if iteration_index is not None else 0
+    if current_iteration_index <= 0 or previous_iteration_failed:
         return "thinking"
     return "fast"
 
@@ -188,6 +227,8 @@ def build_runtime_thinking_kwargs(
     thinking_effort: str | None = None,
     thinking_budget_tokens: int | None = None,
     thinking_mode: ThinkingMode | None = None,
+    iteration_index: int | None = None,
+    previous_iteration_failed: bool = False,
 ) -> dict[str, Any]:
     """Translate stored thinking config plus runtime mode into request kwargs.
 
@@ -197,6 +238,9 @@ def build_runtime_thinking_kwargs(
         thinking_effort: Optional effort tier.
         thinking_budget_tokens: Optional budget for extended thinking.
         thinking_mode: User-selected runtime mode.
+        iteration_index: Zero-based iteration index of the current recursion.
+        previous_iteration_failed: Whether the immediately preceding recursion
+            failed and should enable recovery-oriented thinking in Auto mode.
 
     Returns:
         Provider request kwargs to merge into one LLM call.
@@ -214,14 +258,14 @@ def build_runtime_thinking_kwargs(
     if normalized_policy == DEFAULT_THINKING_POLICY:
         return {}
 
-    effective_mode = thinking_mode or get_default_thinking_mode(
-        normalized_policy,
-        normalized_effort,
+    effective_mode = resolve_runtime_thinking_mode(
+        thinking_policy=normalized_policy,
+        thinking_effort=normalized_effort,
+        thinking_mode=thinking_mode,
+        iteration_index=iteration_index,
+        previous_iteration_failed=previous_iteration_failed,
     )
-    if effective_mode == "thinking" and policy_supports_thinking_mode(
-        normalized_policy,
-        normalized_effort,
-    ):
+    if effective_mode == "thinking":
         return _build_thinking_kwargs(
             normalized_policy,
             normalized_effort,

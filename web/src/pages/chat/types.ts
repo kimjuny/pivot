@@ -1,6 +1,8 @@
 import type {
   FileUploadSource,
+  ProjectResponse,
   ReactSessionRuntimeDebug,
+  SessionListItem,
   TaskAttachmentAsset,
 } from "@/utils/api";
 import type {
@@ -24,6 +26,14 @@ export interface ChatSidebarNavigationItem {
   isActive: boolean;
   /** Callback invoked when the user selects the destination. */
   onSelect: () => void | Promise<void>;
+}
+
+/**
+ * One sidebar project with its nested sessions already grouped for rendering.
+ */
+export interface ChatSidebarProjectItem extends ProjectResponse {
+  /** Sessions currently attached to this project workspace. */
+  sessions: SessionListItem[];
 }
 
 /**

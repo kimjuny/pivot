@@ -20,6 +20,45 @@ thinking_policy = import_module("app.llm.thinking_policy")
 class ThinkingPolicyTestCase(unittest.TestCase):
     """Verify thinking configuration maps cleanly onto provider payloads."""
 
+    def test_auto_mode_defaults_to_thinking_on_first_iteration(self) -> None:
+        """Auto mode should preserve deep reasoning for the opening plan pass."""
+        kwargs = thinking_policy.build_runtime_thinking_kwargs(
+            protocol="openai_response_llm",
+            thinking_policy="openai-response-reasoning-effort",
+            thinking_effort="high",
+            thinking_mode="auto",
+            iteration_index=0,
+            previous_iteration_failed=False,
+        )
+
+        self.assertEqual(kwargs, {"reasoning": {"effort": "high"}})
+
+    def test_auto_mode_falls_back_to_fast_after_clean_iteration(self) -> None:
+        """Auto mode should stay cheap once the task is progressing normally."""
+        kwargs = thinking_policy.build_runtime_thinking_kwargs(
+            protocol="openai_response_llm",
+            thinking_policy="openai-response-reasoning-effort",
+            thinking_effort="high",
+            thinking_mode="auto",
+            iteration_index=1,
+            previous_iteration_failed=False,
+        )
+
+        self.assertEqual(kwargs, {"reasoning": {"effort": "none"}})
+
+    def test_auto_mode_reenables_thinking_after_previous_failure(self) -> None:
+        """Auto mode should give the agent extra room to recover from failures."""
+        kwargs = thinking_policy.build_runtime_thinking_kwargs(
+            protocol="openai_response_llm",
+            thinking_policy="openai-response-reasoning-effort",
+            thinking_effort="high",
+            thinking_mode="auto",
+            iteration_index=2,
+            previous_iteration_failed=True,
+        )
+
+        self.assertEqual(kwargs, {"reasoning": {"effort": "high"}})
+
     def test_qwen_fast_override_disables_thinking(self) -> None:
         """Fast mode should explicitly disable Qwen thinking."""
         kwargs = thinking_policy.build_runtime_thinking_kwargs(

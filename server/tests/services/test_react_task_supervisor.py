@@ -21,6 +21,7 @@ LLM = import_module("app.models.llm").LLM
 ReactTask = import_module("app.models.react").ReactTask
 SessionModel = import_module("app.models.session").Session
 User = import_module("app.models.user").User
+Workspace = import_module("app.models.workspace").Workspace
 ReactTaskLaunchRequest = import_module(
     "app.services.react_task_supervisor"
 ).ReactTaskLaunchRequest
@@ -118,11 +119,20 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.session.refresh(release)
         self.release = release
 
+        workspace = Workspace(
+            workspace_id="workspace-1",
+            agent_id=agent.id or 0,
+            user="alice",
+            scope="session_private",
+            session_id="session-1",
+        )
+        self.session.add(workspace)
         session = SessionModel(
             session_id="session-1",
             agent_id=agent.id or 0,
             release_id=release.id or 0,
             user="alice",
+            workspace_id="workspace-1",
             chat_history=json.dumps({"version": 1, "messages": []}),
             react_llm_messages="[]",
             react_llm_cache_state="{}",
@@ -242,11 +252,6 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             ),
             patch.object(
                 react_task_supervisor_module,
-                "build_runtime_thinking_kwargs",
-                return_value={},
-            ),
-            patch.object(
-                react_task_supervisor_module,
                 "list_visible_skills",
                 return_value=[],
             ),
@@ -279,10 +284,13 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                 )
             )
 
-        build_tool_manager.assert_called_once_with(
-            username="alice",
-            agent_id=self.agent.id or 0,
-            raw_tool_ids='["release_tool"]',
+        build_tool_manager.assert_called_once()
+        build_tool_manager_kwargs = build_tool_manager.call_args.kwargs
+        self.assertEqual(build_tool_manager_kwargs["username"], "alice")
+        self.assertEqual(build_tool_manager_kwargs["agent_id"], self.agent.id or 0)
+        self.assertEqual(
+            build_tool_manager_kwargs["raw_tool_ids"],
+            '["release_tool"]',
         )
         self.assertIn("tool_execution_context", captured)
         tool_execution_context = captured["tool_execution_context"]

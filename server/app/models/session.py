@@ -29,6 +29,8 @@ class Session(SQLModel, table=True):
         user: Username of the user who owns this session.
         status: Current session lifecycle status (active, waiting_input, closed).
         runtime_status: Live aggregate execution state derived from child tasks.
+        project_id: Owning project UUID for shared-workspace sessions.
+        workspace_id: Owning workspace UUID.
         title: Optional user-facing session label set from the sidebar.
         is_pinned: Whether the session should stay at the top of the sidebar.
         chat_history: JSON string containing the complete chat history.
@@ -76,6 +78,16 @@ class Session(SQLModel, table=True):
     runtime_status: str = Field(
         default="idle",
         description="Live runtime status: idle, running, waiting_input",
+    )
+    project_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Shared project UUID for project-backed sessions",
+    )
+    workspace_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Owning workspace UUID",
     )
     title: str | None = Field(
         default=None,

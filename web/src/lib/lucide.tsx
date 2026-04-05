@@ -24,6 +24,7 @@ import {
   EyeOff as EyeOffIcon,
   FileSpreadsheet as FileSpreadsheetIcon,
   FileText as FileTextIcon,
+  Folder as FolderIcon,
   Github as GithubIcon,
   History as HistoryIcon,
   Globe as GlobeIcon,
@@ -54,6 +55,7 @@ import {
   Presentation as PresentationIcon,
   Radio as RadioIcon,
   RefreshCcw as RefreshCcwIcon,
+  RefreshCw as RefreshCwIcon,
   Search as SearchIcon,
   Server as ServerIcon,
   Settings2 as Settings2Icon,
@@ -110,6 +112,7 @@ export const Eye = withDefaultStroke(EyeIcon);
 export const EyeOff = withDefaultStroke(EyeOffIcon);
 export const FileSpreadsheet = withDefaultStroke(FileSpreadsheetIcon);
 export const FileText = withDefaultStroke(FileTextIcon);
+export const Folder = withDefaultStroke(FolderIcon);
 export const Github = withDefaultStroke(GithubIcon);
 export const History = withDefaultStroke(HistoryIcon);
 export const Globe = withDefaultStroke(GlobeIcon);
@@ -140,6 +143,7 @@ export const Plus = withDefaultStroke(PlusIcon);
 export const Presentation = withDefaultStroke(PresentationIcon);
 export const Radio = withDefaultStroke(RadioIcon);
 export const RefreshCcw = withDefaultStroke(RefreshCcwIcon);
+export const RefreshCw = withDefaultStroke(RefreshCwIcon);
 export const Search = withDefaultStroke(SearchIcon);
 export const Server = withDefaultStroke(ServerIcon);
 export const Settings2 = withDefaultStroke(Settings2Icon);

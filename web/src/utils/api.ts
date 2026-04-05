@@ -1719,6 +1719,28 @@ export const deleteLLM = async (llmId: number): Promise<void> => {
 // ============================================
 
 /**
+ * Project record from API.
+ */
+export interface ProjectResponse {
+  id: number;
+  project_id: string;
+  agent_id: number;
+  name: string;
+  description: string | null;
+  workspace_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Project list response from API.
+ */
+export interface ProjectListResponse {
+  projects: ProjectResponse[];
+  total: number;
+}
+
+/**
  * Session list item from API.
  */
 export interface SessionListItem {
@@ -1726,6 +1748,9 @@ export interface SessionListItem {
   agent_id: number;
   type?: ChatSessionType;
   release_id?: number | null;
+  project_id?: string | null;
+  workspace_id?: string | null;
+  workspace_scope?: "session_private" | "project_shared" | null;
   test_workspace_hash?: string | null;
   status: string;
   runtime_status?: "idle" | "running" | "waiting_input";
@@ -1752,6 +1777,9 @@ export interface SessionResponse {
   agent_id: number;
   type?: ChatSessionType;
   release_id?: number | null;
+  project_id?: string | null;
+  workspace_id?: string | null;
+  workspace_scope?: "session_private" | "project_shared" | null;
   test_workspace_hash?: string | null;
   user: string;
   status: string;
@@ -1771,6 +1799,7 @@ export interface SessionResponse {
 export const createSession = async (
   agentId: number,
   options?: {
+    projectId?: string | null;
     type?: ChatSessionType;
     testSnapshot?: StudioTestSnapshotPayload | null;
   },
@@ -1779,10 +1808,75 @@ export const createSession = async (
     method: 'POST',
     body: JSON.stringify({
       agent_id: agentId,
+      project_id: options?.projectId ?? null,
       type: options?.type ?? 'consumer',
       test_snapshot: options?.testSnapshot ?? null,
     }),
   }) as Promise<SessionResponse>;
+};
+
+/**
+ * List projects for one agent.
+ *
+ * @param agentId - Agent ID whose projects should be fetched
+ * @returns Promise resolving to the user's projects for that agent
+ */
+export const listProjects = async (
+  agentId: number,
+): Promise<ProjectListResponse> => {
+  return apiRequest(`/projects?agent_id=${agentId}`) as Promise<ProjectListResponse>;
+};
+
+/**
+ * Create a new project for one agent.
+ *
+ * @param payload - Project creation metadata
+ * @returns Promise resolving to the created project
+ */
+export const createProject = async (payload: {
+  agent_id: number;
+  name: string;
+  description?: string | null;
+}): Promise<ProjectResponse> => {
+  return apiRequest('/projects', {
+    method: 'POST',
+    body: JSON.stringify({
+      agent_id: payload.agent_id,
+      name: payload.name,
+      description: payload.description ?? null,
+    }),
+  }) as Promise<ProjectResponse>;
+};
+
+/**
+ * Update one existing project.
+ *
+ * @param projectId - Public project UUID
+ * @param payload - Partial metadata updates
+ * @returns Promise resolving to the updated project
+ */
+export const updateProject = async (
+  projectId: string,
+  payload: {
+    name?: string | null;
+    description?: string | null;
+  },
+): Promise<ProjectResponse> => {
+  return apiRequest(`/projects/${projectId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }) as Promise<ProjectResponse>;
+};
+
+/**
+ * Delete one project and its child sessions.
+ *
+ * @param projectId - Public project UUID
+ */
+export const deleteProject = async (projectId: string): Promise<void> => {
+  await apiRequest(`/projects/${projectId}`, {
+    method: 'DELETE',
+  });
 };
 
 /**
@@ -2105,7 +2199,7 @@ export const startReactTask = async (payload: {
   session_id?: string | null;
   file_ids?: string[];
   web_search_provider?: string | null;
-  thinking_mode?: "fast" | "thinking" | null;
+  thinking_mode?: "auto" | "fast" | "thinking" | null;
 }): Promise<ReactTaskStartResponse> => {
   return apiRequest('/react/tasks', {
     method: 'POST',

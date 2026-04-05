@@ -69,6 +69,10 @@ class SessionCreate(AppBaseModel):
 
     agent_id: int = Field(..., description="Agent ID for this session")
     user: str = Field(default="default_user", description="Username")
+    project_id: str | None = Field(
+        default=None,
+        description="Optional project UUID for shared-workspace sessions",
+    )
     type: Literal["consumer", "studio_test"] = Field(
         default="consumer",
         description="Whether the session belongs to Consumer or Studio Test",
@@ -87,6 +91,9 @@ class SessionResponse(AppBaseModel):
     agent_id: int
     type: Literal["consumer", "studio_test"]
     release_id: int | None
+    project_id: str | None = None
+    workspace_id: str | None = None
+    workspace_scope: Literal["session_private", "project_shared"] | None = None
     test_workspace_hash: str | None = None
     user: str
     status: str
@@ -111,6 +118,9 @@ class SessionListItem(AppBaseModel):
     agent_id: int
     type: Literal["consumer", "studio_test"]
     release_id: int | None
+    project_id: str | None = None
+    workspace_id: str | None = None
+    workspace_scope: Literal["session_private", "project_shared"] | None = None
     test_workspace_hash: str | None = None
     status: str
     runtime_status: str = "idle"

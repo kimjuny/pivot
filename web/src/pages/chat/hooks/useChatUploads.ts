@@ -34,7 +34,7 @@ export function useChatUploads(primaryLlmId?: number) {
     useState<boolean>(false);
   const [thinkingModes, setThinkingModes] = useState<ChatThinkingMode[]>([]);
   const [defaultThinkingMode, setDefaultThinkingMode] =
-    useState<ChatThinkingMode>("fast");
+    useState<ChatThinkingMode>("auto");
   const imageInputRef = useRef<HTMLInputElement>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map());

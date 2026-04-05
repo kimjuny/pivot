@@ -19,7 +19,10 @@ from app.schemas.file import FileAssetListItem
 from app.schemas.task_attachment import TaskAttachmentListItem
 from app.services.agent_service import AgentService
 from app.services.file_service import FileService
+from app.services.project_service import ProjectService
+from app.services.sandbox_service import get_sandbox_service
 from app.services.task_attachment_service import TaskAttachmentService
+from app.services.workspace_service import WorkspaceService
 from sqlalchemy import func
 from sqlmodel import Session as DBSession, col, select
 
@@ -71,6 +74,7 @@ class SessionService:
         agent_id: int,
         user: str,
         *,
+        project_id: str | None = None,
         session_type: Literal["consumer", "studio_test"] = "consumer",
         test_snapshot_id: int | None = None,
     ) -> Session:
@@ -79,6 +83,7 @@ class SessionService:
         Args:
             agent_id: ID of the agent for this session.
             user: Username of the session owner.
+            project_id: Optional shared project UUID for project-backed sessions.
             session_type: Whether the session belongs to Consumer or Studio Test.
             test_snapshot_id: Frozen Studio working-copy snapshot pinned to the
                 session when ``session_type`` is ``studio_test``.
@@ -95,6 +100,7 @@ class SessionService:
         now = datetime.now(UTC)
         release_id: int | None = None
         resolved_test_snapshot_id: int | None = None
+        workspace_id: str | None = None
 
         if session_type == "consumer":
             agent = AgentService(self.db).require_session_creation_ready(agent_id)
@@ -107,6 +113,21 @@ class SessionService:
         else:
             raise ValueError(f"Unsupported session type '{session_type}'.")
 
+        if project_id is not None:
+            project = ProjectService(self.db).get_owned_project(project_id, user)
+            if project is None:
+                raise ValueError(f"Project {project_id} not found.")
+            if project.agent_id != agent_id:
+                raise ValueError("Project does not belong to the requested agent.")
+            workspace_id = project.workspace_id
+        else:
+            workspace_id = WorkspaceService(self.db).create_workspace(
+                agent_id=agent_id,
+                username=user,
+                scope="session_private",
+                session_id=session_id,
+            ).workspace_id
+
         # Create session
         session = Session(
             session_id=session_id,
@@ -117,6 +138,8 @@ class SessionService:
             user=user,
             status="active",
             runtime_status="idle",
+            project_id=project_id,
+            workspace_id=workspace_id,
             title=None,
             is_pinned=False,
             chat_history=json.dumps({"version": 1, "messages": []}),
@@ -131,6 +154,15 @@ class SessionService:
         self.db.refresh(session)
 
         return session
+
+    @staticmethod
+    def get_workspace_scope(session: Session) -> Literal["session_private", "project_shared"] | None:
+        """Return the public workspace scope for one session row."""
+        if session.project_id:
+            return "project_shared"
+        if session.workspace_id:
+            return "session_private"
+        return None
 
     def get_session(self, session_id: str) -> Session | None:
         """Get a session by session_id.
@@ -521,6 +553,57 @@ class SessionService:
 
         return session
 
+    def _best_effort_destroy_workspace_sandbox(self, workspace_id: str) -> None:
+        """Try to destroy one workspace sandbox without blocking persistence."""
+        workspace = WorkspaceService(self.db).get_workspace(workspace_id)
+        if workspace is None:
+            return
+
+        try:
+            get_sandbox_service().destroy(
+                username=workspace.user,
+                workspace_id=workspace.workspace_id,
+                workspace_backend_path=WorkspaceService(self.db).get_workspace_backend_path(
+                    workspace
+                ),
+            )
+        except RuntimeError:
+            return
+
+    def _delete_task_rows_for_session(self, session_id: str) -> None:
+        """Delete all persisted task rows that belong to one session."""
+        task_rows = list(
+            self.db.exec(select(ReactTask).where(ReactTask.session_id == session_id)).all()
+        )
+        task_ids = [task.task_id for task in task_rows]
+
+        if task_ids:
+            recursion_state_rows = list(
+                self.db.exec(
+                    select(ReactRecursionState).where(
+                        col(ReactRecursionState.task_id).in_(task_ids)
+                    )
+                ).all()
+            )
+            for state_row in recursion_state_rows:
+                self.db.delete(state_row)
+
+            event_rows = list(
+                self.db.exec(
+                    select(ReactTaskEvent).where(col(ReactTaskEvent.task_id).in_(task_ids))
+                ).all()
+            )
+            for event_row in event_rows:
+                self.db.delete(event_row)
+
+        for session_event_row in self.db.exec(
+            select(ReactTaskEvent).where(ReactTaskEvent.session_id == session_id)
+        ).all():
+            self.db.delete(session_event_row)
+
+        for task_row in task_rows:
+            self.db.delete(task_row)
+
     def update_chat_history(
         self,
         session_id: str,
@@ -610,11 +693,13 @@ class SessionService:
         self.db.commit()
         return True
 
-    def delete_session(self, session_id: str) -> bool:
+    def delete_session(self, session_id: str, *, delete_workspace: bool = True) -> bool:
         """Delete a session and its associated data.
 
         Args:
             session_id: UUID of the session.
+            delete_workspace: Whether to delete the bound workspace when it is
+                private to this session.
 
         Returns:
             True if successful, False otherwise.
@@ -625,7 +710,10 @@ class SessionService:
 
         FileService(self.db).clear_files_by_session_id(session_id)
         TaskAttachmentService(self.db).delete_by_session_id(session_id)
+        self._delete_task_rows_for_session(session_id)
         test_snapshot_id = session.test_snapshot_id
+        workspace_id = session.workspace_id
+        should_delete_workspace = delete_workspace and session.project_id is None
 
         self.db.delete(session)
         self.db.commit()
@@ -638,6 +726,9 @@ class SessionService:
                 if test_snapshot is not None:
                     self.db.delete(test_snapshot)
                     self.db.commit()
+        if should_delete_workspace and workspace_id:
+            self._best_effort_destroy_workspace_sandbox(workspace_id)
+            WorkspaceService(self.db).delete_workspace(workspace_id)
         return True
 
     def get_full_session_history(self, session_id: str) -> list[dict[str, Any]]:

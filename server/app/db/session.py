@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
 from typing import Final
@@ -22,6 +23,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "externalidentitybinding",
     "fileasset",
     "llm",
+    "project",
     "reactplanstep",
     "reactrecursion",
     "reactrecursionstate",
@@ -34,6 +36,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "subscene",
     "taskattachment",
     "user",
+    "workspace",
 }
 
 
@@ -72,9 +75,7 @@ def get_session() -> Generator[Session, None, None]:
     Yields:
         A database session that will be automatically closed after use.
     """
-    engine = get_engine()
-    ensure_database_ready(engine)
-    with Session(engine) as session:
+    with managed_session() as session:
         yield session
 
 
@@ -87,6 +88,23 @@ def init_db():
     engine = get_engine()
     ensure_database_ready(engine)
     print("Database initialized successfully")
+
+
+@contextmanager
+def managed_session() -> Generator[Session, None, None]:
+    """Open one database session after ensuring the schema is ready.
+
+    Why: background loops and tool handlers may open ad-hoc SQLModel sessions
+    outside FastAPI dependency injection. This wrapper keeps those paths aligned
+    with request handlers so a recreated SQLite file is initialized before use.
+
+    Yields:
+        A ready-to-use SQLModel session.
+    """
+    engine = get_engine()
+    ensure_database_ready(engine)
+    with Session(engine) as session:
+        yield session
 
 
 def ensure_database_ready(engine: Engine | None = None) -> None:

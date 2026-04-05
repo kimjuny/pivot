@@ -3,16 +3,21 @@ import type { FormEvent, KeyboardEvent } from "react";
 
 import {
   cancelReactTask,
+  createProject,
   createSession,
+  deleteProject,
   deleteSession,
   getAgentWebSearchBindings,
   getFullSessionHistory,
   getReactContextUsage,
   getReactSessionRuntimeDebug,
+  listProjects,
   listSessions,
   startReactTask,
   submitReactUserAction,
+  updateProject,
   updateSession,
+  type ProjectResponse,
   type ReactContextUsageSummary,
   type ReactSessionRuntimeDebug,
   type SessionListItem,
@@ -42,6 +47,7 @@ import type {
   ChatPageProps,
   ChatMessage,
   ChatReplyTarget,
+  ChatSidebarProjectItem,
   PlanStepData,
   ReactStreamEvent,
   RecursionRecord,
@@ -124,6 +130,9 @@ function toSessionListItem(session: SessionResponse): SessionListItem {
     agent_id: session.agent_id,
     type: session.type ?? "consumer",
     release_id: session.release_id,
+    project_id: session.project_id ?? null,
+    workspace_id: session.workspace_id ?? null,
+    workspace_scope: session.workspace_scope ?? null,
     test_workspace_hash: session.test_workspace_hash ?? null,
     status: session.status,
     runtime_status: session.runtime_status ?? "idle",
@@ -147,6 +156,39 @@ function sortSessionsForSidebar(
     }
 
     return Date.parse(right.updated_at) - Date.parse(left.updated_at);
+  });
+}
+
+/**
+ * Keep project ordering aligned with the freshest session activity underneath
+ * each shared workspace instead of relying only on project metadata writes.
+ */
+function sortProjectsForSidebar(
+  projects: ProjectResponse[],
+  sessions: SessionListItem[],
+): ProjectResponse[] {
+  const latestSessionByProject = new Map<string, number>();
+  for (const session of sessions) {
+    if (!session.project_id) {
+      continue;
+    }
+    const timestamp = Date.parse(session.updated_at);
+    const previousTimestamp = latestSessionByProject.get(session.project_id) ?? 0;
+    if (timestamp > previousTimestamp) {
+      latestSessionByProject.set(session.project_id, timestamp);
+    }
+  }
+
+  return [...projects].sort((left, right) => {
+    const leftTimestamp = Math.max(
+      Date.parse(left.updated_at),
+      latestSessionByProject.get(left.project_id) ?? 0,
+    );
+    const rightTimestamp = Math.max(
+      Date.parse(right.updated_at),
+      latestSessionByProject.get(right.project_id) ?? 0,
+    );
+    return rightTimestamp - leftTimestamp;
   });
 }
 
@@ -319,7 +361,9 @@ function ChatContainer({
   >({});
   const [replyTaskId, setReplyTaskId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
@@ -510,18 +554,41 @@ function ChatContainer({
     [],
   );
 
+  const standaloneSessions = sortSessionsForSidebar(
+    sessions.filter((session) => !session.project_id),
+  );
+  const sidebarProjects: ChatSidebarProjectItem[] = sortProjectsForSidebar(
+    projects,
+    sessions,
+  ).map((project) => ({
+    ...project,
+    sessions: sortSessionsForSidebar(
+      sessions.filter((session) => session.project_id === project.project_id),
+    ),
+  }));
+
   /**
-   * Reloads the sidebar session list so metadata stays in sync after task completion.
+   * Reload project and session navigation data so sidebar metadata stays fresh
+   * after task activity or workspace management actions.
    */
-  const refreshSessionList = useCallback(async (): Promise<SessionListItem[]> => {
-    const response = await listSessions(
-      agentId,
-      50,
-      { type: sessionType },
-    );
-    setSessions(response.sessions);
-    return response.sessions;
-  }, [agentId, sessionType]);
+  const refreshSidebarData = useCallback(
+    async (): Promise<{
+      projects: ProjectResponse[];
+      sessions: SessionListItem[];
+    }> => {
+      const [sessionResponse, projectResponse] = await Promise.all([
+        listSessions(agentId, 50, { type: sessionType }),
+        listProjects(agentId),
+      ]);
+      setSessions(sessionResponse.sessions);
+      setProjects(projectResponse.projects);
+      return {
+        projects: projectResponse.projects,
+        sessions: sessionResponse.sessions,
+      };
+    },
+    [agentId, sessionType],
+  );
 
   /**
    * Commits a fully prepared message snapshot to both React state and the
@@ -990,7 +1057,7 @@ function ChatContainer({
           event.type === "task_cancelled" ||
           (event.type === "error" && isTerminalError)
         ) {
-          void refreshSessionList().catch((refreshError) => {
+          void refreshSidebarData().catch((refreshError) => {
             console.error(
               "Failed to refresh session list after task activity changed:",
               refreshError,
@@ -1314,7 +1381,7 @@ function ChatContainer({
       applyHistoryMessages,
       currentSessionId,
       loadSessionRuntimeDebug,
-      refreshSessionList,
+      refreshSidebarData,
       showCompactStatus,
       updateMessages,
     ],
@@ -1426,7 +1493,7 @@ function ChatContainer({
 
       setIsLoadingSession(true);
       try {
-        const existingSessions = await refreshSessionList();
+        const { sessions: existingSessions } = await refreshSidebarData();
 
         if (existingSessions.length > 0) {
           const requestedSessionId =
@@ -1463,6 +1530,11 @@ function ChatContainer({
 
           setCurrentSessionId(autoSelectedSessionId);
           currentSessionIdRef.current = autoSelectedSessionId;
+          setCurrentProjectId(
+            existingSessions.find(
+              (session) => session.session_id === autoSelectedSessionId,
+            )?.project_id ?? null,
+          );
           setReplyTaskId(null);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
@@ -1487,6 +1559,7 @@ function ChatContainer({
             setIsStreaming(false);
           }
         } else {
+          setCurrentProjectId(null);
           setCurrentSessionId(null);
           currentSessionIdRef.current = null;
           setReplyTaskId(null);
@@ -1513,7 +1586,7 @@ function ChatContainer({
     isInitialized,
     initialSessionId,
     isLoadingSession,
-    refreshSessionList,
+    refreshSidebarData,
     sessionIdleTimeoutMs,
     openSessionStream,
     stopSessionStream,
@@ -1725,14 +1798,15 @@ function ChatContainer({
   ]);
 
   /**
-   * Enters a blank draft state and postpones session persistence until send time.
+   * Enter a blank draft state while optionally keeping one project selected.
    */
-  const handleNewSession = async () => {
+  const enterDraftState = async (nextProjectId: string | null) => {
     setIsLoadingSession(true);
     try {
       await clearPendingFiles();
       prepareForProgrammaticScroll();
 
+      setCurrentProjectId(nextProjectId);
       setCurrentSessionId(null);
       currentSessionIdRef.current = null;
       commitMessages([]);
@@ -1754,6 +1828,98 @@ function ChatContainer({
   };
 
   /**
+   * Enters a standalone draft and postpones session persistence until send time.
+   */
+  const handleNewSession = async () => {
+    await enterDraftState(null);
+  };
+
+  /**
+   * Opens one project-level draft so the next send creates a session inside
+   * the selected shared workspace.
+   */
+  const handleSelectProject = async (projectId: string) => {
+    await enterDraftState(projectId);
+  };
+
+  /**
+   * Creates a new project with a lightweight default name and opens its draft.
+   */
+  const handleCreateProject = async () => {
+    try {
+      const project = await createProject({
+        agent_id: agentId,
+        name: "New project",
+      });
+      setProjects((previous) =>
+        sortProjectsForSidebar([...previous, project], sessions),
+      );
+      await enterDraftState(project.project_id);
+      setError(null);
+    } catch (projectError) {
+      console.error("Failed to create project:", projectError);
+      setError("Failed to create project");
+    }
+  };
+
+  /**
+   * Applies a user-provided project name from the sidebar.
+   */
+  const handleRenameProject = async (
+    projectId: string,
+    name: string | null,
+  ) => {
+    if (!name) {
+      return;
+    }
+
+    try {
+      const updatedProject = await updateProject(projectId, { name });
+      setProjects((previous) =>
+        sortProjectsForSidebar(
+          previous.map((project) =>
+            project.project_id === projectId ? updatedProject : project,
+          ),
+          sessions,
+        ),
+      );
+      setError(null);
+    } catch (renameError) {
+      console.error("Failed to rename project:", renameError);
+      setError("Failed to rename project");
+    }
+  };
+
+  /**
+   * Deletes a project and all of its child sessions, then clears any active
+   * draft or session that depended on that shared workspace.
+   */
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      await deleteProject(projectId);
+      const remainingProjects = projects.filter(
+        (project) => project.project_id !== projectId,
+      );
+      const remainingSessions = sessions.filter(
+        (session) => session.project_id !== projectId,
+      );
+      setProjects(remainingProjects);
+      setSessions(remainingSessions);
+
+      const currentSessionProjectId =
+        sessions.find((session) => session.session_id === currentSessionId)?.project_id ??
+        null;
+      if (currentProjectId === projectId || currentSessionProjectId === projectId) {
+        await enterDraftState(null);
+      }
+      setError(null);
+    } catch (deleteError) {
+      console.error("Failed to delete project:", deleteError);
+      setError("Failed to delete project");
+    }
+  };
+
+  /**
    * Loads the selected session history into the current chat surface.
    */
   const handleSelectSession = async (sessionId: string) => {
@@ -1761,6 +1927,8 @@ function ChatContainer({
       return;
     }
 
+    const selectedSession = sessions.find((session) => session.session_id === sessionId);
+    setCurrentProjectId(selectedSession?.project_id ?? null);
     setCurrentSessionId(sessionId);
     currentSessionIdRef.current = sessionId;
     setIsLoadingSession(true);
@@ -1793,6 +1961,7 @@ function ChatContainer({
    */
   const handleDeleteSession = async (sessionId: string) => {
     try {
+      const deletedSession = sessions.find((session) => session.session_id === sessionId);
       await deleteSession(sessionId);
 
       const remainingSessions = sessions.filter(
@@ -1807,21 +1976,23 @@ function ChatContainer({
         setContextUsage(null);
         clearCompactStatusImmediately();
 
-        if (remainingSessions.length > 0) {
-          await handleSelectSession(remainingSessions[0].session_id);
+        if (deletedSession?.project_id) {
+          const siblingProjectSessions = remainingSessions.filter(
+            (session) => session.project_id === deletedSession.project_id,
+          );
+          if (siblingProjectSessions.length > 0) {
+            await handleSelectSession(siblingProjectSessions[0].session_id);
+          } else {
+            await enterDraftState(deletedSession.project_id);
+          }
+        } else if (remainingSessions.length > 0) {
+          await handleSelectSession(
+            remainingSessions.find((session) => !session.project_id)?.session_id ??
+              remainingSessions[0].session_id,
+          );
         } else {
-          await clearPendingFiles();
-          setCurrentSessionId(null);
-          currentSessionIdRef.current = null;
-          setActiveContextTaskId(null);
-          setActiveContextIteration(null);
-          setContextUsage(null);
-          clearCompactStatusImmediately();
-          syncLiveRefsFromMessages([]);
-          commitMessages([]);
+          await enterDraftState(null);
           setIsInitialized(false);
-          stopSessionStream();
-          setIsStreaming(false);
         }
       }
     } catch (deleteError) {
@@ -1883,7 +2054,7 @@ function ChatContainer({
 
       void cancelReactTask(activeTaskId)
         .then(() =>
-          refreshSessionList().catch((refreshError) => {
+          refreshSidebarData().catch((refreshError) => {
             console.error(
               "Failed to refresh session list after stopping task:",
               refreshError,
@@ -1949,12 +2120,14 @@ function ChatContainer({
 
       if (!activeSessionId) {
         const session = await createSession(agentId, {
+          projectId: currentProjectId,
           type: sessionType,
           testSnapshot: sessionType === "studio_test" ? testSnapshot : undefined,
         });
         activeSessionId = session.session_id;
         shouldResetConversation = true;
         const sessionItem = toSessionListItem(session);
+        setCurrentProjectId(session.project_id ?? currentProjectId);
         setCurrentSessionId(activeSessionId);
         currentSessionIdRef.current = activeSessionId;
         setSessions((previous) => upsertSessionListItem(previous, sessionItem));
@@ -2046,7 +2219,7 @@ function ChatContainer({
         ),
       );
       liveTaskIdRef.current = launchResult.task_id;
-      void refreshSessionList().catch((refreshError) => {
+      void refreshSidebarData().catch((refreshError) => {
         console.error(
           "Failed to refresh session list after task launch:",
           refreshError,
@@ -2112,7 +2285,7 @@ function ChatContainer({
 
     void submitReactUserAction(taskId, decision)
       .then(() => {
-        void refreshSessionList().catch((refreshError) => {
+        void refreshSidebarData().catch((refreshError) => {
           console.error(
             "Failed to refresh session list after user action:",
             refreshError,
@@ -2177,18 +2350,29 @@ function ChatContainer({
   const isConversationEmpty = messages.length === 0;
   const composerTaskPlan = deriveComposerTaskPlan(messages);
   const replyTarget = findReplyTarget(messages, replyTaskId);
+  const selectedProject =
+    sidebarProjects.find((project) => project.project_id === currentProjectId) ?? null;
+  const isNewSessionDraftActive =
+    currentSessionId === null && currentProjectId === null;
 
   return (
     <SidebarProvider defaultOpen>
       <SessionSidebar
-        sessions={sessions}
+        sessions={standaloneSessions}
+        projects={sidebarProjects}
         currentSessionId={currentSessionId}
+        currentProjectId={currentProjectId}
+        isNewSessionDraftActive={isNewSessionDraftActive}
         isLoadingSession={isLoadingSession}
         hasInitializedSessions={isInitialized}
         isStreaming={isStreaming}
         sidebarTitleIcon={sidebarTitleIcon}
         sidebarTitle={sidebarTitle}
         onNewSession={handleNewSession}
+        onCreateProject={handleCreateProject}
+        onSelectProject={handleSelectProject}
+        onRenameProject={handleRenameProject}
+        onDeleteProject={handleDeleteProject}
         onSelectSession={handleSelectSession}
         onRenameSession={handleRenameSession}
         onTogglePinSession={handleTogglePinSession}
@@ -2207,20 +2391,59 @@ function ChatContainer({
           onScroll={handleScroll}
         >
           <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
-            <ConversationView
-              messages={messages}
-              agentName={agentName}
-              expandedRecursions={expandedRecursions}
-              isStreaming={isStreaming}
-              onToggleRecursion={toggleRecursion}
-              onReplyTask={setReplyTaskId}
-              onApproveSkillChange={(taskId, request) =>
-                handleSkillChangeDecision("approve", taskId, request)
-              }
-              onRejectSkillChange={(taskId, request) =>
-                handleSkillChangeDecision("reject", taskId, request)
-              }
-            />
+            {selectedProject && currentSessionId === null && messages.length === 0 ? (
+              <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Project Workspace
+                  </p>
+                  <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                    {selectedProject.name}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    Your next message will start a new session inside this shared
+                    project workspace.
+                  </p>
+                </div>
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleNewSession();
+                    }}
+                    className="inline-flex h-9 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    New Private Session
+                  </button>
+                  {selectedProject.sessions.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSelectSession(selectedProject.sessions[0].session_id);
+                      }}
+                      className="inline-flex h-9 items-center rounded-lg border border-border bg-accent/50 px-4 text-sm font-medium transition-colors hover:bg-accent"
+                    >
+                      Open Latest Session
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <ConversationView
+                messages={messages}
+                agentName={agentName}
+                expandedRecursions={expandedRecursions}
+                isStreaming={isStreaming}
+                onToggleRecursion={toggleRecursion}
+                onReplyTask={setReplyTaskId}
+                onApproveSkillChange={(taskId, request) =>
+                  handleSkillChangeDecision("approve", taskId, request)
+                }
+                onRejectSkillChange={(taskId, request) =>
+                  handleSkillChangeDecision("reject", taskId, request)
+                }
+              />
+            )}
             <div className="h-1" />
           </div>
         </div>

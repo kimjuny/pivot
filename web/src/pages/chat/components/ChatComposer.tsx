@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Paperclip,
   Plus,
+  RefreshCw,
   Square,
   XCircle,
   Zap,
@@ -125,9 +126,17 @@ export function ChatComposer({
       (provider) => provider.key === selectedWebSearchProvider,
     ) ?? null;
   const selectedThinkingModeLabel =
-    selectedThinkingMode === "thinking" ? "Thinking" : "Fast";
+    selectedThinkingMode === "thinking"
+      ? "Thinking"
+      : selectedThinkingMode === "auto"
+        ? "Auto"
+        : "Fast";
   const SelectedThinkingModeIcon =
-    selectedThinkingMode === "thinking" ? Brain : Zap;
+    selectedThinkingMode === "thinking"
+      ? Brain
+      : selectedThinkingMode === "auto"
+        ? RefreshCw
+        : Zap;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const replyPreview = replyTarget?.question.replace(/\s+/g, " ").trim() ?? "";
 
@@ -304,6 +313,14 @@ export function ChatComposer({
                     </span>
                   </SelectTrigger>
                   <SelectContent size="medium">
+                    {thinkingModes.includes("auto") && (
+                      <SelectItem value="auto">
+                        <div className="flex items-center gap-2">
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          <span>Auto</span>
+                        </div>
+                      </SelectItem>
+                    )}
                     {thinkingModes.includes("fast") && (
                       <SelectItem value="fast">
                         <div className="flex items-center gap-2">

@@ -26,6 +26,7 @@ from app.api.files import router as files_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
 from app.api.operations import router as operations_router  # noqa: E402
+from app.api.projects import router as projects_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
 from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
@@ -36,13 +37,12 @@ from app.api.web_search import router as web_search_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
-    get_engine,
     init_db,
+    managed_session,
 )
 from app.orchestration.tool import get_tool_manager  # noqa: E402
 from app.services.file_service import FileService  # noqa: E402
 from app.utils.logging_config import get_logger, setup_logging  # noqa: E402
-from sqlmodel import Session as DBSession  # noqa: E402
 
 # Set up logging at startup
 setup_logging()
@@ -103,6 +103,7 @@ app.include_router(files_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")
 app.include_router(react_router, prefix="/api")
+app.include_router(projects_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
 app.include_router(task_attachments_router, prefix="/api")
 app.include_router(channels_router, prefix="/api")
@@ -141,7 +142,7 @@ async def _prune_unused_files_loop() -> None:
     interval_seconds = int(get_settings().FILE_PRUNE_INTERVAL_MINUTES) * 60
     while True:
         try:
-            with DBSession(get_engine()) as session:
+            with managed_session() as session:
                 deleted_count = FileService(session).prune_expired_unused_files()
             if deleted_count > 0:
                 logger.info("Pruned %d expired unused files", deleted_count)

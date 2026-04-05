@@ -44,6 +44,9 @@ def _build_session_response(
         agent_id=session.agent_id,
         type=cast(Literal["consumer", "studio_test"], session.type),
         release_id=session.release_id,
+        project_id=session.project_id,
+        workspace_id=session.workspace_id,
+        workspace_scope=SessionService.get_workspace_scope(session),
         test_workspace_hash=test_workspace_hash,
         user=session.user,
         status=session.status,
@@ -91,6 +94,7 @@ async def create_session(
         session = service.create_session(
             agent_id=request.agent_id,
             user=current_user.username,
+            project_id=request.project_id,
             session_type=request.type,
             test_snapshot_id=test_snapshot_id,
         )
@@ -154,6 +158,9 @@ async def list_sessions(
                 agent_id=session.agent_id,
                 type=cast(Literal["consumer", "studio_test"], session.type),
                 release_id=session.release_id,
+                project_id=session.project_id,
+                workspace_id=session.workspace_id,
+                workspace_scope=service.get_workspace_scope(session),
                 test_workspace_hash=(
                     test_snapshot_hashes.get(session.test_snapshot_id or 0)
                     if session.test_snapshot_id is not None

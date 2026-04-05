@@ -22,11 +22,11 @@ from app.channels.work_wechat_socket import (
     generate_work_wechat_req_id,
 )
 from app.config import get_settings
-from app.db.session import get_engine
+from app.db.session import managed_session
 from app.models.channel import AgentChannelBinding, ChannelEventLog
 from app.services.channel_service import ChannelService
 from app.utils.logging_config import get_logger
-from sqlmodel import Session, select
+from sqlmodel import select
 
 if TYPE_CHECKING:
     from app.channels.types import (
@@ -168,7 +168,7 @@ class WorkWeChatBindingRuntime:
         if event is None:
             return
 
-        with Session(get_engine()) as session:
+        with managed_session() as session:
             binding = session.get(AgentChannelBinding, self.binding_id)
             if binding is None or not binding.enabled:
                 return
@@ -294,7 +294,7 @@ class WorkWeChatBindingRuntime:
 
     def _load_binding_state(self) -> dict[str, Any] | None:
         """Load the current binding row and parsed configs from the database."""
-        with Session(get_engine()) as session:
+        with managed_session() as session:
             binding = session.get(AgentChannelBinding, self.binding_id)
             if binding is None or not binding.enabled:
                 return None
@@ -306,7 +306,7 @@ class WorkWeChatBindingRuntime:
 
     def _update_health(self, *, status: str, message: str) -> None:
         """Persist the latest runtime health status for the binding."""
-        with Session(get_engine()) as session:
+        with managed_session() as session:
             binding = session.get(AgentChannelBinding, self.binding_id)
             if binding is None:
                 return
@@ -360,7 +360,7 @@ class ChannelRuntimeManager:
     async def _reconcile_bindings(self) -> None:
         """Start, restart, or stop binding runtimes based on DB state."""
         desired_bindings: dict[int, str] = {}
-        with Session(get_engine()) as session:
+        with managed_session() as session:
             rows = session.exec(
                 select(AgentChannelBinding).where(
                     AgentChannelBinding.enabled == True,  # noqa: E712

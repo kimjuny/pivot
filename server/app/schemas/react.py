@@ -46,7 +46,7 @@ class ReactChatRequest(AppBaseModel):
         default=None,
         description="Optional chat-selected provider key for abstract web search",
     )
-    thinking_mode: Literal["fast", "thinking"] | None = Field(
+    thinking_mode: Literal["auto", "fast", "thinking"] | None = Field(
         default=None,
         description="Optional chat-selected thinking mode for the primary LLM",
     )

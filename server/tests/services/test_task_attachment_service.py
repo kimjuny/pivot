@@ -16,6 +16,8 @@ if str(SERVER_ROOT) not in sys.path:
 TaskAttachmentService = import_module(
     "app.services.task_attachment_service"
 ).TaskAttachmentService
+SessionModel = import_module("app.models.session").Session
+Workspace = import_module("app.models.workspace").Workspace
 workspace_service = import_module("app.services.workspace_service")
 
 
@@ -37,6 +39,32 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
         self.agent_workspace = workspace_module.ensure_agent_workspace(
             "alice", 7
         ).resolve()
+        session_workspace = workspace_module.session_workspace_dir(
+            "alice",
+            7,
+            "session-1",
+        ).resolve()
+        self.workspace = Workspace(
+            workspace_id="workspace-1",
+            agent_id=7,
+            user="alice",
+            scope="session_private",
+            session_id="session-1",
+        )
+        self.db.add(self.workspace)
+        self.db.add(
+            SessionModel(
+                session_id="session-1",
+                agent_id=7,
+                user="alice",
+                workspace_id="workspace-1",
+                chat_history='{"version": 1, "messages": []}',
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.db.commit()
+        self.agent_workspace = session_workspace
 
     def tearDown(self) -> None:
         """Restore the original workspace root and close the test database."""
@@ -52,7 +80,6 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
         attachments = self.service.create_from_answer_paths(
             username="alice",
-            agent_id=7,
             task_id="task-1",
             session_id="session-1",
             paths=["/workspace/outputs/report.md"],
@@ -74,9 +101,8 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
         attachments = self.service.create_from_answer_paths(
             username="alice",
-            agent_id=7,
             task_id="task-2",
-            session_id=None,
+            session_id="session-1",
             paths=[
                 "/workspace/outputs/diagram.txt",
                 "/workspace/missing.md",
@@ -95,9 +121,8 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
         attachments = self.service.create_from_answer_paths(
             username="alice",
-            agent_id=7,
             task_id="task-3",
-            session_id="session-3",
+            session_id="session-1",
             paths=["/workspace/outputs/script.js"],
         )
 
@@ -112,9 +137,8 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
         attachments = self.service.create_from_answer_paths(
             username="alice",
-            agent_id=7,
             task_id="task-4",
-            session_id="session-4",
+            session_id="session-1",
             paths=["/workspace/.env"],
         )
 

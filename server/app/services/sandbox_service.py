@@ -67,17 +67,24 @@ class SandboxService:
     def exec(
         self,
         username: str,
-        agent_id: int,
+        workspace_id: str,
+        workspace_backend_path: str,
         cmd: list[str],
         skills: list[dict[str, str]] | None = None,
         timeout_seconds: int | None = None,
     ) -> SandboxExecResult:
-        """Execute one non-interactive command inside an agent sandbox."""
+        """Execute one non-interactive command inside a workspace sandbox."""
         if skills is None:
             skills = []
         data = self._post(
             "/sandboxes/exec",
-            {"username": username, "agent_id": agent_id, "cmd": cmd, "skills": skills},
+            {
+                "username": username,
+                "workspace_id": workspace_id,
+                "workspace_backend_path": workspace_backend_path,
+                "cmd": cmd,
+                "skills": skills,
+            },
             timeout_seconds=timeout_seconds,
         )
         return SandboxExecResult(
@@ -89,7 +96,8 @@ class SandboxService:
     def create(
         self,
         username: str,
-        agent_id: int,
+        workspace_id: str,
+        workspace_backend_path: str,
         skills: list[dict[str, str]] | None = None,
         timeout_seconds: int | None = None,
     ) -> None:
@@ -98,7 +106,32 @@ class SandboxService:
             skills = []
         self._post(
             "/sandboxes/create",
-            {"username": username, "agent_id": agent_id, "skills": skills},
+            {
+                "username": username,
+                "workspace_id": workspace_id,
+                "workspace_backend_path": workspace_backend_path,
+                "skills": skills,
+            },
+            timeout_seconds=timeout_seconds,
+        )
+
+    def destroy(
+        self,
+        *,
+        username: str,
+        workspace_id: str,
+        workspace_backend_path: str,
+        timeout_seconds: int | None = None,
+    ) -> None:
+        """Destroy one sandbox container bound to the given workspace."""
+        self._post(
+            "/sandboxes/destroy",
+            {
+                "username": username,
+                "workspace_id": workspace_id,
+                "workspace_backend_path": workspace_backend_path,
+                "skills": [],
+            },
             timeout_seconds=timeout_seconds,
         )
 

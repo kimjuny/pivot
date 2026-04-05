@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   THINKING_PROVIDER_OPTIONS,
   formatThinkingPolicyLabel,
+  getChatThinkingModes,
+  getDefaultChatThinkingMode,
   getThinkingEditorStateFromPolicy,
   llmHasThinkingSelector,
 } from "./llmThinking";
@@ -38,5 +40,15 @@ describe("llmThinking MiniMax fallback handling", () => {
         thinking_effort: null,
       }),
     ).toBe(false);
+  });
+
+  it("defaults chat runtime mode to Auto when a thinking tier is available", () => {
+    const llm = {
+      thinking_policy: "openai-response-reasoning-effort",
+      thinking_effort: "high",
+    };
+
+    expect(getChatThinkingModes(llm)).toEqual(["auto", "fast", "thinking"]);
+    expect(getDefaultChatThinkingMode(llm)).toBe("auto");
   });
 });

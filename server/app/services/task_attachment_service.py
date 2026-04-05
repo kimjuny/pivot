@@ -9,9 +9,10 @@ import uuid
 from datetime import UTC
 from pathlib import Path
 
+from app.models.session import Session as SessionModel
 from app.models.task_attachment import TaskAttachment
 from app.schemas.task_attachment import TaskAttachmentListItem
-from app.services.workspace_service import ensure_agent_workspace, workspace_root
+from app.services.workspace_service import WorkspaceService, workspace_root
 from sqlmodel import Session as DBSession, col, select
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,6 @@ class TaskAttachmentService:
         self,
         *,
         username: str,
-        agent_id: int,
         task_id: str,
         session_id: str | None,
         paths: list[str],
@@ -95,7 +95,6 @@ class TaskAttachmentService:
 
         Args:
             username: Authenticated owner username.
-            agent_id: Owning agent identifier.
             task_id: Owning task UUID.
             session_id: Owning session UUID, if present.
             paths: Sandbox-local file paths declared by the model.
@@ -108,8 +107,20 @@ class TaskAttachmentService:
         normalized_paths = self._normalize_declared_paths(paths)
         if not normalized_paths:
             return []
+        if session_id is None:
+            return []
 
-        workspace_dir = ensure_agent_workspace(username, agent_id).resolve()
+        session_row = self.db.exec(
+            select(SessionModel).where(SessionModel.session_id == session_id)
+        ).first()
+        if session_row is None or session_row.workspace_id is None:
+            return []
+
+        workspace = WorkspaceService(self.db).get_workspace(session_row.workspace_id)
+        if workspace is None:
+            return []
+
+        workspace_dir = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
         attachments_dir = (
             workspace_root() / username / "task_attachments" / task_id
         ).resolve()
@@ -139,7 +150,7 @@ class TaskAttachmentService:
                 attachment_id=attachment_id,
                 task_id=task_id,
                 session_id=session_id,
-                agent_id=agent_id,
+                agent_id=session_row.agent_id,
                 user=username,
                 display_name=host_path.name,
                 original_name=host_path.name,

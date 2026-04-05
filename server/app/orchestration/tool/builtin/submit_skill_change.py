@@ -44,6 +44,8 @@ def submit_skill_change(
     return submit_skill_change_for_agent(
         username=context.username,
         agent_id=context.agent_id,
+        workspace_id=context.workspace_id,
+        workspace_backend_path=context.workspace_backend_path,
         skill_path=skill_path,
         message=message,
     )

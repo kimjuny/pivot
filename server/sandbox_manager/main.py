@@ -106,21 +106,17 @@ def _require_token(x_sandbox_token: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid sandbox token.")
 
 
-def _sandbox_name(username: str, agent_id: int) -> str:
+def _sandbox_name(username: str, workspace_id: str) -> str:
     """Build deterministic sandbox container name."""
     prefix = get_settings().SANDBOX_CONTAINER_PREFIX
     user = username.strip() or "default"
-    return f"{prefix}-{user}-{agent_id}"
+    workspace = workspace_id.strip() or "default"
+    return f"{prefix}-{user}-{workspace}"
 
 
-def _skills_volume_name(username: str, agent_id: int) -> str:
+def _skills_volume_name(username: str, workspace_id: str) -> str:
     """Build deterministic named-volume identifier for sandbox-local skills."""
-    return f"{_sandbox_name(username, agent_id)}-skills"
-
-
-def _workspace_target(username: str, agent_id: int) -> str:
-    """Return backend-mounted target path for one agent workspace."""
-    return f"/app/server/workspace/{username}/agents/{agent_id}"
+    return f"{_sandbox_name(username, workspace_id)}-skills"
 
 
 def _backend_container() -> Any:
@@ -232,14 +228,14 @@ def _resolve_workspace_host_root() -> str:
     )
 
 
-def _ensure_agent_workspace_dir(username: str, agent_id: int) -> None:
-    """Create the host-backed agent workspace root.
+def _ensure_workspace_dir(path_in_backend: str) -> None:
+    """Create the backend-visible directory used for the primary workspace mount."""
+    if not path_in_backend.startswith("/app/server/workspace/"):
+        raise HTTPException(
+            status_code=400,
+            detail="workspace_backend_path must stay under /app/server/workspace.",
+        )
 
-    Why: the primary ``/workspace`` bind mount targets the agent workspace root.
-    Nested ``/workspace/skills`` data now lives in a sandbox-private named volume,
-    so only the top-level agent workspace must exist on the backend host.
-    """
-    path_in_backend = _workspace_target(username, agent_id)
     backend = _backend_container()
     try:
         exec_result = backend.exec_run(
@@ -444,9 +440,9 @@ def _remove_container_fast(
     return elapsed_ms
 
 
-def _ensure_skills_volume(username: str, agent_id: int) -> str:
+def _ensure_skills_volume(username: str, workspace_id: str) -> str:
     """Create the sandbox-local named volume used for ``/workspace/skills``."""
-    volume_name = _skills_volume_name(username, agent_id)
+    volume_name = _skills_volume_name(username, workspace_id)
     client = get_client()
     try:
         client.volumes.get(volume_name)
@@ -455,7 +451,7 @@ def _ensure_skills_volume(username: str, agent_id: int) -> str:
             name=volume_name,
             labels={
                 "pivot.sandbox.username": username,
-                "pivot.sandbox.agent_id": str(agent_id),
+                "pivot.sandbox.workspace_id": workspace_id,
                 "pivot.sandbox.kind": "skills",
             },
         )
@@ -728,15 +724,16 @@ def _is_broken_exec_environment_error(message: str) -> bool:
 
 def _ensure_sandbox(
     username: str,
-    agent_id: int,
+    workspace_id: str,
+    workspace_backend_path: str,
     skills: Sequence[SandboxSkillMount | dict[str, Any]] | None = None,
 ) -> Any:
     """Create or start a reusable sidecar sandbox container."""
     op_started = time.perf_counter()
     settings = get_settings()
-    name = _sandbox_name(username, agent_id)
-    skills_volume_name = _ensure_skills_volume(username, agent_id)
-    _ensure_agent_workspace_dir(username, agent_id)
+    name = _sandbox_name(username, workspace_id)
+    skills_volume_name = _ensure_skills_volume(username, workspace_id)
+    _ensure_workspace_dir(workspace_backend_path)
     normalized_skills = _normalize_skill_mounts(skills)
     skill_volumes, expected_skill_sources = _build_skill_mounts(normalized_skills)
 
@@ -759,10 +756,10 @@ def _ensure_sandbox(
                 detail=f"Failed to remove legacy sandbox '{name}': {exc}",
             ) from exc
         logger.info(
-            "sandbox.recreate_remove name=%s username=%s agent_id=%d reason=%s",
+            "sandbox.recreate_remove name=%s username=%s workspace_id=%s reason=%s",
             name,
             username,
-            agent_id,
+            workspace_id,
             recreate_reason,
         )
         existing = None
@@ -790,7 +787,12 @@ def _ensure_sandbox(
                 # Reuse the original backend payload so skill locations are still
                 # backend paths (``/app/server/...``). Passing normalized host paths
                 # back through ``_normalize_skill_mounts`` would strip every skill.
-                return _ensure_sandbox(username, agent_id, skills)
+                return _ensure_sandbox(
+                    username,
+                    workspace_id,
+                    workspace_backend_path,
+                    skills,
+                )
             if "already running" not in message:
                 raise HTTPException(
                     status_code=500,
@@ -798,19 +800,24 @@ def _ensure_sandbox(
                 ) from exc
         _touch_container(name)
         logger.info(
-            "sandbox.ensure name=%s username=%s agent_id=%d mode=reuse start_ms=%d total_ms=%d",
+            "sandbox.ensure name=%s username=%s workspace_id=%s mode=reuse start_ms=%d total_ms=%d",
             name,
             username,
-            agent_id,
+            workspace_id,
             int((time.perf_counter() - start_started) * 1000),
             int((time.perf_counter() - op_started) * 1000),
         )
         return existing
 
-    workspace_host_root = _resolve_workspace_host_root()
-    workspace_host_dir = (
-        f"{workspace_host_root.rstrip('/')}/{username}/agents/{agent_id}"
-    )
+    workspace_host_dir = _resolve_host_path_from_backend_path(workspace_backend_path)
+    if workspace_host_dir is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not resolve host path for workspace_backend_path "
+                f"{workspace_backend_path!r}."
+            ),
+        )
     volumes = {workspace_host_dir: {"bind": "/workspace", "mode": "rw"}}
     volumes[skills_volume_name] = {"bind": "/workspace/skills", "mode": "rw"}
     volumes.update(skill_volumes)
@@ -820,6 +827,8 @@ def _ensure_sandbox(
         "pivot.sandbox.base_image_ref": settings.SANDBOX_BASE_IMAGE,
         "pivot.sandbox.network_mode": settings.SANDBOX_NETWORK_MODE,
         "pivot.sandbox.skills_volume_name": skills_volume_name,
+        "pivot.sandbox.workspace_backend_path": workspace_backend_path,
+        "pivot.sandbox.workspace_id": workspace_id,
     }
     if base_image_id is not None:
         labels["pivot.sandbox.base_image_id"] = base_image_id
@@ -845,10 +854,10 @@ def _ensure_sandbox(
         container.start()
         start_ms = int((time.perf_counter() - start_started) * 1000)
         logger.info(
-            "sandbox.ensure name=%s username=%s agent_id=%d mode=create create_ms=%d start_ms=%d total_ms=%d",
+            "sandbox.ensure name=%s username=%s workspace_id=%s mode=create create_ms=%d start_ms=%d total_ms=%d",
             name,
             username,
-            agent_id,
+            workspace_id,
             create_ms,
             start_ms,
             int((time.perf_counter() - op_started) * 1000),
@@ -873,7 +882,8 @@ class SandboxRequest(BaseModel):
     """Request payload for create/destroy operations."""
 
     username: str = Field(min_length=1)
-    agent_id: int
+    workspace_id: str = Field(min_length=1)
+    workspace_backend_path: str = Field(min_length=1)
     skills: list[SandboxSkillMount] = Field(default_factory=list)
 
 
@@ -997,28 +1007,33 @@ def healthz() -> dict[str, str]:
 
 @app.post("/sandboxes/create", dependencies=[Depends(_require_token)])
 def create_sandbox(payload: SandboxRequest) -> dict[str, str]:
-    """Create sandbox container for one user+agent pair (idempotent)."""
-    container = _ensure_sandbox(payload.username, payload.agent_id, payload.skills)
+    """Create sandbox container for one workspace (idempotent)."""
+    container = _ensure_sandbox(
+        payload.username,
+        payload.workspace_id,
+        payload.workspace_backend_path,
+        payload.skills,
+    )
     return {
-        "container_name": _sandbox_name(payload.username, payload.agent_id),
+        "container_name": _sandbox_name(payload.username, payload.workspace_id),
         "container_id": container.id,
     }
 
 
 @app.post("/sandboxes/destroy", dependencies=[Depends(_require_token)])
 def destroy_sandbox(payload: SandboxRequest) -> dict[str, str]:
-    """Stop and remove sandbox container for one user+agent pair."""
+    """Stop and remove sandbox container for one workspace."""
     started = time.perf_counter()
-    name = _sandbox_name(payload.username, payload.agent_id)
+    name = _sandbox_name(payload.username, payload.workspace_id)
     container = _find_container(name)
     if container is None:
         with _pool_lock:
             _last_used_by_name.pop(name, None)
         logger.info(
-            "sandbox.destroy name=%s username=%s agent_id=%d status=not_found total_ms=%d",
+            "sandbox.destroy name=%s username=%s workspace_id=%s status=not_found total_ms=%d",
             name,
             payload.username,
-            payload.agent_id,
+            payload.workspace_id,
             int((time.perf_counter() - started) * 1000),
         )
         return {"status": "not_found", "container_name": name}
@@ -1036,10 +1051,10 @@ def destroy_sandbox(payload: SandboxRequest) -> dict[str, str]:
     with _pool_lock:
         _last_used_by_name.pop(name, None)
     logger.info(
-        "sandbox.destroy name=%s username=%s agent_id=%d status=destroyed total_ms=%d",
+        "sandbox.destroy name=%s username=%s workspace_id=%s status=destroyed total_ms=%d",
         name,
         payload.username,
-        payload.agent_id,
+        payload.workspace_id,
         int((time.perf_counter() - started) * 1000),
     )
     return {"status": "destroyed", "container_name": name}
@@ -1050,7 +1065,12 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
     """Exec one command in sandbox and return stdout/stderr + exit code."""
     started = time.perf_counter()
     ensure_started = time.perf_counter()
-    container = _ensure_sandbox(payload.username, payload.agent_id, payload.skills)
+    container = _ensure_sandbox(
+        payload.username,
+        payload.workspace_id,
+        payload.workspace_backend_path,
+        payload.skills,
+    )
     ensure_ms = int((time.perf_counter() - ensure_started) * 1000)
 
     def _exec_once(target_container: Any) -> Any:
@@ -1071,16 +1091,17 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
         if _is_broken_exec_environment_error(message):
             logger.warning(
                 "sandbox.exec detected broken runtime state; recreating container "
-                "username=%s agent_id=%d err=%s",
+                "username=%s workspace_id=%s err=%s",
                 payload.username,
-                payload.agent_id,
+                payload.workspace_id,
                 message,
             )
             with suppress(Exception):
                 _remove_container_fast(container, reason="recreate:exec_runtime_error")
             container = _ensure_sandbox(
                 payload.username,
-                payload.agent_id,
+                payload.workspace_id,
+                payload.workspace_backend_path,
                 payload.skills,
             )
             try:
@@ -1118,10 +1139,10 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
 
     total_ms = int((time.perf_counter() - started) * 1000)
     logger.info(
-        "sandbox.exec name=%s username=%s agent_id=%d exit_code=%d ensure_ms=%d exec_ms=%d total_ms=%d",
-        _sandbox_name(payload.username, payload.agent_id),
+        "sandbox.exec name=%s username=%s workspace_id=%s exit_code=%d ensure_ms=%d exec_ms=%d total_ms=%d",
+        _sandbox_name(payload.username, payload.workspace_id),
         payload.username,
-        payload.agent_id,
+        payload.workspace_id,
         exit_code,
         ensure_ms,
         exec_ms,
@@ -1132,5 +1153,5 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
         exit_code=exit_code,
         stdout=stdout,
         stderr=stderr,
-        container_name=_sandbox_name(payload.username, payload.agent_id),
+        container_name=_sandbox_name(payload.username, payload.workspace_id),
     )

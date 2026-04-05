@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from app.db.session import get_engine
+from app.db.session import managed_session
 from app.orchestration.tool import get_current_tool_execution_context, tool
 from app.orchestration.web_search.normalization import (
     normalize_web_search_request_payload,
@@ -17,7 +17,6 @@ from app.orchestration.web_search.types import (
 )
 from app.services.web_search_service import WebSearchService
 from pydantic import ValidationError
-from sqlmodel import Session
 
 
 @tool
@@ -146,7 +145,7 @@ def web_search(
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
 
-    with Session(get_engine()) as db:
+    with managed_session() as db:
         result = WebSearchService(db).execute_search(
             agent_id=context.agent_id,
             request=request,

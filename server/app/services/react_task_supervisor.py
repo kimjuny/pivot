@@ -18,11 +18,11 @@ from time import perf_counter
 from typing import Any, Literal
 
 from app.crud.llm import llm as llm_crud
-from app.db.session import get_engine
+from app.db.session import managed_session
 from app.llm.llm_factory import create_llm_from_config
-from app.llm.thinking_policy import build_runtime_thinking_kwargs
 from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask, ReactTaskEvent
+from app.models.session import Session as SessionModel
 from app.models.user import User
 from app.orchestration.react.engine import ReactEngine
 from app.orchestration.skills import select_skills_with_usage
@@ -48,6 +48,7 @@ from app.services.skill_service import (
     build_skill_mounts,
     list_visible_skills,
 )
+from app.services.workspace_service import WorkspaceService
 from fastapi.concurrency import run_in_threadpool
 from sqlmodel import Session, col, desc, select
 
@@ -64,7 +65,7 @@ class ReactTaskLaunchRequest:
     session_id: str | None
     file_ids: list[str]
     web_search_provider: str | None = None
-    thinking_mode: Literal["fast", "thinking"] | None = None
+    thinking_mode: Literal["auto", "fast", "thinking"] | None = None
     task_id: str | None = None
 
 
@@ -153,7 +154,7 @@ class ReactTaskSupervisor:
         Raises:
             ValueError: If the launch is invalid.
         """
-        with Session(get_engine()) as db:
+        with managed_session() as db:
             task, cursor_before_start = self._prepare_task(db=db, launch=launch)
             task_id = task.task_id
             session_id = task.session_id
@@ -182,7 +183,7 @@ class ReactTaskSupervisor:
         decision: Literal["approve", "reject"],
     ) -> ReactTaskLaunchResult:
         """Apply one structured waiting action and resume the task."""
-        with Session(get_engine()) as db:
+        with managed_session() as db:
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             task = db.exec(statement).first()
             if task is None:
@@ -277,7 +278,7 @@ class ReactTaskSupervisor:
         cancel_timestamp = datetime.now(UTC)
         session_id: str | None = None
 
-        with Session(get_engine()) as db:
+        with managed_session() as db:
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             task = db.exec(statement).first()
             if task is None:
@@ -348,7 +349,7 @@ class ReactTaskSupervisor:
         task_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return persisted events newer than one cursor."""
-        with Session(get_engine()) as db:
+        with managed_session() as db:
             statement = (
                 select(ReactTaskEvent)
                 .where(ReactTaskEvent.session_id == session_id)
@@ -363,9 +364,51 @@ class ReactTaskSupervisor:
 
     def get_task(self, task_id: str) -> ReactTask | None:
         """Load one task row for API callers."""
-        with Session(get_engine()) as db:
+        with managed_session() as db:
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             return db.exec(statement).first()
+
+    def _ensure_workspace_available_for_launch(
+        self,
+        *,
+        db: Session,
+        session: SessionModel | None,
+        excluding_task_id: str | None = None,
+    ) -> None:
+        """Reject concurrent launches when another task is active in the workspace.
+
+        Why: project sessions share one mutable filesystem and sandbox. V1 keeps
+        the model predictable by allowing only one active task per workspace.
+        """
+        if session is None or session.workspace_id is None:
+            return
+
+        sibling_session_ids = [
+            item.session_id
+            for item in db.exec(
+                select(SessionModel).where(
+                    SessionModel.workspace_id == session.workspace_id
+                )
+            ).all()
+            if item.session_id
+        ]
+        if not sibling_session_ids:
+            return
+
+        statement = (
+            select(ReactTask)
+            .where(col(ReactTask.session_id).in_(sibling_session_ids))
+            .where(col(ReactTask.status).in_(["pending", "running", "waiting_input"]))
+            .order_by(desc(col(ReactTask.updated_at)))
+        )
+        active_tasks = list(db.exec(statement).all())
+        for active_task in active_tasks:
+            if excluding_task_id is not None and active_task.task_id == excluding_task_id:
+                continue
+            raise ValueError(
+                "Another task is already active in this workspace. "
+                "Please wait for it to finish before starting a new one."
+            )
 
     def _prepare_task(
         self,
@@ -381,6 +424,12 @@ class ReactTaskSupervisor:
                 raise ValueError(f"Session {launch.session_id} not found")
             if session.user != launch.username:
                 raise ValueError("Session does not belong to the current user")
+        elif launch.task_id:
+            existing_task = db.exec(
+                select(ReactTask).where(ReactTask.task_id == launch.task_id)
+            ).first()
+            if existing_task is not None and existing_task.session_id is not None:
+                session = SessionService(db).get_session(existing_task.session_id)
         agent_service = AgentService(db)
         if session is not None and session.type == "studio_test":
             agent_service.get_required_agent(launch.agent_id)
@@ -389,6 +438,8 @@ class ReactTaskSupervisor:
         runtime_config = (
             AgentReleaseRuntimeService(db).resolve_for_session(launch.session_id)
             if launch.session_id
+            else AgentReleaseRuntimeService(db).resolve_for_session(session.session_id)
+            if session is not None
             else AgentReleaseRuntimeService(db).resolve_for_agent(launch.agent_id)
         )
         if runtime_config.agent_id != launch.agent_id:
@@ -411,6 +462,8 @@ class ReactTaskSupervisor:
 
             if existing_task.user != launch.username:
                 raise ValueError("Task does not belong to the current user")
+            if session is None and existing_task.session_id is not None:
+                session = SessionService(db).get_session(existing_task.session_id)
 
             if existing_task.status == "waiting_input":
                 if existing_task.pending_user_action_json:
@@ -433,9 +486,16 @@ class ReactTaskSupervisor:
                     "Only waiting-input tasks can be resumed with a task_id"
                 )
 
+            self._ensure_workspace_available_for_launch(
+                db=db,
+                session=session,
+                excluding_task_id=existing_task.task_id,
+            )
+
         if task is None:
             if launch.message is None or launch.message.strip() == "":
                 raise ValueError("message is required when starting a new text turn")
+            self._ensure_workspace_available_for_launch(db=db, session=session)
             launch_timestamp = datetime.now(UTC)
             task = ReactTask(
                 task_id=str(uuid.uuid4()),
@@ -513,7 +573,7 @@ class ReactTaskSupervisor:
     async def _run_task(self, *, task_id: str, launch: ReactTaskLaunchRequest) -> None:
         """Execute one task in the background and persist every emitted event."""
         try:
-            with Session(get_engine()) as db:
+            with managed_session() as db:
                 statement = select(ReactTask).where(ReactTask.task_id == task_id)
                 task = db.exec(statement).first()
                 if task is None:
@@ -533,20 +593,25 @@ class ReactTaskSupervisor:
                     raise ValueError(
                         f"Agent {runtime_config.agent_name} has no LLM configured"
                     )
+                session_row = (
+                    SessionService(db).get_session(task.session_id)
+                    if task.session_id is not None
+                    else None
+                )
+                if session_row is None or session_row.workspace_id is None:
+                    raise ValueError("Task is missing a session workspace binding.")
+                workspace = WorkspaceService(db).get_workspace(session_row.workspace_id)
+                if workspace is None:
+                    raise ValueError("Workspace not found for the current session.")
+                workspace_backend_path = WorkspaceService(db).get_workspace_backend_path(
+                    workspace
+                )
 
                 llm_config = llm_crud.get(runtime_config.llm_id, db)
                 if llm_config is None:
                     raise ValueError(
                         f"LLM configuration with ID {runtime_config.llm_id} not found"
                     )
-                llm_runtime_kwargs = build_runtime_thinking_kwargs(
-                    protocol=llm_config.protocol,
-                    thinking_policy=llm_config.thinking_policy,
-                    thinking_effort=llm_config.thinking_effort,
-                    thinking_budget_tokens=llm_config.thinking_budget_tokens,
-                    thinking_mode=launch.thinking_mode,
-                )
-
                 llm = create_llm_from_config(llm_config)
 
                 turn_files = []
@@ -617,12 +682,20 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         username=launch.username,
                         agent_id=agent.id or 0,
+                        workspace_id=workspace.workspace_id,
+                        workspace_backend_path=workspace_backend_path,
                         sandbox_timeout_seconds=runtime_config.sandbox_timeout_seconds,
                         web_search_provider=launch.web_search_provider,
                         allowed_skills=tuple(allowed_skill_mounts),
                     ),
                     stream_llm_responses=bool(llm_config.streaming),
-                    llm_runtime_kwargs=llm_runtime_kwargs,
+                    thinking_runtime_config={
+                        "protocol": llm_config.protocol,
+                        "thinking_policy": llm_config.thinking_policy,
+                        "thinking_effort": llm_config.thinking_effort,
+                        "thinking_budget_tokens": llm_config.thinking_budget_tokens,
+                        "thinking_mode": launch.thinking_mode,
+                    },
                 )
 
                 before_start_effects = await self._run_task_hooks(
@@ -784,7 +857,7 @@ class ReactTaskSupervisor:
         except Exception as exc:
             logger.error("Background ReAct task failed task_id=%s err=%s", task_id, exc)
             logger.error(traceback.format_exc())
-            with Session(get_engine()) as db:
+            with managed_session() as db:
                 statement = select(ReactTask).where(ReactTask.task_id == task_id)
                 task = db.exec(statement).first()
                 if task is not None and task.status not in {"completed", "cancelled"}:

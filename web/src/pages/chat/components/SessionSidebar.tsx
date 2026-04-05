@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
   Loader2,
   MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
+  Plus,
   SquarePen,
   Trash2,
 } from "@/lib/lucide";
@@ -34,18 +38,28 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { useSidebar } from "@/hooks/use-sidebar";
+import type { ChatSidebarNavigationItem, ChatSidebarProjectItem } from "@/pages/chat/types";
 import type { SessionListItem } from "@/utils/api";
-import type { ChatSidebarNavigationItem } from "@/pages/chat/types";
 
 interface SessionSidebarProps {
   sessions: SessionListItem[];
+  projects?: ChatSidebarProjectItem[];
   currentSessionId: string | null;
+  currentProjectId?: string | null;
+  isNewSessionDraftActive?: boolean;
   isLoadingSession: boolean;
   hasInitializedSessions: boolean;
   isStreaming: boolean;
   sidebarTitleIcon?: ReactNode;
   sidebarTitle?: string;
   onNewSession: () => void | Promise<void>;
+  onCreateProject?: () => void | Promise<void>;
+  onSelectProject?: (projectId: string) => void | Promise<void>;
+  onRenameProject?: (
+    projectId: string,
+    name: string | null,
+  ) => void | Promise<void>;
+  onDeleteProject?: (projectId: string) => void | Promise<void>;
   onSelectSession: (sessionId: string) => void | Promise<void>;
   onRenameSession: (
     sessionId: string,
@@ -79,18 +93,25 @@ function isSessionRunning(session: SessionListItem): boolean {
 }
 
 /**
- * Shows session navigation and keeps session-management controls visually
- * separated from the conversation timeline.
+ * Shows project and session navigation while keeping workspace-management
+ * actions visually separate from the conversation timeline.
  */
 export function SessionSidebar({
   sessions,
+  projects = [],
   currentSessionId,
+  currentProjectId = null,
+  isNewSessionDraftActive = false,
   isLoadingSession,
   hasInitializedSessions,
   isStreaming,
   sidebarTitleIcon,
   sidebarTitle,
   onNewSession,
+  onCreateProject,
+  onSelectProject,
+  onRenameProject,
+  onDeleteProject,
   onSelectSession,
   onRenameSession,
   onTogglePinSession,
@@ -100,68 +121,250 @@ export function SessionSidebar({
 }: SessionSidebarProps) {
   const { state } = useSidebar();
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState<string>("");
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState("");
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingProjectName, setEditingProjectName] = useState("");
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const renameSessionInputRef = useRef<HTMLInputElement | null>(null);
+  const renameProjectInputRef = useRef<HTMLInputElement | null>(null);
   const isCollapsed = state === "collapsed";
   const isSessionListPending = isLoadingSession || !hasInitializedSessions;
 
   useEffect(() => {
-    if (!editingSessionId) {
-      return;
+    if (editingSessionId) {
+      renameSessionInputRef.current?.focus();
+      renameSessionInputRef.current?.select();
     }
-
-    renameInputRef.current?.focus();
-    renameInputRef.current?.select();
   }, [editingSessionId]);
+
+  useEffect(() => {
+    if (editingProjectId) {
+      renameProjectInputRef.current?.focus();
+      renameProjectInputRef.current?.select();
+    }
+  }, [editingProjectId]);
+
+  useEffect(() => {
+    setExpandedProjects((currentState) => {
+      const nextState: Record<string, boolean> = {};
+      projects.forEach((project) => {
+        nextState[project.project_id] = currentState[project.project_id] ?? false;
+      });
+      return nextState;
+    });
+  }, [projects]);
 
   /**
    * Enter inline-title editing so renames stay lightweight and fast.
    */
-  const startRenaming = (session: SessionListItem) => {
+  const startRenamingSession = (session: SessionListItem) => {
     setEditingSessionId(session.session_id);
-    setEditingTitle(session.title ?? "");
+    setEditingSessionTitle(session.title ?? "");
   };
 
   /**
-   * Exit rename mode without touching persisted state.
+   * Enter inline renaming for one project row without leaving the sidebar.
    */
-  const cancelRenaming = () => {
-    setEditingSessionId(null);
-    setEditingTitle("");
+  const startRenamingProject = (project: ChatSidebarProjectItem) => {
+    setEditingProjectId(project.project_id);
+    setEditingProjectName(project.name);
   };
 
   /**
-   * Persist the current inline rename draft and fall back to the generated
+   * Exit session rename mode without touching persisted state.
+   */
+  const cancelSessionRenaming = () => {
+    setEditingSessionId(null);
+    setEditingSessionTitle("");
+  };
+
+  /**
+   * Exit project rename mode without touching persisted state.
+   */
+  const cancelProjectRenaming = () => {
+    setEditingProjectId(null);
+    setEditingProjectName("");
+  };
+
+  /**
+   * Toggle one project's nested session list without changing selection.
+   */
+  const toggleProjectExpanded = (projectId: string) => {
+    setExpandedProjects((currentState) => ({
+      ...currentState,
+      [projectId]: !(currentState[projectId] ?? false),
+    }));
+  };
+
+  /**
+   * Persist the current session rename draft and fall back to the generated
    * title when the user clears the field entirely.
    */
-  const submitRename = async () => {
+  const submitSessionRename = async () => {
     if (!editingSessionId) {
       return;
     }
 
-    const nextTitle = editingTitle.trim();
+    const nextTitle = editingSessionTitle.trim();
     const sessionId = editingSessionId;
-    cancelRenaming();
+    cancelSessionRenaming();
     await onRenameSession(sessionId, nextTitle.length > 0 ? nextTitle : null);
   };
 
   /**
-   * Keep keyboard-driven renaming aligned with common list-editing behavior.
+   * Persist the current project rename draft while keeping empty names invalid.
+   */
+  const submitProjectRename = async () => {
+    if (!editingProjectId || !onRenameProject) {
+      return;
+    }
+
+    const nextName = editingProjectName.trim();
+    if (nextName.length === 0) {
+      cancelProjectRenaming();
+      return;
+    }
+
+    const projectId = editingProjectId;
+    cancelProjectRenaming();
+    await onRenameProject(projectId, nextName);
+  };
+
+  /**
+   * Keep keyboard-driven inline editing aligned with common list behavior.
    */
   const handleRenameKeyDown = async (
     event: KeyboardEvent<HTMLInputElement>,
+    scope: "session" | "project",
   ) => {
     event.stopPropagation();
     if (event.key === "Enter") {
       event.preventDefault();
-      await submitRename();
+      if (scope === "session") {
+        await submitSessionRename();
+      } else {
+        await submitProjectRename();
+      }
       return;
     }
 
     if (event.key === "Escape") {
       event.preventDefault();
-      cancelRenaming();
+      if (scope === "session") {
+        cancelSessionRenaming();
+      } else {
+        cancelProjectRenaming();
+      }
     }
+  };
+
+  /**
+   * Render one session row so standalone and project-nested sessions stay
+   * visually and behaviorally consistent.
+   */
+  const renderSessionRow = (session: SessionListItem) => {
+    const isActive = session.session_id === currentSessionId;
+    const isEditing = session.session_id === editingSessionId;
+
+    return (
+      <SidebarMenuItem key={session.session_id}>
+        {isEditing ? (
+          <div className="px-2 py-1">
+            <Input
+              ref={renameSessionInputRef}
+              value={editingSessionTitle}
+              onChange={(event) => setEditingSessionTitle(event.target.value)}
+              onBlur={() => {
+                void submitSessionRename();
+              }}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                void handleRenameKeyDown(event, "session");
+              }}
+              className="h-8 rounded-lg border-sidebar-border/60 bg-background px-2 text-xs shadow-none focus-visible:ring-2"
+              aria-label="Rename session"
+            />
+          </div>
+        ) : (
+          <>
+            <SidebarMenuButton
+              isActive={isActive}
+              tooltip={getSessionTitle(session)}
+              onClick={() => {
+                void onSelectSession(session.session_id);
+              }}
+              className="h-9 rounded-xl px-2.5 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+            >
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                {isSessionRunning(session) ? (
+                  <Loader2
+                    className="h-3.5 w-3.5 animate-spin text-sidebar-foreground/60"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </span>
+              <span>{getSessionTitle(session)}</span>
+            </SidebarMenuButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuAction
+                  showOnHover={!session.is_pinned}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                  }}
+                  title="Session actions"
+                  className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
+                >
+                  {session.is_pinned ? (
+                    <Pin className="h-4 w-4" />
+                  ) : (
+                    <MoreHorizontal className="h-4 w-4" />
+                  )}
+                </SidebarMenuAction>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <DropdownMenuItem
+                  onSelect={() => {
+                    startRenamingSession(session);
+                  }}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Rename
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void onTogglePinSession(
+                      session.session_id,
+                      !session.is_pinned,
+                    );
+                  }}
+                >
+                  {session.is_pinned ? (
+                    <PinOff className="h-4 w-4" />
+                  ) : (
+                    <Pin className="h-4 w-4" />
+                  )}
+                  {session.is_pinned ? "Unpin" : "Pin to top"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => {
+                    void onDeleteSession(session.session_id);
+                  }}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
+      </SidebarMenuItem>
+    );
   };
 
   return (
@@ -193,6 +396,7 @@ export function SessionSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
+              isActive={isNewSessionDraftActive}
               tooltip="New Session"
               onClick={() => {
                 void onNewSession();
@@ -223,8 +427,188 @@ export function SessionSidebar({
         </SidebarMenu>
       </SidebarHeader>
 
-      {!isCollapsed && (
+      {!isCollapsed ? (
         <SidebarContent className="session-sidebar-scroll-area gap-0">
+          {onCreateProject || projects.length > 0 ? (
+            <SidebarGroup className="py-2">
+              <SidebarGroupLabel className="flex h-6 items-center justify-between px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/42">
+                <span>Projects</span>
+                {onCreateProject ? (
+                  <button
+                    type="button"
+                    aria-label="New project"
+                    onClick={() => {
+                      void onCreateProject();
+                    }}
+                    disabled={isLoadingSession || isStreaming}
+                    className="flex h-5 w-5 items-center justify-center rounded-md text-sidebar-foreground/52 transition hover:bg-sidebar-accent hover:text-sidebar-foreground disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </SidebarGroupLabel>
+              <SidebarGroupContent className="px-1 pt-1">
+                {projects.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-muted-foreground">
+                    {isSessionListPending ? (
+                      <div className="space-y-2" role="status" aria-live="polite">
+                        <span className="sr-only">Loading projects...</span>
+                        {Array.from({ length: 2 }, (_, index) => (
+                          <Skeleton
+                            key={`project-skeleton-${index}`}
+                            className="h-9 rounded-xl bg-sidebar-accent/55"
+                            aria-hidden="true"
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <span>No projects yet</span>
+                    )}
+                  </div>
+                ) : (
+                  <SidebarMenu>
+                    {projects.map((project) => {
+                      const isEditing = project.project_id === editingProjectId;
+                      const isProjectOverviewActive =
+                        currentProjectId === project.project_id &&
+                        currentSessionId === null;
+                      const hasNestedSessions = project.sessions.length > 0;
+                      const isExpanded =
+                        expandedProjects[project.project_id] ?? false;
+
+                      return (
+                        <div key={project.project_id} className="space-y-1">
+                          <SidebarMenuItem>
+                            {isEditing ? (
+                              <div className="px-2 py-1">
+                                <Input
+                                  ref={renameProjectInputRef}
+                                  value={editingProjectName}
+                                  onChange={(event) =>
+                                    setEditingProjectName(event.target.value)
+                                  }
+                                  onBlur={() => {
+                                    void submitProjectRename();
+                                  }}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => {
+                                    void handleRenameKeyDown(event, "project");
+                                  }}
+                                  className="h-8 rounded-lg border-sidebar-border/60 bg-background px-2 text-xs shadow-none focus-visible:ring-2"
+                                  aria-label="Rename project"
+                                />
+                              </div>
+                            ) : (
+                              <div className="group/project-item relative">
+                                {hasNestedSessions ? (
+                                  <button
+                                    type="button"
+                                    aria-label={
+                                      isExpanded
+                                        ? `Collapse project ${project.name}`
+                                        : `Expand project ${project.name}`
+                                    }
+                                    aria-expanded={isExpanded}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      toggleProjectExpanded(project.project_id);
+                                    }}
+                                    className="absolute left-2 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-foreground/55 transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                  >
+                                    <Folder className="h-3.5 w-3.5 transition-opacity duration-200 group-hover/project-item:opacity-0" />
+                                    {isExpanded ? (
+                                      <ChevronDown className="absolute h-3.5 w-3.5 opacity-0 transition-opacity duration-200 group-hover/project-item:opacity-100" />
+                                    ) : (
+                                      <ChevronRight className="absolute h-3.5 w-3.5 opacity-0 transition-opacity duration-200 group-hover/project-item:opacity-100" />
+                                    )}
+                                  </button>
+                                ) : (
+                                  <span className="absolute left-2 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-sidebar-foreground/50">
+                                    <Folder className="h-3.5 w-3.5" />
+                                  </span>
+                                )}
+
+                                <SidebarMenuButton
+                                  isActive={isProjectOverviewActive}
+                                  tooltip={project.name}
+                                  onClick={() => {
+                                    void onSelectProject?.(project.project_id);
+                                  }}
+                                  className="h-9 rounded-xl pl-8 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+                                >
+                                  <span className="truncate">{project.name}</span>
+                                </SidebarMenuButton>
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <SidebarMenuAction
+                                      showOnHover
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                      }}
+                                      title="Project actions"
+                                      className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
+                                    >
+                                      <MoreHorizontal className="h-4 w-4" />
+                                    </SidebarMenuAction>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent
+                                    align="end"
+                                    onClick={(event) => event.stopPropagation()}
+                                  >
+                                    <DropdownMenuItem
+                                      onSelect={() => {
+                                        startRenamingProject(project);
+                                      }}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                      Rename
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onSelect={() => {
+                                        void onDeleteProject?.(project.project_id);
+                                      }}
+                                      className="text-destructive focus:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                      Delete
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            )}
+                          </SidebarMenuItem>
+
+                          {hasNestedSessions ? (
+                            <div
+                              aria-hidden={!isExpanded}
+                              className={`ml-4 overflow-hidden border-l border-sidebar-border/40 pl-2 transition-[max-height,opacity,margin] duration-200 ease-out ${
+                                isExpanded
+                                  ? "mt-1 opacity-100"
+                                  : "mt-0 opacity-0 pointer-events-none"
+                              }`}
+                              style={{
+                                maxHeight: isExpanded
+                                  ? `${project.sessions.length * 44 + 8}px`
+                                  : "0px",
+                              }}
+                            >
+                              <SidebarMenu>
+                                {project.sessions.map((session) =>
+                                  renderSessionRow(session),
+                                )}
+                              </SidebarMenu>
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </SidebarMenu>
+                )}
+              </SidebarGroupContent>
+            </SidebarGroup>
+          ) : null}
+
           <SidebarGroup className="py-2">
             <SidebarGroupLabel className="h-6 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/42">
               Sessions
@@ -246,123 +630,16 @@ export function SessionSidebar({
                       ))}
                     </div>
                   ) : (
-                    <span>No sessions yet</span>
+                    <span>No standalone sessions yet</span>
                   )}
                 </div>
               ) : (
-                <SidebarMenu>
-                  {sessions.map((session) => {
-                    const isActive = session.session_id === currentSessionId;
-                    const isEditing = session.session_id === editingSessionId;
-
-                    return (
-                      <SidebarMenuItem key={session.session_id}>
-                        {isEditing ? (
-                          <div className="px-2 py-1">
-                            <Input
-                              ref={renameInputRef}
-                              value={editingTitle}
-                              onChange={(event) =>
-                                setEditingTitle(event.target.value)
-                              }
-                              onBlur={() => {
-                                void submitRename();
-                              }}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                void handleRenameKeyDown(event);
-                              }}
-                              className="h-8 rounded-lg border-sidebar-border/60 bg-background px-2 text-xs shadow-none focus-visible:ring-2"
-                              aria-label="Rename session"
-                            />
-                          </div>
-                        ) : (
-                          <>
-                            <SidebarMenuButton
-                              isActive={isActive}
-                              tooltip={getSessionTitle(session)}
-                              onClick={() => {
-                                void onSelectSession(session.session_id);
-                              }}
-                              className="h-9 rounded-xl px-2.5 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
-                            >
-                              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                                {isSessionRunning(session) ? (
-                                  <Loader2
-                                    className="h-3.5 w-3.5 animate-spin text-sidebar-foreground/60"
-                                    aria-hidden="true"
-                                  />
-                                ) : null}
-                              </span>
-                              <span>{getSessionTitle(session)}</span>
-                            </SidebarMenuButton>
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <SidebarMenuAction
-                                  showOnHover={!session.is_pinned}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                  }}
-                                  title="Session actions"
-                                  className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
-                                >
-                                  {session.is_pinned ? (
-                                    <Pin className="h-4 w-4" />
-                                  ) : (
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  )}
-                                </SidebarMenuAction>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent
-                                align="end"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <DropdownMenuItem
-                                  onSelect={() => {
-                                    startRenaming(session);
-                                  }}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                  Rename
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onSelect={() => {
-                                    void onTogglePinSession(
-                                      session.session_id,
-                                      !session.is_pinned,
-                                    );
-                                  }}
-                                >
-                                  {session.is_pinned ? (
-                                    <PinOff className="h-4 w-4" />
-                                  ) : (
-                                    <Pin className="h-4 w-4" />
-                                  )}
-                                  {session.is_pinned ? "Unpin" : "Pin to top"}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onSelect={() => {
-                                    void onDeleteSession(session.session_id);
-                                  }}
-                                  className="text-destructive focus:text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </>
-                        )}
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
+                <SidebarMenu>{sessions.map((session) => renderSessionRow(session))}</SidebarMenu>
               )}
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-      )}
+      ) : null}
 
       {footer ? (
         <SidebarFooter

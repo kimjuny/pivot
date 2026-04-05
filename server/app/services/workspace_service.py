@@ -14,20 +14,26 @@ import ast
 import importlib.util
 import inspect
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.models.workspace import Workspace
 from app.orchestration.tool.metadata import ToolMetadata
 from app.utils.logging_config import get_logger
+from sqlmodel import Session as DBSession, select
 
 logger = get_logger("workspace_service")
 
 # Root that contains per-user subdirectories.
 # Resolved relative to this file: server/app/services/ -> server/
 _WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent / "workspace"
+_BACKEND_WORKSPACE_ROOT = "/app/server/workspace"
 
 
 def workspace_root() -> Path:
@@ -58,6 +64,142 @@ def ensure_agent_workspace(username: str, agent_id: int) -> Path:
     agent_dir = workspace_root() / username / "agents" / str(agent_id)
     agent_dir.mkdir(parents=True, exist_ok=True)
     return agent_dir
+
+
+def session_workspace_dir(username: str, agent_id: int, session_id: str) -> Path:
+    """Return the directory reserved for one private session workspace."""
+    path = ensure_agent_workspace(username, agent_id) / "sessions" / session_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def project_workspace_dir(username: str, agent_id: int, project_id: str) -> Path:
+    """Return the directory reserved for one shared project workspace."""
+    path = ensure_agent_workspace(username, agent_id) / "projects" / project_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+class WorkspaceService:
+    """CRUD-style service for runtime workspace records and paths."""
+
+    def __init__(self, db: DBSession) -> None:
+        """Initialize the service with a database session.
+
+        Args:
+            db: Active database session.
+        """
+        self.db = db
+
+    def get_workspace(self, workspace_id: str) -> Workspace | None:
+        """Return one workspace by public identifier."""
+        statement = select(Workspace).where(Workspace.workspace_id == workspace_id)
+        return self.db.exec(statement).first()
+
+    def create_workspace(
+        self,
+        *,
+        agent_id: int,
+        username: str,
+        scope: str,
+        session_id: str | None = None,
+        project_id: str | None = None,
+    ) -> Workspace:
+        """Create and persist one workspace record plus its directory.
+
+        Args:
+            agent_id: Owning agent identifier.
+            username: Workspace owner.
+            scope: Workspace scope string.
+            session_id: Optional bound private session UUID.
+            project_id: Optional bound shared project UUID.
+
+        Returns:
+            Persisted workspace row.
+
+        Raises:
+            ValueError: If the requested scope/ownership combination is invalid.
+        """
+        if scope == "session_private":
+            if session_id is None or project_id is not None:
+                raise ValueError("session_private workspaces require session_id only.")
+        elif scope == "project_shared":
+            if project_id is None or session_id is not None:
+                raise ValueError("project_shared workspaces require project_id only.")
+        else:
+            raise ValueError(f"Unsupported workspace scope '{scope}'.")
+
+        now = datetime.now(UTC)
+        workspace = Workspace(
+            workspace_id=str(uuid.uuid4()),
+            agent_id=agent_id,
+            user=username,
+            scope=scope,
+            session_id=session_id,
+            project_id=project_id,
+            status="active",
+            created_at=now,
+            updated_at=now,
+        )
+        self.db.add(workspace)
+        self.db.commit()
+        self.db.refresh(workspace)
+        self.get_workspace_path(workspace)
+        return workspace
+
+    def get_workspace_path(self, workspace: Workspace) -> Path:
+        """Resolve and create the host-side directory for one workspace.
+
+        Args:
+            workspace: Workspace row to resolve.
+
+        Returns:
+            Absolute host-side path.
+
+        Raises:
+            ValueError: If the row is missing the scope-specific identifier.
+        """
+        if workspace.scope == "session_private":
+            if workspace.session_id is None:
+                raise ValueError("Workspace row is missing session_id.")
+            return session_workspace_dir(
+                workspace.user,
+                workspace.agent_id,
+                workspace.session_id,
+            )
+        if workspace.scope == "project_shared":
+            if workspace.project_id is None:
+                raise ValueError("Workspace row is missing project_id.")
+            return project_workspace_dir(
+                workspace.user,
+                workspace.agent_id,
+                workspace.project_id,
+            )
+        raise ValueError(f"Unsupported workspace scope '{workspace.scope}'.")
+
+    def get_workspace_backend_path(self, workspace: Workspace) -> str:
+        """Return the path visible inside the backend container for one workspace."""
+        relative_path = self.get_workspace_path(workspace).relative_to(workspace_root())
+        return f"{_BACKEND_WORKSPACE_ROOT}/{relative_path.as_posix()}"
+
+    def delete_workspace(self, workspace_id: str) -> bool:
+        """Delete one workspace record and its host-side directory.
+
+        Args:
+            workspace_id: Public workspace identifier.
+
+        Returns:
+            ``True`` when a workspace existed and was removed.
+        """
+        workspace = self.get_workspace(workspace_id)
+        if workspace is None:
+            return False
+
+        workspace_dir = self.get_workspace_path(workspace)
+        shutil.rmtree(workspace_dir, ignore_errors=True)
+        self.db.delete(workspace)
+        self.db.commit()
+        return True
 
 
 # ---------------------------------------------------------------------------
