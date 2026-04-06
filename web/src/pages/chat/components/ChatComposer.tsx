@@ -405,7 +405,7 @@ export function ChatComposer({
         event.preventDefault();
         if (filteredMandatorySkills.length > 0) {
           setHighlightedMandatorySkillIndex((previous) =>
-            Math.min(previous + 1, filteredMandatorySkills.length - 1),
+            previous >= filteredMandatorySkills.length - 1 ? 0 : previous + 1,
           );
         }
         return;
@@ -415,7 +415,7 @@ export function ChatComposer({
         event.preventDefault();
         if (filteredMandatorySkills.length > 0) {
           setHighlightedMandatorySkillIndex((previous) =>
-            Math.max(previous - 1, 0),
+            previous <= 0 ? filteredMandatorySkills.length - 1 : previous - 1,
           );
         }
         return;
@@ -818,6 +818,7 @@ export function ChatComposer({
                 ) : (
                   <InputGroupButton
                     type="submit"
+                    variant="default"
                     disabled={!canSendMessage}
                     size="icon-sm"
                     className="rounded-full"

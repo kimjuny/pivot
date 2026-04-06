@@ -447,6 +447,43 @@ describe("ChatContainer session rollover", () => {
     });
   });
 
+  it("keeps skill-only drafts non-sendable without message text", async () => {
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+    vi.mocked(getReactRuntimeSkills).mockResolvedValue([
+      {
+        name: "sample_skill",
+        description: "Example skill description",
+        path: "/workspace/skills/sample_skill/SKILL.md",
+      },
+    ]);
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getReactRuntimeSkills).toHaveBeenCalled();
+    });
+
+    const textarea = screen.getByPlaceholderText("Ask anything");
+    await user.click(textarea);
+    await user.type(textarea, "/");
+    await user.click(await screen.findByText("sample_skill"));
+
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+    await user.click(sendButton);
+    expect(startReactTask).not.toHaveBeenCalled();
+  });
+
   it("defaults to Auto mode when the primary LLM exposes a non-fast thinking tier", async () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
     vi.mocked(getLLMById).mockResolvedValue({

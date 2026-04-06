@@ -185,7 +185,9 @@ describe("ChatComposer", () => {
       scopedGroup.getByRole("button", { name: "Clear reply context" }),
     ).toBeInTheDocument();
     expect(scopedGroup.getByRole("button", { name: "Attach" })).toBeInTheDocument();
-    expect(scopedGroup.getByRole("button", { name: "Send" })).toBeInTheDocument();
+    const sendButton = scopedGroup.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeInTheDocument();
+    expect(sendButton.className).toContain("bg-primary");
   });
 
   it("opens the slash picker and inserts one mandatory skill chip", async () => {
@@ -329,6 +331,63 @@ describe("ChatComposer", () => {
     expect(screen.queryByText("alpha_skill")).not.toBeInTheDocument();
     expect(screen.queryByText("beta_skill")).not.toBeInTheDocument();
     expect(handleAddMandatorySkill).not.toHaveBeenCalled();
+  });
+
+  it("wraps keyboard navigation from the first skill to the last one", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatComposer
+        {...buildComposerProps({
+          inputMessage: "/",
+          availableMandatorySkills: [
+            {
+              name: "alpha_skill",
+              description: "Alpha",
+              path: "/workspace/skills/alpha_skill/SKILL.md",
+            },
+            {
+              name: "beta_skill",
+              description: "Beta",
+              path: "/workspace/skills/beta_skill/SKILL.md",
+            },
+            {
+              name: "gamma_skill",
+              description: "Gamma",
+              path: "/workspace/skills/gamma_skill/SKILL.md",
+            },
+          ],
+        })}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask anything");
+    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected the composer to render a textarea element.");
+    }
+
+    await user.click(textarea);
+    placeComposerCaret(textarea, 1);
+
+    const alphaSkill = await screen.findByText("alpha_skill");
+    const gammaSkill = await screen.findByText("gamma_skill");
+
+    expect(alphaSkill.closest("[cmdk-item]")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+    expect(gammaSkill.closest("[cmdk-item]")).toHaveAttribute(
+      "data-selected",
+      "true",
+    );
+    expect(alphaSkill.closest("[cmdk-item]")).not.toHaveAttribute(
+      "data-selected",
+      "true",
+    );
   });
 
   it("scrolls the highlighted mandatory skill into view during keyboard navigation", async () => {
