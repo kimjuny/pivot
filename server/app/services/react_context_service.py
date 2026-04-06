@@ -139,9 +139,7 @@ class ReactContextUsageService:
                         )
                     )
                     messages.append(resume_prompt_object)
-                    bootstrap_tokens = estimate_messages_tokens(
-                        [resume_prompt_object]
-                    )
+                    bootstrap_tokens = estimate_messages_tokens([resume_prompt_object])
                     includes_task_bootstrap = True
                 draft_message_payload = self._build_task_user_payload(
                     task=task,

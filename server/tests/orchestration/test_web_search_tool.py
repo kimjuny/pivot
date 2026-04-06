@@ -10,8 +10,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
 
-from sqlmodel import create_engine
-
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
@@ -22,6 +20,12 @@ types_module = import_module("app.orchestration.web_search.types")
 
 class WebSearchToolTestCase(unittest.TestCase):
     """Validate noisy LLM inputs are normalized at the tool boundary."""
+
+    def test_web_search_metadata_hides_provider_selection_from_llm(self) -> None:
+        """The model should not be told to choose concrete provider keys."""
+        parameters = cast(Any, tool_module.web_search).__tool_metadata__.parameters
+
+        self.assertNotIn("provider", parameters["properties"])
 
     def test_web_search_normalizes_noisy_llm_arguments(self) -> None:
         """Trailing newlines and aliases should not cause tool execution failure."""
@@ -43,9 +47,6 @@ class WebSearchToolTestCase(unittest.TestCase):
                 tool_module,
                 "get_current_tool_execution_context",
                 return_value=SimpleNamespace(agent_id=7),
-            ),
-            patch.object(
-                tool_module, "get_engine", return_value=create_engine("sqlite://")
             ),
             patch.object(
                 tool_module.WebSearchService,
@@ -93,9 +94,6 @@ class WebSearchToolTestCase(unittest.TestCase):
                 return_value=SimpleNamespace(agent_id=7, web_search_provider="baidu"),
             ),
             patch.object(
-                tool_module, "get_engine", return_value=create_engine("sqlite://")
-            ),
-            patch.object(
                 tool_module.WebSearchService,
                 "execute_search",
                 side_effect=fake_execute_search,
@@ -128,9 +126,6 @@ class WebSearchToolTestCase(unittest.TestCase):
                 tool_module,
                 "get_current_tool_execution_context",
                 return_value=SimpleNamespace(agent_id=7, web_search_provider="missing"),
-            ),
-            patch.object(
-                tool_module, "get_engine", return_value=create_engine("sqlite://")
             ),
             patch.object(
                 tool_module.WebSearchService,

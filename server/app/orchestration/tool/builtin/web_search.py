@@ -42,10 +42,15 @@ def web_search(
     include_usage: bool = False,
     safe_search: bool = False,
 ) -> dict[str, Any]:
-    """Search the web through one configured provider and return normalized results.
+    """Search the web through the provider selected for the current turn.
 
-    This is an abstract network-search tool. Each agent configures one or more
-    web-search provider bindings separately in the Web Search sidebar section.
+    This is an abstract network-search tool. Provider bindings are configured
+    outside the tool itself. In the chat UI, the active provider comes from the
+    user's current composer selection. If no turn-scoped selection exists, the
+    tool falls back to the agent's only enabled web-search binding.
+
+    Do not guess or hard-code provider keys in model tool calls. The runtime is
+    responsible for resolving which concrete provider binding is available.
 
     Use this tool when you need fresh web data. The tool returns:
     - normalized search results
@@ -56,8 +61,6 @@ def web_search(
 
     Args:
         query: Search query to execute.
-        provider: Optional provider key such as ``tavily`` or ``baidu``. When
-            omitted, the agent must have exactly one enabled web-search binding.
         max_results: Maximum number of normalized search results to return.
         search_depth: Optional search depth hint. Supported today by Tavily only.
         topic: Optional search topic hint such as ``general`` or ``news``.
@@ -157,7 +160,6 @@ cast(Any, web_search).__tool_metadata__.parameters = {
     "type": "object",
     "properties": {
         "query": {"type": "string"},
-        "provider": {"type": "string"},
         "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
         "search_depth": {
             "type": "string",

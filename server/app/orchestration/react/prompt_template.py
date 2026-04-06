@@ -71,12 +71,11 @@ def build_runtime_user_prompt(
     if tool_manager:
         tools_description = tool_manager.to_text_catalog()
 
-    rendered_prompt = _REACT_USER_PROMPT.replace(
-        "{{tools_description}}", tools_description
-    ).replace("{{skills}}", skills).replace(
-        "{{mandatory_skills}}", mandatory_skills
-    ).replace(
-        "{{workspace_guidance}}", workspace_guidance
+    rendered_prompt = (
+        _REACT_USER_PROMPT.replace("{{tools_description}}", tools_description)
+        .replace("{{skills}}", skills)
+        .replace("{{mandatory_skills}}", mandatory_skills)
+        .replace("{{workspace_guidance}}", workspace_guidance)
     )
     ordered_sections = [
         *[block.strip() for block in (prefix_blocks or []) if block.strip()],
