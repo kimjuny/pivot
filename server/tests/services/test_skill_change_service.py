@@ -10,6 +10,7 @@ import unittest
 from importlib import import_module
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 from zipfile import ZipFile
 
@@ -23,6 +24,10 @@ import_module("app.models")
 skill_change_service = import_module("app.services.skill_change_service")
 skill_service = import_module("app.services.skill_service")
 sandbox_service_module = import_module("app.services.sandbox_service")
+binary_storage_service = import_module("app.services.binary_storage_service")
+WorkspaceMountSpec = import_module(
+    "app.services.workspace_storage_service"
+).WorkspaceMountSpec
 Skill = import_module("app.models.skill").Skill
 SkillChangeSubmission = import_module(
     "app.models.skill_change_submission"
@@ -40,12 +45,12 @@ class _FakeSandboxService:
     def exec(
         self,
         username: str,
-        agent_id: int,
+        mount_spec: Any,
         cmd: list[str],
         skills: list[dict[str, str]] | None = None,
         timeout_seconds: int | None = None,
     ) -> SandboxExecResult:
-        del username, agent_id, cmd, skills, timeout_seconds
+        del username, mount_spec, cmd, skills, timeout_seconds
         return SandboxExecResult(
             exit_code=0,
             stdout=json.dumps(self.archive_payload),
@@ -64,23 +69,21 @@ class SkillChangeServiceTestCase(unittest.TestCase):
 
         self.tmpdir = tempfile.TemporaryDirectory()
         root = Path(self.tmpdir.name)
-        self.workspace_root = root / "workspace"
-        self.builtin_root = root / "builtin"
-        self.workspace_root.mkdir(parents=True, exist_ok=True)
-        self.builtin_root.mkdir(parents=True, exist_ok=True)
+        self.cache_root = root / "cache"
+        self.data_root = root / "data"
 
-        self.skill_workspace_patch = patch.object(
-            skill_service, "workspace_root", return_value=self.workspace_root
+        self.skill_cache_patch = patch.object(
+            skill_service,
+            "local_runtime_cache_root",
+            return_value=self.cache_root,
         )
-        self.skill_change_workspace_patch = patch.object(
-            skill_change_service, "workspace_root", return_value=self.workspace_root
+        self.binary_storage_patch = patch.object(
+            binary_storage_service,
+            "local_data_root",
+            return_value=self.data_root,
         )
-        self.builtin_patch = patch.object(
-            skill_service, "_builtin_skills_dir", return_value=self.builtin_root
-        )
-        self.skill_workspace_patch.start()
-        self.skill_change_workspace_patch.start()
-        self.builtin_patch.start()
+        self.skill_cache_patch.start()
+        self.binary_storage_patch.start()
 
         self.alice = User(username="alice", password_hash="hash")
         self.session.add(self.alice)
@@ -89,9 +92,8 @@ class SkillChangeServiceTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         """Release temporary state after each test."""
-        self.skill_workspace_patch.stop()
-        self.skill_change_workspace_patch.stop()
-        self.builtin_patch.stop()
+        self.skill_cache_patch.stop()
+        self.binary_storage_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
 
@@ -132,6 +134,12 @@ class SkillChangeServiceTestCase(unittest.TestCase):
                 self.session,
                 self.alice,
                 agent_id=7,
+                mount_spec=WorkspaceMountSpec(
+                    workspace_id="workspace-1",
+                    storage_backend="seaweedfs",
+                    logical_path="users/alice/agents/7/sessions/workspace-1",
+                    mount_mode="live_sync",
+                ),
                 draft_dir_path="/workspace/skills/planning-kit",
                 message="Adds a reusable planning workflow.",
             )
@@ -164,7 +172,7 @@ class SkillChangeServiceTestCase(unittest.TestCase):
         self.assertIsNotNone(skill)
         self.assertEqual(skill.kind, "private")
         self.assertEqual(skill.source, "agent")
-        applied_path = self.workspace_root / "alice" / "skills" / "planning-kit"
+        applied_path = self.cache_root / "users" / "alice" / "skills" / "planning-kit"
         self.assertTrue((applied_path / "scripts" / "check.sh").exists())
 
         submission = self.session.get(SkillChangeSubmission, submission_id)
@@ -205,6 +213,12 @@ class SkillChangeServiceTestCase(unittest.TestCase):
                 self.session,
                 self.alice,
                 agent_id=9,
+                mount_spec=WorkspaceMountSpec(
+                    workspace_id="workspace-2",
+                    storage_backend="seaweedfs",
+                    logical_path="users/alice/agents/9/sessions/workspace-2",
+                    mount_mode="live_sync",
+                ),
                 draft_dir_path="/workspace/skills/research-notes",
             )
             self.assertEqual(staged["change_type"], "update")
@@ -216,7 +230,7 @@ class SkillChangeServiceTestCase(unittest.TestCase):
                 decision="approve",
             )
 
-        skill_dir = self.workspace_root / "alice" / "skills" / "research-notes"
+        skill_dir = self.cache_root / "users" / "alice" / "skills" / "research-notes"
         skill_source = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("Updated body.", skill_source)
         self.assertTrue((skill_dir / "templates" / "outline.md").exists())

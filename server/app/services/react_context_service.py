@@ -32,6 +32,7 @@ from app.services.skill_service import (
 )
 from app.services.workspace_guidance_service import build_workspace_guidance_prompt
 from app.services.workspace_service import WorkspaceService
+from app.services.workspace_storage_service import WorkspaceStorageService
 from sqlmodel import Session as DBSession, select
 
 if TYPE_CHECKING:
@@ -339,7 +340,8 @@ class ReactContextUsageService:
             return ""
 
         return build_workspace_guidance_prompt(
-            workspace_service.get_workspace_path(workspace)
+            username=session_row.user,
+            mount_spec=WorkspaceStorageService().build_mount_spec(workspace),
         )
 
     def list_runtime_skills(

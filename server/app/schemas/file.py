@@ -43,6 +43,10 @@ class FileAssetResponse(AppBaseModel):
         default=None,
         description="Task UUID that consumed the file",
     )
+    workspace_relative_path: str | None = Field(
+        default=None,
+        description="Workspace-relative path once the file is attached",
+    )
     created_at: str = Field(..., description="UTC creation timestamp in ISO format")
     expires_at: str = Field(..., description="UTC expiry timestamp in ISO format")
 
@@ -64,4 +68,5 @@ class FileAssetListItem(AppBaseModel):
     suspected_scanned: bool = False
     text_encoding: str | None = None
     source: str
+    workspace_relative_path: str | None = None
     created_at: str

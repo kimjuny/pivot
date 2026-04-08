@@ -19,6 +19,10 @@ class Workspace(SQLModel, table=True):
         session_id: Session UUID for private workspaces.
         project_id: Project UUID for shared project workspaces.
         status: Lifecycle state for future reset/repair flows.
+        storage_backend: Persistent storage backend identity for this workspace.
+        logical_path: Canonical storage path within the selected backend.
+        mount_mode: Runtime attach behavior, currently ``live_sync``.
+        source_workspace_id: Optional future source workspace for clone flows.
         created_at: UTC creation time.
         updated_at: UTC last-update time.
     """
@@ -33,5 +37,9 @@ class Workspace(SQLModel, table=True):
     session_id: str | None = Field(default=None, index=True)
     project_id: str | None = Field(default=None, index=True)
     status: str = Field(default="active", description="Workspace lifecycle status")
+    storage_backend: str = Field(default="seaweedfs", max_length=64)
+    logical_path: str = Field(default="", unique=True, max_length=1024)
+    mount_mode: str = Field(default="live_sync", max_length=64)
+    source_workspace_id: str | None = Field(default=None, index=True, max_length=255)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

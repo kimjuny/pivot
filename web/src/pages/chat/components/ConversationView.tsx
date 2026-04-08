@@ -6,6 +6,7 @@ import { UserMessageBubble } from "./UserMessageBubble";
 
 interface ConversationViewProps {
   messages: ChatMessage[];
+  currentSessionId: string | null;
   agentName?: string;
   expandedRecursions: Record<string, boolean>;
   isStreaming: boolean;
@@ -26,6 +27,7 @@ interface ConversationViewProps {
  */
 export function ConversationView({
   messages,
+  currentSessionId,
   agentName,
   expandedRecursions,
   isStreaming,
@@ -60,10 +62,14 @@ export function ConversationView({
       {messages.map((message) => (
         <div key={message.id} className="mb-6 space-y-2 last:mb-0">
           {message.role === "user" ? (
-            <UserMessageBubble message={message} />
+            <UserMessageBubble
+              message={message}
+              currentSessionId={currentSessionId}
+            />
           ) : (
             <AssistantMessageBlock
               message={message}
+              currentSessionId={currentSessionId}
               expandedRecursions={expandedRecursions}
               isStreaming={isStreaming}
               onToggleRecursion={onToggleRecursion}

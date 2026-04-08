@@ -43,11 +43,13 @@ from app.services.session_service import SessionService
 from app.services.skill_change_service import apply_skill_change_submission
 from app.services.skill_service import (
     build_mandatory_skills_prompt_json,
+    build_skill_mounts,
     build_skills_metadata_prompt_json,
     list_allowed_visible_skills,
 )
 from app.services.workspace_guidance_service import build_workspace_guidance_prompt
 from app.services.workspace_service import WorkspaceService
+from app.services.workspace_storage_service import WorkspaceStorageService
 from sqlmodel import Session, col, desc, select
 
 logger = logging.getLogger(__name__)
@@ -607,11 +609,9 @@ class ReactTaskSupervisor:
                 workspace = WorkspaceService(db).get_workspace(session_row.workspace_id)
                 if workspace is None:
                     raise ValueError("Workspace not found for the current session.")
-                workspace_service = WorkspaceService(db)
-                workspace_backend_path = workspace_service.get_workspace_backend_path(
+                workspace_mount_spec = WorkspaceStorageService().build_mount_spec(
                     workspace
                 )
-                workspace_host_path = workspace_service.get_workspace_path(workspace)
 
                 llm_config = llm_crud.get(runtime_config.llm_id, db)
                 if llm_config is None:
@@ -656,13 +656,12 @@ class ReactTaskSupervisor:
                     raw_skill_ids=runtime_config.raw_skill_ids,
                     extra_skills=extension_skills,
                 )
-                allowed_skill_mounts = [
-                    {
-                        "name": skill["name"],
-                        "location": skill["location"],
-                    }
-                    for skill in allowed_visible_skills
-                ]
+                allowed_skill_mounts = build_skill_mounts(
+                    db,
+                    launch.username,
+                    [skill["name"] for skill in allowed_visible_skills],
+                    extra_skills=extension_skills,
+                )
                 skills_metadata_json = build_skills_metadata_prompt_json(
                     db,
                     launch.username,
@@ -677,7 +676,8 @@ class ReactTaskSupervisor:
                     extra_skills=extension_skills,
                 )
                 workspace_guidance = build_workspace_guidance_prompt(
-                    workspace_host_path
+                    username=launch.username,
+                    mount_spec=workspace_mount_spec,
                 )
 
                 engine = ReactEngine(
@@ -687,8 +687,7 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         username=launch.username,
                         agent_id=agent.id or 0,
-                        workspace_id=workspace.workspace_id,
-                        workspace_backend_path=workspace_backend_path,
+                        workspace_mount_spec=workspace_mount_spec,
                         sandbox_timeout_seconds=runtime_config.sandbox_timeout_seconds,
                         web_search_provider=launch.web_search_provider,
                         allowed_skills=tuple(allowed_skill_mounts),

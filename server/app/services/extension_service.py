@@ -28,12 +28,13 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
 from app.orchestration.tool.metadata import ToolMetadata
 from app.orchestration.web_search.types import WebSearchProviderManifest
 from app.services.artifact_storage_service import ExtensionArtifactStorageService
+from app.services.local_data_paths_service import local_runtime_cache_root
 from app.services.provider_registry_service import (
     ProviderRegistryService,
     load_channel_provider_from_file,
     load_web_search_provider_from_file,
 )
-from app.services.workspace_service import ensure_agent_workspace, workspace_root
+from app.services.user_tool_storage_service import get_user_tool_storage_service
 from sqlmodel import Session, col, select
 
 _MANIFEST_FILENAME = "manifest.json"
@@ -162,7 +163,7 @@ def _hash_payload(payload: Any) -> str:
 
 def _extensions_root() -> Path:
     """Return the package-centric local root for installed extension versions."""
-    root = workspace_root() / "extensions"
+    root = local_runtime_cache_root() / "extensions"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -2133,6 +2134,11 @@ class ExtensionService:
                             *PurePosixPath(skill["path"]).parts
                         ).resolve()
                     ),
+                    "canonical_location": str(
+                        install_root.joinpath(
+                            *PurePosixPath(skill["path"]).parts
+                        ).resolve()
+                    ),
                     "entry_file": _SKILL_MARKDOWN_FILENAME,
                 }
                 for skill in contributions.get("skills", [])
@@ -2169,15 +2175,15 @@ class ExtensionService:
         extension_bundle: list[dict[str, Any]],
     ) -> ToolManager:
         """Build the runtime tool catalog for one request-scoped execution."""
-        ensure_agent_workspace(username, agent_id)
+        del agent_id
         shared_manager = get_tool_manager()
         request_tool_manager = ToolManager()
         for metadata in shared_manager.list_tools():
             request_tool_manager.add_entry(metadata)
 
-        from app.services.workspace_service import load_all_user_tool_metadata
-
-        private_metas = load_all_user_tool_metadata(username)
+        private_metas = get_user_tool_storage_service().load_all_user_tool_metadata(
+            username
+        )
         for metadata in private_metas:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
@@ -2281,6 +2287,7 @@ class ExtensionService:
                     "name": normalized_skill_name,
                     "description": normalized_description,
                     "location": normalized_location,
+                    "canonical_location": normalized_location,
                     "entry_file": _SKILL_MARKDOWN_FILENAME,
                 }
                 payloads.append(payload)

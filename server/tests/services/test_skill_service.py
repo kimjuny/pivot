@@ -23,6 +23,7 @@ github_skill_module = import_module("app.orchestration.skills.github")
 GitHubSkillCandidate = github_skill_module.GitHubSkillCandidate
 GitHubSkillProbeResult = github_skill_module.GitHubSkillProbeResult
 skill_service = import_module("app.services.skill_service")
+binary_storage_service = import_module("app.services.binary_storage_service")
 BundleImportFile = skill_service.BundleImportFile
 
 
@@ -37,19 +38,20 @@ class SkillServiceTestCase(unittest.TestCase):
 
         self.tmpdir = tempfile.TemporaryDirectory()
         root = Path(self.tmpdir.name)
-        self.workspace_root = root / "workspace"
-        self.builtin_root = root / "builtin"
-        self.workspace_root.mkdir(parents=True, exist_ok=True)
-        self.builtin_root.mkdir(parents=True, exist_ok=True)
-
-        self.workspace_patch = patch.object(
-            skill_service, "workspace_root", return_value=self.workspace_root
+        self.cache_root = root / "cache"
+        self.data_root = root / "data"
+        self.local_cache_patch = patch.object(
+            skill_service,
+            "local_runtime_cache_root",
+            return_value=self.cache_root,
         )
-        self.builtin_patch = patch.object(
-            skill_service, "_builtin_skills_dir", return_value=self.builtin_root
+        self.local_data_patch = patch.object(
+            binary_storage_service,
+            "local_data_root",
+            return_value=self.data_root,
         )
-        self.workspace_patch.start()
-        self.builtin_patch.start()
+        self.local_cache_patch.start()
+        self.local_data_patch.start()
 
         self.alice = User(username="alice", password_hash="hash")
         self.bob = User(username="bob", password_hash="hash")
@@ -61,8 +63,8 @@ class SkillServiceTestCase(unittest.TestCase):
 
     def tearDown(self) -> None:
         """Release temporary state after each test."""
-        self.workspace_patch.stop()
-        self.builtin_patch.stop()
+        self.local_cache_patch.stop()
+        self.local_data_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
 
@@ -90,7 +92,7 @@ class SkillServiceTestCase(unittest.TestCase):
 
     def _user_skill_dir(self, username: str, name: str) -> Path:
         """Return the unified on-disk directory for one user-owned skill."""
-        return self.workspace_root / username / "skills" / name
+        return self.cache_root / "users" / username / "skills" / name
 
     def _build_skill_archive(self, directory_name: str, source: str) -> bytes:
         """Create a GitHub-like repository zipball for one skill folder."""
@@ -109,27 +111,26 @@ class SkillServiceTestCase(unittest.TestCase):
     def test_sync_registry_and_visible_metadata(self) -> None:
         """Visible skill listings should come from persisted registry metadata."""
         self._write_skill(
-            self.builtin_root,
+            self.cache_root / "users" / "alice" / "skills" / "shared",
             "coding",
-            "Built-in coding instructions",
+            "Alice shared coding instructions",
             "Use coding best practices.",
-            filename="coding.md",
         )
         self._write_skill(
-            self.workspace_root / "alice" / "skills" / "private",
+            self.cache_root / "users" / "alice" / "skills" / "private",
             "research-notes",
             "Alice private research workflow",
             "Private notes body.",
             filename="research-notes.md",
         )
         self._write_skill(
-            self.workspace_root / "alice" / "skills" / "shared",
+            self.cache_root / "users" / "alice" / "skills" / "shared",
             "team-writer",
             "Alice shared writing workflow",
             "Shared writing body.",
         )
         self._write_skill(
-            self.workspace_root / "bob" / "skills" / "shared",
+            self.cache_root / "users" / "bob" / "skills" / "shared",
             "qa-playbook",
             "Bob shared QA workflow",
             "Shared QA body.",
@@ -153,15 +154,15 @@ class SkillServiceTestCase(unittest.TestCase):
             for item in skill_service.list_visible_skills(self.session, "alice")
         }
 
-        self.assertEqual(visible["coding"]["builtin"], True)
-        self.assertEqual(visible["coding"]["read_only"], True)
+        self.assertEqual(visible["coding"]["creator"], "alice")
+        self.assertEqual(visible["coding"]["read_only"], False)
         self.assertEqual(visible["qa-playbook"]["creator"], "bob")
         self.assertEqual(visible["qa-playbook"]["read_only"], True)
         self.assertEqual(visible["research-notes"]["kind"], "private")
         self.assertEqual(visible["research-notes"]["read_only"], False)
         self.assertEqual(visible["team-writer"]["creator"], "alice")
         self.assertEqual(visible["team-writer"]["read_only"], False)
-        self.assertEqual(visible["coding"]["source"], "builtin")
+        self.assertEqual(visible["coding"]["source"], "manual")
         self.assertEqual(visible["research-notes"]["source"], "manual")
         self.assertEqual(visible["team-writer"]["source"], "manual")
         self.assertTrue(visible["coding"]["created_at"].endswith("+00:00"))
@@ -177,13 +178,13 @@ class SkillServiceTestCase(unittest.TestCase):
             [
                 {
                     "name": "research-notes",
-                    "location": str(
+                    "canonical_location": str(
                         self._user_skill_dir("alice", "research-notes").resolve()
                     ),
                 },
                 {
                     "name": "qa-playbook",
-                    "location": str(
+                    "canonical_location": str(
                         self._user_skill_dir("bob", "qa-playbook").resolve()
                     ),
                 },
@@ -360,7 +361,7 @@ class SkillServiceTestCase(unittest.TestCase):
     def test_build_mandatory_skills_prompt_json_reads_full_skill_content(self) -> None:
         """Mandatory skill prompt payloads should inline the full markdown body."""
         self._write_skill(
-            self.workspace_root / "alice" / "skills",
+            self.cache_root / "users" / "alice" / "skills",
             "sample-skill",
             "Sample mandatory skill",
             "Follow the sample workflow carefully.",
@@ -507,8 +508,8 @@ class SkillServiceTestCase(unittest.TestCase):
 
     def test_sync_registry_migrates_legacy_kind_directories(self) -> None:
         """Legacy private/shared folders should migrate into the unified root."""
-        legacy_private_root = self.workspace_root / "alice" / "skills" / "private"
-        legacy_shared_root = self.workspace_root / "alice" / "skills" / "shared"
+        legacy_private_root = self.cache_root / "users" / "alice" / "skills" / "private"
+        legacy_shared_root = self.cache_root / "users" / "alice" / "skills" / "shared"
         self._write_skill(
             legacy_private_root,
             "deep-research",
@@ -528,8 +529,8 @@ class SkillServiceTestCase(unittest.TestCase):
 
         migrated_private_dir = self._user_skill_dir("alice", "deep-research")
         migrated_shared_dir = self._user_skill_dir("alice", "team-notes")
-        self.assertTrue((migrated_private_dir / "deep-research.md").exists())
-        self.assertTrue((migrated_shared_dir / "team-notes.md").exists())
+        self.assertTrue((migrated_private_dir / "SKILL.md").exists())
+        self.assertTrue((migrated_shared_dir / "SKILL.md").exists())
         self.assertFalse((legacy_private_root / "deep-research").exists())
         self.assertFalse((legacy_shared_root / "team-notes").exists())
 

@@ -5,11 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import posixpath
-import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from zipfile import ZipFile
 
 from app.db.session import managed_session
@@ -18,14 +19,19 @@ from app.models.skill_change_submission import SkillChangeSubmission
 from app.models.user import User
 from app.orchestration.skills.skill_files import parse_front_matter
 from app.services.sandbox_service import get_sandbox_service
+from app.services.skill_change_artifact_storage_service import (
+    SkillChangeArtifactStorageService,
+)
 from app.services.skill_service import (
     _detect_skill_entry_filename,
     _validate_skill_name,
     apply_private_skill_directory,
     sync_skill_registry,
 )
-from app.services.workspace_service import workspace_root
 from sqlmodel import Session, select
+
+if TYPE_CHECKING:
+    from app.services.workspace_storage_service import WorkspaceMountSpec
 
 _SANDBOX_SKILLS_ROOT = "/workspace/skills"
 _MAX_SNAPSHOT_FILE_COUNT = 200
@@ -56,13 +62,6 @@ class SkillChangeApprovalRequest:
             "file_count": self.file_count,
             "total_bytes": self.total_bytes,
         }
-
-
-def _submission_root(username: str) -> Path:
-    """Return the per-user storage root for staged skill change submissions."""
-    root = workspace_root() / username / "skill_change_submissions"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
 
 
 def _normalize_draft_dir_path(draft_dir_path: str) -> str:
@@ -144,16 +143,13 @@ print(json.dumps(payload))
 def _export_draft_snapshot(
     *,
     username: str,
-    agent_id: int,
-    workspace_id: str,
-    workspace_backend_path: str,
+    mount_spec: WorkspaceMountSpec,
     draft_dir_path: str,
 ) -> tuple[bytes, int, int]:
     """Archive one sandbox draft skill directory and return its bytes."""
     result = get_sandbox_service().exec(
         username=username,
-        workspace_id=workspace_id,
-        workspace_backend_path=workspace_backend_path,
+        mount_spec=mount_spec,
         cmd=_sandbox_export_command(draft_dir_path),
     )
     if result.exit_code != 0:
@@ -273,8 +269,7 @@ def stage_skill_change_submission(
     current_user: User,
     *,
     agent_id: int,
-    workspace_id: str,
-    workspace_backend_path: str,
+    mount_spec: WorkspaceMountSpec,
     draft_dir_path: str,
     message: str = "",
 ) -> dict[str, object]:
@@ -284,8 +279,7 @@ def stage_skill_change_submission(
         session: Active database session.
         current_user: Authenticated owner of the target private skill namespace.
         agent_id: Agent workspace that holds the draft.
-        workspace_id: Owning runtime workspace identifier.
-        workspace_backend_path: Backend-container workspace path.
+        mount_spec: Runtime mount contract for the active workspace.
         draft_dir_path: Sandbox-local path under ``/workspace/skills``.
         message: Optional agent-authored explanation shown to the user.
 
@@ -298,9 +292,7 @@ def stage_skill_change_submission(
     normalized_path = _normalize_draft_dir_path(draft_dir_path)
     archive_bytes, file_count, total_bytes = _export_draft_snapshot(
         username=current_user.username,
-        agent_id=agent_id,
-        workspace_id=workspace_id,
-        workspace_backend_path=workspace_backend_path,
+        mount_spec=mount_spec,
         draft_dir_path=normalized_path,
     )
 
@@ -312,7 +304,8 @@ def stage_skill_change_submission(
         change_type="create",
         status="pending",
         sandbox_draft_path=normalized_path,
-        snapshot_location="",
+        storage_backend="pending",
+        storage_key=None,
         summary=message.strip(),
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
@@ -321,51 +314,54 @@ def stage_skill_change_submission(
     session.commit()
     session.refresh(submission)
 
-    snapshot_dir = (
-        _submission_root(current_user.username) / str(submission.id) / "source"
-    )
+    artifact_storage = SkillChangeArtifactStorageService()
     try:
-        _extract_snapshot_archive(archive_bytes, snapshot_dir)
-        skill_name = _resolve_submission_skill_name(
-            draft_dir_path=normalized_path,
-            snapshot_dir=snapshot_dir,
-        )
-        sync_skill_registry(session)
-        existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
-        if existing is None:
-            change_type = "create"
-        else:
-            if existing.builtin:
-                raise PermissionError(
-                    f"Skill '{skill_name}' is built-in and cannot be changed."
-                )
-            if existing.creator_id != current_user.id:
-                raise PermissionError(
-                    f"Skill '{skill_name}' is owned by another creator."
-                )
-            if existing.kind != "private":
-                raise PermissionError(
-                    f"Skill '{skill_name}' is a {existing.kind} skill and cannot be "
-                    "changed through agent submissions."
-                )
-            change_type = "update"
+        with TemporaryDirectory(prefix="pivot-skill-change-stage-") as tmp_root:
+            snapshot_dir = Path(tmp_root) / "source"
+            _extract_snapshot_archive(archive_bytes, snapshot_dir)
+            skill_name = _resolve_submission_skill_name(
+                draft_dir_path=normalized_path,
+                snapshot_dir=snapshot_dir,
+            )
+            sync_skill_registry(session)
+            existing = session.exec(
+                select(Skill).where(Skill.name == skill_name)
+            ).first()
+            if existing is None:
+                change_type = "create"
+            else:
+                if existing.creator_id != current_user.id:
+                    raise PermissionError(
+                        f"Skill '{skill_name}' is owned by another creator."
+                    )
+                if existing.kind != "private":
+                    raise PermissionError(
+                        f"Skill '{skill_name}' is a {existing.kind} skill and cannot be "
+                        "changed through agent submissions."
+                    )
+                change_type = "update"
 
-        details = _build_submission_details(
-            skill_name=skill_name,
-            snapshot_dir=snapshot_dir,
-            file_count=file_count,
-            total_bytes=total_bytes,
+            details = _build_submission_details(
+                skill_name=skill_name,
+                snapshot_dir=snapshot_dir,
+                file_count=file_count,
+                total_bytes=total_bytes,
+            )
+        stored_artifact = artifact_storage.store_archive(
+            username=current_user.username,
+            submission_id=submission.id or 0,
+            archive_bytes=archive_bytes,
         )
         submission.skill_name = skill_name
         submission.change_type = change_type
-        submission.snapshot_location = str(snapshot_dir.resolve())
+        submission.storage_backend = stored_artifact.storage_backend
+        submission.storage_key = stored_artifact.storage_key
         submission.details_json = json.dumps(details, ensure_ascii=False)
         submission.updated_at = datetime.now(UTC)
         session.add(submission)
         session.commit()
         session.refresh(submission)
     except Exception:
-        shutil.rmtree(snapshot_dir.parent, ignore_errors=True)
         session.delete(submission)
         session.commit()
         raise
@@ -392,8 +388,7 @@ def submit_skill_change_for_agent(
     *,
     username: str,
     agent_id: int,
-    workspace_id: str,
-    workspace_backend_path: str,
+    mount_spec: WorkspaceMountSpec,
     skill_path: str,
     message: str = "",
 ) -> dict[str, object]:
@@ -405,8 +400,7 @@ def submit_skill_change_for_agent(
     Args:
         username: Authenticated username from the tool execution context.
         agent_id: Agent workspace that authored the draft.
-        workspace_id: Owning runtime workspace identifier.
-        workspace_backend_path: Backend-container workspace path.
+        mount_spec: Runtime mount contract for the active workspace.
         skill_path: Sandbox-local skill directory under ``/workspace/skills``.
         message: Optional reviewer-facing explanation of the staged change.
 
@@ -427,8 +421,7 @@ def submit_skill_change_for_agent(
             session,
             current_user,
             agent_id=agent_id,
-            workspace_id=workspace_id,
-            workspace_backend_path=workspace_backend_path,
+            mount_spec=mount_spec,
             draft_dir_path=skill_path,
             message=message,
         )
@@ -481,14 +474,24 @@ def apply_skill_change_submission(
             "message": f"Rejected skill change submission #{submission.id}.",
         }
 
-    snapshot_dir = Path(submission.snapshot_location)
-    metadata = apply_private_skill_directory(
-        session,
-        current_user,
-        skill_name=submission.skill_name,
-        source_dir=snapshot_dir,
-        source="agent",
-    )
+    if submission.storage_key is None:
+        raise ValueError(
+            f"Skill change submission #{submission_id} has no staged artifact."
+        )
+
+    with TemporaryDirectory(prefix="pivot-skill-change-apply-") as tmp_root:
+        snapshot_dir = Path(tmp_root) / "source"
+        SkillChangeArtifactStorageService().materialize_to_directory(
+            storage_key=submission.storage_key,
+            target_dir=snapshot_dir,
+        )
+        metadata = apply_private_skill_directory(
+            session,
+            current_user,
+            skill_name=submission.skill_name,
+            source_dir=snapshot_dir,
+            source="agent",
+        )
     submission.status = "applied"
     submission.reviewed_at = datetime.now(UTC)
     submission.updated_at = datetime.now(UTC)

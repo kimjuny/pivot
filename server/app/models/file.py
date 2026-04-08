@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 class FileAsset(SQLModel, table=True):
-    """Persistent metadata for an uploaded file stored in user workspace."""
+    """Persistent metadata for one uploaded file stored in shared asset storage."""
 
     id: int | None = Field(default=None, primary_key=True)
     file_id: str = Field(index=True, unique=True, description="Public UUID for file")
@@ -14,7 +14,8 @@ class FileAsset(SQLModel, table=True):
     source: str = Field(description="Upload source such as local or clipboard")
     original_name: str = Field(description="Original client-side filename")
     stored_name: str = Field(description="Stored filename on disk")
-    storage_path: str = Field(description="Absolute path to the stored file")
+    storage_backend: str = Field(description="Storage backend identifier")
+    storage_key: str = Field(description="Stable object-style key for file bytes")
     kind: str = Field(
         default="image",
         description="Normalized asset kind such as image or document",
@@ -29,9 +30,9 @@ class FileAsset(SQLModel, table=True):
         default=None,
         description="Estimated page count for document uploads",
     )
-    markdown_path: str | None = Field(
+    markdown_storage_key: str | None = Field(
         default=None,
-        description="Absolute path to cached markdown extracted from a document",
+        description="Stable object-style key for cached extracted markdown",
     )
     can_extract_text: bool = Field(
         default=False,

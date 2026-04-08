@@ -2,6 +2,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
+from threading import Lock
 from typing import Final
 
 from app.config import get_settings
@@ -38,6 +39,39 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "user",
     "workspace",
 }
+_DATABASE_READY_LOCK = Lock()
+_READY_DATABASE_URLS: set[str] = set()
+
+
+def _database_url_key(engine: Engine) -> str:
+    """Build a stable in-process identity for the active database engine.
+
+    Args:
+        engine: The SQLAlchemy engine being initialized.
+
+    Returns:
+        A normalized database URL string suitable for ready-state caching.
+    """
+    return engine.url.render_as_string(hide_password=False)
+
+
+def _sqlite_database_path(database_url: str) -> Path | None:
+    """Resolve the on-disk SQLite path when the active database is file-based.
+
+    Args:
+        database_url: The configured SQLAlchemy database URL.
+
+    Returns:
+        The SQLite file path, or None when the URL is not a file-backed SQLite
+        database.
+    """
+    if not database_url.startswith("sqlite"):
+        return None
+    if database_url == "sqlite://" or database_url.startswith("sqlite:///:memory:"):
+        return None
+    if database_url.startswith("sqlite:////"):
+        return Path("/" + database_url[len("sqlite:////") :])
+    return Path(database_url.removeprefix("sqlite:///").lstrip("/"))
 
 
 def get_engine():
@@ -51,17 +85,15 @@ def get_engine():
     """
     database_url = get_settings().DATABASE_URL
 
-    if database_url.startswith("sqlite"):
+    sqlite_path = _sqlite_database_path(database_url)
+    if sqlite_path is not None:
         # For SQLite, ensure the parent directory exists (important in containers
         # where the named volume may be mounted but not yet initialised).
-        db_path_str = database_url.removeprefix("sqlite:///").lstrip("/")
-        if database_url.startswith("sqlite:////"):
-            # Absolute path form sqlite:////abs/path
-            db_path = Path("/" + database_url[len("sqlite:////") :])
-        else:
-            db_path = Path(db_path_str)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        return create_engine(database_url, connect_args={"check_same_thread": False})
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+        return create_engine(
+            database_url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
 
     return create_engine(database_url)
 
@@ -120,35 +152,53 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     if engine is None:
         engine = get_engine()
 
-    # Import models lazily so every SQLModel table is registered before create_all.
-    import_module("app.models")
+    database_key = _database_url_key(engine)
+    sqlite_path = _sqlite_database_path(database_key)
+    if sqlite_path is not None and not sqlite_path.exists():
+        with _DATABASE_READY_LOCK:
+            _READY_DATABASE_URLS.discard(database_key)
 
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    if not _REQUIRED_TABLES.issubset(existing_tables):
-        SQLModel.metadata.create_all(engine)
+    if database_key in _READY_DATABASE_URLS:
+        return
 
-    ensure_agent_schema_compatibility()
-    ensure_session_schema_compatibility()
-    ensure_react_schema_compatibility()
-    ensure_file_schema_compatibility()
-    ensure_skill_schema_compatibility()
+    with _DATABASE_READY_LOCK:
+        if database_key in _READY_DATABASE_URLS:
+            return
 
-    from app.api.auth import init_default_user
-    from app.services.skill_service import sync_skill_registry
+        # Import models lazily so every SQLModel table is registered before create_all.
+        import_module("app.models")
 
-    with Session(engine) as session:
-        init_default_user(session)
-        sync_skill_registry(session)
+        inspector = inspect(engine)
+        existing_tables = set(inspector.get_table_names())
+        if not _REQUIRED_TABLES.issubset(existing_tables):
+            SQLModel.metadata.create_all(engine)
+
+        ensure_agent_schema_compatibility(engine)
+        ensure_session_schema_compatibility(engine)
+        ensure_react_schema_compatibility(engine)
+        ensure_file_schema_compatibility(engine)
+        ensure_workspace_schema_compatibility(engine)
+        ensure_skill_schema_compatibility(engine)
+        ensure_skill_change_submission_schema_compatibility(engine)
+
+        from app.api.auth import init_default_user
+        from app.services.skill_service import sync_skill_registry
+
+        with Session(engine) as session:
+            init_default_user(session)
+            sync_skill_registry(session)
+
+        _READY_DATABASE_URLS.add(database_key)
 
 
-def ensure_agent_schema_compatibility() -> None:
+def ensure_agent_schema_compatibility(engine: Engine | None = None) -> None:
     """Apply additive schema updates for legacy agent tables.
 
     Why: existing SQLite deployments keep their current columns after startup,
     so newly introduced agent settings must be backfilled manually.
     """
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
     inspector = inspect(engine)
     if not inspector.has_table("agent"):
         return
@@ -206,13 +256,14 @@ def ensure_agent_schema_compatibility() -> None:
         )
 
 
-def ensure_session_schema_compatibility() -> None:
+def ensure_session_schema_compatibility(engine: Engine | None = None) -> None:
     """Apply additive schema updates for legacy session tables.
 
     Why: chat sidebar features rely on explicit title and pin fields so the UI
     can stay simple without reconstructing that state from derived history.
     """
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
     inspector = inspect(engine)
     if not inspector.has_table("session"):
         return
@@ -287,9 +338,10 @@ def ensure_session_schema_compatibility() -> None:
         )
 
 
-def ensure_react_schema_compatibility() -> None:
+def ensure_react_schema_compatibility(engine: Engine | None = None) -> None:
     """Apply additive schema updates for legacy ReAct tables."""
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
     inspector = inspect(engine)
     with engine.begin() as conn:
         if inspector.has_table("reacttask"):
@@ -346,22 +398,35 @@ def ensure_react_schema_compatibility() -> None:
                 )
 
 
-def ensure_file_schema_compatibility() -> None:
+def ensure_file_schema_compatibility(engine: Engine | None = None) -> None:
     """Apply additive schema updates for legacy uploaded-file tables."""
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
     inspector = inspect(engine)
     if not inspector.has_table("fileasset"):
         return
 
     columns = {column["name"] for column in inspector.get_columns("fileasset")}
     with engine.begin() as conn:
+        if "storage_backend" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN storage_backend VARCHAR"))
+            conn.execute(
+                text(
+                    "UPDATE fileasset SET storage_backend = 'local_fs' "
+                    "WHERE storage_backend IS NULL"
+                )
+            )
+        if "storage_key" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN storage_key VARCHAR"))
+        if "markdown_storage_key" not in columns:
+            conn.execute(
+                text("ALTER TABLE fileasset ADD COLUMN markdown_storage_key VARCHAR")
+            )
         if "kind" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN kind VARCHAR"))
             conn.execute(text("UPDATE fileasset SET kind = 'image' WHERE kind IS NULL"))
         if "page_count" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN page_count INTEGER"))
-        if "markdown_path" not in columns:
-            conn.execute(text("ALTER TABLE fileasset ADD COLUMN markdown_path VARCHAR"))
         if "can_extract_text" not in columns:
             conn.execute(
                 text("ALTER TABLE fileasset ADD COLUMN can_extract_text BOOLEAN")
@@ -386,20 +451,31 @@ def ensure_file_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN text_encoding VARCHAR"))
 
 
-def ensure_skill_schema_compatibility() -> None:
+def ensure_skill_schema_compatibility(engine: Engine | None = None) -> None:
     """Apply additive schema updates for the evolving skill registry table.
 
     Why: skill import metadata is still moving quickly pre-launch, so
     startup should keep developer SQLite files usable without hand-written
     migrations every time the skill model grows.
     """
-    engine = get_engine()
+    if engine is None:
+        engine = get_engine()
     inspector = inspect(engine)
     if not inspector.has_table("skill"):
         return
 
     columns = {column["name"] for column in inspector.get_columns("skill")}
     with engine.begin() as conn:
+        if "storage_backend" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN storage_backend VARCHAR"))
+            conn.execute(
+                text(
+                    "UPDATE skill SET storage_backend = 'local_fs' "
+                    "WHERE storage_backend IS NULL"
+                )
+            )
+        if "storage_key" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN storage_key VARCHAR"))
         if "source" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN source VARCHAR"))
         if "github_repo_url" not in columns:
@@ -410,13 +486,153 @@ def ensure_skill_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE skill ADD COLUMN github_ref_type VARCHAR"))
         if "github_skill_path" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN github_skill_path VARCHAR"))
+        if "builtin" in columns:
+            conn.execute(
+                text(
+                    "UPDATE skill "
+                    "SET source = CASE "
+                    "WHEN source IS NULL OR source = '' OR source = 'user' "
+                    "OR source = 'builtin' THEN 'manual' "
+                    "ELSE source "
+                    "END"
+                )
+            )
+        else:
+            conn.execute(
+                text(
+                    "UPDATE skill "
+                    "SET source = CASE "
+                    "WHEN source IS NULL OR source = '' OR source = 'user' "
+                    "OR source = 'builtin' THEN 'manual' "
+                    "ELSE source "
+                    "END"
+                )
+            )
+
+def ensure_workspace_schema_compatibility(engine: Engine | None = None) -> None:
+    """Apply additive schema updates for workspace storage identity fields.
+
+    Why: the workspace runtime is moving from host paths to stable storage
+    identity, so existing development databases need these fields populated on
+    startup without requiring hand-authored migrations.
+    """
+    from app.services.workspace_storage_service import build_workspace_logical_path
+
+    if engine is None:
+        engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("workspace"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("workspace")}
+    with engine.begin() as conn:
+        if "storage_backend" not in columns:
+            conn.execute(
+                text("ALTER TABLE workspace ADD COLUMN storage_backend VARCHAR")
+            )
+        if "logical_path" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN logical_path VARCHAR"))
+        if "mount_mode" not in columns:
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN mount_mode VARCHAR"))
+        if "source_workspace_id" not in columns:
+            conn.execute(
+                text("ALTER TABLE workspace ADD COLUMN source_workspace_id VARCHAR")
+            )
+
+        rows = conn.execute(
+            text(
+                "SELECT id, user, agent_id, scope, session_id, project_id, "
+                "storage_backend, logical_path, mount_mode "
+                "FROM workspace"
+            )
+        ).mappings()
+        for row in rows:
+            logical_path = row["logical_path"]
+            if (
+                not isinstance(logical_path, str)
+                or logical_path.strip() == ""
+                or logical_path.startswith("pivot/workspaces/")
+            ):
+                logical_path = build_workspace_logical_path(
+                    scope=str(row["scope"]),
+                    username=str(row["user"]),
+                    agent_id=int(row["agent_id"]),
+                    session_id=(
+                        str(row["session_id"])
+                        if row["session_id"] is not None
+                        else None
+                    ),
+                    project_id=(
+                        str(row["project_id"])
+                        if row["project_id"] is not None
+                        else None
+                    ),
+                )
+            conn.execute(
+                text(
+                    "UPDATE workspace "
+                    "SET storage_backend = :storage_backend, "
+                    "logical_path = :logical_path, "
+                    "mount_mode = :mount_mode "
+                    "WHERE id = :id"
+                ),
+                {
+                    "id": int(row["id"]),
+                    "storage_backend": (
+                        str(row["storage_backend"])
+                        if row["storage_backend"] is not None
+                        and str(row["storage_backend"]).strip() != ""
+                        else "seaweedfs"
+                    ),
+                    "logical_path": logical_path,
+                    "mount_mode": (
+                        str(row["mount_mode"])
+                        if row["mount_mode"] is not None
+                        and str(row["mount_mode"]).strip() != ""
+                        else "live_sync"
+                    ),
+                },
+            )
+
+
+def ensure_skill_change_submission_schema_compatibility(
+    engine: Engine | None = None,
+) -> None:
+    """Apply additive schema updates for staged skill submission artifacts.
+
+    Why: staged skill approvals now persist their frozen archive in shared
+    storage instead of backend-local paths, so pre-launch SQLite files need
+    additive columns without hand-written migrations every time this model
+    tightens.
+    """
+    if engine is None:
+        engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("skillchangesubmission"):
+        return
+
+    columns = {
+        column["name"] for column in inspector.get_columns("skillchangesubmission")
+    }
+    with engine.begin() as conn:
+        if "storage_backend" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE skillchangesubmission "
+                    "ADD COLUMN storage_backend VARCHAR"
+                )
+            )
+        if "storage_key" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE skillchangesubmission "
+                    "ADD COLUMN storage_key VARCHAR"
+                )
+            )
         conn.execute(
             text(
-                "UPDATE skill "
-                "SET source = CASE "
-                "WHEN builtin = 1 THEN 'builtin' "
-                "WHEN source IS NULL OR source = '' OR source = 'user' THEN 'manual' "
-                "ELSE source "
-                "END"
+                "UPDATE skillchangesubmission "
+                "SET storage_backend = 'seaweedfs' "
+                "WHERE storage_backend IS NULL OR storage_backend = ''"
             )
         )

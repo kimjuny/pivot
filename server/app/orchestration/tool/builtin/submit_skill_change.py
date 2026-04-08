@@ -26,7 +26,7 @@ def submit_skill_change(
 
     Notes:
         - V1 only syncs to creator-owned private skills.
-        - Built-in, foreign-owned, and shared skill targets are rejected.
+        - Foreign-owned and shared skill targets are rejected.
 
     Args:
         skill_path: Sandbox-local skill directory under ``/workspace/skills``.
@@ -46,8 +46,7 @@ def submit_skill_change(
     return submit_skill_change_for_agent(
         username=context.username,
         agent_id=context.agent_id,
-        workspace_id=context.workspace_id,
-        workspace_backend_path=context.workspace_backend_path,
+        mount_spec=context.workspace_mount_spec,
         skill_path=skill_path,
         message=message,
     )

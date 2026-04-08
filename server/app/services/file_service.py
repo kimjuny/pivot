@@ -7,20 +7,33 @@ import io
 import logging
 import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
 from app.models.file import FileAsset
+from app.models.session import Session as SessionModel
 from app.schemas.file import FileAssetListItem
-from app.services.workspace_service import workspace_root
+from app.services.binary_storage_service import (
+    BinaryStorageBackend,
+    build_binary_storage_backend,
+)
+from app.services.workspace_runtime_file_service import WorkspaceRuntimeFileService
+from app.services.workspace_service import WorkspaceService
+from app.services.workspace_storage_service import WorkspaceStorageService
 from PIL import Image, UnidentifiedImageError
 from sqlmodel import Session as DBSession, col, select
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from app.models.workspace import Workspace
 
 _ALLOWED_IMAGE_FORMATS: dict[str, tuple[str, str]] = {
     "JPEG": ("jpg", "image/jpeg"),
@@ -122,17 +135,66 @@ class PreparedFileAttachment:
 class FileService:
     """Provide generic file lifecycle operations for user workspaces."""
 
-    def __init__(self, db: DBSession) -> None:
+    def __init__(
+        self,
+        db: DBSession,
+        *,
+        storage_backend: BinaryStorageBackend | None = None,
+    ) -> None:
         """Initialize the service with a database session."""
         self.db = db
         self.settings = get_settings()
+        self.storage_backend = storage_backend or build_binary_storage_backend(
+            self.settings
+        )
 
     @staticmethod
-    def user_files_dir(username: str) -> Path:
-        """Return the workspace directory used for raw user files."""
-        files_dir = workspace_root() / username / "files"
-        files_dir.mkdir(parents=True, exist_ok=True)
-        return files_dir
+    def _pending_storage_key(*, username: str, file_id: str, stored_name: str) -> str:
+        """Return the canonical pending-storage key for one uploaded asset."""
+        return f"users/{username}/uploads/.pending/{file_id}/{stored_name}"
+
+    @staticmethod
+    def _pending_markdown_storage_key(*, username: str, file_id: str) -> str:
+        """Return the pending markdown cache key for one uploaded document."""
+        return f"users/{username}/uploads/.pending/{file_id}/.pivot/extracted.md"
+
+    @staticmethod
+    def _workspace_upload_relative_path(*, file_id: str, stored_name: str) -> Path:
+        """Return the workspace-relative upload path for one attached file."""
+        return Path(".uploads") / file_id / stored_name
+
+    @classmethod
+    def _workspace_storage_key(
+        cls,
+        *,
+        workspace_logical_path: str,
+        file_id: str,
+        stored_name: str,
+    ) -> str:
+        """Return the canonical workspace storage key for one attached file."""
+        relative_path = cls._workspace_upload_relative_path(
+            file_id=file_id,
+            stored_name=stored_name,
+        )
+        return f"{workspace_logical_path}/workspace/{relative_path.as_posix()}"
+
+    @classmethod
+    def _workspace_markdown_storage_key(
+        cls,
+        *,
+        workspace_logical_path: str,
+        file_id: str,
+        stored_name: str,
+    ) -> str:
+        """Return the workspace-side markdown cache key for one attached file."""
+        relative_path = cls._workspace_upload_relative_path(
+            file_id=file_id,
+            stored_name=stored_name,
+        )
+        return (
+            f"{workspace_logical_path}/workspace/"
+            f"{relative_path.parent.as_posix()}/.pivot/extracted.md"
+        )
 
     def verify_image_upload(
         self,
@@ -281,17 +343,27 @@ class FileService:
         if upload_kind == "document":
             verified_document = self.verify_document_upload(normalized_name, file_bytes)
             stored_name = f"{file_id}.{verified_document.extension}"
-            storage_path = self.user_files_dir(username) / stored_name
-            markdown_path = storage_path.with_suffix(".extracted.md")
+            storage_key = self._pending_storage_key(
+                username=username,
+                file_id=file_id,
+                stored_name=stored_name,
+            )
+            markdown_storage_key = self._pending_markdown_storage_key(
+                username=username,
+                file_id=file_id,
+            )
             try:
-                storage_path.write_bytes(verified_document.file_bytes)
-                markdown_path.write_text(
-                    verified_document.markdown_text,
-                    encoding="utf-8",
+                self.storage_backend.put_bytes(
+                    payload=verified_document.file_bytes,
+                    key=storage_key,
                 )
-            except OSError as err:
-                self._safe_unlink(storage_path)
-                self._safe_unlink(markdown_path)
+                self.storage_backend.put_bytes(
+                    payload=verified_document.markdown_text.encode("utf-8"),
+                    key=markdown_storage_key,
+                )
+            except Exception as err:
+                self._safe_delete_storage_key(storage_key)
+                self._safe_delete_storage_key(markdown_storage_key)
                 raise ValueError("Failed to persist uploaded file.") from err
 
             file_asset = FileAsset(
@@ -300,7 +372,8 @@ class FileService:
                 source=source,
                 original_name=normalized_name,
                 stored_name=stored_name,
-                storage_path=str(storage_path),
+                storage_backend=self.storage_backend.backend_name,
+                storage_key=storage_key,
                 kind="document",
                 mime_type=verified_document.mime_type,
                 format=verified_document.format,
@@ -309,7 +382,7 @@ class FileService:
                 width=0,
                 height=0,
                 page_count=verified_document.page_count,
-                markdown_path=str(markdown_path),
+                markdown_storage_key=markdown_storage_key,
                 can_extract_text=verified_document.can_extract_text,
                 suspected_scanned=verified_document.suspected_scanned,
                 text_encoding=verified_document.text_encoding,
@@ -321,11 +394,18 @@ class FileService:
         else:
             verified_image = self.verify_image_upload(normalized_name, file_bytes)
             stored_name = f"{file_id}.{verified_image.extension}"
-            storage_path = self.user_files_dir(username) / stored_name
+            storage_key = self._pending_storage_key(
+                username=username,
+                file_id=file_id,
+                stored_name=stored_name,
+            )
             try:
-                storage_path.write_bytes(verified_image.file_bytes)
-            except OSError as err:
-                self._safe_unlink(storage_path)
+                self.storage_backend.put_bytes(
+                    payload=verified_image.file_bytes,
+                    key=storage_key,
+                )
+            except Exception as err:
+                self._safe_delete_storage_key(storage_key)
                 raise ValueError("Failed to persist uploaded image.") from err
 
             file_asset = FileAsset(
@@ -334,7 +414,8 @@ class FileService:
                 source=source,
                 original_name=normalized_name,
                 stored_name=stored_name,
-                storage_path=str(storage_path),
+                storage_backend=self.storage_backend.backend_name,
+                storage_key=storage_key,
                 kind="image",
                 mime_type=verified_image.mime_type,
                 format=verified_image.format,
@@ -343,7 +424,7 @@ class FileService:
                 width=verified_image.width,
                 height=verified_image.height,
                 page_count=None,
-                markdown_path=None,
+                markdown_storage_key=None,
                 can_extract_text=False,
                 suspected_scanned=False,
                 text_encoding=None,
@@ -416,6 +497,10 @@ class FileService:
         attached_files: list[FileAsset] = []
         seen_ids: set[str] = set()
         now = datetime.now(UTC)
+        workspace = self._load_workspace_for_session(
+            session_id=session_id,
+            username=username,
+        )
 
         for file_id in file_ids:
             normalized_id = file_id.strip()
@@ -430,6 +515,12 @@ class FileService:
             if file_asset.task_id is not None and file_asset.task_id != task_id:
                 raise ValueError(
                     f"File '{normalized_id}' is already attached elsewhere."
+                )
+
+            if workspace is not None:
+                self._relocate_attached_file_into_workspace(
+                    file_asset=file_asset,
+                    workspace=workspace,
                 )
 
             file_asset.session_id = session_id
@@ -474,7 +565,7 @@ class FileService:
                 )
                 continue
 
-            file_bytes = Path(file_asset.storage_path).read_bytes()
+            file_bytes = self.read_file_bytes(file_asset)
             encoded_data = base64.b64encode(file_bytes).decode("ascii")
             prepared.append(
                 PreparedFileAttachment(
@@ -491,6 +582,23 @@ class FileService:
                 )
             )
         return prepared
+
+    def read_file_bytes(self, file_asset: FileAsset) -> bytes:
+        """Return bytes for one uploaded file, preferring live workspace content."""
+        if file_asset.session_id is not None:
+            live_bytes = self._read_live_workspace_bytes(file_asset)
+            if live_bytes is not None:
+                return live_bytes
+        return self.storage_backend.read_bytes(key=file_asset.storage_key)
+
+    def build_workspace_relative_path(self, file_asset: FileAsset) -> str | None:
+        """Return the workspace-relative path for one attached file."""
+        if file_asset.session_id is None:
+            return None
+        return self._workspace_upload_relative_path(
+            file_id=file_asset.file_id,
+            stored_name=file_asset.stored_name,
+        ).as_posix()
 
     def build_history_items(
         self,
@@ -527,6 +635,9 @@ class FileService:
                     suspected_scanned=file_asset.suspected_scanned,
                     text_encoding=file_asset.text_encoding,
                     source=file_asset.source,
+                    workspace_relative_path=self.build_workspace_relative_path(
+                        file_asset
+                    ),
                     created_at=file_asset.created_at.replace(tzinfo=UTC).isoformat(),
                 )
             )
@@ -556,17 +667,32 @@ class FileService:
 
     def _load_document_markdown(self, file_asset: FileAsset) -> str:
         """Load cached markdown, regenerating it when the cache is missing."""
-        if file_asset.markdown_path:
-            markdown_path = Path(file_asset.markdown_path)
-            if markdown_path.exists():
-                return markdown_path.read_text(encoding="utf-8")
+        if file_asset.session_id is not None:
+            return self._refresh_document_markdown(file_asset)
 
-        markdown_text, page_count = self._convert_document_with_docling(
-            Path(file_asset.storage_path)
+        if file_asset.markdown_storage_key:
+            try:
+                return self.storage_backend.read_bytes(
+                    key=file_asset.markdown_storage_key
+                ).decode("utf-8")
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+        with self._materialized_storage_file(file_asset) as stored_file_path:
+            markdown_text, page_count = self._convert_document_with_docling(
+                stored_file_path
+            )
+        markdown_storage_key = self._pending_markdown_storage_key(
+            username=file_asset.user,
+            file_id=file_asset.file_id,
         )
-        markdown_path = Path(file_asset.storage_path).with_suffix(".extracted.md")
-        markdown_path.write_text(markdown_text, encoding="utf-8")
-        file_asset.markdown_path = str(markdown_path)
+        self.storage_backend.put_bytes(
+            payload=markdown_text.encode("utf-8"),
+            key=markdown_storage_key,
+        )
+        file_asset.markdown_storage_key = markdown_storage_key
         file_asset.page_count = page_count
         file_asset.can_extract_text = bool(markdown_text.strip())
         file_asset.suspected_scanned = (
@@ -577,6 +703,44 @@ class FileService:
         self.db.commit()
         self.db.refresh(file_asset)
         return markdown_text
+
+    def _refresh_document_markdown(self, file_asset: FileAsset) -> str:
+        """Regenerate markdown for one attached live workspace document."""
+        with self._materialized_storage_file(file_asset) as stored_file_path:
+            markdown_text, page_count = self._convert_document_with_docling(
+                stored_file_path
+            )
+
+        if file_asset.markdown_storage_key:
+            self.storage_backend.put_bytes(
+                payload=markdown_text.encode("utf-8"),
+                key=file_asset.markdown_storage_key,
+            )
+        file_asset.page_count = page_count
+        file_asset.can_extract_text = bool(markdown_text.strip())
+        file_asset.suspected_scanned = (
+            file_asset.extension == "pdf" and not file_asset.can_extract_text
+        )
+        file_asset.updated_at = datetime.now(UTC)
+        self.db.add(file_asset)
+        self.db.commit()
+        self.db.refresh(file_asset)
+        return markdown_text
+
+    @contextmanager
+    def _materialized_storage_file(
+        self,
+        file_asset: FileAsset,
+    ) -> Generator[Path, None, None]:
+        """Write one stored payload to a temporary file for local toolchains."""
+        suffix = Path(file_asset.stored_name).suffix
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            temp_path = Path(handle.name)
+            handle.write(self.read_file_bytes(file_asset))
+        try:
+            yield temp_path
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     def _convert_document_with_docling(
         self,
@@ -842,26 +1006,110 @@ class FileService:
 
     def _delete_asset(self, file_asset: FileAsset, commit: bool = False) -> None:
         """Delete both structured metadata and raw file safely."""
-        self._safe_unlink(Path(file_asset.storage_path))
-        if file_asset.markdown_path:
-            self._safe_unlink(Path(file_asset.markdown_path))
+        self._safe_delete_storage_key(file_asset.storage_key)
+        if file_asset.markdown_storage_key:
+            self._safe_delete_storage_key(file_asset.markdown_storage_key)
         self.db.delete(file_asset)
         if commit:
             self.db.commit()
 
-    @staticmethod
-    def _safe_unlink(path: Path) -> None:
-        """Delete a stored file only when it lives under the workspace root.
-
-        Why: session-based cleanup deletes by database metadata, so we guard the
-        filesystem path to avoid ever unlinking arbitrary user-supplied paths.
-        """
-        resolved_path = path.resolve()
-        workspace_path = workspace_root().resolve()
-        if not resolved_path.is_relative_to(workspace_path):
-            logger.warning("Skip unsafe file deletion outside workspace: %s", path)
-            return
+    def _safe_delete_storage_key(self, key: str) -> None:
+        """Delete one stored payload while swallowing best-effort cleanup errors."""
         try:
-            resolved_path.unlink(missing_ok=True)
+            self.storage_backend.delete(key=key)
         except OSError as err:
-            logger.warning("Failed to delete file %s: %s", resolved_path, err)
+            logger.warning("Failed to delete storage key %s: %s", key, err)
+
+    def _load_workspace_for_session(
+        self,
+        *,
+        session_id: str | None,
+        username: str,
+    ):
+        """Return the owning workspace row for one session-bound upload flow."""
+        if session_id is None:
+            return None
+
+        session_row = self.db.exec(
+            select(SessionModel).where(
+                SessionModel.session_id == session_id,
+                SessionModel.user == username,
+            )
+        ).first()
+        if session_row is None or session_row.workspace_id is None:
+            raise ValueError(f"Session '{session_id}' is missing a workspace.")
+
+        workspace = WorkspaceService(self.db).get_workspace(session_row.workspace_id)
+        if workspace is None:
+            raise ValueError(f"Workspace '{session_row.workspace_id}' was not found.")
+        return workspace
+
+    def _read_live_workspace_bytes(self, file_asset: FileAsset) -> bytes | None:
+        """Read bytes from the current live workspace when a file is attached."""
+        if file_asset.session_id is None:
+            return None
+
+        try:
+            workspace = self._load_workspace_for_session(
+                session_id=file_asset.session_id,
+                username=file_asset.user,
+            )
+        except ValueError:
+            return None
+        if workspace is None:
+            return None
+
+        mount_spec = WorkspaceStorageService().build_mount_spec(workspace)
+        sandbox_path = (
+            "/workspace/"
+            + self._workspace_upload_relative_path(
+                file_id=file_asset.file_id,
+                stored_name=file_asset.stored_name,
+            ).as_posix()
+        )
+        exported_files = WorkspaceRuntimeFileService().export_files(
+            username=file_asset.user,
+            mount_spec=mount_spec,
+            sandbox_paths=[sandbox_path],
+        )
+        if not exported_files:
+            return None
+        return exported_files[0].content_bytes
+
+    def _relocate_attached_file_into_workspace(
+        self,
+        *,
+        file_asset: FileAsset,
+        workspace: Workspace,
+    ) -> None:
+        """Move one attached upload from pending storage into workspace-owned storage."""
+        normalized_workspace = WorkspaceStorageService().ensure_workspace_identity(
+            workspace
+        )
+        file_bytes = self.storage_backend.read_bytes(key=file_asset.storage_key)
+        new_storage_key = self._workspace_storage_key(
+            workspace_logical_path=normalized_workspace.logical_path,
+            file_id=file_asset.file_id,
+            stored_name=file_asset.stored_name,
+        )
+        if new_storage_key != file_asset.storage_key:
+            self.storage_backend.put_bytes(payload=file_bytes, key=new_storage_key)
+            self._safe_delete_storage_key(file_asset.storage_key)
+            file_asset.storage_key = new_storage_key
+
+        if file_asset.markdown_storage_key:
+            markdown_bytes = self.storage_backend.read_bytes(
+                key=file_asset.markdown_storage_key
+            )
+            new_markdown_key = self._workspace_markdown_storage_key(
+                workspace_logical_path=normalized_workspace.logical_path,
+                file_id=file_asset.file_id,
+                stored_name=file_asset.stored_name,
+            )
+            if new_markdown_key != file_asset.markdown_storage_key:
+                self.storage_backend.put_bytes(
+                    payload=markdown_bytes,
+                    key=new_markdown_key,
+                )
+                self._safe_delete_storage_key(file_asset.markdown_storage_key)
+                file_asset.markdown_storage_key = new_markdown_key

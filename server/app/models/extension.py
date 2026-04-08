@@ -21,7 +21,7 @@ class ExtensionInstallation(SQLModel, table=True):
         manifest_json: Canonical normalized manifest payload.
         manifest_hash: Stable hash of the canonical manifest payload.
         artifact_storage_backend: Stable storage backend identifier such as
-            ``local_fs`` or a future S3-compatible backend.
+            ``seaweedfs`` or a future fallback backend.
         artifact_key: Canonical object-storage style key for the persisted
             extension artifact.
         artifact_digest: Stable digest of the persisted extension artifact.
@@ -54,7 +54,7 @@ class ExtensionInstallation(SQLModel, table=True):
     description: str = Field(default="")
     manifest_json: str = Field()
     manifest_hash: str = Field(index=True, max_length=64)
-    artifact_storage_backend: str = Field(default="local_fs", max_length=64)
+    artifact_storage_backend: str = Field(default="seaweedfs", max_length=64)
     artifact_key: str = Field(unique=True, max_length=2048)
     artifact_digest: str = Field(index=True, max_length=64)
     artifact_size_bytes: int = Field(default=0)

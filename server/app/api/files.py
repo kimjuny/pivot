@@ -8,15 +8,15 @@ from app.api.dependencies import get_db
 from app.models.user import User
 from app.schemas.file import FileAssetResponse
 from app.services.file_service import FileService
+from app.utils.http_headers import build_inline_content_disposition
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
 from sqlmodel import Session as DBSession
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _to_response(file_asset: object) -> FileAssetResponse:
+def _to_response(file_asset: object, service: FileService) -> FileAssetResponse:
     """Serialize a file asset row into the public API schema."""
     from app.models.file import FileAsset
 
@@ -40,6 +40,7 @@ def _to_response(file_asset: object) -> FileAssetResponse:
         text_encoding=file_asset.text_encoding,
         session_id=file_asset.session_id,
         task_id=file_asset.task_id,
+        workspace_relative_path=service.build_workspace_relative_path(file_asset),
         created_at=file_asset.created_at.replace(tzinfo=UTC).isoformat(),
         expires_at=file_asset.expires_at.replace(tzinfo=UTC).isoformat(),
     )
@@ -86,7 +87,7 @@ async def _store_upload(
             detail="Unexpected file upload failure.",
         ) from err
 
-    return _to_response(stored_file)
+    return _to_response(stored_file, service)
 
 
 @router.post("/files/uploads", response_model=FileAssetResponse, status_code=201)
@@ -145,8 +146,12 @@ async def get_image_content(
     if file_asset is None:
         raise HTTPException(status_code=404, detail="Image file not found")
 
-    return FileResponse(
-        path=file_asset.storage_path,
+    return Response(
+        content=service.read_file_bytes(file_asset),
         media_type=file_asset.mime_type,
-        filename=file_asset.original_name,
+        headers={
+            "Content-Disposition": build_inline_content_disposition(
+                file_asset.original_name
+            )
+        },
     )

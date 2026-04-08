@@ -2,8 +2,8 @@
 
 Provides two categories of tools:
 - **Shared tools**: built-in tools loaded at startup, available to all users.
-- **Private tools**: per-user Python source files stored under
-  ``server/workspace/{username}/tools/``.
+- **Private tools**: creator-owned source files with canonical storage under
+  ``users/{username}/tools/{tool_name}/tool.py`` plus lazy local runtime cache.
 
 All endpoints require authentication.
 """
@@ -16,14 +16,11 @@ from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.models.user import User
 from app.orchestration.tool import get_tool_manager
+from app.services.user_tool_storage_service import get_user_tool_storage_service
 from app.services.workspace_service import (
     check_ast,
     check_pyright,
     check_ruff,
-    delete_user_tool,
-    list_user_tools,
-    read_user_tool,
-    write_user_tool,
 )
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -136,7 +133,7 @@ async def get_private_tools(
     Returns:
         List of dicts with ``name``, ``filename``, and ``tool_type`` keys.
     """
-    return list_user_tools(current_user.username)
+    return get_user_tool_storage_service().list_user_tools(current_user.username)
 
 
 @router.get("/tools/private/{tool_name}")
@@ -157,7 +154,10 @@ async def get_private_tool(
         404: If the tool file does not exist.
     """
     try:
-        source = read_user_tool(current_user.username, tool_name)
+        source = get_user_tool_storage_service().read_user_tool(
+            current_user.username,
+            tool_name,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"name": tool_name, "source": source}
@@ -179,7 +179,11 @@ async def upsert_private_tool(
     Returns:
         Confirmation dict with ``name`` and ``status`` keys.
     """
-    write_user_tool(current_user.username, tool_name, body.source)
+    get_user_tool_storage_service().write_user_tool(
+        current_user.username,
+        tool_name,
+        body.source,
+    )
     return {"name": tool_name, "status": "ok"}
 
 
@@ -201,7 +205,10 @@ async def delete_private_tool(
         404: If the tool file does not exist.
     """
     try:
-        delete_user_tool(current_user.username, tool_name)
+        get_user_tool_storage_service().delete_user_tool(
+            current_user.username,
+            tool_name,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"name": tool_name, "status": "deleted"}

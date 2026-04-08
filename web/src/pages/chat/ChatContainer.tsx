@@ -2397,6 +2397,7 @@ function ChatContainer({
             ) : (
               <ConversationView
                 messages={messages}
+                currentSessionId={currentSessionId}
                 agentName={agentName}
                 expandedRecursions={expandedRecursions}
                 isStreaming={isStreaming}

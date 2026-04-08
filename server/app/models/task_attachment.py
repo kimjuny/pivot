@@ -1,4 +1,4 @@
-"""Database models for agent-generated task attachments."""
+"""Database models for agent-generated live workspace file references."""
 
 from datetime import UTC, datetime
 
@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 class TaskAttachment(SQLModel, table=True):
-    """Immutable assistant artifact snapshot generated for one task answer."""
+    """Assistant file reference generated for one task answer."""
 
     id: int | None = Field(default=None, primary_key=True)
     attachment_id: str = Field(
@@ -37,9 +37,6 @@ class TaskAttachment(SQLModel, table=True):
     )
     workspace_relative_path: str = Field(
         description="Path relative to the agent workspace root."
-    )
-    storage_path: str = Field(
-        description="Backend-managed immutable snapshot path on disk."
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

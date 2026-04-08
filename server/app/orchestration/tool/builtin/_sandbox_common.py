@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import posixpath
+from typing import TYPE_CHECKING
 
 from app.orchestration.tool import get_current_tool_execution_context
 from app.services.sandbox_service import get_sandbox_service
 
+if TYPE_CHECKING:
+    from app.services.workspace_storage_service import WorkspaceMountSpec
 
-def require_context() -> tuple[str, int, str, str, int, tuple[dict[str, str], ...]]:
+
+def require_context() -> tuple[
+    str, int, WorkspaceMountSpec, int, tuple[dict[str, str], ...]
+]:
     """Read tool execution context for sandbox tools.
 
     Returns:
-        Tuple of ``(username, agent_id, workspace_id, workspace_backend_path,``
+        Tuple of ``(username, agent_id, workspace_mount_spec,``
         ``sandbox_timeout_seconds, allowed_skills)``.
 
     Raises:
@@ -24,8 +30,7 @@ def require_context() -> tuple[str, int, str, str, int, tuple[dict[str, str], ..
     return (
         ctx.username,
         ctx.agent_id,
-        ctx.workspace_id,
-        ctx.workspace_backend_path,
+        ctx.workspace_mount_spec,
         ctx.sandbox_timeout_seconds,
         ctx.allowed_skills,
     )
@@ -72,15 +77,13 @@ def exec_in_sandbox(cmd: list[str]) -> str:
     (
         username,
         _agent_id,
-        workspace_id,
-        workspace_backend_path,
+        workspace_mount_spec,
         sandbox_timeout_seconds,
         allowed_skills,
     ) = require_context()
     result = get_sandbox_service().exec(
         username=username,
-        workspace_id=workspace_id,
-        workspace_backend_path=workspace_backend_path,
+        mount_spec=workspace_mount_spec,
         cmd=cmd,
         skills=list(allowed_skills),
         timeout_seconds=sandbox_timeout_seconds,

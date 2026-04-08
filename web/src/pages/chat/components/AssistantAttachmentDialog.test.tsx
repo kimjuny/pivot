@@ -1,11 +1,18 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProviderContext } from "@/lib/use-theme";
-import { fetchTaskAttachmentBlob } from "@/utils/api";
+import {
+  fetchTaskAttachmentBlob,
+  fetchWorkspaceTextFile,
+  updateWorkspaceTextFile,
+} from "@/utils/api";
 
 vi.mock("@/utils/api", () => ({
   fetchTaskAttachmentBlob: vi.fn(),
+  fetchWorkspaceTextFile: vi.fn(),
+  updateWorkspaceTextFile: vi.fn(),
 }));
 
 vi.mock("@/desktop/desktop-adapter", () => ({
@@ -63,6 +70,8 @@ function renderWithTheme(node: React.ReactNode) {
 describe("AssistantAttachmentDialog", () => {
   beforeEach(() => {
     vi.mocked(fetchTaskAttachmentBlob).mockReset();
+    vi.mocked(fetchWorkspaceTextFile).mockReset();
+    vi.mocked(updateWorkspaceTextFile).mockReset();
     vi.stubGlobal("URL", {
       ...URL,
       createObjectURL: vi.fn(() => "blob:attachment-preview"),
@@ -88,6 +97,7 @@ describe("AssistantAttachmentDialog", () => {
           workspaceRelativePath: "outputs/script.js",
           createdAt: "2026-03-31T00:00:00Z",
         }}
+        currentSessionId={null}
         open
         onOpenChange={vi.fn()}
       />,
@@ -121,6 +131,7 @@ describe("AssistantAttachmentDialog", () => {
           workspaceRelativePath: "outputs/report.md",
           createdAt: "2026-03-31T00:00:00Z",
         }}
+        currentSessionId={null}
         open
         onOpenChange={vi.fn()}
       />,
@@ -133,5 +144,53 @@ describe("AssistantAttachmentDialog", () => {
     });
     expect(screen.queryByTestId("monaco-editor")).not.toBeInTheDocument();
     expect(screen.getByText("Body copy")).toBeInTheDocument();
+  });
+
+  it("edits and saves live workspace text attachments against the current session", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchWorkspaceTextFile).mockResolvedValue({
+      session_id: "session-1",
+      workspace_relative_path: "outputs/report.md",
+      content: "draft body",
+    });
+    vi.mocked(updateWorkspaceTextFile).mockResolvedValue({
+      session_id: "session-1",
+      workspace_relative_path: "outputs/report.md",
+      content: "saved body",
+    });
+
+    renderWithTheme(
+      <AssistantAttachmentDialog
+        attachment={{
+          attachmentId: "attachment-text",
+          displayName: "report.md",
+          originalName: "report.md",
+          mimeType: "text/markdown",
+          extension: "md",
+          sizeBytes: 22,
+          renderKind: "text",
+          workspaceRelativePath: "outputs/report.md",
+          createdAt: "2026-03-31T00:00:00Z",
+        }}
+        currentSessionId="session-1"
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Save report.md" }));
+
+    await waitFor(() => {
+      expect(updateWorkspaceTextFile).toHaveBeenCalledWith(
+        "session-1",
+        "outputs/report.md",
+        "draft body",
+      );
+    });
   });
 });

@@ -18,11 +18,13 @@ class Skill(SQLModel, table=True):
         name: Globally unique skill identifier used by agents and sandbox mounts.
         description: Short summary extracted from markdown front matter.
         kind: Visibility scope, either ``private`` or ``shared``.
-        source: Origin of the skill, one of ``builtin``, ``manual``,
-            ``network``, ``bundle``, or ``agent``.
-        builtin: Whether the skill ships with the application.
+        source: Origin of the skill, one of ``manual``, ``network``,
+            ``bundle``, or ``agent``.
         creator_id: Owning user ID for user-created skills.
-        location: Absolute directory path that contains the markdown skill assets.
+        storage_backend: Canonical persisted storage backend for the skill bundle.
+        storage_key: Canonical bundle key inside the persisted storage backend.
+        location: Local materialized cache directory that contains the markdown
+            skill assets used by runtime and editor flows.
         filename: Markdown filename inside ``location``.
         md5: Content digest of the markdown source for quick change detection.
         github_repo_url: Upstream GitHub repository URL for imported skills.
@@ -38,8 +40,9 @@ class Skill(SQLModel, table=True):
     description: str = Field(default="")
     kind: str = Field(max_length=20)
     source: str = Field(max_length=20)
-    builtin: bool = Field(default=False, index=True)
     creator_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    storage_backend: str = Field(default="seaweedfs", max_length=64)
+    storage_key: str | None = Field(default=None, max_length=2048)
     location: str = Field(unique=True, max_length=1024)
     filename: str = Field(max_length=255)
     md5: str = Field(max_length=32)

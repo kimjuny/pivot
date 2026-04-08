@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
     SANDBOX_MANAGER_TIMEOUT_SECONDS: int = 30
 
+    # Persisted storage
+    PERSISTED_STORAGE_BACKEND: str = "local_fs"
+    SEAWEEDFS_FILER_URL: str = "http://seaweedfs:8888"
+    LOCAL_DATA_ROOT: str | None = None
+    LOCAL_CACHE_ROOT: str | None = None
+
     # File uploads
     MAX_IMAGE_SIZE: int = Field(
         default=2 * 1024 * 1024,

@@ -11,6 +11,7 @@ import {
   deleteChatImage,
   fetchChatFileBlob,
   fetchChatImageBlob,
+  fetchWorkspaceTextFile,
   getExtensionInstallationConfiguration,
   getAgentExtensionPackages,
   getExtensionHookExecutions,
@@ -21,6 +22,7 @@ import {
   setHttpClient,
   uploadChatFile,
   uploadChatImage,
+  updateWorkspaceTextFile,
   updateExtensionInstallationConfiguration,
   updateSession,
 } from './api';
@@ -186,6 +188,66 @@ describe('chat file api helpers', () => {
       expect.stringContaining('/task-attachments/attachment-1/content'),
       expect.objectContaining({
         method: 'GET',
+      })
+    );
+  });
+
+  it('reads one live workspace text file for the active session', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session_id: 'session-1',
+          workspace_relative_path: 'notes/report.md',
+          content: '# Report',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+
+    const result = await fetchWorkspaceTextFile('session-1', 'notes/report.md');
+
+    expect(result.content).toBe('# Report');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/session-1/workspace-file?path=notes%2Freport.md'),
+      expect.objectContaining({
+        method: 'GET',
+      })
+    );
+  });
+
+  it('writes one live workspace text file for the active session', async () => {
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session_id: 'session-1',
+          workspace_relative_path: 'notes/report.md',
+          content: '# Updated',
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
+
+    const result = await updateWorkspaceTextFile(
+      'session-1',
+      'notes/report.md',
+      '# Updated'
+    );
+
+    expect(result.content).toBe('# Updated');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/sessions/session-1/workspace-file'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          workspace_relative_path: 'notes/report.md',
+          content: '# Updated',
+        }),
       })
     );
   });

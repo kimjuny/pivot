@@ -1,22 +1,8 @@
-"""Workspace service for managing per-user private tool files.
-
-Each user has an isolated workspace directory under ``server/workspace/{username}/``.
-This service provides CRUD operations over the ``tools/`` sub-folder of that
-workspace, keeping private tools as plain ``.py`` source files on disk.
-
-The service intentionally works with raw source code strings so that:
-1. The frontend can display and edit the full file contents in an editor.
-2. The backend can pass the code to static-analysis tools (AST / ruff / pyright)
-   without an extra round-trip.
-"""
+"""Workspace service for runtime workspace records, cache paths, and code checks."""
 
 import ast
-import importlib.util
-import inspect
 import json
-import shutil
 import subprocess
-import sys
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -24,44 +10,29 @@ from pathlib import Path
 from typing import Any
 
 from app.models.workspace import Workspace
-from app.orchestration.tool.metadata import ToolMetadata
-from app.utils.logging_config import get_logger
+from app.services.workspace_storage_service import WorkspaceStorageService
 from sqlmodel import Session as DBSession, select
 
-logger = get_logger("workspace_service")
-
-# Root that contains per-user subdirectories.
+# Root that contains persisted local service data.
 # Resolved relative to this file: server/app/services/ -> server/
 _WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent / "workspace"
-_BACKEND_WORKSPACE_ROOT = "/app/server/workspace"
-
-
 def workspace_root() -> Path:
     """Return the root directory that stores all user workspaces."""
     _WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
     return _WORKSPACE_ROOT
 
-
-def _user_tools_dir(username: str) -> Path:
-    """Return (and create if needed) the tools directory for a user.
-
-    Args:
-        username: The authenticated username.
-
-    Returns:
-        Absolute path to ``server/workspace/{username}/tools/``.
-    """
-    tools_dir = workspace_root() / username / "tools"
-    tools_dir.mkdir(parents=True, exist_ok=True)
-    return tools_dir
-
-
 def ensure_agent_workspace(username: str, agent_id: int) -> Path:
     """Return (and create) an agent workspace directory.
 
-    Path format: ``server/workspace/{username}/agents/{agent_id}/``.
+    Path format: ``server/workspace/users/{username}/agents/{agent_id}/``.
     """
-    agent_dir = workspace_root() / username / "agents" / str(agent_id)
+    agent_dir = (
+        workspace_root()
+        / "users"
+        / username
+        / "agents"
+        / str(agent_id)
+    )
     agent_dir.mkdir(parents=True, exist_ok=True)
     return agent_dir
 
@@ -105,7 +76,7 @@ class WorkspaceService:
         session_id: str | None = None,
         project_id: str | None = None,
     ) -> Workspace:
-        """Create and persist one workspace record plus its directory.
+        """Create and persist one workspace record plus its storage identity.
 
         Args:
             agent_id: Owning agent identifier.
@@ -130,6 +101,7 @@ class WorkspaceService:
             raise ValueError(f"Unsupported workspace scope '{scope}'.")
 
         now = datetime.now(UTC)
+        storage_service = WorkspaceStorageService()
         workspace = Workspace(
             workspace_id=str(uuid.uuid4()),
             agent_id=agent_id,
@@ -138,52 +110,25 @@ class WorkspaceService:
             session_id=session_id,
             project_id=project_id,
             status="active",
+            storage_backend=storage_service.default_storage_backend(),
+            logical_path=storage_service.build_logical_path(
+                scope=scope,
+                username=username,
+                agent_id=agent_id,
+                session_id=session_id,
+                project_id=project_id,
+            ),
+            mount_mode=storage_service.default_mount_mode(),
             created_at=now,
             updated_at=now,
         )
         self.db.add(workspace)
         self.db.commit()
         self.db.refresh(workspace)
-        self.get_workspace_path(workspace)
         return workspace
 
-    def get_workspace_path(self, workspace: Workspace) -> Path:
-        """Resolve and create the host-side directory for one workspace.
-
-        Args:
-            workspace: Workspace row to resolve.
-
-        Returns:
-            Absolute host-side path.
-
-        Raises:
-            ValueError: If the row is missing the scope-specific identifier.
-        """
-        if workspace.scope == "session_private":
-            if workspace.session_id is None:
-                raise ValueError("Workspace row is missing session_id.")
-            return session_workspace_dir(
-                workspace.user,
-                workspace.agent_id,
-                workspace.session_id,
-            )
-        if workspace.scope == "project_shared":
-            if workspace.project_id is None:
-                raise ValueError("Workspace row is missing project_id.")
-            return project_workspace_dir(
-                workspace.user,
-                workspace.agent_id,
-                workspace.project_id,
-            )
-        raise ValueError(f"Unsupported workspace scope '{workspace.scope}'.")
-
-    def get_workspace_backend_path(self, workspace: Workspace) -> str:
-        """Return the path visible inside the backend container for one workspace."""
-        relative_path = self.get_workspace_path(workspace).relative_to(workspace_root())
-        return f"{_BACKEND_WORKSPACE_ROOT}/{relative_path.as_posix()}"
-
     def delete_workspace(self, workspace_id: str) -> bool:
-        """Delete one workspace record and its host-side directory.
+        """Delete one workspace record.
 
         Args:
             workspace_id: Public workspace identifier.
@@ -195,158 +140,9 @@ class WorkspaceService:
         if workspace is None:
             return False
 
-        workspace_dir = self.get_workspace_path(workspace)
-        shutil.rmtree(workspace_dir, ignore_errors=True)
         self.db.delete(workspace)
         self.db.commit()
         return True
-
-
-# ---------------------------------------------------------------------------
-# Source-file CRUD
-# ---------------------------------------------------------------------------
-
-
-def list_user_tools(username: str) -> list[dict[str, str]]:
-    """List all tool source files owned by a user.
-
-    Args:
-        username: The authenticated username.
-
-    Returns:
-        List of dicts with ``name`` (stem), ``filename``, and ``tool_type`` keys.
-    """
-    tools_dir = _user_tools_dir(username)
-    tools: list[dict[str, str]] = []
-    for py_file in sorted(tools_dir.glob("*.py")):
-        if py_file.name.startswith("_"):
-            continue
-        metadata = load_user_tool_metadata(username, py_file.stem)
-        tools.append(
-            {
-                "name": py_file.stem,
-                "filename": py_file.name,
-                "tool_type": metadata.tool_type if metadata is not None else "normal",
-            }
-        )
-    return tools
-
-
-def read_user_tool(username: str, tool_name: str) -> str:
-    """Read the source code of a user's tool file.
-
-    Args:
-        username: The authenticated username.
-        tool_name: Stem of the tool file (without ``.py``).
-
-    Returns:
-        Source code string.
-
-    Raises:
-        FileNotFoundError: If the tool file does not exist.
-    """
-    tool_path = _user_tools_dir(username) / f"{tool_name}.py"
-    if not tool_path.exists():
-        raise FileNotFoundError(f"Tool '{tool_name}' not found for user '{username}'.")
-    return tool_path.read_text(encoding="utf-8")
-
-
-def write_user_tool(username: str, tool_name: str, source: str) -> None:
-    """Create or overwrite a user's tool file.
-
-    Args:
-        username: The authenticated username.
-        tool_name: Stem of the tool file (without ``.py``).
-        source: Python source code to write.
-    """
-    tool_path = _user_tools_dir(username) / f"{tool_name}.py"
-    tool_path.write_text(source, encoding="utf-8")
-    logger.info("Wrote tool '%s' for user '%s'", tool_name, username)
-
-
-def delete_user_tool(username: str, tool_name: str) -> None:
-    """Delete a user's tool file.
-
-    Args:
-        username: The authenticated username.
-        tool_name: Stem of the tool file (without ``.py``).
-
-    Raises:
-        FileNotFoundError: If the tool file does not exist.
-    """
-    tool_path = _user_tools_dir(username) / f"{tool_name}.py"
-    if not tool_path.exists():
-        raise FileNotFoundError(f"Tool '{tool_name}' not found for user '{username}'.")
-    tool_path.unlink()
-    logger.info("Deleted tool '%s' for user '%s'", tool_name, username)
-
-
-# ---------------------------------------------------------------------------
-# Dynamic metadata loading (for listing tools with metadata)
-# ---------------------------------------------------------------------------
-
-
-def load_all_user_tool_metadata(username: str) -> list[ToolMetadata]:
-    """Load ToolMetadata for every private tool file belonging to a user.
-
-    Args:
-        username: The authenticated username.
-
-    Returns:
-        List of ToolMetadata instances for all valid decorated tool functions.
-        Files that fail to load or contain no ``@tool`` function are silently skipped.
-    """
-    tools_dir = _user_tools_dir(username)
-    results: list[ToolMetadata] = []
-    for py_file in sorted(tools_dir.glob("*.py")):
-        if py_file.name.startswith("_"):
-            continue
-        metadata = load_user_tool_metadata(username, py_file.stem)
-        if metadata is not None:
-            results.append(metadata)
-    return results
-
-
-def load_user_tool_metadata(username: str, tool_name: str) -> ToolMetadata | None:
-    """Dynamically import a user tool file and extract its ToolMetadata.
-
-    Uses a fresh ``importlib`` spec load so that re-saves are reflected
-    without a server restart.
-
-    Args:
-        username: The authenticated username.
-        tool_name: Stem of the tool file (without ``.py``).
-
-    Returns:
-        ToolMetadata if a decorated function is found, None otherwise.
-    """
-    tool_path = _user_tools_dir(username) / f"{tool_name}.py"
-    if not tool_path.exists():
-        return None
-
-    # Use a unique module name to avoid collisions in sys.modules
-    module_key = f"_pivot_workspace_{username}_{tool_name}"
-    spec = importlib.util.spec_from_file_location(module_key, tool_path)
-    if spec is None or spec.loader is None:
-        return None
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_key] = module
-    try:
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-    except Exception as exc:
-        logger.warning("Failed to load tool module '%s': %s", tool_name, exc)
-        return None
-
-    from app.orchestration.tool.metadata import ToolMetadata
-
-    for _name, obj in inspect.getmembers(module, inspect.isfunction):
-        metadata = getattr(obj, "__tool_metadata__", None)
-        if metadata is not None and isinstance(metadata, ToolMetadata):
-            return metadata
-
-    return None
-
 
 # ---------------------------------------------------------------------------
 # Code analysis helpers (AST / ruff / pyright)

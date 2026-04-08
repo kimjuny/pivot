@@ -8,10 +8,13 @@ isolated in a dedicated service.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    from app.services.workspace_storage_service import WorkspaceMountSpec
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,7 @@ class SandboxService:
             raise RuntimeError(f"Sandbox manager request failed: {exc}") from exc
 
         if response.status_code >= 400:
-            detail = response.text.strip()
+            detail = self._error_detail(response)
             raise RuntimeError(
                 f"Sandbox manager error ({response.status_code}): {detail}"
             )
@@ -64,11 +67,25 @@ class SandboxService:
             raise RuntimeError("Sandbox manager response is not a JSON object.")
         return data
 
+    @staticmethod
+    def _error_detail(response: requests.Response) -> str:
+        """Return the most useful error detail from one manager HTTP response."""
+        with_detail = response.text.strip()
+        try:
+            payload = response.json()
+        except ValueError:
+            return with_detail or "Unknown sandbox-manager error."
+
+        if isinstance(payload, dict):
+            detail = payload.get("detail")
+            if isinstance(detail, str) and detail.strip():
+                return detail.strip()
+        return with_detail or "Unknown sandbox-manager error."
+
     def exec(
         self,
         username: str,
-        workspace_id: str,
-        workspace_backend_path: str,
+        mount_spec: WorkspaceMountSpec,
         cmd: list[str],
         skills: list[dict[str, str]] | None = None,
         timeout_seconds: int | None = None,
@@ -80,8 +97,11 @@ class SandboxService:
             "/sandboxes/exec",
             {
                 "username": username,
-                "workspace_id": workspace_id,
-                "workspace_backend_path": workspace_backend_path,
+                "workspace_id": mount_spec.workspace_id,
+                "storage_backend": mount_spec.storage_backend,
+                "logical_path": mount_spec.logical_path,
+                "mount_mode": mount_spec.mount_mode,
+                "source_workspace_id": mount_spec.source_workspace_id,
                 "cmd": cmd,
                 "skills": skills,
             },
@@ -96,8 +116,7 @@ class SandboxService:
     def create(
         self,
         username: str,
-        workspace_id: str,
-        workspace_backend_path: str,
+        mount_spec: WorkspaceMountSpec,
         skills: list[dict[str, str]] | None = None,
         timeout_seconds: int | None = None,
     ) -> None:
@@ -108,8 +127,11 @@ class SandboxService:
             "/sandboxes/create",
             {
                 "username": username,
-                "workspace_id": workspace_id,
-                "workspace_backend_path": workspace_backend_path,
+                "workspace_id": mount_spec.workspace_id,
+                "storage_backend": mount_spec.storage_backend,
+                "logical_path": mount_spec.logical_path,
+                "mount_mode": mount_spec.mount_mode,
+                "source_workspace_id": mount_spec.source_workspace_id,
                 "skills": skills,
             },
             timeout_seconds=timeout_seconds,
@@ -119,8 +141,7 @@ class SandboxService:
         self,
         *,
         username: str,
-        workspace_id: str,
-        workspace_backend_path: str,
+        mount_spec: WorkspaceMountSpec,
         timeout_seconds: int | None = None,
     ) -> None:
         """Destroy one sandbox container bound to the given workspace."""
@@ -128,8 +149,11 @@ class SandboxService:
             "/sandboxes/destroy",
             {
                 "username": username,
-                "workspace_id": workspace_id,
-                "workspace_backend_path": workspace_backend_path,
+                "workspace_id": mount_spec.workspace_id,
+                "storage_backend": mount_spec.storage_backend,
+                "logical_path": mount_spec.logical_path,
+                "mount_mode": mount_spec.mount_mode,
+                "source_workspace_id": mount_spec.source_workspace_id,
                 "skills": [],
             },
             timeout_seconds=timeout_seconds,

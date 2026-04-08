@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from importlib import import_module
 from pathlib import Path
+from unittest.mock import patch
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
@@ -12,6 +13,9 @@ if str(SERVER_ROOT) not in sys.path:
 
 prompt_template = import_module("app.orchestration.react.prompt_template")
 workspace_guidance_service = import_module("app.services.workspace_guidance_service")
+WorkspaceMountSpec = import_module(
+    "app.services.workspace_storage_service"
+).WorkspaceMountSpec
 
 
 class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
@@ -26,40 +30,24 @@ class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
         """Release the temporary workspace root."""
         self.tmpdir.cleanup()
 
-    def test_discover_prefers_agents_over_claude(self) -> None:
-        """`AGENTS.md` should outrank `CLAUDE.md` when both are present."""
-        (self.workspace_path / "AGENTS.md").write_text(
-            "Use pytest.\n",
-            encoding="utf-8",
-        )
-        (self.workspace_path / "CLAUDE.md").write_text(
-            "Use npm test.\n",
-            encoding="utf-8",
-        )
-
-        discovered = workspace_guidance_service.discover_workspace_guidance_file(
-            self.workspace_path
-        )
-
-        self.assertIsNotNone(discovered)
-        if discovered is None:
-            self.fail("Expected one workspace guidance file to be discovered.")
-        host_path, sandbox_path = discovered
-        self.assertEqual(host_path.name, "AGENTS.md")
-        self.assertEqual(sandbox_path, "/workspace/AGENTS.md")
-
     def test_build_workspace_guidance_prompt_uses_canonical_sandbox_path(
         self,
     ) -> None:
         """Prompt payloads should expose the sandbox-visible guidance path."""
-        (self.workspace_path / "CLAUDE.md").write_text(
-            "# Local Rules\n\nPrefer pnpm.\n",
-            encoding="utf-8",
-        )
-
-        prompt_block = workspace_guidance_service.build_workspace_guidance_prompt(
-            self.workspace_path
-        )
+        with patch.object(
+            workspace_guidance_service.WorkspaceRuntimeFileService,
+            "read_guidance_file",
+            return_value=("/workspace/CLAUDE.md", "# Local Rules\n\nPrefer pnpm."),
+        ):
+            prompt_block = workspace_guidance_service.build_workspace_guidance_prompt(
+                username="alice",
+                mount_spec=WorkspaceMountSpec(
+                    workspace_id="workspace-1",
+                    storage_backend="seaweedfs",
+                    logical_path="users/alice/agents/7/sessions/workspace-1",
+                    mount_mode="live_sync",
+                ),
+            )
 
         self.assertEqual(
             prompt_block,
@@ -68,12 +56,23 @@ class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
 
     def test_build_workspace_guidance_prompt_returns_empty_when_missing(self) -> None:
         """Workspaces without a supported file should inject no guidance."""
-        self.assertEqual(
-            workspace_guidance_service.build_workspace_guidance_prompt(
-                self.workspace_path
-            ),
-            "",
-        )
+        with patch.object(
+            workspace_guidance_service.WorkspaceRuntimeFileService,
+            "read_guidance_file",
+            return_value=None,
+        ):
+            self.assertEqual(
+                workspace_guidance_service.build_workspace_guidance_prompt(
+                    username="alice",
+                    mount_spec=WorkspaceMountSpec(
+                        workspace_id="workspace-1",
+                        storage_backend="seaweedfs",
+                        logical_path="users/alice/agents/7/sessions/workspace-1",
+                        mount_mode="live_sync",
+                    ),
+                ),
+                "",
+            )
 
     def test_runtime_user_prompt_injects_workspace_guidance(self) -> None:
         """The task bootstrap prompt should replace the guidance placeholder."""

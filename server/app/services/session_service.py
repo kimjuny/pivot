@@ -23,6 +23,7 @@ from app.services.project_service import ProjectService
 from app.services.sandbox_service import get_sandbox_service
 from app.services.task_attachment_service import TaskAttachmentService
 from app.services.workspace_service import WorkspaceService
+from app.services.workspace_storage_service import WorkspaceStorageService
 from sqlalchemy import func
 from sqlmodel import Session as DBSession, col, select
 
@@ -568,10 +569,7 @@ class SessionService:
         try:
             get_sandbox_service().destroy(
                 username=workspace.user,
-                workspace_id=workspace.workspace_id,
-                workspace_backend_path=WorkspaceService(
-                    self.db
-                ).get_workspace_backend_path(workspace),
+                mount_spec=WorkspaceStorageService().build_mount_spec(workspace),
             )
         except RuntimeError:
             return

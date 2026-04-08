@@ -5,16 +5,13 @@ concerns between API endpoints and core functionality.
 """
 
 from app.services.session_service import SessionService
+from app.services.user_tool_storage_service import (
+    get_user_tool_storage_service,
+)
 from app.services.workspace_service import (
     check_ast,
     check_pyright,
     check_ruff,
-    delete_user_tool,
-    list_user_tools,
-    load_all_user_tool_metadata,
-    load_user_tool_metadata,
-    read_user_tool,
-    write_user_tool,
 )
 
 __all__ = [
@@ -22,10 +19,5 @@ __all__ = [
     "check_ast",
     "check_pyright",
     "check_ruff",
-    "delete_user_tool",
-    "list_user_tools",
-    "load_all_user_tool_metadata",
-    "load_user_tool_metadata",
-    "read_user_tool",
-    "write_user_tool",
+    "get_user_tool_storage_service",
 ]

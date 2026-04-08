@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 import unittest
+from contextlib import contextmanager
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -136,17 +137,22 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.session.add(session)
         self.session.commit()
         self.session.refresh(session)
-        self.get_engine_patch = patch.object(
+
+        @contextmanager
+        def managed_session_override():
+            yield self.session
+
+        self.managed_session_patch = patch.object(
             react_task_supervisor_module,
-            "get_engine",
-            return_value=self.engine,
+            "managed_session",
+            managed_session_override,
         )
-        self.get_engine_patch.start()
+        self.managed_session_patch.start()
         self.supervisor = ReactTaskSupervisor()
 
     def tearDown(self) -> None:
         """Release the in-memory database after each test."""
-        self.get_engine_patch.stop()
+        self.managed_session_patch.stop()
         self.session.close()
 
     def test_prepare_task_updates_session_activity_for_new_turns(self) -> None:
@@ -220,13 +226,18 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             ),
             patch.object(
                 react_task_supervisor_module,
-                "list_visible_skills",
+                "list_allowed_visible_skills",
                 return_value=[],
             ),
             patch.object(
                 react_task_supervisor_module,
                 "build_skill_mounts",
                 return_value=[],
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "build_workspace_guidance_prompt",
+                return_value="",
             ),
             patch.object(
                 react_task_supervisor_module,
@@ -268,6 +279,135 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.assertEqual(
             cast(Any, tool_execution_context).sandbox_timeout_seconds,
             90,
+        )
+
+    def test_run_task_passes_mount_spec_and_canonical_skills_to_runtime(self) -> None:
+        """Runtime bootstrap should use mount specs and canonical skill locations."""
+        task = ReactTask(
+            task_id="task-mount-spec",
+            session_id="session-1",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Run released config",
+            user_intent="Run released config",
+            status="pending",
+            iteration=0,
+            max_iteration=7,
+        )
+        self.session.add(task)
+        self.session.commit()
+
+        captured: dict[str, object] = {}
+
+        class DummyEngine:
+            """Minimal async engine stub for mount-spec capture."""
+
+            def __init__(self, **kwargs: object) -> None:
+                tool_execution_context = kwargs["tool_execution_context"]
+                if not isinstance(tool_execution_context, ToolExecutionContext):
+                    raise AssertionError("Expected a ToolExecutionContext instance")
+                captured["tool_execution_context"] = tool_execution_context
+                self.cancelled = False
+
+            async def run_task(self, **kwargs: object):
+                if False:
+                    yield kwargs
+
+        allowed_visible_skills = [
+            {
+                "name": "release_skill",
+                "description": "Release skill",
+                "location": "/app/server/workspace/alice/skills/release_skill",
+                "filename": "SKILL.md",
+            }
+        ]
+        materialized_skills = [
+            {
+                "name": "release_skill",
+                "canonical_location": "/app/server/workspace/alice/skills/release_skill",
+            }
+        ]
+
+        with (
+            patch.object(
+                self.supervisor,
+                "_build_request_tool_manager",
+                return_value=MagicMock(),
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "create_llm_from_config",
+                return_value=object(),
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "list_allowed_visible_skills",
+                return_value=allowed_visible_skills,
+            ),
+            patch.object(
+                react_task_supervisor_module,
+                "build_skill_mounts",
+                return_value=materialized_skills,
+            ) as build_skill_mounts_mock,
+            patch.object(
+                react_task_supervisor_module,
+                "build_workspace_guidance_prompt",
+                return_value="",
+            ) as guidance_mock,
+            patch.object(
+                react_task_supervisor_module,
+                "ReactEngine",
+                DummyEngine,
+            ),
+            patch.object(
+                self.supervisor,
+                "_publish_event",
+                new=AsyncMock(return_value=None),
+            ),
+        ):
+            asyncio.run(
+                self.supervisor._run_task(
+                    task_id="task-mount-spec",
+                    launch=ReactTaskLaunchRequest(
+                        agent_id=self.agent.id or 0,
+                        message="Run released config",
+                        username="alice",
+                        session_id="session-1",
+                        file_ids=[],
+                    ),
+                )
+            )
+
+        raw_tool_execution_context = captured["tool_execution_context"]
+        self.assertIsInstance(raw_tool_execution_context, ToolExecutionContext)
+        if not isinstance(raw_tool_execution_context, ToolExecutionContext):
+            self.fail("Expected a ToolExecutionContext instance")
+        tool_execution_context = cast(Any, raw_tool_execution_context)
+        self.assertEqual(
+            tool_execution_context.workspace_mount_spec.workspace_id,
+            "workspace-1",
+        )
+        self.assertEqual(
+            tool_execution_context.workspace_mount_spec.storage_backend,
+            "seaweedfs",
+        )
+        self.assertEqual(
+            tool_execution_context.workspace_mount_spec.logical_path,
+            "users/alice/agents/1/sessions/session-1",
+        )
+        self.assertEqual(tool_execution_context.allowed_skills, tuple(materialized_skills))
+
+        build_skill_mounts_mock.assert_called_once_with(
+            self.session,
+            "alice",
+            ["release_skill"],
+            extra_skills=[],
+        )
+        guidance_mock.assert_called_once()
+        self.assertEqual(guidance_mock.call_args.kwargs["username"], "alice")
+        self.assertEqual(
+            guidance_mock.call_args.kwargs["mount_spec"].logical_path,
+            "users/alice/agents/1/sessions/session-1",
         )
 
     def test_prepare_task_rejects_text_reply_for_structured_pending_action(

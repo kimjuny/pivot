@@ -285,6 +285,7 @@ export interface ChatAttachment {
   canExtractText?: boolean;
   suspectedScanned?: boolean;
   textEncoding?: string | null;
+  workspaceRelativePath?: string | null;
   previewUrl?: string;
 }
 

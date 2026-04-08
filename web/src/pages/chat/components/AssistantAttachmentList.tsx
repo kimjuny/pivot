@@ -13,6 +13,7 @@ import { AssistantAttachmentDialog } from "./AssistantAttachmentDialog";
 
 interface AssistantAttachmentListProps {
   attachments?: AssistantAttachment[];
+  currentSessionId?: string | null;
 }
 
 /**
@@ -52,13 +53,6 @@ function formatAttachmentKindLabel(attachment: AssistantAttachment): string {
 }
 
 /**
- * Only previewable formats should behave like action buttons in the answer timeline.
- */
-function isPreviewableAttachment(attachment: AssistantAttachment): boolean {
-  return attachment.renderKind !== "download";
-}
-
-/**
  * Picks a recognizable icon for one assistant-generated attachment card.
  */
 function getAttachmentIcon(attachment: AssistantAttachment) {
@@ -85,6 +79,7 @@ function getAttachmentIcon(attachment: AssistantAttachment) {
  */
 export function AssistantAttachmentList({
   attachments,
+  currentSessionId = null,
 }: AssistantAttachmentListProps) {
   const [activeAttachment, setActiveAttachment] =
     useState<AssistantAttachment | null>(null);
@@ -101,51 +96,32 @@ export function AssistantAttachmentList({
     <>
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {normalizedAttachments.map((attachment) => (
-          isPreviewableAttachment(attachment) ? (
-            <button
-              key={attachment.attachmentId}
-              type="button"
-              onClick={() => setActiveAttachment(attachment)}
-              className="group flex min-w-[220px] max-w-[280px] flex-1 items-center rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5 text-left transition-colors hover:border-primary/35 hover:bg-muted/35"
-              aria-label={`Open ${attachment.displayName}`}
-            >
-              <div className="mr-2.5 rounded-lg border border-border/70 bg-background p-1.5">
-                {getAttachmentIcon(attachment)}
+          <button
+            key={attachment.attachmentId}
+            type="button"
+            onClick={() => setActiveAttachment(attachment)}
+            className="group flex min-w-[220px] max-w-[280px] flex-1 items-center rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5 text-left transition-colors hover:border-primary/35 hover:bg-muted/35"
+            aria-label={`Open ${attachment.displayName}`}
+          >
+            <div className="mr-2.5 rounded-lg border border-border/70 bg-background p-1.5">
+              {getAttachmentIcon(attachment)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold leading-tight text-foreground">
+                {attachment.displayName}
               </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold leading-tight text-foreground">
-                  {attachment.displayName}
-                </div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">
-                  {formatAttachmentKindLabel(attachment)} ·{" "}
-                  {formatAttachmentSize(attachment.sizeBytes)}
-                </div>
-              </div>
-            </button>
-          ) : (
-            <div
-              key={attachment.attachmentId}
-              className="flex min-w-[220px] max-w-[280px] flex-1 items-center rounded-xl border border-border/80 bg-muted/20 px-3 py-2.5"
-            >
-              <div className="mr-2.5 rounded-lg border border-border/70 bg-background p-1.5">
-                {getAttachmentIcon(attachment)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold leading-tight text-foreground">
-                  {attachment.displayName}
-                </div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">
-                  {formatAttachmentKindLabel(attachment)} ·{" "}
-                  {formatAttachmentSize(attachment.sizeBytes)}
-                </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {formatAttachmentKindLabel(attachment)} ·{" "}
+                {formatAttachmentSize(attachment.sizeBytes)}
               </div>
             </div>
-          )
+          </button>
         ))}
       </div>
 
       <AssistantAttachmentDialog
         attachment={activeAttachment}
+        currentSessionId={currentSessionId}
         open={activeAttachment !== null}
         onOpenChange={(open) => {
           if (!open) {

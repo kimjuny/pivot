@@ -1962,6 +1962,7 @@ export interface ChatFileAsset {
   text_encoding?: string | null;
   session_id: string | null;
   task_id: string | null;
+  workspace_relative_path?: string | null;
   created_at: string;
   expires_at?: string;
 }
@@ -1979,6 +1980,15 @@ export interface TaskAttachmentAsset {
   render_kind: 'markdown' | 'pdf' | 'image' | 'text' | 'download';
   workspace_relative_path: string;
   created_at: string;
+}
+
+/**
+ * One live workspace text file bound to the active session.
+ */
+export interface WorkspaceFileAsset {
+  session_id: string;
+  workspace_relative_path: string;
+  content: string;
 }
 
 /**
@@ -2493,6 +2503,84 @@ export const fetchTaskAttachmentBlob = async (
   }
 
   return await response.blob();
+};
+
+/**
+ * Read one live text file from the current session workspace.
+ *
+ * @param sessionId - Current session UUID
+ * @param workspaceRelativePath - Path relative to ``/workspace``
+ * @param signal - Optional abort signal
+ * @returns Promise resolving to the live text file payload
+ */
+export const fetchWorkspaceTextFile = async (
+  sessionId: string,
+  workspaceRelativePath: string,
+  signal?: AbortSignal
+): Promise<WorkspaceFileAsset> => {
+  const url =
+    `${getApiBaseUrl()}/sessions/${sessionId}/workspace-file?path=` +
+    encodeURIComponent(workspaceRelativePath);
+  const headers = getAuthorizedHeaders();
+
+  const response = await httpClient(url, {
+    method: "GET",
+    headers,
+    signal,
+  });
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError("Authentication expired. Please log in again.");
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json() as { detail?: string };
+    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+  }
+
+  return await response.json() as WorkspaceFileAsset;
+};
+
+/**
+ * Persist one edited live text file back into the current session workspace.
+ *
+ * @param sessionId - Current session UUID
+ * @param workspaceRelativePath - Path relative to ``/workspace``
+ * @param content - Next UTF-8 file contents
+ * @returns Promise resolving to the updated live text file payload
+ */
+export const updateWorkspaceTextFile = async (
+  sessionId: string,
+  workspaceRelativePath: string,
+  content: string
+): Promise<WorkspaceFileAsset> => {
+  const url = `${getApiBaseUrl()}/sessions/${sessionId}/workspace-file`;
+  const headers = getAuthorizedHeaders();
+
+  const response = await httpClient(url, {
+    method: "PUT",
+    headers: {
+      ...headers,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      workspace_relative_path: workspaceRelativePath,
+      content,
+    }),
+  });
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError("Authentication expired. Please log in again.");
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json() as { detail?: string };
+    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+  }
+
+  return await response.json() as WorkspaceFileAsset;
 };
 
 // ---------------------------------------------------------------------------

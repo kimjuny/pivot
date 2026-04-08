@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
-import { Download, Loader2 } from "@/lib/lucide";
+import { Check, Download, Loader2, Pencil } from "@/lib/lucide";
 import { toast } from "sonner";
 
 import DraggableDialog from "@/components/DraggableDialog";
@@ -9,13 +9,18 @@ import {
   saveBlobWithNativeDialog,
 } from "@/desktop/desktop-adapter";
 import { useTheme } from "@/lib/use-theme";
-import { fetchTaskAttachmentBlob } from "@/utils/api";
+import {
+  fetchTaskAttachmentBlob,
+  fetchWorkspaceTextFile,
+  updateWorkspaceTextFile,
+} from "@/utils/api";
 
 import type { AssistantAttachment } from "../types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface AssistantAttachmentDialogProps {
   attachment: AssistantAttachment | null;
+  currentSessionId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -118,22 +123,32 @@ function getAttachmentEditorLanguage(attachment: AssistantAttachment): string {
  */
 export function AssistantAttachmentDialog({
   attachment,
+  currentSessionId,
   open,
   onOpenChange,
 }: AssistantAttachmentDialogProps) {
   const monacoTheme = useResolvedMonacoTheme();
   const [textContent, setTextContent] = useState<string>("");
+  const [draftContent, setDraftContent] = useState<string>("");
   const [attachmentBlob, setAttachmentBlob] = useState<Blob | null>(null);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const isEditableAttachment =
+    currentSessionId !== null &&
+    (attachment?.renderKind === "markdown" || attachment?.renderKind === "text");
 
   useEffect(() => {
     if (!open || !attachment) {
       setTextContent("");
+      setDraftContent("");
       setAttachmentBlob(null);
       setObjectUrl(null);
       setIsLoading(false);
+      setIsEditing(false);
+      setIsSaving(false);
       setErrorMessage(null);
       return;
     }
@@ -146,6 +161,23 @@ export function AssistantAttachmentDialog({
         setIsLoading(true);
         setErrorMessage(null);
         setTextContent("");
+        setDraftContent("");
+        if (
+          currentSessionId &&
+          (attachment.renderKind === "markdown" ||
+            attachment.renderKind === "text")
+        ) {
+          const file = await fetchWorkspaceTextFile(
+            currentSessionId,
+            attachment.workspaceRelativePath,
+            controller.signal,
+          );
+          setTextContent(file.content);
+          setDraftContent(file.content);
+          setAttachmentBlob(null);
+          setObjectUrl(null);
+          return;
+        }
         const blob = await fetchTaskAttachmentBlob(
           attachment.attachmentId,
           controller.signal,
@@ -158,7 +190,9 @@ export function AssistantAttachmentDialog({
           attachment.renderKind === "markdown" ||
           attachment.renderKind === "text"
         ) {
-          setTextContent(await blob.text());
+          const nextText = await blob.text();
+          setTextContent(nextText);
+          setDraftContent(nextText);
         }
       } catch (error) {
         if (controller.signal.aborted) {
@@ -185,7 +219,39 @@ export function AssistantAttachmentDialog({
         URL.revokeObjectURL(nextObjectUrl);
       }
     };
-  }, [attachment, open]);
+  }, [attachment, currentSessionId, open]);
+
+  const handleSave = useCallback(async () => {
+    if (!attachment || currentSessionId === null || !isEditableAttachment) {
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      await updateWorkspaceTextFile(
+        currentSessionId,
+        attachment.workspaceRelativePath,
+        draftContent,
+      );
+      setTextContent(draftContent);
+      setIsEditing(false);
+      toast.success(`Saved ${attachment.displayName}`);
+    } catch (error) {
+      console.error("Failed to save assistant workspace file:", error);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to save this workspace file.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    attachment,
+    currentSessionId,
+    draftContent,
+    isEditableAttachment,
+  ]);
 
   const handleDownload = useCallback(async () => {
     if (!attachment || !attachmentBlob) {
@@ -229,23 +295,88 @@ export function AssistantAttachmentDialog({
   }, [attachment, attachmentBlob, objectUrl]);
 
   const headerAction = useMemo(() => {
-    if (!attachment || !attachmentBlob || (!isDesktop && !objectUrl)) {
+    if (!attachment) {
       return null;
     }
 
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          void handleDownload();
-        }}
-        className="inline-flex h-6 w-6 items-center justify-center rounded p-1 transition-colors hover:bg-accent"
-        aria-label={`Download ${attachment.displayName}`}
-      >
-        <Download className="h-3.5 w-3.5 text-foreground" />
-      </button>
-    );
-  }, [attachment, attachmentBlob, handleDownload, objectUrl]);
+    const actions: ReactNode[] = [];
+    if (isEditableAttachment) {
+      if (isEditing) {
+        actions.push(
+          <button
+            key="cancel"
+            type="button"
+            onClick={() => {
+              setDraftContent(textContent);
+              setIsEditing(false);
+            }}
+            className="rounded-md border border-border/70 px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent"
+          >
+            Cancel
+          </button>,
+        );
+        actions.push(
+          <button
+            key="save"
+            type="button"
+            onClick={() => {
+              void handleSave();
+            }}
+            disabled={isSaving}
+            className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label={`Save ${attachment.displayName}`}
+          >
+            <Check className="h-3.5 w-3.5" />
+            {isSaving ? "Saving..." : "Save"}
+          </button>,
+        );
+      } else {
+        actions.push(
+          <button
+            key="edit"
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-border/70 px-2 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </button>,
+        );
+      }
+    }
+
+    if (attachmentBlob && (isDesktop || objectUrl)) {
+      actions.push(
+        <button
+          key="download"
+          type="button"
+          onClick={() => {
+            void handleDownload();
+          }}
+          className="inline-flex h-6 w-6 items-center justify-center rounded p-1 transition-colors hover:bg-accent"
+          aria-label={`Download ${attachment.displayName}`}
+        >
+          <Download className="h-3.5 w-3.5 text-foreground" />
+        </button>,
+      );
+    }
+
+    if (actions.length === 0) {
+      return null;
+    }
+
+    return <div className="flex items-center gap-2">{actions}</div>;
+  }, [
+    attachment,
+    attachmentBlob,
+    handleDownload,
+    handleSave,
+    isEditableAttachment,
+    isEditing,
+    isSaving,
+    objectUrl,
+    textContent,
+  ]);
 
   return (
     <DraggableDialog
@@ -257,6 +388,16 @@ export function AssistantAttachmentDialog({
       fullscreenable
     >
       <div className="flex h-full flex-col bg-background">
+        {attachment ? (
+          <div className="border-b border-border/70 px-4 py-2">
+            <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Live workspace file
+            </div>
+            <div className="mt-1 font-mono text-xs text-foreground">
+              /workspace/{attachment.workspaceRelativePath}
+            </div>
+          </div>
+        ) : null}
         <div
           className={`min-h-0 flex-1 overflow-auto ${
             attachment?.renderKind === "text" ? "overflow-hidden" : "p-4"
@@ -272,15 +413,42 @@ export function AssistantAttachmentDialog({
             </div>
           ) : attachment?.renderKind === "markdown" ? (
             <div className="mx-auto w-full max-w-5xl px-4 md:px-8 lg:px-12">
-              <MarkdownRenderer content={textContent} variant="document" />
+              {isEditing ? (
+                <Editor
+                  height="100%"
+                  language="markdown"
+                  value={draftContent}
+                  theme={monacoTheme}
+                  onChange={(value) => setDraftContent(value ?? "")}
+                  loading={
+                    <div className="flex h-full min-h-[60vh] items-center justify-center text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                    </div>
+                  }
+                  options={{
+                    automaticLayout: true,
+                    fontSize: 13,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: "on",
+                  }}
+                />
+              ) : (
+                <MarkdownRenderer content={textContent} variant="document" />
+              )}
             </div>
           ) : attachment?.renderKind === "text" ? (
             <div className="h-full min-h-[60vh] bg-muted/20">
               <Editor
                 height="100%"
                 language={getAttachmentEditorLanguage(attachment)}
-                value={textContent}
+                value={isEditing ? draftContent : textContent}
                 theme={monacoTheme}
+                onChange={(value) => {
+                  if (isEditing) {
+                    setDraftContent(value ?? "");
+                  }
+                }}
                 loading={
                   <div className="flex h-full min-h-[60vh] items-center justify-center text-muted-foreground">
                     <Loader2 className="h-5 w-5 animate-spin" />
@@ -288,11 +456,10 @@ export function AssistantAttachmentDialog({
                 }
                 options={{
                   automaticLayout: true,
-                  domReadOnly: true,
                   fontSize: 13,
                   lineNumbers: "on",
                   minimap: { enabled: false },
-                  readOnly: true,
+                  readOnly: !isEditing,
                   renderLineHighlight: "none",
                   renderWhitespace: "selection",
                   scrollBeyondLastLine: false,
@@ -322,7 +489,7 @@ export function AssistantAttachmentDialog({
                 This attachment does not have an inline preview yet.
               </p>
               <p className="text-xs text-muted-foreground">
-                Use the download action in the title bar to open the raw file.
+                Use the title-bar actions to inspect or download the current live file.
               </p>
             </div>
           )}

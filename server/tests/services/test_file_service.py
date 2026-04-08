@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 from PIL import Image
 from sqlmodel import Session, SQLModel, create_engine
@@ -17,9 +18,37 @@ SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-FileService = import_module("app.services.file_service").FileService
-PdfTextLayerProbe = import_module("app.services.file_service").PdfTextLayerProbe
+file_service_module = import_module("app.services.file_service")
+FileService = file_service_module.FileService
+PdfTextLayerProbe = file_service_module.PdfTextLayerProbe
+SessionModel = import_module("app.models.session").Session
+Workspace = import_module("app.models.workspace").Workspace
+WorkspaceRuntimeFile = import_module(
+    "app.services.workspace_runtime_file_service"
+).WorkspaceRuntimeFile
 workspace_service = import_module("app.services.workspace_service")
+
+
+class InMemoryStorageBackend:
+    """Tiny in-memory backend used to verify object-style file persistence."""
+
+    backend_name = "memory"
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def put_bytes(self, *, payload: bytes, key: str):
+        self.objects[key] = payload
+        return object()
+
+    def read_bytes(self, *, key: str) -> bytes:
+        try:
+            return self.objects[key]
+        except KeyError as err:
+            raise FileNotFoundError(key) from err
+
+    def delete(self, *, key: str) -> None:
+        self.objects.pop(key, None)
 
 
 class FileServiceTestCase(unittest.TestCase):
@@ -35,7 +64,74 @@ class FileServiceTestCase(unittest.TestCase):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
         SQLModel.metadata.create_all(engine)
         self.db = Session(engine)
-        self.service = FileService(self.db)
+        self.storage_backend = InMemoryStorageBackend()
+        self.service = FileService(self.db, storage_backend=self.storage_backend)
+        self.db.add(
+            Workspace(
+                workspace_id="workspace-1",
+                agent_id=7,
+                user="alice",
+                scope="session_private",
+                session_id="session-1",
+                logical_path="users/alice/agents/7/sessions/session-1",
+            )
+        )
+        self.db.add(
+            SessionModel(
+                session_id="session-1",
+                agent_id=7,
+                user="alice",
+                workspace_id="workspace-1",
+                chat_history='{"version": 1, "messages": []}',
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.db.add(
+            Workspace(
+                workspace_id="workspace-2",
+                agent_id=7,
+                user="alice",
+                scope="session_private",
+                session_id="session-2",
+                logical_path="users/alice/agents/7/sessions/session-2",
+            )
+        )
+        self.db.add(
+            SessionModel(
+                session_id="session-2",
+                agent_id=7,
+                user="alice",
+                workspace_id="workspace-2",
+                chat_history='{"version": 1, "messages": []}',
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.db.add(
+            Workspace(
+                workspace_id="workspace-draft",
+                agent_id=7,
+                user="alice",
+                scope="session_private",
+                session_id="session-draft",
+                logical_path=(
+                    "users/alice/agents/7/sessions/session-draft"
+                ),
+            )
+        )
+        self.db.add(
+            SessionModel(
+                session_id="session-draft",
+                agent_id=7,
+                user="alice",
+                workspace_id="workspace-draft",
+                chat_history='{"version": 1, "messages": []}',
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.db.commit()
 
     def tearDown(self) -> None:
         """Clean up temporary resources after each test."""
@@ -63,7 +159,8 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertEqual(asset.kind, "image")
         self.assertEqual(asset.format, "PNG")
         self.assertEqual(asset.mime_type, "image/png")
-        self.assertTrue(Path(asset.storage_path).exists())
+        self.assertEqual(asset.storage_backend, "memory")
+        self.assertIn(asset.storage_key, self.storage_backend.objects)
 
         attached = self.service.attach_files_to_task(
             [asset.file_id],
@@ -75,12 +172,18 @@ class FileServiceTestCase(unittest.TestCase):
 
         self.assertEqual(attached[0].session_id, "session-1")
         self.assertEqual(attached[0].task_id, "task-1")
+        self.assertTrue(
+            attached[0].storage_key.endswith(
+                "/sessions/session-1/workspace/.uploads/"
+                f"{attached[0].file_id}/{attached[0].stored_name}"
+            )
+        )
         self.assertEqual(len(prepared[0].content_blocks), 2)
         self.assertEqual(prepared[0].content_blocks[0]["type"], "text")
         self.assertIn("Attached image", prepared[0].content_blocks[0]["text"])
         self.assertEqual(prepared[0].content_blocks[1]["type"], "image")
         decoded = base64.b64decode(prepared[0].content_blocks[1]["data"])
-        self.assertEqual(decoded, Path(asset.storage_path).read_bytes())
+        self.assertEqual(decoded, self.storage_backend.read_bytes(key=asset.storage_key))
 
     def test_uploaded_files_remain_unbound_until_a_session_is_known(self) -> None:
         """Uploads should stay reusable until a send operation binds them."""
@@ -104,6 +207,12 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertEqual(len(attached), 1)
         self.assertEqual(attached[0].session_id, "session-draft")
         self.assertEqual(attached[0].task_id, "task-draft")
+        self.assertTrue(
+            attached[0].storage_key.endswith(
+                "/sessions/session-draft/workspace/.uploads/"
+                f"{attached[0].file_id}/{attached[0].stored_name}"
+            )
+        )
 
     def test_store_and_preprocess_document(self) -> None:
         """Document uploads should persist extracted markdown for prompting."""
@@ -148,9 +257,9 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertEqual(asset.format, "PDF")
         self.assertEqual(asset.page_count, 3)
         self.assertTrue(asset.can_extract_text)
-        self.assertTrue(Path(asset.storage_path).exists())
-        self.assertIsNotNone(asset.markdown_path)
-        self.assertTrue(Path(asset.markdown_path or "").exists())
+        self.assertIn(asset.storage_key, self.storage_backend.objects)
+        self.assertIsNotNone(asset.markdown_storage_key)
+        self.assertIn(asset.markdown_storage_key or "", self.storage_backend.objects)
 
         attached = self.service.attach_files_to_task(
             [asset.file_id],
@@ -159,6 +268,18 @@ class FileServiceTestCase(unittest.TestCase):
             task_id="task-2",
         )
         prepared = self.service.preprocess_files(attached)
+
+        self.assertTrue(
+            attached[0].storage_key.endswith(
+                "/sessions/session-2/workspace/.uploads/"
+                f"{attached[0].file_id}/{attached[0].stored_name}"
+            )
+        )
+        self.assertTrue(
+            (attached[0].markdown_storage_key or "").endswith(
+                f"/sessions/session-2/workspace/.uploads/{attached[0].file_id}/.pivot/extracted.md"
+            )
+        )
 
         self.assertEqual(len(prepared[0].content_blocks), 1)
         self.assertEqual(prepared[0].content_blocks[0]["type"], "text")
@@ -263,8 +384,44 @@ class FileServiceTestCase(unittest.TestCase):
         deleted_count = self.service.prune_expired_unused_files()
 
         self.assertEqual(deleted_count, 1)
-        self.assertFalse(Path(expired_asset.storage_path).exists())
-        self.assertTrue(Path(used_asset.storage_path).exists())
+        self.assertNotIn(expired_asset.storage_key, self.storage_backend.objects)
+        self.assertIn(used_asset.storage_key, self.storage_backend.objects)
+
+    def test_read_file_bytes_prefers_live_workspace_bytes_for_attached_files(self) -> None:
+        """Attached files should read from the current workspace copy when available."""
+        asset = self.service.store_uploaded_image(
+            username="alice",
+            filename="diagram.png",
+            source="local",
+            file_bytes=self._build_png_bytes("#3b82f6"),
+        )
+        attached = self.service.attach_files_to_task(
+            [asset.file_id],
+            username="alice",
+            session_id="session-1",
+            task_id="task-live-file",
+        )[0]
+
+        with patch.object(
+            file_service_module.WorkspaceRuntimeFileService,
+            "export_files",
+            return_value=[
+                WorkspaceRuntimeFile(
+                    sandbox_path=(
+                        "/workspace/.uploads/"
+                        f"{attached.file_id}/{attached.stored_name}"
+                    ),
+                    workspace_relative_path=(
+                        f".uploads/{attached.file_id}/{attached.stored_name}"
+                    ),
+                    display_name=attached.original_name,
+                    content_bytes=b"live workspace bytes",
+                )
+            ],
+        ):
+            content = self.service.read_file_bytes(attached)
+
+        self.assertEqual(content, b"live workspace bytes")
 
 
 if __name__ == "__main__":

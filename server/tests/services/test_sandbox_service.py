@@ -6,6 +6,7 @@ import sys
 import unittest
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,9 @@ if str(SERVER_ROOT) not in sys.path:
 
 sandbox_service_module = import_module("app.services.sandbox_service")
 SandboxService = sandbox_service_module.SandboxService
+workspace_storage_service_module = import_module(
+    "app.services.workspace_storage_service"
+)
 
 
 class SandboxServiceTimeoutTestCase(unittest.TestCase):
@@ -42,6 +46,15 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         """Stop settings patching after each test."""
         self.settings_patch.stop()
 
+    def _mount_spec(self) -> Any:
+        """Return one deterministic mount spec for sandbox-manager requests."""
+        return workspace_storage_service_module.WorkspaceMountSpec(
+            workspace_id="workspace-1",
+            storage_backend="seaweedfs",
+            logical_path="users/alice/agents/1/sessions/session-1",
+            mount_mode="live_sync",
+        )
+
     def test_exec_uses_override_timeout_when_provided(self) -> None:
         """Agent-level timeout should override the global sandbox default."""
         response = Mock()
@@ -55,8 +68,14 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         ) as post_mock:
             result = self.service.exec(
                 username="alice",
-                agent_id=1,
+                mount_spec=self._mount_spec(),
                 cmd=["echo", "hi"],
+                skills=[
+                    {
+                        "name": "crm_research",
+                        "canonical_location": "/app/server/workspace/alice/skills/crm_research",
+                    }
+                ],
                 timeout_seconds=60,
             )
 
@@ -65,6 +84,23 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         self.assertEqual(
             post_mock.call_args.kwargs["timeout"],
             60,
+        )
+        self.assertEqual(
+            post_mock.call_args.kwargs["json"]["storage_backend"],
+            "seaweedfs",
+        )
+        self.assertEqual(
+            post_mock.call_args.kwargs["json"]["logical_path"],
+            "users/alice/agents/1/sessions/session-1",
+        )
+        self.assertEqual(
+            post_mock.call_args.kwargs["json"]["skills"],
+            [
+                {
+                    "name": "crm_research",
+                    "canonical_location": "/app/server/workspace/alice/skills/crm_research",
+                }
+            ],
         )
 
     def test_exec_falls_back_to_global_timeout_without_override(self) -> None:
@@ -80,7 +116,7 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         ) as post_mock:
             self.service.exec(
                 username="alice",
-                agent_id=1,
+                mount_spec=self._mount_spec(),
                 cmd=["pwd"],
             )
 
@@ -99,8 +135,35 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         ) as post_mock:
             self.service.create(
                 username="alice",
-                agent_id=1,
+                mount_spec=self._mount_spec(),
                 timeout_seconds=75,
             )
 
         self.assertEqual(post_mock.call_args.kwargs["timeout"], 75)
+        self.assertEqual(
+            post_mock.call_args.kwargs["json"]["workspace_id"],
+            "workspace-1",
+        )
+
+    def test_exec_surfaces_manager_detail_field_on_error(self) -> None:
+        """Manager JSON errors should preserve their concrete detail message."""
+        response = Mock()
+        response.status_code = 500
+        response.text = '{"detail":"Workspace cache path is missing."}'
+        response.json.return_value = {"detail": "Workspace cache path is missing."}
+
+        with (
+            patch.object(
+                sandbox_service_module.requests,
+                "post",
+                return_value=response,
+            ),
+            self.assertRaises(RuntimeError) as ctx,
+        ):
+            self.service.exec(
+                username="alice",
+                mount_spec=self._mount_spec(),
+                cmd=["pwd"],
+            )
+
+        self.assertIn("Workspace cache path is missing.", str(ctx.exception))

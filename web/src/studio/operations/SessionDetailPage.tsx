@@ -441,6 +441,7 @@ export default function SessionDetailPage() {
                   <div className="px-4 py-4">
                     <ConversationView
                       messages={messages}
+                      currentSessionId={sessionMeta.session_id}
                       agentName={sessionMeta.agent_name}
                       expandedRecursions={expandedRecursions}
                       isStreaming={false}

@@ -14,6 +14,7 @@ import { AttachmentThumbnail } from "./AttachmentThumbnail";
 
 interface AttachmentListProps {
   attachments?: ChatAttachment[];
+  currentSessionId?: string | null;
   variant?: "message" | "composer";
   onRemovePendingFile?: (clientId: string) => void | Promise<void>;
 }
@@ -23,6 +24,7 @@ interface AttachmentListProps {
  */
 export function AttachmentList({
   attachments,
+  currentSessionId = null,
   variant = "message",
   onRemovePendingFile,
 }: AttachmentListProps) {
@@ -125,6 +127,7 @@ export function AttachmentList({
         </div>
         <AttachmentPreviewDialog
           attachment={previewAttachment}
+          currentSessionId={currentSessionId}
           open={previewAttachment !== null}
           onOpenChange={(open) => {
             if (!open) {
@@ -140,9 +143,13 @@ export function AttachmentList({
     <>
       <div className="mb-3 flex flex-wrap gap-2">
         {attachments.map((attachment) => {
+          const canOpenLiveFile =
+            attachment.workspaceRelativePath !== null &&
+            attachment.workspaceRelativePath !== undefined;
           const isPreviewableImage =
             attachment.kind === "image" ||
             attachment.mimeType.startsWith("image/");
+          const shouldOpenDialog = isPreviewableImage || canOpenLiveFile;
           const cardContent = (
             <>
               <div className="h-28 w-28">
@@ -163,13 +170,13 @@ export function AttachmentList({
             </>
           );
 
-          return isPreviewableImage ? (
+          return shouldOpenDialog ? (
             <button
               key={attachment.fileId}
               type="button"
               onClick={() => setPreviewAttachment(attachment)}
               className="overflow-hidden rounded-xl border border-border bg-background/70 text-left transition-colors hover:border-border/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              aria-label={`Preview ${attachment.originalName}`}
+              aria-label={`Open ${attachment.originalName}`}
             >
               {cardContent}
             </button>
@@ -185,6 +192,7 @@ export function AttachmentList({
       </div>
       <AttachmentPreviewDialog
         attachment={previewAttachment}
+        currentSessionId={currentSessionId}
         open={previewAttachment !== null}
         onOpenChange={(open) => {
           if (!open) {

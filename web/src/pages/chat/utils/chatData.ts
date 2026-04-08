@@ -137,6 +137,7 @@ export function toChatAttachment(
     canExtractText: file.can_extract_text,
     suspectedScanned: file.suspected_scanned,
     textEncoding: file.text_encoding,
+    workspaceRelativePath: file.workspace_relative_path,
     previewUrl,
   };
 }

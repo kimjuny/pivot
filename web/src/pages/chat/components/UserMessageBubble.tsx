@@ -6,12 +6,16 @@ import { AttachmentList } from "./AttachmentList";
 
 interface UserMessageBubbleProps {
   message: ChatMessage;
+  currentSessionId: string | null;
 }
 
 /**
  * Renders the user side of the conversation with the existing timestamp and attachment treatment.
  */
-export function UserMessageBubble({ message }: UserMessageBubbleProps) {
+export function UserMessageBubble({
+  message,
+  currentSessionId,
+}: UserMessageBubbleProps) {
   return (
     <div className="flex justify-end">
       <div className="max-w-[85%] rounded-2xl rounded-br-none bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
@@ -35,7 +39,10 @@ export function UserMessageBubble({ message }: UserMessageBubbleProps) {
           </div>
         )}
         {message.attachments && message.attachments.length > 0 && (
-          <AttachmentList attachments={message.attachments} />
+          <AttachmentList
+            attachments={message.attachments}
+            currentSessionId={currentSessionId}
+          />
         )}
         {message.content && (
           <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">

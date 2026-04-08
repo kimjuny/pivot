@@ -39,7 +39,10 @@ services:
       - SANDBOX_MANAGER_URL=http://sandbox-manager:8051
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
       - SANDBOX_MANAGER_TIMEOUT_SECONDS=30
+      - PERSISTED_STORAGE_BACKEND=seaweedfs
+      - SEAWEEDFS_FILER_URL=http://seaweedfs:8888
     depends_on:
+      - seaweedfs
       - sandbox-manager
     command: >
       poetry run python -m uvicorn app.main:app
@@ -62,6 +65,7 @@ services:
       # Linux users can override with: /run/podman/podman.sock:/run/podman/podman.sock
       - /var/run/docker.sock:/run/podman/podman.sock
       - ./server:/app/server:z
+      - seaweedfs_mount_root:/var/lib/pivot
     environment:
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
       - SANDBOX_PODMAN_BASE_URL=unix:///run/podman/podman.sock
@@ -70,14 +74,17 @@ services:
       - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
       - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
       - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30
-      # Do not pin SANDBOX_WORKSPACE_HOST_ROOT with ${PWD}; it is shell-cwd dependent
-      # and may incorrectly resolve to ".../web/server/workspace". Let sandbox-manager
-      # discover the workspace host root from backend container mounts.
+      - SANDBOX_SEAWEEDFS_FILER_URL=http://seaweedfs:8888
+      - SANDBOX_SEAWEEDFS_MOUNT_ROOT=/var/lib/pivot/seaweedfs-mnt
+      - SANDBOX_SEAWEEDFS_ATTACH_STRATEGY=shared_mount_root
+      - SANDBOX_SEAWEEDFS_REQUIRE_NATIVE_MOUNT=true
       # Pooling: 24h idle timeout cleanup + LRU cap fallback.
       - SANDBOX_POOL_SCAN_INTERVAL_SECONDS=30
       - SANDBOX_POOL_IDLE_TTL_SECONDS=86400
       - SANDBOX_POOL_MAX_SIZE=100
     depends_on:
+      seaweedfs:
+        condition: service_started
       sandbox-base:
         condition: service_completed_successfully
     command: >
@@ -119,3 +126,28 @@ services:
     depends_on:
       - backend
     command: npm run dev -- --host 0.0.0.0
+
+  # ---------- SeaweedFS (all-in-one dev topology) ----------
+  seaweedfs:
+    image: docker.io/chrislusf/seaweedfs:latest
+    container_name: pivot-seaweedfs
+    command: >
+      server
+      -dir=/data
+      -ip.bind=0.0.0.0
+      -master.port=9333
+      -volume.port=8080
+      -filer=true
+      -filer.port=8888
+      -filer.port.grpc=18888
+    volumes:
+      - seaweedfs_data:/data:z
+    ports:
+      - "8888:8888"
+      - "18888:18888"
+      - "9333:9333"
+      - "8080:8080"
+
+volumes:
+  seaweedfs_data:
+  seaweedfs_mount_root:

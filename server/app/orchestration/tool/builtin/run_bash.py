@@ -26,15 +26,13 @@ def run_bash(command: str, fail_on_nonzero: bool = False) -> dict[str, Any]:
     (
         username,
         _agent_id,
-        workspace_id,
-        workspace_backend_path,
+        workspace_mount_spec,
         sandbox_timeout_seconds,
         allowed_skills,
     ) = require_context()
     result = get_sandbox_service().exec(
         username=username,
-        workspace_id=workspace_id,
-        workspace_backend_path=workspace_backend_path,
+        mount_spec=workspace_mount_spec,
         cmd=["bash", "-lc", command],
         skills=list(allowed_skills),
         timeout_seconds=sandbox_timeout_seconds,

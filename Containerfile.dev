@@ -7,6 +7,10 @@
 # Pre-installs all dependencies so `podman compose up` is instant
 # =============================================================================
 
+# ---- SeaweedFS tooling ------------------------------------------------------
+FROM docker.io/chrislusf/seaweedfs:latest AS seaweedfs-bin
+
+
 # ---- Frontend dev target ----------------------------------------------------
 FROM docker.io/library/node:20-alpine AS frontend-dev
 
@@ -58,7 +62,7 @@ FROM docker.io/library/python:3.11-slim AS backend-dev
 # Pyright's Python wrapper shells out to Node; bundling nodejs in the dev image
 # avoids a nodeenv bootstrap on every fresh container run.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc libffi-dev nodejs && \
+    apt-get install -y --no-install-recommends gcc libffi-dev fuse3 nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
@@ -75,6 +79,7 @@ RUN poetry install --no-root && rm -rf /root/.cache
 
 # Copy server code (will be overridden by bind mount in compose)
 COPY server/ ./server/
+COPY --from=seaweedfs-bin /usr/bin/weed /usr/local/bin/weed
 
 # Create data directory for SQLite persistence
 RUN mkdir -p ./server/data

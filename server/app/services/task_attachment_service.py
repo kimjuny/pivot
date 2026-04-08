@@ -1,10 +1,8 @@
-"""Reusable persistence service for assistant-generated task attachments."""
+"""Reusable persistence service for assistant-generated live file references."""
 
 from __future__ import annotations
 
-import logging
 import mimetypes
-import shutil
 import uuid
 from datetime import UTC
 from pathlib import Path
@@ -12,10 +10,10 @@ from pathlib import Path
 from app.models.session import Session as SessionModel
 from app.models.task_attachment import TaskAttachment
 from app.schemas.task_attachment import TaskAttachmentListItem
-from app.services.workspace_service import WorkspaceService, workspace_root
+from app.services.workspace_runtime_file_service import WorkspaceRuntimeFileService
+from app.services.workspace_service import WorkspaceService
+from app.services.workspace_storage_service import WorkspaceStorageService
 from sqlmodel import Session as DBSession, col, select
-
-logger = logging.getLogger(__name__)
 
 _MAX_ATTACHMENTS_PER_ANSWER = 8
 _TEXT_EXTENSIONS = {
@@ -77,7 +75,7 @@ _TEXT_MIME_TYPES = {
 
 
 class TaskAttachmentService:
-    """Persist immutable snapshots of files returned by assistant answers."""
+    """Persist live workspace file references returned by assistant answers."""
 
     def __init__(self, db: DBSession) -> None:
         """Initialize the service with a database session."""
@@ -91,7 +89,7 @@ class TaskAttachmentService:
         session_id: str | None,
         paths: list[str],
     ) -> list[TaskAttachment]:
-        """Validate sandbox paths, snapshot files, and persist metadata.
+        """Validate sandbox paths, resolve live files, and persist metadata.
 
         Args:
             username: Authenticated owner username.
@@ -120,33 +118,25 @@ class TaskAttachmentService:
         if workspace is None:
             return []
 
-        workspace_dir = (
-            WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        mount_spec = WorkspaceStorageService().build_mount_spec(workspace)
+        exported_files = WorkspaceRuntimeFileService().export_files(
+            username=username,
+            mount_spec=mount_spec,
+            sandbox_paths=normalized_paths,
         )
-        attachments_dir = (
-            workspace_root() / username / "task_attachments" / task_id
-        ).resolve()
-        attachments_dir.mkdir(parents=True, exist_ok=True)
 
         created: list[TaskAttachment] = []
         seen_relative_paths: set[str] = set()
 
-        for sandbox_path in normalized_paths:
-            host_path, workspace_relative_path = self._resolve_workspace_file(
-                workspace_dir,
-                sandbox_path,
-            )
-            if host_path is None or workspace_relative_path is None:
-                continue
-
+        for exported_file in exported_files:
+            sandbox_path = exported_file.sandbox_path
+            workspace_relative_path = exported_file.workspace_relative_path
             if workspace_relative_path in seen_relative_paths:
                 continue
             seen_relative_paths.add(workspace_relative_path)
 
-            detected = self._detect_metadata(host_path)
+            detected = self._detect_metadata(exported_file.display_name)
             attachment_id = str(uuid.uuid4())
-            snapshot_path = attachments_dir / f"{attachment_id}{detected['suffix']}"
-            shutil.copy2(host_path, snapshot_path)
 
             attachment = TaskAttachment(
                 attachment_id=attachment_id,
@@ -154,15 +144,14 @@ class TaskAttachmentService:
                 session_id=session_id,
                 agent_id=session_row.agent_id,
                 user=username,
-                display_name=host_path.name,
-                original_name=host_path.name,
+                display_name=exported_file.display_name,
+                original_name=exported_file.display_name,
                 mime_type=str(detected["mime_type"]),
                 extension=str(detected["extension"]),
-                size_bytes=int(host_path.stat().st_size),
+                size_bytes=len(exported_file.content_bytes),
                 render_kind=str(detected["render_kind"]),
                 sandbox_path=sandbox_path,
                 workspace_relative_path=workspace_relative_path,
-                storage_path=str(snapshot_path),
             )
             self.db.add(attachment)
             created.append(attachment)
@@ -204,8 +193,20 @@ class TaskAttachmentService:
         )
         return self.db.exec(stmt).first()
 
+    def read_attachment_bytes(self, attachment: TaskAttachment) -> bytes:
+        """Return the current workspace bytes for one live attachment reference."""
+        mount_spec = self._build_mount_spec_for_attachment(attachment)
+        exported_files = WorkspaceRuntimeFileService().export_files(
+            username=attachment.user,
+            mount_spec=mount_spec,
+            sandbox_paths=[attachment.sandbox_path],
+        )
+        if not exported_files:
+            raise FileNotFoundError(attachment.sandbox_path)
+        return exported_files[0].content_bytes
+
     def delete_by_task_id(self, task_id: str) -> int:
-        """Delete all attachment snapshots belonging to one task."""
+        """Delete all persisted attachment references belonging to one task."""
         stmt = select(TaskAttachment).where(TaskAttachment.task_id == task_id)
         rows = list(self.db.exec(stmt).all())
         for row in rows:
@@ -215,7 +216,7 @@ class TaskAttachmentService:
         return len(rows)
 
     def delete_by_session_id(self, session_id: str) -> int:
-        """Delete all attachment snapshots belonging to one session."""
+        """Delete all persisted attachment references belonging to one session."""
         stmt = select(TaskAttachment).where(TaskAttachment.session_id == session_id)
         rows = list(self.db.exec(stmt).all())
         for row in rows:
@@ -245,7 +246,7 @@ class TaskAttachmentService:
         self,
         attachments: list[TaskAttachment],
     ) -> list[dict[str, str | int]]:
-        """Serialize persisted attachments into the public event/list shape."""
+        """Serialize persisted live file references into the public event/list shape."""
         return [self._to_list_item(item).model_dump() for item in attachments]
 
     def _normalize_declared_paths(self, paths: list[str]) -> list[str]:
@@ -260,53 +261,12 @@ class TaskAttachmentService:
             normalized.append(candidate)
         return normalized
 
-    def _resolve_workspace_file(
-        self,
-        workspace_dir: Path,
-        sandbox_path: str,
-    ) -> tuple[Path | None, str | None]:
-        """Map a sandbox-local workspace path to a host-side file path."""
-        candidate = Path(sandbox_path)
-        if not candidate.is_absolute():
-            logger.warning("Skip non-absolute task attachment path: %s", sandbox_path)
-            return None, None
-
-        if candidate == Path("/workspace"):
-            logger.warning("Skip workspace root attachment path: %s", sandbox_path)
-            return None, None
-
-        try:
-            workspace_relative_path = candidate.relative_to("/workspace")
-        except ValueError:
-            logger.warning(
-                "Skip task attachment path outside /workspace: %s",
-                sandbox_path,
-            )
-            return None, None
-
-        host_path = (workspace_dir / workspace_relative_path).resolve()
-        if not host_path.is_relative_to(workspace_dir):
-            logger.warning(
-                "Skip task attachment path escaping workspace: %s",
-                sandbox_path,
-            )
-            return None, None
-        if host_path.is_symlink():
-            logger.warning("Skip symlink task attachment path: %s", sandbox_path)
-            return None, None
-        if not host_path.exists():
-            logger.warning("Skip missing task attachment path: %s", sandbox_path)
-            return None, None
-        if not host_path.is_file():
-            logger.warning("Skip non-file task attachment path: %s", sandbox_path)
-            return None, None
-        return host_path, workspace_relative_path.as_posix()
-
-    def _detect_metadata(self, host_path: Path) -> dict[str, str]:
+    def _detect_metadata(self, filename: str) -> dict[str, str]:
         """Infer stable MIME, extension, and render metadata for one file."""
-        extension = host_path.suffix.lower().removeprefix(".")
-        filename = host_path.name.lower()
-        guessed_mime_type, _ = mimetypes.guess_type(host_path.name)
+        candidate = Path(filename)
+        extension = candidate.suffix.lower().removeprefix(".")
+        normalized_filename = candidate.name.lower()
+        guessed_mime_type, _ = mimetypes.guess_type(candidate.name)
         mime_type = guessed_mime_type or "application/octet-stream"
 
         if extension in {"md", "markdown"} or mime_type in _MARKDOWN_MIME_TYPES:
@@ -319,7 +279,7 @@ class TaskAttachmentService:
             render_kind = "image"
         elif (
             extension in _TEXT_EXTENSIONS
-            or filename in _TEXT_FILENAMES
+            or normalized_filename in _TEXT_FILENAMES
             or mime_type.startswith("text/")
             or mime_type in _TEXT_MIME_TYPES
         ):
@@ -327,12 +287,10 @@ class TaskAttachmentService:
         else:
             render_kind = "download"
 
-        suffix = host_path.suffix or (f".{extension}" if extension else "")
         return {
-            "extension": extension or host_path.suffix.lower().removeprefix("."),
+            "extension": extension or candidate.suffix.lower().removeprefix("."),
             "mime_type": mime_type,
             "render_kind": render_kind,
-            "suffix": suffix,
         }
 
     def _to_list_item(self, row: TaskAttachment) -> TaskAttachmentListItem:
@@ -355,22 +313,26 @@ class TaskAttachmentService:
         *,
         commit: bool,
     ) -> None:
-        """Delete one persisted attachment row and its snapshot file."""
-        snapshot_path = Path(attachment.storage_path)
-        if snapshot_path.exists():
-            self._safe_unlink(snapshot_path)
+        """Delete one persisted attachment row."""
         self.db.delete(attachment)
         if commit:
             self.db.commit()
 
-    def _safe_unlink(self, path: Path) -> None:
-        """Delete a snapshot file only when it lives under the workspace root."""
-        resolved_path = path.resolve()
-        workspace_path = workspace_root().resolve()
-        if not resolved_path.is_relative_to(workspace_path):
-            logger.warning(
-                "Skip unsafe task attachment deletion outside workspace: %s",
-                path,
-            )
-            return
-        resolved_path.unlink(missing_ok=True)
+    def _build_mount_spec_for_attachment(
+        self,
+        attachment: TaskAttachment,
+    ):
+        """Resolve the workspace mount spec for one live attachment reference."""
+        if attachment.session_id is None:
+            raise FileNotFoundError("Task attachment is missing session context.")
+
+        session_row = self.db.exec(
+            select(SessionModel).where(SessionModel.session_id == attachment.session_id)
+        ).first()
+        if session_row is None or session_row.workspace_id is None:
+            raise FileNotFoundError("Task attachment workspace is unavailable.")
+
+        workspace = WorkspaceService(self.db).get_workspace(session_row.workspace_id)
+        if workspace is None:
+            raise FileNotFoundError("Task attachment workspace is unavailable.")
+        return WorkspaceStorageService().build_mount_spec(workspace)

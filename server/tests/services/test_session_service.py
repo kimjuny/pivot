@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 from sqlmodel import Session as DBSession, SQLModel, create_engine
 
@@ -29,6 +30,11 @@ SessionService = import_module("app.services.session_service").SessionService
 TaskAttachmentService = import_module(
     "app.services.task_attachment_service"
 ).TaskAttachmentService
+Workspace = import_module("app.models.workspace").Workspace
+WorkspaceRuntimeFile = import_module(
+    "app.services.workspace_runtime_file_service"
+).WorkspaceRuntimeFile
+task_attachment_module = import_module("app.services.task_attachment_service")
 workspace_service = import_module("app.services.workspace_service")
 
 
@@ -57,19 +63,41 @@ class SessionServiceTestCase(unittest.TestCase):
             session_id="session-1",
             agent_id=agent.id or 0,
             user="alice",
+            workspace_id="workspace-1",
             chat_history=json.dumps({"version": 1, "messages": []}),
             react_llm_messages="[]",
             react_llm_cache_state="{}",
         )
         self.session.add(session)
         self.session.add(
+            Workspace(
+                workspace_id="workspace-1",
+                agent_id=agent.id or 0,
+                user="alice",
+                scope="session_private",
+                session_id="session-1",
+                logical_path="users/alice/agents/1/sessions/workspace-1",
+            )
+        )
+        self.session.add(
             Session(
                 session_id="session-2",
                 agent_id=second_agent.id or 0,
                 user="alice",
+                workspace_id="workspace-2",
                 chat_history=json.dumps({"version": 1, "messages": []}),
                 react_llm_messages="[]",
                 react_llm_cache_state="{}",
+            )
+        )
+        self.session.add(
+            Workspace(
+                workspace_id="workspace-2",
+                agent_id=second_agent.id or 0,
+                user="alice",
+                scope="session_private",
+                session_id="session-2",
+                logical_path="users/alice/agents/2/sessions/workspace-2",
             )
         )
         self.session.commit()
@@ -405,21 +433,24 @@ class SessionServiceTestCase(unittest.TestCase):
         self.session.add(task)
         self.session.commit()
 
-        source_file = (
-            workspace_module.ensure_agent_workspace("alice", self.agent.id or 0)
-            / "outputs"
-            / "report.md"
-        )
-        source_file.parent.mkdir(parents=True, exist_ok=True)
-        source_file.write_text("# Report", encoding="utf-8")
-
-        TaskAttachmentService(self.session).create_from_answer_paths(
-            username="alice",
-            agent_id=self.agent.id or 0,
-            task_id=task.task_id,
-            session_id="session-1",
-            paths=["/workspace/outputs/report.md"],
-        )
+        with patch.object(
+            task_attachment_module.WorkspaceRuntimeFileService,
+            "export_files",
+            return_value=[
+                WorkspaceRuntimeFile(
+                    sandbox_path="/workspace/outputs/report.md",
+                    workspace_relative_path="outputs/report.md",
+                    display_name="report.md",
+                    content_bytes=b"# Report",
+                )
+            ],
+        ):
+            TaskAttachmentService(self.session).create_from_answer_paths(
+                username="alice",
+                task_id=task.task_id,
+                session_id="session-1",
+                paths=["/workspace/outputs/report.md"],
+            )
 
         history = self.service.get_full_session_history("session-1")
 

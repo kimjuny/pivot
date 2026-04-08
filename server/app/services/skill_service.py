@@ -25,7 +25,8 @@ from app.orchestration.skills.skill_files import (
     parse_front_matter,
     rewrite_skill_name,
 )
-from app.services.workspace_service import workspace_root
+from app.services.local_data_paths_service import local_runtime_cache_root
+from app.services.skill_artifact_storage_service import SkillArtifactStorageService
 from app.utils.logging_config import get_logger
 from sqlmodel import Session, select
 
@@ -39,14 +40,6 @@ _ALLOWED_KINDS = {"private", "shared"}
 _ALLOWED_USER_SOURCES = {"manual", "network", "bundle", "agent"}
 _LEGACY_USER_SKILL_DIRS = frozenset(_ALLOWED_KINDS)
 _CANONICAL_SKILL_ENTRY_FILENAME = "SKILL.md"
-
-
-@dataclass(frozen=True)
-class SkillMount:
-    """Minimal mount information for sandbox skill injection."""
-
-    name: str
-    location: str
 
 
 @dataclass(frozen=True)
@@ -65,19 +58,12 @@ class _DiscoveredSkill:
     description: str
     kind: str
     source: str
-    builtin: bool
     creator_id: int | None
     creator_username: str | None
     location: str
     filename: str
     md5: str
     updated_at: datetime
-
-
-def _builtin_skills_dir() -> Path:
-    return (
-        Path(__file__).resolve().parent.parent / "orchestration" / "skills" / "builtin"
-    )
 
 
 def _user_skills_dir(username: str, *, create: bool) -> Path:
@@ -87,7 +73,7 @@ def _user_skills_dir(username: str, *, create: bool) -> Path:
     Visibility and sharing rules live in persistent metadata instead of the
     on-disk path shape, which keeps future ACL changes out of storage layout.
     """
-    base = workspace_root() / username / _SKILLS_DIRNAME
+    base = local_runtime_cache_root() / "users" / username / _SKILLS_DIRNAME
     if create:
         base.mkdir(parents=True, exist_ok=True)
     return base
@@ -244,7 +230,12 @@ def _migrate_legacy_user_skill_to_unified_root(
         candidate = target_dir / filename
         if candidate.exists():
             candidate.replace(canonical_path)
-            break
+            return canonical_path
+    for candidate in sorted(target_dir.glob("*.md")):
+        if candidate.name.startswith("_"):
+            continue
+        candidate.replace(canonical_path)
+        return canonical_path
     return canonical_path
 
 
@@ -270,6 +261,40 @@ def _detect_skill_entry_filename(skill_dir: Path, *, label: str) -> str:
 
     expected_names = ", ".join(SKILL_MARKDOWN_FILENAMES)
     raise ValueError(f"{label} must contain one of {expected_names} at its top level.")
+
+def _persist_skill_bundle(
+    *,
+    username: str,
+    skill_name: str,
+    source_dir: Path,
+    target_dir: Path,
+) -> tuple[str, str]:
+    """Persist one skill bundle canonically and refresh its local cache."""
+    storage = SkillArtifactStorageService()
+    stored_artifact = storage.store_directory(
+        username=username,
+        skill_name=skill_name,
+        source_dir=source_dir,
+    )
+    storage.materialize_to_directory(
+        storage_key=stored_artifact.storage_key,
+        target_dir=target_dir,
+    )
+    return stored_artifact.storage_backend, stored_artifact.storage_key
+
+
+def _ensure_materialized_skill_cache(skill: Skill) -> None:
+    """Recreate one local skill cache from canonical storage when needed."""
+    if skill.storage_backend != "seaweedfs" or not skill.storage_key:
+        return
+    skill_dir = Path(skill.location)
+    entry_path = skill_dir / skill.filename
+    if entry_path.is_file():
+        return
+    SkillArtifactStorageService().materialize_to_directory(
+        storage_key=skill.storage_key,
+        target_dir=skill_dir,
+    )
 
 
 def _replace_directory_contents(source_dir: Path, target_dir: Path) -> None:
@@ -299,7 +324,6 @@ def _discover_skill(
     skill_path: Path,
     kind: str,
     source: str,
-    builtin: bool,
     creator: User | None,
 ) -> _DiscoveredSkill:
     """Build one discovered skill record from markdown on disk."""
@@ -318,7 +342,6 @@ def _discover_skill(
         description=parsed.get("description", ""),
         kind=kind,
         source=source,
-        builtin=builtin,
         creator_id=creator.id if creator is not None else None,
         creator_username=creator.username if creator is not None else None,
         location=str(location.resolve()),
@@ -326,24 +349,6 @@ def _discover_skill(
         md5=_file_md5(skill_path),
         updated_at=updated_at,
     )
-
-
-def _discover_builtin_skills() -> list[_DiscoveredSkill]:
-    root = _builtin_skills_dir()
-    if not root.exists():
-        return []
-
-    return [
-        _discover_skill(
-            base_dir=root,
-            skill_path=_canonicalize_skill_entry_filename(skill_path),
-            kind="shared",
-            source="builtin",
-            builtin=True,
-            creator=None,
-        )
-        for skill_path in _list_skill_paths(root)
-    ]
 
 
 def _kind_for_unified_skill(
@@ -399,7 +404,6 @@ def _discover_user_skills(
                         skill_path=skill_path,
                         kind=kind,
                         source=source,
-                        builtin=False,
                         creator=user,
                     )
                 )
@@ -421,7 +425,6 @@ def _discover_user_skills(
                         skill_path=_canonicalize_skill_entry_filename(migrated_path),
                         kind=kind,
                         source="manual",
-                        builtin=False,
                         creator=user,
                     )
                 )
@@ -495,7 +498,7 @@ def _serialize_skill(
     creator = (
         creator_lookup.get(skill.creator_id) if skill.creator_id is not None else None
     )
-    read_only = bool(skill.builtin)
+    read_only = False
     if (
         creator is not None
         and current_username is not None
@@ -511,7 +514,6 @@ def _serialize_skill(
         "kind": skill.kind,
         "source": skill.source,
         "creator": creator,
-        "builtin": skill.builtin,
         "read_only": read_only,
         "md5": skill.md5,
         "github_repo_url": skill.github_repo_url,
@@ -568,8 +570,9 @@ def _upsert_skill_row(
                 description=discovered.description,
                 kind=discovered.kind,
                 source=discovered.source,
-                builtin=discovered.builtin,
                 creator_id=discovered.creator_id,
+                storage_backend="local_fs",
+                storage_key=None,
                 location=discovered.location,
                 filename=discovered.filename,
                 md5=discovered.md5,
@@ -580,17 +583,12 @@ def _upsert_skill_row(
         return True
 
     changed = False
-    next_source = (
-        discovered.source
-        if discovered.builtin
-        else _normalize_user_skill_source(skill.source)
-    )
+    next_source = _normalize_user_skill_source(skill.source)
     new_values = {
         "name": discovered.name,
         "description": discovered.description,
         "kind": discovered.kind,
         "source": next_source,
-        "builtin": discovered.builtin,
         "creator_id": discovered.creator_id,
         "location": discovered.location,
         "filename": discovered.filename,
@@ -618,16 +616,15 @@ def sync_skill_registry(session: Session) -> None:
     """
     users = session.exec(select(User).order_by(User.username)).all()
     existing_rows = _all_skills_query(session)
+    for row in existing_rows:
+        _ensure_materialized_skill_cache(row)
     existing_by_location = {item.location: item for item in existing_rows}
     existing_by_name = {item.name: item for item in existing_rows}
-    discovered = [
-        *_discover_builtin_skills(),
-        *_discover_user_skills(
-            users,
-            existing_by_name=existing_by_name,
-            existing_by_location=existing_by_location,
-        ),
-    ]
+    discovered = _discover_user_skills(
+        users,
+        existing_by_name=existing_by_name,
+        existing_by_location=existing_by_location,
+    )
     _assert_unique_discovered_names(discovered)
     desired_locations = {item.location for item in discovered}
 
@@ -721,7 +718,7 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
         username: Authenticated username.
 
     Returns:
-        Serialized metadata for builtin, shared, and user-private skills.
+        Serialized metadata for shared and user-private skills.
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
@@ -1039,7 +1036,7 @@ def build_skill_mounts(
     skill_names: list[str],
     extra_skills: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
-    """Build sandbox mount metadata for visible skills.
+    """Build runtime materialization metadata for visible skills.
 
     Args:
         session: Active database session.
@@ -1049,7 +1046,8 @@ def build_skill_mounts(
             package skills.
 
     Returns:
-        List of ``{"name": ..., "location": ...}`` payloads for sandbox-manager.
+        List of ``{"name": ..., "canonical_location": ...}`` payloads for
+        sandbox-manager.
     """
     sync_skill_registry(session)
     visible_skills = _visible_skills_query(session, username)
@@ -1057,7 +1055,11 @@ def build_skill_mounts(
     extra_by_name = {
         item["name"]: item
         for item in extra_skills or []
-        if isinstance(item.get("name"), str) and isinstance(item.get("location"), str)
+        if isinstance(item.get("name"), str)
+        and (
+            isinstance(item.get("canonical_location"), str)
+            or isinstance(item.get("location"), str)
+        )
     }
 
     mounts: list[dict[str, str]] = []
@@ -1074,12 +1076,24 @@ def build_skill_mounts(
             mounts.append(
                 {
                     "name": skill_name,
-                    "location": str(Path(extra_skill["location"]).resolve()),
+                    "canonical_location": str(
+                        Path(
+                            str(
+                                extra_skill.get("canonical_location")
+                                or extra_skill.get("location")
+                            )
+                        ).resolve()
+                    ),
                 }
             )
             continue
         seen_names.add(skill_name)
-        mounts.append({"name": skill.name, "location": skill.location})
+        mounts.append(
+            {
+                "name": skill.name,
+                "canonical_location": skill.location,
+            }
+        )
     return mounts
 
 
@@ -1350,6 +1364,8 @@ def _create_skill_row(
     creator_id: int,
     source: str,
     created_at: datetime,
+    storage_backend: str,
+    storage_key: str,
     github_repo_url: str | None = None,
     github_ref: str | None = None,
     github_ref_type: str | None = None,
@@ -1361,8 +1377,9 @@ def _create_skill_row(
         description=discovered.description,
         kind=discovered.kind,
         source=source,
-        builtin=False,
         creator_id=creator_id,
+        storage_backend=storage_backend,
+        storage_key=storage_key,
         location=discovered.location,
         filename=discovered.filename,
         md5=discovered.md5,
@@ -1407,14 +1424,18 @@ def _install_skill_from_directory(
         skill_name,
     )
     skill_markdown_path.write_text(rewritten_source, encoding="utf-8")
-    shutil.copytree(extracted_dir, target_dir)
+    storage_backend, storage_key = _persist_skill_bundle(
+        username=current_user.username,
+        skill_name=skill_name,
+        source_dir=extracted_dir,
+        target_dir=target_dir,
+    )
 
     discovered = _discover_skill(
         base_dir=base_dir,
         skill_path=target_dir / entry_filename,
         kind=kind,
         source=source,
-        builtin=False,
         creator=current_user,
     )
     timestamp = datetime.now(UTC)
@@ -1423,6 +1444,8 @@ def _install_skill_from_directory(
         creator_id=current_user.id,
         source=source,
         created_at=timestamp,
+        storage_backend=storage_backend,
+        storage_key=storage_key,
         github_repo_url=github_repo_url,
         github_ref=github_ref,
         github_ref_type=github_ref_type,
@@ -1461,7 +1484,7 @@ def apply_private_skill_directory(
         Serialized metadata for the applied private skill.
 
     Raises:
-        PermissionError: If the name belongs to a builtin, shared, or foreign skill.
+        PermissionError: If the name belongs to a shared or foreign skill.
         ValueError: If the skill layout is invalid.
     """
     _validate_skill_name(skill_name)
@@ -1473,8 +1496,6 @@ def apply_private_skill_directory(
     sync_skill_registry(session)
     existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if existing is not None:
-        if existing.builtin:
-            raise PermissionError(f"Skill '{skill_name}' is built-in and read-only.")
         if existing.creator_id != current_user.id:
             raise PermissionError(
                 f"Skill '{skill_name}' is owned by another creator and is read-only."
@@ -1498,15 +1519,18 @@ def apply_private_skill_directory(
 
     base_dir = _user_skills_dir(current_user.username, create=True)
     target_dir = base_dir / skill_name
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    _replace_directory_contents(source_dir, target_dir)
+    storage_backend, storage_key = _persist_skill_bundle(
+        username=current_user.username,
+        skill_name=skill_name,
+        source_dir=source_dir,
+        target_dir=target_dir,
+    )
 
     discovered = _discover_skill(
         base_dir=base_dir,
         skill_path=target_dir / entry_filename,
         kind="private",
         source=source,
-        builtin=False,
         creator=current_user,
     )
 
@@ -1517,10 +1541,14 @@ def apply_private_skill_directory(
             creator_id=current_user.id,
             source=source,
             created_at=timestamp,
+            storage_backend=storage_backend,
+            storage_key=storage_key,
         )
     else:
         row = existing
         row.description = discovered.description
+        row.storage_backend = storage_backend
+        row.storage_key = storage_key
         row.location = discovered.location
         row.filename = discovered.filename
         row.md5 = discovered.md5
@@ -1559,7 +1587,7 @@ def upsert_user_skill(
         Serialized metadata for the saved skill.
 
     Raises:
-        PermissionError: If the target name belongs to another creator or builtin.
+        PermissionError: If the target name belongs to another creator.
         ValueError: If the name or scope is invalid.
     """
     _validate_skill_name(skill_name)
@@ -1571,8 +1599,6 @@ def upsert_user_skill(
     sync_skill_registry(session)
     existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if existing is not None:
-        if existing.builtin:
-            raise PermissionError(f"Skill '{skill_name}' is built-in and read-only.")
         if existing.creator_id != current_user.id:
             raise PermissionError(
                 f"Skill '{skill_name}' is owned by another creator and is read-only."
@@ -1584,9 +1610,22 @@ def upsert_user_skill(
 
     normalized_source = rewrite_skill_name(source, skill_name)
     base_dir = _user_skills_dir(current_user.username, create=True)
-    canonical_path = _canonical_skill_path(base_dir, skill_name)
-    canonical_path.parent.mkdir(parents=True, exist_ok=True)
-    canonical_path.write_text(normalized_source, encoding="utf-8")
+    target_dir = base_dir / skill_name
+    with TemporaryDirectory(prefix="pivot-skill-upsert-") as tmp_root:
+        staged_dir = Path(tmp_root) / skill_name
+        if target_dir.exists():
+            shutil.copytree(target_dir, staged_dir)
+        else:
+            staged_dir.mkdir(parents=True, exist_ok=True)
+        canonical_path = _canonical_skill_path(base_dir=staged_dir.parent, skill_name=skill_name)
+        canonical_path.parent.mkdir(parents=True, exist_ok=True)
+        canonical_path.write_text(normalized_source, encoding="utf-8")
+        storage_backend, storage_key = _persist_skill_bundle(
+            username=current_user.username,
+            skill_name=skill_name,
+            source_dir=staged_dir,
+            target_dir=target_dir,
+        )
     for legacy_kind in _ALLOWED_KINDS:
         legacy_root = _legacy_user_skills_dir(
             current_user.username,
@@ -1599,10 +1638,9 @@ def upsert_user_skill(
 
     discovered = _discover_skill(
         base_dir=base_dir,
-        skill_path=canonical_path,
+        skill_path=target_dir / _CANONICAL_SKILL_ENTRY_FILENAME,
         kind=kind,
         source="manual",
-        builtin=False,
         creator=current_user,
     )
 
@@ -1613,10 +1651,14 @@ def upsert_user_skill(
             creator_id=current_user.id,
             source="manual",
             created_at=created_at,
+            storage_backend=storage_backend,
+            storage_key=storage_key,
         )
     else:
         row = existing
         row.description = discovered.description
+        row.storage_backend = storage_backend
+        row.storage_key = storage_key
         row.location = discovered.location
         row.filename = discovered.filename
         row.md5 = discovered.md5
@@ -1670,7 +1712,7 @@ def delete_user_skill(
     skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if skill is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found.")
-    if skill.builtin or skill.creator_id != current_user.id or skill.kind != kind:
+    if skill.creator_id != current_user.id or skill.kind != kind:
         raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
 
     skill_dir = Path(skill.location)
@@ -1682,6 +1724,8 @@ def delete_user_skill(
 
     if canonical_path.exists():
         shutil.rmtree(skill_dir, ignore_errors=True)
+    if skill.storage_key:
+        SkillArtifactStorageService().delete_artifact(storage_key=skill.storage_key)
     if legacy_path.exists():
         legacy_path.unlink()
     for legacy_kind in _ALLOWED_KINDS:

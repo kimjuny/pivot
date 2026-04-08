@@ -7,9 +7,12 @@ import inspect
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .metadata import ToolMetadata
+
+if TYPE_CHECKING:
+    from app.services.workspace_storage_service import WorkspaceMountSpec
 
 _tool_execution_context: ContextVar["ToolExecutionContext | None"] = ContextVar(
     "tool_execution_context",
@@ -23,8 +26,7 @@ class ToolExecutionContext:
 
     username: str
     agent_id: int
-    workspace_id: str
-    workspace_backend_path: str
+    workspace_mount_spec: "WorkspaceMountSpec"
     sandbox_timeout_seconds: int = 60
     web_search_provider: str | None = None
     allowed_skills: tuple[dict[str, str], ...] = ()

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from app.models.project import Project
 from app.services.sandbox_service import get_sandbox_service
 from app.services.workspace_service import WorkspaceService
+from app.services.workspace_storage_service import WorkspaceStorageService
 from sqlmodel import Session as DBSession, col, select
 
 
@@ -152,10 +153,7 @@ class ProjectService:
             with suppress(RuntimeError):
                 get_sandbox_service().destroy(
                     username=workspace.user,
-                    workspace_id=workspace.workspace_id,
-                    workspace_backend_path=workspace_service.get_workspace_backend_path(
-                        workspace
-                    ),
+                    mount_spec=WorkspaceStorageService().build_mount_spec(workspace),
                 )
 
         WorkspaceService(self.db).delete_workspace(project.workspace_id)

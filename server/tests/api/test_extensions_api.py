@@ -32,8 +32,8 @@ extensions_api_module = import_module("app.api.extensions")
 hook_execution_service_module = import_module(
     "app.services.extension_hook_execution_service"
 )
+binary_storage_service_module = import_module("app.services.binary_storage_service")
 extension_service_module = import_module("app.services.extension_service")
-artifact_storage_service_module = import_module("app.services.artifact_storage_service")
 workspace_service = import_module("app.services.workspace_service")
 ExtensionHookExecutionService = (
     hook_execution_service_module.ExtensionHookExecutionService
@@ -68,14 +68,14 @@ class ExtensionsApiTestCase(unittest.TestCase):
             "workspace_root",
             return_value=self.workspace_root,
         )
-        self.artifact_workspace_patch = patch.object(
-            artifact_storage_service_module,
+        self.binary_storage_workspace_patch = patch.object(
+            binary_storage_service_module,
             "workspace_root",
             return_value=self.workspace_root,
         )
         self.workspace_patch.start()
         self.extension_workspace_patch.start()
-        self.artifact_workspace_patch.start()
+        self.binary_storage_workspace_patch.start()
 
         self.agent = Agent(
             name="api-agent",
@@ -103,7 +103,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.app.dependency_overrides.clear()
         self.workspace_patch.stop()
         self.extension_workspace_patch.stop()
-        self.artifact_workspace_patch.stop()
+        self.binary_storage_workspace_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
 
@@ -261,7 +261,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
         installation_payload = install_response.json()
         self.assertEqual(installation_payload["package_id"], "@acme/providers")
         self.assertEqual(installation_payload["trust_status"], "trusted_local")
-        self.assertEqual(installation_payload["artifact_storage_backend"], "local_fs")
+        self.assertEqual(installation_payload["artifact_storage_backend"], "seaweedfs")
         self.assertTrue(installation_payload["artifact_key"].endswith(".tar.gz"))
         self.assertGreater(installation_payload["artifact_size_bytes"], 0)
         self.assertTrue(installation_payload["created_at"].endswith("+00:00"))

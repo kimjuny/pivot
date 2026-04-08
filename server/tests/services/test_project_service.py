@@ -15,6 +15,7 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 Agent = import_module("app.models.agent").Agent
+Workspace = import_module("app.models.workspace").Workspace
 ProjectService = import_module("app.services.project_service").ProjectService
 SessionModel = import_module("app.models.session").Session
 User = import_module("app.models.user").User
@@ -50,7 +51,7 @@ class ProjectServiceTestCase(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_create_project_creates_shared_workspace(self) -> None:
-        """Creating a project should persist both the row and the workspace path."""
+        """Creating a project should persist both the row and workspace identity."""
         project = self.service.create_project(
             agent_id=self.agent.id or 0,
             username="alice",
@@ -59,15 +60,17 @@ class ProjectServiceTestCase(unittest.TestCase):
 
         self.assertEqual(project.name, "Website refresh")
         self.assertTrue(project.workspace_id)
-        project_dir = (
-            Path(self.temp_dir.name)
-            / "alice"
-            / "agents"
-            / str(self.agent.id or 0)
-            / "projects"
-            / project.project_id
+        workspace = self.db.exec(
+            select(Workspace).where(Workspace.workspace_id == project.workspace_id)
+        ).first()
+        self.assertIsNotNone(workspace)
+        assert workspace is not None
+        self.assertEqual(workspace.storage_backend, "seaweedfs")
+        self.assertEqual(workspace.mount_mode, "live_sync")
+        self.assertEqual(
+            workspace.logical_path,
+            f"users/alice/agents/{self.agent.id or 0}/projects/{project.project_id}",
         )
-        self.assertTrue(project_dir.exists())
 
     def test_delete_project_removes_child_sessions(self) -> None:
         """Deleting a project should remove every session that points at it."""

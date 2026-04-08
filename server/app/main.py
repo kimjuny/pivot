@@ -34,6 +34,7 @@ from app.api.skills import router as skills_router  # noqa: E402
 from app.api.task_attachments import router as task_attachments_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.api.web_search import router as web_search_router  # noqa: E402
+from app.api.workspace_files import router as workspace_files_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
@@ -112,6 +113,7 @@ app.include_router(extensions_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
 app.include_router(web_search_router, prefix="/api")
+app.include_router(workspace_files_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(operations_router, prefix="/api")
 

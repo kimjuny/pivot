@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import shutil
 import tarfile
 from dataclasses import dataclass
@@ -10,7 +9,10 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 from typing import Protocol
 
-from app.services.workspace_service import workspace_root
+from app.services.binary_storage_service import (
+    StoredBinary,
+    build_binary_storage_backend,
+)
 
 
 @dataclass(frozen=True)
@@ -35,7 +37,7 @@ class StorageBackend(Protocol):
 
     backend_name: str
 
-    def put_file(self, *, source_path: Path, key: str) -> StoredArtifact:
+    def put_bytes(self, *, payload: bytes, key: str) -> StoredBinary:
         """Persist one local file under a stable storage key."""
         ...
 
@@ -48,71 +50,6 @@ class StorageBackend(Protocol):
         ...
 
 
-def _storage_root() -> Path:
-    """Return the workspace-local root used by the local storage backend."""
-    root = workspace_root()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-class LocalFilesystemStorageBackend:
-    """Store artifacts under the local workspace for development."""
-
-    backend_name = "local_fs"
-
-    def _resolve_key_path(self, key: str) -> Path:
-        """Return the fully qualified file path for one artifact key."""
-        normalized_key = key.strip().replace("\\", "/")
-        if normalized_key == "":
-            raise ValueError("Artifact key must not be empty.")
-        parts = [
-            part for part in normalized_key.split("/") if part not in {"", ".", ".."}
-        ]
-        if not parts:
-            raise ValueError("Artifact key must contain at least one safe path part.")
-        return _storage_root().joinpath(*parts)
-
-    def put_file(self, *, source_path: Path, key: str) -> StoredArtifact:
-        """Persist one local file under the workspace artifact root.
-
-        Args:
-            source_path: Existing file to copy into artifact storage.
-            key: Object-style artifact key relative to the backend root.
-
-        Returns:
-            Stored artifact metadata including digest and size.
-        """
-        target_path = self._resolve_key_path(key)
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = source_path.read_bytes()
-        target_path.write_bytes(payload)
-        return StoredArtifact(
-            storage_backend=self.backend_name,
-            artifact_key=key,
-            artifact_digest=hashlib.sha256(payload).hexdigest(),
-            size_bytes=len(payload),
-        )
-
-    def read_bytes(self, *, key: str) -> bytes:
-        """Return the bytes for one local artifact key.
-
-        Args:
-            key: Object-style artifact key relative to the backend root.
-
-        Returns:
-            Raw stored bytes.
-        """
-        return self._resolve_key_path(key).read_bytes()
-
-    def delete(self, *, key: str) -> None:
-        """Delete one stored artifact if it exists.
-
-        Args:
-            key: Object-style artifact key relative to the backend root.
-        """
-        self._resolve_key_path(key).unlink(missing_ok=True)
-
-
 class ExtensionArtifactStorageService:
     """Persist and materialize extension package artifacts.
 
@@ -123,7 +60,7 @@ class ExtensionArtifactStorageService:
 
     def __init__(self, backend: StorageBackend | None = None) -> None:
         """Store the backend used for artifact persistence."""
-        self.backend = backend or LocalFilesystemStorageBackend()
+        self.backend = backend or build_binary_storage_backend()
 
     def build_artifact_key(
         self,
@@ -170,7 +107,16 @@ class ExtensionArtifactStorageService:
         try:
             with tarfile.open(archive_path, mode="w:gz") as archive:
                 archive.add(source_dir, arcname=".")
-            return self.backend.put_file(source_path=archive_path, key=artifact_key)
+            stored_binary = self.backend.put_bytes(
+                payload=archive_path.read_bytes(),
+                key=artifact_key,
+            )
+            return StoredArtifact(
+                storage_backend=stored_binary.storage_backend,
+                artifact_key=stored_binary.storage_key,
+                artifact_digest=stored_binary.content_digest,
+                size_bytes=stored_binary.size_bytes,
+            )
         finally:
             archive_path.unlink(missing_ok=True)
 

@@ -19,7 +19,8 @@ class SkillChangeSubmission(SQLModel, table=True):
         change_type: Whether the submission creates or updates a skill.
         status: Lifecycle state such as ``pending`` or ``applied``.
         sandbox_draft_path: Original sandbox-local draft directory path.
-        snapshot_location: Host path that stores the frozen submission snapshot.
+        storage_backend: Canonical storage backend that owns the staged archive.
+        storage_key: Canonical storage key for the frozen submission snapshot.
         summary: Optional agent-authored rationale for the submission.
         details_json: Serialized validation and preview metadata for the UI/tooling.
         reviewed_at: UTC timestamp when the user approved or rejected the change.
@@ -35,7 +36,8 @@ class SkillChangeSubmission(SQLModel, table=True):
     change_type: str = Field(max_length=20)
     status: str = Field(default="pending", max_length=32, index=True)
     sandbox_draft_path: str = Field(max_length=1024)
-    snapshot_location: str = Field(max_length=1024)
+    storage_backend: str = Field(default="seaweedfs", max_length=64)
+    storage_key: str | None = Field(default=None, max_length=2048)
     summary: str = Field(default="")
     details_json: str | None = Field(default=None)
     reviewed_at: datetime | None = Field(default=None)

@@ -43,10 +43,12 @@ ExtensionHookEffectService = import_module(
 ExtensionHookReplayService = import_module(
     "app.services.extension_hook_replay_service"
 ).ExtensionHookReplayService
+binary_storage_service_module = import_module("app.services.binary_storage_service")
 extension_service_module = import_module("app.services.extension_service")
 ExtensionBundleImportFile = extension_service_module.ExtensionBundleImportFile
 ExtensionService = extension_service_module.ExtensionService
 ChannelService = import_module("app.services.channel_service").ChannelService
+ToolMetadata = import_module("app.orchestration.tool.metadata").ToolMetadata
 skill_service = import_module("app.services.skill_service")
 WebSearchService = import_module("app.services.web_search_service").WebSearchService
 WebSearchQueryRequest = import_module(
@@ -68,19 +70,27 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.root = Path(self.tmpdir.name)
         self.workspace_root = self.root / "workspace"
         self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self.cache_root = self.root / "cache"
+        self.data_root = self.root / "data"
 
         self.workspace_patch = patch.object(
             workspace_service,
             "workspace_root",
             return_value=self.workspace_root,
         )
-        self.extension_workspace_patch = patch.object(
+        self.extension_cache_patch = patch.object(
             extension_service_module,
-            "workspace_root",
-            return_value=self.workspace_root,
+            "local_runtime_cache_root",
+            return_value=self.cache_root,
+        )
+        self.binary_storage_workspace_patch = patch.object(
+            binary_storage_service_module,
+            "local_data_root",
+            return_value=self.data_root,
         )
         self.workspace_patch.start()
-        self.extension_workspace_patch.start()
+        self.extension_cache_patch.start()
+        self.binary_storage_workspace_patch.start()
 
         self.agent = Agent(
             name="ext-agent",
@@ -96,7 +106,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         """Release temporary resources after each test."""
         self.workspace_patch.stop()
-        self.extension_workspace_patch.stop()
+        self.extension_cache_patch.stop()
+        self.binary_storage_workspace_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
 
@@ -485,7 +496,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
             [
                 {
                     "name": "crm_research",
-                    "description": "Research CRM accounts",
+                    "description": "CRM research skill",
                     "path": "/workspace/skills/crm_research/SKILL.md",
                 }
             ],
@@ -498,7 +509,40 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extra_skills=extra_skills,
         )
         self.assertEqual(len(mounts), 1)
-        self.assertTrue(mounts[0]["location"].endswith("/skills/crm_research"))
+        self.assertTrue(
+            mounts[0]["canonical_location"].endswith("/skills/crm_research")
+        )
+
+    def test_request_tool_manager_includes_creator_owned_user_tools(self) -> None:
+        """Request-scoped tool catalogs should include creator-owned tools."""
+
+        def custom_lookup(query: str) -> str:
+            return query
+
+        user_tool_metadata = ToolMetadata(
+            name="custom_lookup",
+            description="Lookup a creator-owned tool.",
+            parameters={"properties": {"query": {"type": "string"}}},
+            func=custom_lookup,
+            tool_type="normal",
+        )
+        service = ExtensionService(self.session)
+
+        with patch.object(
+            extension_service_module,
+            "get_user_tool_storage_service",
+        ) as storage_service_factory:
+            storage_service_factory.return_value.load_all_user_tool_metadata.return_value = [
+                user_tool_metadata
+            ]
+            tool_manager = service.build_request_tool_manager(
+                username="alice",
+                agent_id=self.agent.id or 0,
+                raw_tool_ids=None,
+                extension_bundle=[],
+            )
+
+        self.assertIsNotNone(tool_manager.get_tool("custom_lookup"))
 
     def test_snapshot_bundle_includes_packaged_hooks(self) -> None:
         """Resolved extension bundles should pin declared task hooks."""
@@ -1265,7 +1309,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(response.package_id, "@acme/providers")
         self.assertEqual(response.trust_status, "trusted_local")
         self.assertEqual(response.trust_source, "local_import")
-        self.assertEqual(response.artifact_storage_backend, "local_fs")
+        self.assertEqual(response.artifact_storage_backend, "seaweedfs")
         self.assertTrue(response.artifact_key.endswith(".tar.gz"))
         self.assertTrue(bool(response.artifact_digest))
         self.assertGreater(response.artifact_size_bytes, 0)
@@ -1810,7 +1854,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(installation.package_id, "@acme/crm")
         self.assertEqual(installation.trust_status, "trusted_local")
         self.assertEqual(installation.trust_source, "local_import")
-        self.assertEqual(installation.artifact_storage_backend, "local_fs")
+        self.assertEqual(installation.artifact_storage_backend, "seaweedfs")
         self.assertTrue(installation.artifact_key.endswith(".tar.gz"))
         self.assertTrue(bool(installation.artifact_digest))
         self.assertGreater(installation.artifact_size_bytes, 0)
@@ -1965,7 +2009,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertNotEqual(overwritten.manifest_hash, original_manifest_hash)
         self.assertNotEqual(overwritten.artifact_key, original_artifact_key)
         self.assertEqual(overwritten.description, "Overwritten package payload")
-        self.assertFalse((self.workspace_root / original_artifact_key).exists())
+        self.assertFalse((self.data_root / "storage" / original_artifact_key).exists())
 
     def test_install_from_path_blocks_overwrite_when_references_exist(self) -> None:
         """Same-version replacement should be rejected while references still exist."""
@@ -2325,6 +2369,10 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(len(bundle), 1)
         self.assertTrue(Path(bundle[0]["tools"][0]["source_path"]).is_file())
         self.assertTrue(Path(bundle[0]["skills"][0]["location"]).is_dir())
+        self.assertEqual(
+            bundle[0]["skills"][0]["canonical_location"],
+            bundle[0]["skills"][0]["location"],
+        )
 
     def test_reference_summary_counts_pinned_snapshots(self) -> None:
         """Reference summary should count release and snapshot records that pin bundles."""
@@ -2393,7 +2441,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         )
 
         install_root = Path(installation.install_root)
-        artifact_path = self.workspace_root / Path(installation.artifact_key)
+        artifact_path = self.data_root / "storage" / Path(installation.artifact_key)
         result = service.uninstall_installation(
             installation_id=installation.id or 0,
         )

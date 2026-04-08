@@ -64,7 +64,9 @@ describe("AssistantAttachmentList", () => {
     expect(screen.queryByText("Download")).not.toBeInTheDocument();
   });
 
-  it("renders download-only artifacts as static raw cards", () => {
+  it("opens download-only artifacts as live workspace references", async () => {
+    const user = userEvent.setup();
+
     render(
       <AssistantAttachmentList
         attachments={[
@@ -85,8 +87,10 @@ describe("AssistantAttachmentList", () => {
 
     expect(screen.getByText("archive.bin")).toBeInTheDocument();
     expect(screen.getByText("Raw · 920B")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open archive.bin" }));
+    expect(screen.getByText("/workspace/outputs/archive.bin")).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "Open archive.bin" }),
-    ).not.toBeInTheDocument();
+      screen.getByText("This attachment does not have an inline preview yet."),
+    ).toBeInTheDocument();
   });
 });

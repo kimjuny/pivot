@@ -20,6 +20,7 @@ import { TokenUsageLabel } from "./TokenUsageLabel";
 
 interface AssistantMessageBlockProps {
   message: ChatMessage;
+  currentSessionId: string | null;
   expandedRecursions: Record<string, boolean>;
   isStreaming: boolean;
   onToggleRecursion: (messageId: string, recursionUid: string) => void;
@@ -39,6 +40,7 @@ interface AssistantMessageBlockProps {
  */
 export function AssistantMessageBlock({
   message,
+  currentSessionId,
   expandedRecursions,
   isStreaming,
   onToggleRecursion,
@@ -128,7 +130,10 @@ export function AssistantMessageBlock({
           </div>
           <div className="pl-5 text-sm leading-relaxed text-foreground">
             {message.content && <MarkdownRenderer content={message.content} />}
-            <AssistantAttachmentList attachments={message.assistantAttachments} />
+            <AssistantAttachmentList
+              attachments={message.assistantAttachments}
+              currentSessionId={currentSessionId}
+            />
           </div>
         </div>
       )}

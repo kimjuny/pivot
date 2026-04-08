@@ -16,6 +16,7 @@ describe("AssistantMessageBlock", () => {
           status: "stopped",
           recursions: [],
         }}
+        currentSessionId={null}
         expandedRecursions={{}}
         isStreaming={false}
         onToggleRecursion={vi.fn()}
@@ -41,6 +42,7 @@ describe("AssistantMessageBlock", () => {
           status: "error",
           recursions: [],
         }}
+        currentSessionId={null}
         expandedRecursions={{}}
         isStreaming={false}
         onToggleRecursion={vi.fn()}
@@ -68,6 +70,7 @@ describe("AssistantMessageBlock", () => {
           status: "completed",
           recursions: [],
         }}
+        currentSessionId={null}
         expandedRecursions={{}}
         isStreaming={false}
         onToggleRecursion={vi.fn()}
@@ -141,6 +144,7 @@ describe("AssistantMessageBlock", () => {
             },
           ],
         }}
+        currentSessionId={null}
         expandedRecursions={{}}
         isStreaming={false}
         onToggleRecursion={vi.fn()}
