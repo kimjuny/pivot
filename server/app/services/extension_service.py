@@ -17,6 +17,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from app.channels.types import ChannelManifest
+from app.config import get_settings
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
 from app.models.skill import Skill
@@ -33,7 +34,7 @@ from app.services.provider_registry_service import (
     load_channel_provider_from_file,
     load_web_search_provider_from_file,
 )
-from app.services.workspace_service import ensure_agent_workspace, workspace_root
+from app.services.workspace_service import ensure_agent_workspace
 from sqlmodel import Session, col, select
 
 _MANIFEST_FILENAME = "manifest.json"
@@ -161,8 +162,19 @@ def _hash_payload(payload: Any) -> str:
 
 
 def _extensions_root() -> Path:
-    """Return the package-centric local root for installed extension versions."""
-    root = workspace_root() / "extensions"
+    """Return the local runtime-cache root for materialized extension versions.
+
+    Why: extension artifacts remain the canonical source of truth. The unpacked
+    Python package directory is only a backend-local runtime cache and should
+    never be written into the active workspace or external POSIX provider root.
+    """
+    settings = get_settings()
+    configured_root = settings.LOCAL_CACHE_ROOT
+    if configured_root:
+        root = Path(configured_root)
+    else:
+        root = Path(__file__).resolve().parent.parent.parent / "data" / ".local_cache"
+    root = root / "extensions"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -181,6 +193,17 @@ def _installation_runtime_root(*, scope: str, name: str, version: str) -> Path:
             version=version,
         )
         / "runtime"
+    )
+
+
+def _runtime_install_root_for_installation(
+    installation: ExtensionInstallation,
+) -> Path:
+    """Return the derived runtime cache directory for one installation row."""
+    return _installation_runtime_root(
+        scope=installation.scope,
+        name=installation.name,
+        version=installation.version,
     )
 
 
@@ -1059,10 +1082,18 @@ class ExtensionService:
         must be able to recreate the extracted package directory after local
         cache cleanup or pod restarts.
         """
+        target_dir = _runtime_install_root_for_installation(installation)
         return self.artifact_storage.ensure_materialized_directory(
             artifact_key=installation.artifact_key,
-            target_dir=Path(installation.install_root),
+            target_dir=target_dir,
         )
+
+    def get_runtime_install_root(
+        self,
+        installation: ExtensionInstallation,
+    ) -> Path:
+        """Return the derived materialization path for one installation."""
+        return _runtime_install_root_for_installation(installation)
 
     def list_installations(self) -> list[ExtensionInstallation]:
         """Return installed extension versions ordered for display."""
@@ -1538,7 +1569,7 @@ class ExtensionService:
             existing.artifact_key = stored_artifact.artifact_key
             existing.artifact_digest = stored_artifact.artifact_digest
             existing.artifact_size_bytes = stored_artifact.size_bytes
-            existing.install_root = str(install_root)
+            existing.install_root = str(install_root.resolve())
             existing.source = source
             existing.trust_status = trust_status
             existing.trust_source = trust_source
@@ -1936,7 +1967,7 @@ class ExtensionService:
                 "references": references.to_dict(),
             }
 
-        install_root = Path(installation.install_root)
+        install_root = _runtime_install_root_for_installation(installation)
         version_root = install_root.parent
         binding_statement = select(AgentExtensionBinding).where(
             AgentExtensionBinding.extension_installation_id == installation_id

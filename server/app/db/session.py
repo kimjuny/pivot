@@ -132,6 +132,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_session_schema_compatibility()
     ensure_react_schema_compatibility()
     ensure_file_schema_compatibility()
+    ensure_task_attachment_schema_compatibility()
     ensure_skill_schema_compatibility()
 
     from app.api.auth import init_default_user
@@ -355,6 +356,10 @@ def ensure_file_schema_compatibility() -> None:
 
     columns = {column["name"] for column in inspector.get_columns("fileasset")}
     with engine.begin() as conn:
+        if "storage_backend" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN storage_backend VARCHAR"))
+        if "object_key" not in columns:
+            conn.execute(text("ALTER TABLE fileasset ADD COLUMN object_key VARCHAR"))
         if "kind" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN kind VARCHAR"))
             conn.execute(text("UPDATE fileasset SET kind = 'image' WHERE kind IS NULL"))
@@ -362,6 +367,14 @@ def ensure_file_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN page_count INTEGER"))
         if "markdown_path" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN markdown_path VARCHAR"))
+        if "workspace_relative_path" not in columns:
+            conn.execute(
+                text("ALTER TABLE fileasset ADD COLUMN workspace_relative_path VARCHAR")
+            )
+        if "markdown_object_key" not in columns:
+            conn.execute(
+                text("ALTER TABLE fileasset ADD COLUMN markdown_object_key VARCHAR")
+            )
         if "can_extract_text" not in columns:
             conn.execute(
                 text("ALTER TABLE fileasset ADD COLUMN can_extract_text BOOLEAN")
@@ -384,6 +397,44 @@ def ensure_file_schema_compatibility() -> None:
             )
         if "text_encoding" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN text_encoding VARCHAR"))
+        conn.execute(
+            text(
+                "UPDATE fileasset "
+                "SET storage_backend = 'local_fs' "
+                "WHERE storage_backend IS NULL OR storage_backend = ''"
+            )
+        )
+
+
+def ensure_task_attachment_schema_compatibility() -> None:
+    """Apply additive schema updates for live task-attachment references."""
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("taskattachment"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("taskattachment")}
+    with engine.begin() as conn:
+        if "workspace_id" not in columns:
+            conn.execute(text("ALTER TABLE taskattachment ADD COLUMN workspace_id VARCHAR"))
+        if "workspace_relative_path" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE taskattachment "
+                    "ADD COLUMN workspace_relative_path VARCHAR"
+                )
+            )
+        conn.execute(
+            text(
+                "UPDATE taskattachment "
+                "SET workspace_id = ("
+                "SELECT session.workspace_id "
+                "FROM session "
+                "WHERE session.session_id = taskattachment.session_id"
+                ") "
+                "WHERE workspace_id IS NULL"
+            )
+        )
 
 
 def ensure_skill_schema_compatibility() -> None:
@@ -402,6 +453,22 @@ def ensure_skill_schema_compatibility() -> None:
     with engine.begin() as conn:
         if "source" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN source VARCHAR"))
+        if "artifact_storage_backend" not in columns:
+            conn.execute(
+                text("ALTER TABLE skill ADD COLUMN artifact_storage_backend VARCHAR")
+            )
+        if "artifact_key" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN artifact_key VARCHAR"))
+        if "artifact_digest" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN artifact_digest VARCHAR"))
+        if "artifact_size_bytes" not in columns:
+            conn.execute(text("ALTER TABLE skill ADD COLUMN artifact_size_bytes INTEGER"))
+            conn.execute(
+                text(
+                    "UPDATE skill SET artifact_size_bytes = 0 "
+                    "WHERE artifact_size_bytes IS NULL"
+                )
+            )
         if "github_repo_url" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN github_repo_url VARCHAR"))
         if "github_ref" not in columns:
@@ -414,8 +481,8 @@ def ensure_skill_schema_compatibility() -> None:
             text(
                 "UPDATE skill "
                 "SET source = CASE "
-                "WHEN builtin = 1 THEN 'builtin' "
-                "WHEN source IS NULL OR source = '' OR source = 'user' THEN 'manual' "
+                "WHEN source IS NULL OR source = '' OR source = 'user' OR source = 'builtin' "
+                "THEN 'manual' "
                 "ELSE source "
                 "END"
             )

@@ -141,6 +141,36 @@ export interface AgentDraftState {
   release_history: AgentReleaseRecord[];
 }
 
+/**
+ * Resolved storage profile state exposed by the backend.
+ */
+export interface StorageStatus {
+  /** The profile requested by configuration or environment. */
+  requested_profile: string;
+  /** The profile currently active after health checks and fallback. */
+  active_profile: string;
+  /** Resolved object storage backend implementation name. */
+  object_storage_backend: string;
+  /** Resolved POSIX workspace backend implementation name. */
+  posix_workspace_backend: string;
+  /** Optional fallback reason when the requested profile could not be used. */
+  fallback_reason: string | null;
+  /** Backend-container-visible workspace root. */
+  backend_workspace_root: string;
+  /** External POSIX entrypoint configured for SeaweedFS-style profiles. */
+  external_posix_root: string | null;
+  /** Host-visible POSIX entrypoint that should expose the SeaweedFS mount. */
+  external_host_posix_root: string | null;
+  /** Whether the backend can currently see the configured external POSIX root. */
+  external_posix_root_exists: boolean;
+  /** Whether the backend can currently reach the external filer endpoint. */
+  external_filer_reachable: boolean | null;
+  /** Whether the configured POSIX root exposes the same namespace as the filer. */
+  external_namespace_shared: boolean | null;
+  /** Human-readable readiness summary for external storage diagnostics. */
+  external_readiness_reason: string | null;
+}
+
 /** Error class for authentication-related errors */
 export class AuthError extends Error {
   constructor(message: string = 'Authentication required') {
@@ -245,6 +275,15 @@ export const apiRequestFormData = async (
  */
 export const getAgents = async (): Promise<Agent[]> => {
   return apiRequest('/agents') as Promise<Agent[]>;
+};
+
+/**
+ * Fetch the resolved storage profile state for diagnostics and warning banners.
+ *
+ * @returns Promise resolving to the currently active storage status.
+ */
+export const getStorageStatus = async (): Promise<StorageStatus> => {
+  return apiRequest('/system/storage-status') as Promise<StorageStatus>;
 };
 
 /**
@@ -2570,7 +2609,7 @@ export interface ToolDiagnostic {
 /**
  * Shared skill metadata returned by the server.
  */
-export type SkillSource = 'builtin' | 'manual' | 'network' | 'bundle';
+export type SkillSource = 'manual' | 'network' | 'bundle' | 'agent';
 
 /**
  * One file entry selected from a local skill bundle.
@@ -2591,7 +2630,6 @@ export interface SharedSkill {
   kind: 'shared';
   source: SkillSource;
   creator: string | null;
-  builtin: boolean;
   read_only: boolean;
   md5: string;
   github_repo_url: string | null;
@@ -2612,9 +2650,8 @@ export interface UserSkill {
   location: string;
   filename: string;
   kind: 'private' | 'shared';
-  source: Exclude<SkillSource, 'builtin'>;
+  source: SkillSource;
   creator: string | null;
-  builtin: boolean;
   read_only: boolean;
   md5: string;
   github_repo_url: string | null;

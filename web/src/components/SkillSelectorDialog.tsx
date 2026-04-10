@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Lock, User as UserIcon, Search, Loader2, Globe2 } from "@/lib/lucide";
+import { User as UserIcon, Search, Loader2, Globe2 } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getSharedSkills,
@@ -282,8 +282,8 @@ function SkillSelectorDialog({
                         <td className="px-2 py-2 align-middle">
                           {skill.kind === 'shared' ? (
                             <Badge variant="secondary" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">
-                              {skill.source === 'builtin' ? <Lock className="w-2.5 h-2.5" /> : <Globe2 className="w-2.5 h-2.5" />}
-                              {skill.source === 'builtin' ? 'Builtin' : skill.readOnly ? `Shared / ${skill.creator ?? 'Unknown'}` : 'Shared / You'}
+                              <Globe2 className="w-2.5 h-2.5" />
+                              {skill.readOnly ? `Shared / ${skill.creator ?? 'Unknown'}` : 'Shared / You'}
                             </Badge>
                           ) : (
                             <Badge variant="outline" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">

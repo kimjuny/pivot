@@ -43,9 +43,15 @@ ExtensionHookEffectService = import_module(
 ExtensionHookReplayService = import_module(
     "app.services.extension_hook_replay_service"
 ).ExtensionHookReplayService
+artifact_storage_service_module = import_module(
+    "app.services.artifact_storage_service"
+)
 extension_service_module = import_module("app.services.extension_service")
 ExtensionBundleImportFile = extension_service_module.ExtensionBundleImportFile
 ExtensionService = extension_service_module.ExtensionService
+LocalFilesystemObjectStorageProvider = import_module(
+    "app.storage.providers.local_fs"
+).LocalFilesystemObjectStorageProvider
 ChannelService = import_module("app.services.channel_service").ChannelService
 skill_service = import_module("app.services.skill_service")
 WebSearchService = import_module("app.services.web_search_service").WebSearchService
@@ -68,19 +74,37 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.root = Path(self.tmpdir.name)
         self.workspace_root = self.root / "workspace"
         self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self.runtime_cache_root = self.root / "runtime-cache"
+        self.runtime_cache_root.mkdir(parents=True, exist_ok=True)
+        self.object_storage_root = self.root / "object-storage"
+        self.object_storage_root.mkdir(parents=True, exist_ok=True)
 
         self.workspace_patch = patch.object(
             workspace_service,
             "workspace_root",
             return_value=self.workspace_root,
         )
-        self.extension_workspace_patch = patch.object(
+        self.extension_runtime_cache_patch = patch.object(
             extension_service_module,
-            "workspace_root",
-            return_value=self.workspace_root,
+            "_extensions_root",
+            return_value=self.runtime_cache_root / "extensions",
+        )
+        self.artifact_storage_profile_patch = patch.object(
+            artifact_storage_service_module,
+            "get_resolved_storage_profile",
+            return_value=type(
+                "ResolvedProfile",
+                (),
+                {
+                    "object_storage": LocalFilesystemObjectStorageProvider(
+                        self.object_storage_root
+                    ),
+                },
+            )(),
         )
         self.workspace_patch.start()
-        self.extension_workspace_patch.start()
+        self.extension_runtime_cache_patch.start()
+        self.artifact_storage_profile_patch.start()
 
         self.agent = Agent(
             name="ext-agent",
@@ -96,7 +120,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         """Release temporary resources after each test."""
         self.workspace_patch.stop()
-        self.extension_workspace_patch.stop()
+        self.extension_runtime_cache_patch.stop()
+        self.artifact_storage_profile_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
 
@@ -1818,6 +1843,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertIsNone(installation.hub_package_id)
         self.assertIsNone(installation.hub_package_version_id)
         self.assertIsNone(installation.hub_artifact_digest)
+        self.assertTrue(
+            Path(installation.install_root).is_relative_to(self.runtime_cache_root)
+        )
         self.assertTrue(
             Path(installation.install_root).joinpath("manifest.json").is_file()
         )

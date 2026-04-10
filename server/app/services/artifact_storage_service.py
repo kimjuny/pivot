@@ -8,9 +8,13 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from app.services.workspace_service import workspace_root
+from app.storage import get_resolved_storage_profile
+
+if TYPE_CHECKING:
+    from app.storage.types import ObjectStorageProvider
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,34 @@ class LocalFilesystemStorageBackend:
         self._resolve_key_path(key).unlink(missing_ok=True)
 
 
+class _ObjectStorageBackendAdapter:
+    """Adapts the new object-storage provider interface to legacy backend calls."""
+
+    def __init__(self, provider: ObjectStorageProvider) -> None:
+        """Store the object provider used by the artifact storage service."""
+        self.backend_name = provider.backend_name
+        self._provider = provider
+
+    def put_file(self, *, source_path: Path, key: str) -> StoredArtifact:
+        """Persist one file through the object storage provider."""
+        payload = source_path.read_bytes()
+        stored = self._provider.put_bytes(key, payload)
+        return StoredArtifact(
+            storage_backend=stored.storage_backend,
+            artifact_key=stored.object_key,
+            artifact_digest=hashlib.sha256(payload).hexdigest(),
+            size_bytes=stored.size_bytes,
+        )
+
+    def read_bytes(self, *, key: str) -> bytes:
+        """Read one artifact payload through the object storage provider."""
+        return self._provider.get_bytes(key)
+
+    def delete(self, *, key: str) -> None:
+        """Delete one artifact payload through the object storage provider."""
+        self._provider.delete(key)
+
+
 class ExtensionArtifactStorageService:
     """Persist and materialize extension package artifacts.
 
@@ -123,7 +155,9 @@ class ExtensionArtifactStorageService:
 
     def __init__(self, backend: StorageBackend | None = None) -> None:
         """Store the backend used for artifact persistence."""
-        self.backend = backend or LocalFilesystemStorageBackend()
+        self.backend = backend or _ObjectStorageBackendAdapter(
+            get_resolved_storage_profile().object_storage
+        )
 
     def build_artifact_key(
         self,

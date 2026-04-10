@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 class TaskAttachment(SQLModel, table=True):
-    """Immutable assistant artifact snapshot generated for one task answer."""
+    """Live assistant file reference generated for one task answer."""
 
     id: int | None = Field(default=None, primary_key=True)
     attachment_id: str = Field(
@@ -19,6 +19,10 @@ class TaskAttachment(SQLModel, table=True):
         default=None,
         index=True,
         description="Owning session UUID when the task belongs to a session.",
+    )
+    workspace_id: str = Field(
+        index=True,
+        description="Owning workspace UUID that currently hosts the live file.",
     )
     agent_id: int = Field(index=True, description="Owning agent identifier.")
     user: str = Field(index=True, description="Owner username.")
@@ -37,9 +41,6 @@ class TaskAttachment(SQLModel, table=True):
     )
     workspace_relative_path: str = Field(
         description="Path relative to the agent workspace root."
-    )
-    storage_path: str = Field(
-        description="Backend-managed immutable snapshot path on disk."
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

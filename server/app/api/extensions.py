@@ -153,7 +153,7 @@ def _serialize_installation(
         artifact_key=installation.artifact_key,
         artifact_digest=installation.artifact_digest,
         artifact_size_bytes=installation.artifact_size_bytes,
-        install_root=installation.install_root,
+        install_root=str(service.get_runtime_install_root(installation)),
         source=installation.source,
         trust_status=installation.trust_status,
         trust_source=installation.trust_source,

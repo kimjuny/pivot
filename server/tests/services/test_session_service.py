@@ -1,5 +1,7 @@
 """Tests for session history plan snapshots."""
 
+from __future__ import annotations
+
 import json
 import sys
 import tempfile
@@ -8,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import Mock, patch
 
 from sqlmodel import Session as DBSession, SQLModel, create_engine
 
@@ -22,6 +25,9 @@ ReactRecursion = import_module("app.models.react").ReactRecursion
 ReactRecursionState = import_module("app.models.react").ReactRecursionState
 ReactTask = import_module("app.models.react").ReactTask
 Session = import_module("app.models.session").Session
+LocalFilesystemPOSIXWorkspaceProvider = import_module(
+    "app.storage.providers.local_fs"
+).LocalFilesystemPOSIXWorkspaceProvider
 AgentSnapshotService = import_module(
     "app.services.agent_snapshot_service"
 ).AgentSnapshotService
@@ -30,6 +36,19 @@ TaskAttachmentService = import_module(
     "app.services.task_attachment_service"
 ).TaskAttachmentService
 workspace_service = import_module("app.services.workspace_service")
+
+
+class _FakeExternalPOSIXProvider(LocalFilesystemPOSIXWorkspaceProvider):
+    """Use one temporary host root while exposing an external backend root."""
+
+    def __init__(self, host_root: Path, backend_root: Path) -> None:
+        """Store one host root plus its backend-visible alias."""
+        super().__init__(host_root)
+        self._backend_root = backend_root
+
+    def local_root(self) -> Path:
+        """Return the backend-visible root instead of the host temp path."""
+        return self._backend_root
 
 
 class SessionServiceTestCase(unittest.TestCase):
@@ -80,6 +99,20 @@ class SessionServiceTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         """Close the session after each test."""
         self.session.close()
+
+    def _external_workspace_profile(self) -> tuple[tempfile.TemporaryDirectory[str], Any]:
+        """Create one provider profile that simulates mounted external POSIX roots."""
+        temp_dir = tempfile.TemporaryDirectory()
+        provider = _FakeExternalPOSIXProvider(
+            Path(temp_dir.name),
+            Path("/app/server/external-posix"),
+        )
+        profile = type(
+            "ResolvedProfile",
+            (),
+            {"posix_workspace": provider},
+        )()
+        return temp_dir, profile
 
     def test_full_history_uses_latest_snapshot_current_plan(self) -> None:
         """History payload should expose the latest persisted current-plan snapshot."""
@@ -381,17 +414,8 @@ class SessionServiceTestCase(unittest.TestCase):
 
     def test_full_history_includes_assistant_attachments(self) -> None:
         """Full history should expose persisted assistant artifacts beside the answer."""
-        temp_dir = tempfile.TemporaryDirectory()
+        temp_dir, profile = self._external_workspace_profile()
         self.addCleanup(temp_dir.cleanup)
-        workspace_module = cast(Any, workspace_service)
-        original_workspace_root = workspace_module._WORKSPACE_ROOT
-        workspace_module._WORKSPACE_ROOT = Path(temp_dir.name)
-        self.addCleanup(
-            setattr,
-            workspace_module,
-            "_WORKSPACE_ROOT",
-            original_workspace_root,
-        )
 
         task = ReactTask(
             task_id="task-attachments",
@@ -405,21 +429,42 @@ class SessionServiceTestCase(unittest.TestCase):
         self.session.add(task)
         self.session.commit()
 
-        source_file = (
-            workspace_module.ensure_agent_workspace("alice", self.agent.id or 0)
-            / "outputs"
-            / "report.md"
-        )
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=profile,
+        ):
+            workspace_row = workspace_service.WorkspaceService(self.session).create_workspace(
+                agent_id=self.agent.id or 0,
+                username="alice",
+                scope="session_private",
+                session_id="session-1",
+            )
+            session = self.service.get_session("session-1")
+            if session is None:
+                self.fail("Expected session-1 to exist")
+            session.workspace_id = workspace_row.workspace_id
+            self.session.add(session)
+            self.session.commit()
+            workspace_dir = workspace_service.WorkspaceService(
+                self.session
+            ).get_workspace_path(workspace_row)
+
+        source_file = workspace_dir / "outputs" / "report.md"
         source_file.parent.mkdir(parents=True, exist_ok=True)
         source_file.write_text("# Report", encoding="utf-8")
 
-        TaskAttachmentService(self.session).create_from_answer_paths(
-            username="alice",
-            agent_id=self.agent.id or 0,
-            task_id=task.task_id,
-            session_id="session-1",
-            paths=["/workspace/outputs/report.md"],
-        )
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=profile,
+        ):
+            TaskAttachmentService(self.session).create_from_answer_paths(
+                username="alice",
+                task_id=task.task_id,
+                session_id="session-1",
+                paths=["/workspace/outputs/report.md"],
+            )
 
         history = self.service.get_full_session_history("session-1")
 
@@ -525,6 +570,92 @@ class SessionServiceTestCase(unittest.TestCase):
         self.assertEqual(created.type, "studio_test")
         self.assertIsNone(created.release_id)
         self.assertEqual(created.test_snapshot_id, snapshot.id)
+
+    def test_create_session_uses_external_private_workspace_root(self) -> None:
+        """Session-private workspaces should materialize under external roots."""
+        self.agent.active_release_id = 7
+        self.session.add(self.agent)
+        self.session.commit()
+        temp_dir, profile = self._external_workspace_profile()
+        self.addCleanup(temp_dir.cleanup)
+
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=profile,
+        ):
+            created = self.service.create_session(
+                agent_id=self.agent.id or 0,
+                user="alice",
+            )
+
+        workspace_row = workspace_service.WorkspaceService(self.session).get_workspace(
+            created.workspace_id or ""
+        )
+        if workspace_row is None:
+            self.fail("Expected created session workspace to exist")
+
+        expected_host_path = (
+            Path(temp_dir.name)
+            / "users"
+            / "alice"
+            / "agents"
+            / str(self.agent.id or 0)
+            / "sessions"
+            / created.session_id
+            / "workspace"
+        )
+        self.assertTrue(expected_host_path.exists())
+
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=profile,
+        ):
+            backend_path = workspace_service.WorkspaceService(
+                self.session
+            ).get_workspace_backend_path(workspace_row)
+
+        self.assertEqual(
+            backend_path,
+            "/app/server/external-posix/users/alice/agents/"
+            f"{self.agent.id or 0}/sessions/{created.session_id}/workspace",
+        )
+
+    def test_delete_session_uses_external_workspace_backend_path_for_sandbox(self) -> None:
+        """Session deletion should destroy warm sandboxes via external roots."""
+        self.agent.active_release_id = 9
+        self.session.add(self.agent)
+        self.session.commit()
+        temp_dir, profile = self._external_workspace_profile()
+        self.addCleanup(temp_dir.cleanup)
+        sandbox_service = Mock()
+
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=profile,
+        ):
+            created = self.service.create_session(
+                agent_id=self.agent.id or 0,
+                user="alice",
+            )
+
+            with patch(
+                "app.services.session_service.get_sandbox_service",
+                return_value=sandbox_service,
+            ):
+                deleted = self.service.delete_session(created.session_id)
+
+        self.assertTrue(deleted)
+        sandbox_service.destroy.assert_called_once_with(
+            username="alice",
+            workspace_id=created.workspace_id,
+            workspace_backend_path=(
+                "/app/server/external-posix/users/alice/agents/"
+                f"{self.agent.id or 0}/sessions/{created.session_id}/workspace"
+            ),
+        )
 
     def test_get_sessions_by_user_filters_by_session_type(self) -> None:
         """Studio and Consumer session listings should stay isolated."""

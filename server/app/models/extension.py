@@ -26,8 +26,10 @@ class ExtensionInstallation(SQLModel, table=True):
             extension artifact.
         artifact_digest: Stable digest of the persisted extension artifact.
         artifact_size_bytes: Size of the persisted extension artifact in bytes.
-        install_root: Absolute directory path containing the materialized runtime
-            package used for local imports and Python module loading.
+        install_root: Legacy cache-path field for the materialized runtime
+            package. The canonical source of truth is the persisted artifact,
+            and runtime code should derive the materialization path from the
+            package identity when needed.
         config_json: Persisted installation-scoped configuration values derived
             from the package's declared configuration schema.
         source: Installation source such as ``manual``.

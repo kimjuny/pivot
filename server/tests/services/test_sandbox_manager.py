@@ -217,3 +217,90 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
 
         self.assertTrue(should_recreate)
         self.assertEqual(reason, "missing_skills_volume_mount")
+
+
+class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
+    """Validate configurable backend workspace root handling."""
+
+    def test_ensure_workspace_dir_rejects_paths_outside_configured_root(self) -> None:
+        """Sandbox creation should reject backend paths that escape the root."""
+        module = cast(Any, sandbox_manager)
+
+        with (
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BACKEND_WORKSPACE_ROOT": "/srv/pivot-workspaces",
+                        "SANDBOX_EXTERNAL_POSIX_ROOT": None,
+                    },
+                )(),
+            ),
+            self.assertRaisesRegex(Exception, "/srv/pivot-workspaces"),
+        ):
+                module._ensure_workspace_dir("/app/server/workspace/alice")
+
+    def test_ensure_workspace_dir_accepts_external_posix_root(self) -> None:
+        """External POSIX roots should be treated as valid workspace parents."""
+        module = cast(Any, sandbox_manager)
+        backend = type(
+            "Backend",
+            (),
+            {
+                "exec_run": lambda self, *args, **kwargs: (0, b""),
+            },
+        )()
+
+        with (
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BACKEND_WORKSPACE_ROOT": "/app/server/workspace",
+                        "SANDBOX_EXTERNAL_POSIX_ROOT": "/app/server/external-posix",
+                    },
+                )(),
+            ),
+            patch.object(module, "_backend_container", return_value=backend),
+        ):
+            module._ensure_workspace_dir(
+                "/app/server/external-posix/users/alice/agents/7/sessions/s1/workspace"
+            )
+
+    def test_resolve_host_path_prefers_external_posix_mount(self) -> None:
+        """Workspace resolution should prefer the most specific external mount."""
+        module = cast(Any, sandbox_manager)
+        backend_mounts = [
+            {
+                "Destination": "/app/server",
+                "Source": "/Users/dev/pivot/server",
+            },
+            {
+                "Destination": "/app/server/external-posix",
+                "Source": "/tmp/pivot-seaweedfs-posix",
+            },
+        ]
+
+        with (
+            patch.object(
+                module,
+                "_backend_container",
+                return_value=object(),
+            ),
+            patch.object(module, "_get_container_mounts", return_value=backend_mounts),
+            patch.object(module, "_self_container", return_value=None),
+        ):
+            resolved = module._resolve_host_path_from_backend_path(
+                "/app/server/external-posix/users/alice/agents/7/sessions/s1/workspace"
+            )
+
+        self.assertEqual(
+            resolved,
+            "/tmp/pivot-seaweedfs-posix/users/alice/agents/7/sessions/s1/workspace",
+        )

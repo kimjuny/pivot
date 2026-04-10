@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-import shutil
 import uuid
 from datetime import UTC
 from pathlib import Path
@@ -12,7 +11,7 @@ from pathlib import Path
 from app.models.session import Session as SessionModel
 from app.models.task_attachment import TaskAttachment
 from app.schemas.task_attachment import TaskAttachmentListItem
-from app.services.workspace_service import WorkspaceService, workspace_root
+from app.services.workspace_service import WorkspaceService
 from sqlmodel import Session as DBSession, col, select
 
 logger = logging.getLogger(__name__)
@@ -77,7 +76,7 @@ _TEXT_MIME_TYPES = {
 
 
 class TaskAttachmentService:
-    """Persist immutable snapshots of files returned by assistant answers."""
+    """Persist live workspace file references returned by assistant answers."""
 
     def __init__(self, db: DBSession) -> None:
         """Initialize the service with a database session."""
@@ -91,7 +90,7 @@ class TaskAttachmentService:
         session_id: str | None,
         paths: list[str],
     ) -> list[TaskAttachment]:
-        """Validate sandbox paths, snapshot files, and persist metadata.
+        """Validate sandbox paths and persist live workspace references.
 
         Args:
             username: Authenticated owner username.
@@ -123,10 +122,6 @@ class TaskAttachmentService:
         workspace_dir = (
             WorkspaceService(self.db).get_workspace_path(workspace).resolve()
         )
-        attachments_dir = (
-            workspace_root() / username / "task_attachments" / task_id
-        ).resolve()
-        attachments_dir.mkdir(parents=True, exist_ok=True)
 
         created: list[TaskAttachment] = []
         seen_relative_paths: set[str] = set()
@@ -145,13 +140,12 @@ class TaskAttachmentService:
 
             detected = self._detect_metadata(host_path)
             attachment_id = str(uuid.uuid4())
-            snapshot_path = attachments_dir / f"{attachment_id}{detected['suffix']}"
-            shutil.copy2(host_path, snapshot_path)
 
             attachment = TaskAttachment(
                 attachment_id=attachment_id,
                 task_id=task_id,
                 session_id=session_id,
+                workspace_id=workspace.workspace_id,
                 agent_id=session_row.agent_id,
                 user=username,
                 display_name=host_path.name,
@@ -162,7 +156,6 @@ class TaskAttachmentService:
                 render_kind=str(detected["render_kind"]),
                 sandbox_path=sandbox_path,
                 workspace_relative_path=workspace_relative_path,
-                storage_path=str(snapshot_path),
             )
             self.db.add(attachment)
             created.append(attachment)
@@ -204,22 +197,37 @@ class TaskAttachmentService:
         )
         return self.db.exec(stmt).first()
 
+    def get_live_attachment_for_user(
+        self,
+        attachment_id: str,
+        username: str,
+    ) -> tuple[TaskAttachment, Path] | None:
+        """Resolve one owned attachment to its current live workspace path."""
+        attachment = self.get_attachment_for_user(attachment_id, username)
+        if attachment is None:
+            return None
+
+        host_path = self.resolve_live_attachment_path(attachment)
+        if host_path is None:
+            return None
+        return attachment, host_path
+
     def delete_by_task_id(self, task_id: str) -> int:
-        """Delete all attachment snapshots belonging to one task."""
+        """Delete all attachment references belonging to one task."""
         stmt = select(TaskAttachment).where(TaskAttachment.task_id == task_id)
         rows = list(self.db.exec(stmt).all())
         for row in rows:
-            self._delete_attachment(row, commit=False)
+            self.db.delete(row)
         if rows:
             self.db.commit()
         return len(rows)
 
     def delete_by_session_id(self, session_id: str) -> int:
-        """Delete all attachment snapshots belonging to one session."""
+        """Delete all attachment references belonging to one session."""
         stmt = select(TaskAttachment).where(TaskAttachment.session_id == session_id)
         rows = list(self.db.exec(stmt).all())
         for row in rows:
-            self._delete_attachment(row, commit=False)
+            self.db.delete(row)
         if rows:
             self.db.commit()
         return len(rows)
@@ -245,7 +253,7 @@ class TaskAttachmentService:
         self,
         attachments: list[TaskAttachment],
     ) -> list[dict[str, str | int]]:
-        """Serialize persisted attachments into the public event/list shape."""
+        """Serialize persisted attachment references into the public event shape."""
         return [self._to_list_item(item).model_dump() for item in attachments]
 
     def _normalize_declared_paths(self, paths: list[str]) -> list[str]:
@@ -302,6 +310,44 @@ class TaskAttachmentService:
             return None, None
         return host_path, workspace_relative_path.as_posix()
 
+    def resolve_live_attachment_path(self, attachment: TaskAttachment) -> Path | None:
+        """Resolve the current live host path for one attachment reference."""
+        workspace = WorkspaceService(self.db).get_workspace(attachment.workspace_id)
+        if workspace is None:
+            logger.warning(
+                "Skip task attachment with missing workspace: %s",
+                attachment.attachment_id,
+            )
+            return None
+
+        workspace_dir = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        host_path = (workspace_dir / attachment.workspace_relative_path).resolve()
+        if not host_path.is_relative_to(workspace_dir):
+            logger.warning(
+                "Skip task attachment path escaping workspace: %s",
+                attachment.attachment_id,
+            )
+            return None
+        if host_path.is_symlink():
+            logger.warning(
+                "Skip symlink task attachment path: %s",
+                attachment.attachment_id,
+            )
+            return None
+        if not host_path.exists():
+            logger.warning(
+                "Skip missing task attachment path: %s",
+                attachment.attachment_id,
+            )
+            return None
+        if not host_path.is_file():
+            logger.warning(
+                "Skip non-file task attachment path: %s",
+                attachment.attachment_id,
+            )
+            return None
+        return host_path
+
     def _detect_metadata(self, host_path: Path) -> dict[str, str]:
         """Infer stable MIME, extension, and render metadata for one file."""
         extension = host_path.suffix.lower().removeprefix(".")
@@ -327,12 +373,10 @@ class TaskAttachmentService:
         else:
             render_kind = "download"
 
-        suffix = host_path.suffix or (f".{extension}" if extension else "")
         return {
             "extension": extension or host_path.suffix.lower().removeprefix("."),
             "mime_type": mime_type,
             "render_kind": render_kind,
-            "suffix": suffix,
         }
 
     def _to_list_item(self, row: TaskAttachment) -> TaskAttachmentListItem:
@@ -348,29 +392,3 @@ class TaskAttachmentService:
             workspace_relative_path=row.workspace_relative_path,
             created_at=row.created_at.replace(tzinfo=UTC).isoformat(),
         )
-
-    def _delete_attachment(
-        self,
-        attachment: TaskAttachment,
-        *,
-        commit: bool,
-    ) -> None:
-        """Delete one persisted attachment row and its snapshot file."""
-        snapshot_path = Path(attachment.storage_path)
-        if snapshot_path.exists():
-            self._safe_unlink(snapshot_path)
-        self.db.delete(attachment)
-        if commit:
-            self.db.commit()
-
-    def _safe_unlink(self, path: Path) -> None:
-        """Delete a snapshot file only when it lives under the workspace root."""
-        resolved_path = path.resolve()
-        workspace_path = workspace_root().resolve()
-        if not resolved_path.is_relative_to(workspace_path):
-            logger.warning(
-                "Skip unsafe task attachment deletion outside workspace: %s",
-                path,
-            )
-            return
-        resolved_path.unlink(missing_ok=True)

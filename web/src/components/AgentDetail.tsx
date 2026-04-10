@@ -138,7 +138,7 @@ function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
 
 /**
  * Parse skill tab metadata/resourceId into a normalized descriptor.
- * Falls back to shared/builtin read-only for legacy tabs without metadata.
+ * Falls back to shared/manual read-only for legacy tabs without metadata.
  * Current tabs should always pass explicit readOnly metadata from the API.
  */
 function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
@@ -158,12 +158,10 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
     parsedSource === 'manual' ||
     parsedSource === 'network' ||
     parsedSource === 'bundle' ||
-    parsedSource === 'builtin'
+    parsedSource === 'agent'
       ? parsedSource
-      : normalizedKind === 'private'
-        ? 'manual'
-        : 'builtin';
-  const readOnly = tab.meta?.readOnly ?? normalizedSource === 'builtin';
+      : 'manual';
+  const readOnly = tab.meta?.readOnly ?? normalizedKind === 'shared';
 
   return {
     kind: tab.meta?.kind ?? normalizedKind,
@@ -171,7 +169,7 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
       tab.meta?.source === 'manual' ||
       tab.meta?.source === 'network' ||
       tab.meta?.source === 'bundle' ||
-      tab.meta?.source === 'builtin'
+      tab.meta?.source === 'agent'
         ? tab.meta.source
         : normalizedSource,
     readOnly,
@@ -546,7 +544,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             const result =
               descriptor.kind === 'private'
                 ? await getUserSkillSource('private', descriptor.skillName)
-                : !descriptor.readOnly && descriptor.source !== 'builtin'
+                : !descriptor.readOnly
                   ? await getUserSkillSource('shared', descriptor.skillName)
                   : await getSharedSkillSource(descriptor.skillName);
             setSkillEditors((prev) => ({

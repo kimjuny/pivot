@@ -9,7 +9,6 @@ from app.models.user import User
 from app.schemas.file import FileAssetResponse
 from app.services.file_service import FileService
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
 from sqlmodel import Session as DBSession
 
 router = APIRouter()
@@ -141,12 +140,17 @@ async def get_image_content(
 ):
     """Stream an uploaded file back to the authenticated owner."""
     service = FileService(db)
-    file_asset = service.get_file_for_user(file_id, current_user.username)
-    if file_asset is None:
+    resolved = service.get_file_content_for_user(file_id, current_user.username)
+    if resolved is None:
         raise HTTPException(status_code=404, detail="Image file not found")
+    file_asset, payload = resolved
 
-    return FileResponse(
-        path=file_asset.storage_path,
+    return Response(
+        content=payload,
         media_type=file_asset.mime_type,
-        filename=file_asset.original_name,
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="{file_asset.original_name}"'
+            )
+        },
     )

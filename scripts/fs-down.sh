@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+POSIX_ROOT="${PIVOT_EXTERNAL_POSIX_ROOT:-/tmp/pivot-seaweedfs-posix}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/fs-down.sh
+
+Tears down the external SeaweedFS POSIX bridge used by Pivot's optional
+`seaweedfs` profile.
+
+Behavior:
+- macOS: unmounts the bridge inside the Podman machine
+- Linux: unmounts the bridge on the host
+- Windows: exits with a short note because Pivot defaults to `local_fs`
+- With `--stop-service`, also stops the `seaweedfs` compose service
+
+Environment overrides:
+- PIVOT_EXTERNAL_POSIX_ROOT
+EOF
+}
+
+log() {
+  printf '[fs-down] %s\n' "$*"
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf '[fs-down] missing required command: %s\n' "$1" >&2
+    exit 1
+  fi
+}
+
+unmount_snippet() {
+  cat <<'EOF'
+if command -v fusermount >/dev/null 2>&1; then
+  fusermount -u "$1"
+else
+  umount "$1"
+fi
+EOF
+}
+
+stop_seaweedfs_service() {
+  log "Stopping SeaweedFS service"
+  (
+    cd "$ROOT_DIR"
+    podman compose --profile seaweedfs stop seaweedfs
+  )
+}
+
+teardown_linux_mount() {
+  if ! command -v mountpoint >/dev/null 2>&1; then
+    printf '[fs-down] missing required command: mountpoint\n' >&2
+    exit 1
+  fi
+
+  if ! mountpoint -q "$POSIX_ROOT"; then
+    log "No SeaweedFS POSIX bridge mounted at $POSIX_ROOT"
+    return 0
+  fi
+
+  log "Unmounting SeaweedFS POSIX bridge on Linux host at $POSIX_ROOT"
+  bash -lc "$(unmount_snippet)" -- "$POSIX_ROOT"
+}
+
+teardown_macos_mount() {
+  require_command podman
+  require_command ssh
+  require_command python3
+
+  local inspect_json
+  inspect_json="$(podman machine inspect)"
+
+  local port
+  local user
+  local identity
+  port="$(python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["SSHConfig"]["Port"])' <<<"$inspect_json")"
+  user="$(python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["SSHConfig"]["RemoteUsername"])' <<<"$inspect_json")"
+  identity="$(python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["SSHConfig"]["IdentityPath"])' <<<"$inspect_json")"
+
+  local ssh_base=(
+    ssh
+    -o
+    StrictHostKeyChecking=no
+    -i
+    "$identity"
+    -p
+    "$port"
+    "${user}@127.0.0.1"
+  )
+
+  local remote_teardown
+  remote_teardown="$(cat <<EOF
+set -euo pipefail
+if ! mountpoint -q "$POSIX_ROOT"; then
+  exit 0
+fi
+$(unmount_snippet)
+EOF
+)"
+
+  log "Unmounting SeaweedFS POSIX bridge in Podman VM at $POSIX_ROOT"
+  "${ssh_base[@]}" /bin/bash -lc "$remote_teardown" sh "$POSIX_ROOT" >/dev/null 2>&1 || {
+    printf '[fs-down] failed to unmount SeaweedFS bridge in Podman VM at %s\n' "$POSIX_ROOT" >&2
+    exit 1
+  }
+}
+
+main() {
+  local stop_service=false
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      --stop-service)
+        stop_service=true
+        ;;
+      *)
+        printf '[fs-down] unknown argument: %s\n' "$1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  case "$(uname -s)" in
+    Darwin)
+      teardown_macos_mount
+      ;;
+    Linux)
+      teardown_linux_mount
+      ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      log "Windows uses local_fs by default; no external POSIX bridge is required"
+      ;;
+    *)
+      printf '[fs-down] unsupported platform: %s\n' "$(uname -s)" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ "$stop_service" = true ]; then
+    stop_seaweedfs_service
+  fi
+}
+
+main "$@"

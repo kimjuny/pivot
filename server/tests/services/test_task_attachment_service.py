@@ -1,11 +1,14 @@
 """Unit tests for assistant-generated task attachment persistence."""
 
+from __future__ import annotations
+
 import sys
 import tempfile
 import unittest
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -16,65 +19,85 @@ if str(SERVER_ROOT) not in sys.path:
 TaskAttachmentService = import_module(
     "app.services.task_attachment_service"
 ).TaskAttachmentService
+LocalFilesystemPOSIXWorkspaceProvider = import_module(
+    "app.storage.providers.local_fs"
+).LocalFilesystemPOSIXWorkspaceProvider
 SessionModel = import_module("app.models.session").Session
-Workspace = import_module("app.models.workspace").Workspace
+WorkspaceService = import_module("app.services.workspace_service").WorkspaceService
 workspace_service = import_module("app.services.workspace_service")
 
 
+class _FakeExternalPOSIXProvider(LocalFilesystemPOSIXWorkspaceProvider):
+    """Use a temporary host root while exposing an external backend root."""
+
+    def __init__(self, host_root: Path, backend_root: Path) -> None:
+        """Store one host root plus its backend-visible alias."""
+        super().__init__(host_root)
+        self._backend_root = backend_root
+
+    def local_root(self) -> Path:
+        """Return the backend-visible root instead of the host temp path."""
+        return self._backend_root
+
+
 class TaskAttachmentServiceTestCase(unittest.TestCase):
-    """Validate answer attachment normalization and snapshot persistence."""
+    """Validate answer attachment normalization and live reference persistence."""
 
     def setUp(self) -> None:
         """Create an isolated database and workspace for each test."""
         self.temp_dir = tempfile.TemporaryDirectory()
-        workspace_module = cast(Any, workspace_service)
-        self.original_workspace_root = workspace_module._WORKSPACE_ROOT
-        workspace_module._WORKSPACE_ROOT = Path(self.temp_dir.name)
+        self.host_root = Path(self.temp_dir.name) / "external-posix"
+        self.profile_patch = patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=type(
+                "ResolvedProfile",
+                (),
+                {
+                    "posix_workspace": _FakeExternalPOSIXProvider(
+                        self.host_root,
+                        Path("/app/server/external-posix"),
+                    ),
+                },
+            )(),
+        )
+        self.profile_patch.start()
 
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
         SQLModel.metadata.create_all(engine)
         self.db = Session(engine)
         self.service = TaskAttachmentService(self.db)
-
-        self.agent_workspace = workspace_module.ensure_agent_workspace(
-            "alice", 7
-        ).resolve()
-        session_workspace = workspace_module.session_workspace_dir(
-            "alice",
-            7,
-            "session-1",
-        ).resolve()
-        self.workspace = Workspace(
-            workspace_id="workspace-1",
+        self.workspace = WorkspaceService(self.db).create_workspace(
             agent_id=7,
-            user="alice",
+            username="alice",
             scope="session_private",
             session_id="session-1",
         )
-        self.db.add(self.workspace)
+        self.workspace_path = (
+            WorkspaceService(self.db).get_workspace_path(self.workspace).resolve()
+        )
         self.db.add(
             SessionModel(
                 session_id="session-1",
                 agent_id=7,
                 user="alice",
-                workspace_id="workspace-1",
+                workspace_id=self.workspace.workspace_id,
                 chat_history='{"version": 1, "messages": []}',
                 react_llm_messages="[]",
                 react_llm_cache_state="{}",
             )
         )
         self.db.commit()
-        self.agent_workspace = session_workspace
 
     def tearDown(self) -> None:
         """Restore the original workspace root and close the test database."""
         self.db.close()
-        cast(Any, workspace_service)._WORKSPACE_ROOT = self.original_workspace_root
+        self.profile_patch.stop()
         self.temp_dir.cleanup()
 
-    def test_create_from_answer_paths_snapshots_valid_workspace_files(self) -> None:
-        """Valid workspace files should be snapshotted and exposed as markdown attachments."""
-        source_file = self.agent_workspace / "outputs" / "report.md"
+    def test_create_from_answer_paths_persists_live_workspace_references(self) -> None:
+        """Valid workspace files should persist live references, not snapshots."""
+        source_file = self.workspace_path / "outputs" / "report.md"
         source_file.parent.mkdir(parents=True, exist_ok=True)
         source_file.write_text("# Report\n\nReady.", encoding="utf-8")
 
@@ -88,14 +111,17 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0].render_kind, "markdown")
         self.assertEqual(attachments[0].workspace_relative_path, "outputs/report.md")
-        self.assertTrue(Path(attachments[0].storage_path).exists())
-        self.assertNotEqual(Path(attachments[0].storage_path), source_file)
+        self.assertEqual(attachments[0].workspace_id, self.workspace.workspace_id)
+        self.assertEqual(
+            self.service.resolve_live_attachment_path(attachments[0]),
+            source_file,
+        )
 
     def test_create_from_answer_paths_skips_invalid_files_but_keeps_valid_ones(
         self,
     ) -> None:
-        """Invalid paths should be ignored without blocking valid attachment snapshots."""
-        valid_file = self.agent_workspace / "outputs" / "diagram.txt"
+        """Invalid paths should be ignored without blocking valid live attachments."""
+        valid_file = self.workspace_path / "outputs" / "diagram.txt"
         valid_file.parent.mkdir(parents=True, exist_ok=True)
         valid_file.write_text("hello", encoding="utf-8")
 
@@ -115,7 +141,7 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
     def test_create_from_answer_paths_marks_common_code_files_as_text(self) -> None:
         """Code and config files should stay previewable instead of falling back to raw download."""
-        source_file = self.agent_workspace / "outputs" / "script.js"
+        source_file = self.workspace_path / "outputs" / "script.js"
         source_file.parent.mkdir(parents=True, exist_ok=True)
         source_file.write_text("console.log('pivot')\n", encoding="utf-8")
 
@@ -132,7 +158,7 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
     def test_create_from_answer_paths_marks_hidden_env_files_as_text(self) -> None:
         """Hidden plain-text config files should remain previewable in the client."""
-        source_file = self.agent_workspace / ".env"
+        source_file = self.workspace_path / ".env"
         source_file.write_text("OPENAI_API_KEY=test\n", encoding="utf-8")
 
         attachments = self.service.create_from_answer_paths(
@@ -145,6 +171,30 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0].render_kind, "text")
         self.assertEqual(attachments[0].workspace_relative_path, ".env")
+
+    def test_live_attachment_resolution_supports_workspace_uploads(self) -> None:
+        """Assistant files in `.uploads` should resolve under the active workspace root."""
+        uploads_dir = WorkspaceService(self.db).get_workspace_uploads_path(self.workspace)
+        source_file = uploads_dir / "artifact.txt"
+        source_file.write_text("hello from uploads", encoding="utf-8")
+
+        attachments = self.service.create_from_answer_paths(
+            username="alice",
+            task_id="task-uploads",
+            session_id="session-1",
+            paths=["/workspace/.uploads/artifact.txt"],
+        )
+
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(
+            attachments[0].workspace_relative_path,
+            ".uploads/artifact.txt",
+        )
+        self.assertEqual(
+            self.service.resolve_live_attachment_path(attachments[0]),
+            source_file,
+        )
+        self.assertTrue(source_file.is_relative_to(self.workspace_path))
 
     def test_extract_declared_paths_accepts_both_spellings(self) -> None:
         """Both the corrected and legacy attachment keys should normalize cleanly."""

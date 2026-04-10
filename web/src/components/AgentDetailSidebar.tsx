@@ -149,7 +149,7 @@ function buildToolResourceId(tool: SidebarTool): string {
 
 /**
  * Build a unique resource ID for skill tabs.
- * Why: shared(user)/shared(builtin)/private may share names.
+ * Why: shared/private descriptors may share names across saved UI tabs.
  */
 function buildSkillResourceId(skill: SidebarSkill): string {
     return `${skill.kind}:${skill.source}:${skill.name}`;
@@ -412,7 +412,7 @@ function AgentDetailSidebar({
     }, []);
 
     /**
-     * Fetch both shared (builtin + user shared) and private user skills.
+     * Fetch both shared and private user skills.
      */
     useEffect(() => {
         if (hasFetchedSkillsRef.current) return;
@@ -1246,11 +1246,9 @@ function AgentDetailSidebar({
                                                                     <p className="font-semibold">{s.name}</p>
                                                                     <span className="text-[10px] text-muted-foreground">
                                                                         {s.kind === 'shared'
-                                                                            ? s.source === 'builtin'
-                                                                                ? '· shared · builtin'
-                                                                                : s.readOnly
-                                                                                  ? `· shared · ${s.creator ?? 'unknown'}`
-                                                                                  : '· shared · you'
+                                                                            ? s.readOnly
+                                                                              ? `· shared · ${s.creator ?? 'unknown'}`
+                                                                              : '· shared · you'
                                                                             : '· private'}
                                                                     </span>
                                                                 </div>

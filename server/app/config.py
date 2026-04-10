@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"
     SANDBOX_MANAGER_TIMEOUT_SECONDS: int = 30
 
+    # Storage
+    STORAGE_PROFILE: str = "local_fs"
+    STORAGE_LOCAL_ROOT: str | None = None
+    LOCAL_CACHE_ROOT: str | None = None
+    STORAGE_SEAWEEDFS_FILER_ENDPOINT: str | None = None
+    STORAGE_SEAWEEDFS_S3_ENDPOINT: str | None = None
+    STORAGE_SEAWEEDFS_ACCESS_KEY: str | None = None
+    STORAGE_SEAWEEDFS_SECRET_KEY: str | None = None
+    STORAGE_SEAWEEDFS_BUCKET: str | None = None
+    STORAGE_SEAWEEDFS_POSIX_ROOT: str | None = None
+    STORAGE_SEAWEEDFS_HOST_POSIX_ROOT: str | None = None
+
     # File uploads
     MAX_IMAGE_SIZE: int = Field(
         default=2 * 1024 * 1024,

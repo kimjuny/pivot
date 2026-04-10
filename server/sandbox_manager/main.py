@@ -46,6 +46,8 @@ class ManagerSettings(BaseSettings):
     SANDBOX_CONTAINER_PREFIX: str = "pivot-sandbox"
     SANDBOX_DEFAULT_TIMEOUT_SECONDS: int = 30
     SANDBOX_WORKSPACE_HOST_ROOT: str | None = None
+    SANDBOX_BACKEND_WORKSPACE_ROOT: str = "/app/server/workspace"
+    SANDBOX_EXTERNAL_POSIX_ROOT: str | None = "/app/server/external-posix"
     SANDBOX_POOL_SCAN_INTERVAL_SECONDS: int = 30
     SANDBOX_POOL_IDLE_TTL_SECONDS: int = 86400
     SANDBOX_POOL_MAX_SIZE: int = 100
@@ -188,52 +190,37 @@ def _mount_source(mount: dict[str, Any]) -> str | None:
     return None
 
 
-def _resolve_workspace_host_root() -> str:
-    """Resolve host-side root path for ``server/workspace`` from backend mounts."""
-    mount_sets: list[list[dict[str, Any]]] = []
-    with suppress(HTTPException):
-        mount_sets.append(_get_container_mounts(_backend_container()))
+def _backend_workspace_root() -> str:
+    """Return the workspace root path visible inside the backend container."""
+    configured_root = get_settings().SANDBOX_BACKEND_WORKSPACE_ROOT.strip()
+    if configured_root == "":
+        return "/app/server/workspace"
+    return configured_root.rstrip("/") or "/"
 
-    self_container = _self_container()
-    if self_container is not None:
-        with suppress(HTTPException):
-            mount_sets.append(_get_container_mounts(self_container))
 
-    for mounts in mount_sets:
-        for mount in mounts:
-            destination = _mount_destination(mount)
-            source = _mount_source(mount)
-            if not destination or not source:
-                continue
-            if destination == "/app/server/workspace":
-                return source.rstrip("/")
-            if destination == "/app/server":
-                return f"{source.rstrip('/')}/workspace"
-
+def _allowed_backend_workspace_roots() -> list[str]:
+    """Return all backend-visible roots that may contain sandbox workspaces."""
     settings = get_settings()
-    configured = settings.SANDBOX_WORKSPACE_HOST_ROOT
-    if configured:
-        logger.warning(
-            "Workspace host root mount auto-discovery failed; falling back to SANDBOX_WORKSPACE_HOST_ROOT=%s",
-            configured,
-        )
-        return configured.rstrip("/")
-
-    raise HTTPException(
-        status_code=500,
-        detail=(
-            "Could not resolve host path for /app/server/workspace. "
-            "Set SANDBOX_WORKSPACE_HOST_ROOT explicitly."
-        ),
-    )
+    roots = [_backend_workspace_root()]
+    external_root = (settings.SANDBOX_EXTERNAL_POSIX_ROOT or "").strip()
+    if external_root:
+        normalized_root = external_root.rstrip("/") or "/"
+        if normalized_root not in roots:
+            roots.append(normalized_root)
+    return roots
 
 
 def _ensure_workspace_dir(path_in_backend: str) -> None:
     """Create the backend-visible directory used for the primary workspace mount."""
-    if not path_in_backend.startswith("/app/server/workspace/"):
+    allowed_roots = _allowed_backend_workspace_roots()
+    allowed_prefixes = [f"{root}/" for root in allowed_roots]
+    if not any(path_in_backend.startswith(prefix) for prefix in allowed_prefixes):
         raise HTTPException(
             status_code=400,
-            detail="workspace_backend_path must stay under /app/server/workspace.",
+            detail=(
+                "workspace_backend_path must stay under one of: "
+                f"{', '.join(allowed_roots)}."
+            ),
         )
 
     backend = _backend_container()

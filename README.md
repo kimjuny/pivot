@@ -1,95 +1,131 @@
 # Pivot
 
-An agent development framework that enables strategic, purpose-driven conversations — making agents think and act more like real people.
+Pivot is an agent development framework for building, testing, and operating
+tool-using agents with a real workspace, live files, extensions, skills, and a
+full chat runtime.
 
-## Prerequisites
+## Why Pivot
 
-- [Podman](https://podman.io/docs/installation) ≥ 4.0
-- [podman-compose](https://github.com/containers/podman-compose) ≥ 1.0
+- Real agent workspace: agents work against a real `/workspace`, not a fake prompt-only sandbox.
+- Live file loop: uploads, generated files, attachments, and workspace edits stay connected.
+- Extension system: add tools, skills, hooks, and runtime capabilities as installable packages.
+- ReAct runtime: plan, act, observe, and recover through a structured task engine.
+- Local-first DX: start fast on one machine, then grow toward external storage and distributed setups.
 
-## Development
+## Quick Start
+
+### Prerequisites
+
+- [Podman](https://podman.io/docs/installation)
+- `podman compose`
+
+### Default development mode
 
 ```bash
-# First time — build images (installs all dependencies inside containers)
 podman compose build
-
-# Start dev environment (backend + frontend with hot-reload)
-podman compose up
-
-# Rebuild after dependency changes (package.json / pyproject.toml)
-podman compose build --no-cache
 podman compose up
 ```
 
-| Service  | URL                    | Description                         |
-| -------- | ---------------------- | ----------------------------------- |
-| Frontend | http://localhost:3000   | Vite dev server (hot-reload)        |
-| Backend  | http://localhost:8003   | FastAPI (auto-reload on code save)  |
+Open:
 
-Source code is bind-mounted into the containers — edit locally, changes reflect instantly.
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8003
 
-### Useful commands
+### Optional SeaweedFS mode
 
 ```bash
-# Stop all services
+scripts/fs-up.sh
+podman compose --profile seaweedfs up -d
+```
+
+`scripts/fs-up.sh` prepares the external POSIX bridge used by the `seaweedfs`
+profile. It is needed for macOS and Linux when you want real external
+workspace storage. Windows continues to use `local_fs` by default.
+
+To tear the bridge down again:
+
+```bash
+scripts/fs-down.sh
+```
+
+To inspect the current external-fs state:
+
+```bash
+scripts/fs-status.sh
+```
+
+Check the active storage mode at:
+
+```text
+GET /api/system/storage-status
+```
+
+SeaweedFS explorer:
+
+- http://localhost:8888
+
+## Development Notes
+
+- Source code is bind-mounted into containers, so edits reload automatically.
+- Default startup path:
+  - `podman compose up`
+- External-storage startup path:
+  - `scripts/fs-up.sh`
+  - `podman compose --profile seaweedfs up -d`
+
+### Common commands
+
+```bash
+# Stop services
 podman compose down
 
-# View logs
+# Logs
 podman compose logs -f backend
 podman compose logs -f frontend
+podman compose logs -f seaweedfs
 
-# Run backend linting inside container
-podman exec pivot-backend poetry run ruff check server/ --fix
-podman exec pivot-backend poetry run pyright server/
+# External POSIX bridge
+scripts/fs-up.sh
+scripts/fs-status.sh
+scripts/fs-down.sh
 
-# Run frontend checks inside container
-podman exec pivot-frontend npm run check-all
+# Backend checks
+podman compose exec backend bash server/lint.sh
+
+# Frontend checks
+podman compose exec frontend npm run check-all
 ```
 
 ## Production
 
 ```bash
-# Build the production image (frontend built & bundled into backend)
 podman build -t pivot .
-
-# Run (single container, single port)
 podman run -d -p 8080:80 --name pivot pivot
 ```
 
-Open http://localhost:8080 — the backend serves both the API and the frontend from a single process.
+Open:
 
-### Configuration
-
-| Variable       | Default                    | Description             |
-| -------------- | -------------------------- | ----------------------- |
-| `DATABASE_URL` | `sqlite:///./server/pivot.db` | Database connection URL |
-| `ENV`          | `production`               | Environment mode        |
-
-Pass environment variables at runtime:
-
-```bash
-podman run -d -p 8080:80 \
-  -e DATABASE_URL="postgresql://user:pass@host:5432/pivot" \
-  -v pivot-data:/app/server/data \
-  pivot
-```
+- http://localhost:8080
 
 ## Project Structure
 
-```
+```text
 pivot/
-├── server/              # FastAPI backend
+├── server/
 │   ├── app/
-│   │   ├── api/         # API endpoints
-│   │   ├── models/      # SQLModel database models
-│   │   ├── services/    # Business logic layer
-│   │   ├── orchestration/  # Agent orchestration (ReAct engine)
-│   │   └── llm/         # LLM provider implementations
-│   └── data/            # SQLite database (dev, gitignored)
-├── web/                 # React + Vite frontend
-│   └── src/
-├── compose.yaml         # Dev environment (podman compose)
-├── Containerfile        # Production image
-├── Containerfile.dev    # Dev image (multi-stage)
-└── pyproject.toml       # Python dependencies & tooling config
+│   │   ├── api/
+│   │   ├── models/
+│   │   ├── services/
+│   │   ├── orchestration/
+│   │   └── llm/
+│   └── data/
+├── web/
+├── compose.yaml
+├── Containerfile
+├── Containerfile.dev
+└── drafts/
 ```
+
+## Docs
+
+- Filesystem and storage design: [drafts/filesystem.md](/Users/erickim/Documents/学习/TRAE/hackon-project/pivot/drafts/filesystem.md)

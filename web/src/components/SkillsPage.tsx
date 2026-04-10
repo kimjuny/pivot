@@ -3,7 +3,6 @@ import {
   ChevronDown,
   Globe2,
   KeyRound,
-  Lock,
   Pencil,
   Plus,
   Share2,
@@ -70,7 +69,7 @@ Describe reusable guidance or process here.
 
 type SkillRow =
   | { kind: 'shared'; source: SkillSource; skill: SharedSkill }
-  | { kind: 'private'; source: Exclude<SkillSource, 'builtin'>; skill: UserSkill };
+  | { kind: 'private'; source: SkillSource; skill: UserSkill };
 
 function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -409,11 +408,6 @@ function SkillsPage() {
                       <Badge variant="outline" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
                         <UserIcon className="w-2.5 h-2.5" />
                         Private
-                      </Badge>
-                    ) : row.source === 'builtin' ? (
-                      <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
-                        <Lock className="w-2.5 h-2.5" />
-                        Shared / Builtin
                       </Badge>
                     ) : row.skill.read_only ? (
                       <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">

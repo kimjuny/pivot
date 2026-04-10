@@ -14,6 +14,7 @@ import ExtensionDetailPage from './components/ExtensionDetailPage'
 import ChannelLinkPage from './components/ChannelLinkPage'
 import StudioDashboardPage from './components/StudioDashboardPage'
 import Navigation from './components/Navigation'
+import { StorageStatusBanner } from './components/StorageStatusBanner'
 import { AuthProvider } from './contexts/AuthContext'
 import { getStoredUser, isTokenValid, useAuth } from './contexts/auth-core'
 import { ThemeProvider } from '@/components/ui/theme-provider'
@@ -56,6 +57,7 @@ export function AuthenticatedLayout({ children }: { children: React.ReactNode })
     <ProtectedRoute>
       <div className="min-h-screen bg-background text-foreground">
         <Navigation />
+        <StorageStatusBanner />
         {children}
       </div>
     </ProtectedRoute>

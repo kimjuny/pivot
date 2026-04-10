@@ -38,6 +38,9 @@ workspace_service = import_module("app.services.workspace_service")
 ExtensionHookExecutionService = (
     hook_execution_service_module.ExtensionHookExecutionService
 )
+LocalFilesystemObjectStorageProvider = import_module(
+    "app.storage.providers.local_fs"
+).LocalFilesystemObjectStorageProvider
 
 
 class ExtensionsApiTestCase(unittest.TestCase):
@@ -57,14 +60,15 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.root = Path(self.tmpdir.name)
         self.workspace_root = self.root / "workspace"
         self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self.external_workspace_root = self.root / "external-posix"
+        self.external_workspace_root.mkdir(parents=True, exist_ok=True)
+        self.runtime_cache_root = self.root / "runtime-cache"
+        self.runtime_cache_root.mkdir(parents=True, exist_ok=True)
+        self.object_storage_root = self.root / "object-storage"
+        self.object_storage_root.mkdir(parents=True, exist_ok=True)
 
         self.workspace_patch = patch.object(
             workspace_service,
-            "workspace_root",
-            return_value=self.workspace_root,
-        )
-        self.extension_workspace_patch = patch.object(
-            extension_service_module,
             "workspace_root",
             return_value=self.workspace_root,
         )
@@ -74,7 +78,6 @@ class ExtensionsApiTestCase(unittest.TestCase):
             return_value=self.workspace_root,
         )
         self.workspace_patch.start()
-        self.extension_workspace_patch.start()
         self.artifact_workspace_patch.start()
 
         self.agent = Agent(
@@ -102,7 +105,6 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.client.close()
         self.app.dependency_overrides.clear()
         self.workspace_patch.stop()
-        self.extension_workspace_patch.stop()
         self.artifact_workspace_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
@@ -116,8 +118,85 @@ class ExtensionsApiTestCase(unittest.TestCase):
         return self.user
 
     def _sample_extension_root(self) -> Path:
-        """Return the repository sample extension used by docs and tests."""
-        return SERVER_ROOT / "examples" / "extensions" / "acme-providers"
+        """Create one local provider extension used across bundle API tests."""
+        extension_root = self.root / "acme-providers"
+        provider_dir = extension_root / "web_search_providers" / "acme_search"
+        provider_dir.mkdir(parents=True, exist_ok=True)
+
+        manifest = {
+            "schema_version": 1,
+            "scope": "acme",
+            "name": "providers",
+            "display_name": "ACME Providers",
+            "version": "1.0.0",
+            "description": "Sample provider extension for API tests.",
+            "contributions": {
+                "web_search_providers": [
+                    {
+                        "entrypoint": (
+                            "web_search_providers/acme_search/provider.py"
+                        ),
+                    }
+                ]
+            },
+        }
+
+        (extension_root / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (provider_dir / "provider.py").write_text(
+            (
+                "from app.orchestration.web_search.base import BaseWebSearchProvider\n"
+                "from app.orchestration.web_search.types import (\n"
+                "    WebSearchExecutionResult,\n"
+                "    WebSearchProviderBinding,\n"
+                "    WebSearchProviderManifest,\n"
+                "    WebSearchQueryRequest,\n"
+                "    WebSearchTestResult,\n"
+                ")\n\n"
+                "class SampleSearchProvider(BaseWebSearchProvider):\n"
+                "    manifest = WebSearchProviderManifest(\n"
+                '        key="acme@search",\n'
+                '        name="ACME Search",\n'
+                '        description="Search provider for API tests.",\n'
+                '        docs_url="https://example.com/search",\n'
+                "        auth_schema=[],\n"
+                "        config_schema=[],\n"
+                '        setup_steps=["Save the extension to enable the sample provider."],\n'
+                '        supported_parameters=["query"],\n'
+                "    )\n\n"
+                "    def _search_with_binding(\n"
+                "        self,\n"
+                "        *,\n"
+                "        request: WebSearchQueryRequest,\n"
+                "        api_key: str,\n"
+                "        runtime_config: dict[str, object],\n"
+                "    ) -> WebSearchExecutionResult:\n"
+                "        del api_key, runtime_config\n"
+                "        return WebSearchExecutionResult(\n"
+                "            provider={'key': self.manifest.key, 'name': self.manifest.name},\n"
+                "            query=request.query,\n"
+                "            results=[],\n"
+                "            provider_request={'query': request.query},\n"
+                "        )\n\n"
+                "    def test_connection(\n"
+                "        self,\n"
+                "        *,\n"
+                "        auth_config: dict[str, object],\n"
+                "        runtime_config: dict[str, object],\n"
+                "    ) -> WebSearchTestResult:\n"
+                "        del auth_config, runtime_config\n"
+                "        return WebSearchTestResult(\n"
+                "            ok=True,\n"
+                "            status='ok',\n"
+                "            message='Sample search provider is healthy.',\n"
+                "        )\n\n"
+                "PROVIDER = SampleSearchProvider()\n"
+            ),
+            encoding="utf-8",
+        )
+        return extension_root
 
     def _write_hook_extension(self) -> Path:
         """Create one minimal local extension that contributes a lifecycle hook."""
@@ -194,24 +273,23 @@ class ExtensionsApiTestCase(unittest.TestCase):
         *,
         bundle_name: str,
         trust_confirmed: bool | None = None,
-    ) -> list[tuple[str, tuple[str | None, bytes | str, str | None]]]:
-        """Return one multipart payload for an extension directory upload."""
-        parts: list[tuple[str, tuple[str | None, bytes | str, str | None]]] = [
-            ("bundle_name", (None, bundle_name, None))
-        ]
+    ) -> tuple[
+        list[tuple[str, tuple[str, bytes, str]]],
+        dict[str, str | list[str]],
+    ]:
+        """Return one multipart payload split into files plus form fields."""
+        relative_paths: list[str] = []
+        data: dict[str, str | list[str]] = {"bundle_name": bundle_name}
         if trust_confirmed is not None:
-            parts.append(
-                (
-                    "trust_confirmed",
-                    (None, "true" if trust_confirmed else "false", None),
-                )
-            )
+            data["trust_confirmed"] = "true" if trust_confirmed else "false"
+
+        files: list[tuple[str, tuple[str, bytes, str]]] = []
 
         for file_path in sorted(
             path for path in extension_root.rglob("*") if path.is_file()
         ):
             relative_path = file_path.relative_to(extension_root).as_posix()
-            parts.append(
+            files.append(
                 (
                     "files",
                     (
@@ -221,22 +299,23 @@ class ExtensionsApiTestCase(unittest.TestCase):
                     ),
                 )
             )
-            parts.append(
-                ("relative_paths", (None, f"{bundle_name}/{relative_path}", None))
-            )
+            relative_paths.append(f"{bundle_name}/{relative_path}")
 
-        return parts
+        data["relative_paths"] = relative_paths
+
+        return files, data
 
     def test_preview_and_import_bundle_endpoints(self) -> None:
         """Bundle preview and import should expose trust and artifact metadata."""
-        preview_parts = self._build_bundle_upload(
+        preview_files, preview_data = self._build_bundle_upload(
             self._sample_extension_root(),
             bundle_name="acme-providers",
         )
 
         preview_response = self.client.post(
             "/api/extensions/installations/import/bundle/preview",
-            files=preview_parts,
+            files=preview_files,
+            data=preview_data,
         )
         self.assertEqual(preview_response.status_code, 200)
         preview_payload = preview_response.json()
@@ -248,37 +327,40 @@ class ExtensionsApiTestCase(unittest.TestCase):
         )
         self.assertEqual(preview_payload["contribution_summary"]["hooks"], [])
 
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             self._sample_extension_root(),
             bundle_name="acme-providers",
             trust_confirmed=True,
         )
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
         self.assertEqual(install_response.status_code, 200)
         installation_payload = install_response.json()
         self.assertEqual(installation_payload["package_id"], "@acme/providers")
         self.assertEqual(installation_payload["trust_status"], "trusted_local")
-        self.assertEqual(installation_payload["artifact_storage_backend"], "local_fs")
+        self.assertEqual(
+            installation_payload["artifact_storage_backend"],
+            artifact_storage_service_module.get_resolved_storage_profile()
+            .object_storage.backend_name,
+        )
         self.assertTrue(installation_payload["artifact_key"].endswith(".tar.gz"))
         self.assertGreater(installation_payload["artifact_size_bytes"], 0)
         self.assertTrue(installation_payload["created_at"].endswith("+00:00"))
         self.assertTrue(installation_payload["updated_at"].endswith("+00:00"))
         self.assertEqual(installation_payload["contribution_summary"]["hooks"], [])
 
-        artifact_path = self.workspace_root / Path(installation_payload["artifact_key"])
-        self.assertTrue(artifact_path.is_file())
-
-        hook_install_parts = self._build_bundle_upload(
+        hook_install_files, hook_install_data = self._build_bundle_upload(
             self._write_hook_extension(),
             bundle_name="acme-hooks",
             trust_confirmed=True,
         )
         hook_install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=hook_install_parts,
+            files=hook_install_files,
+            data=hook_install_data,
         )
         self.assertEqual(hook_install_response.status_code, 200)
         self.assertEqual(
@@ -286,19 +368,83 @@ class ExtensionsApiTestCase(unittest.TestCase):
             ["Recall Memory Context"],
         )
 
+    def test_import_bundle_keeps_runtime_cache_outside_external_workspace_root(
+        self,
+    ) -> None:
+        """External workspaces must not receive extracted extension runtime files."""
+        external_profile = type(
+            "ResolvedProfile",
+            (),
+            {
+                "object_storage": LocalFilesystemObjectStorageProvider(
+                    self.object_storage_root
+                ),
+            },
+        )()
+
+        install_files, install_data = self._build_bundle_upload(
+            self._sample_extension_root(),
+            bundle_name="acme-providers",
+            trust_confirmed=True,
+        )
+
+        with (
+            patch.object(
+                workspace_service,
+                "workspace_root",
+                return_value=self.external_workspace_root,
+            ),
+            patch.object(
+                artifact_storage_service_module,
+                "workspace_root",
+                return_value=self.external_workspace_root,
+            ),
+            patch.object(
+                extension_service_module,
+                "_extensions_root",
+                return_value=self.runtime_cache_root / "extensions",
+            ),
+            patch.object(
+                artifact_storage_service_module,
+                "get_resolved_storage_profile",
+                return_value=external_profile,
+            ),
+        ):
+            install_response = self.client.post(
+                "/api/extensions/installations/import/bundle",
+                files=install_files,
+                data=install_data,
+            )
+
+        self.assertEqual(install_response.status_code, 200)
+        installation_payload = install_response.json()
+
+        install_root = Path(installation_payload["install_root"])
+        artifact_path = self.object_storage_root / Path(
+            installation_payload["artifact_key"]
+        )
+
+        self.assertTrue(install_root.joinpath("manifest.json").is_file())
+        self.assertTrue(install_root.is_relative_to(self.runtime_cache_root))
+        self.assertFalse(install_root.is_relative_to(self.external_workspace_root))
+        self.assertTrue(artifact_path.is_file())
+        self.assertTrue(artifact_path.is_relative_to(self.object_storage_root))
+        self.assertFalse(artifact_path.is_relative_to(self.external_workspace_root))
+
     def test_hook_contributions_are_exposed_in_preview_and_install_payloads(
         self,
     ) -> None:
         """Hook packages should expose lifecycle contributions in preview and install APIs."""
         extension_root = self._write_hook_extension()
-        preview_parts = self._build_bundle_upload(
+        preview_files, preview_data = self._build_bundle_upload(
             extension_root,
             bundle_name="acme-hooks",
             trust_confirmed=False,
         )
         preview_response = self.client.post(
             "/api/extensions/installations/import/bundle/preview",
-            files=preview_parts,
+            files=preview_files,
+            data=preview_data,
         )
 
         self.assertEqual(preview_response.status_code, 200)
@@ -315,14 +461,15 @@ class ExtensionsApiTestCase(unittest.TestCase):
             },
         )
 
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             extension_root,
             bundle_name="acme-hooks",
             trust_confirmed=True,
         )
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
 
         self.assertEqual(install_response.status_code, 200)
@@ -345,7 +492,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
         """Extension APIs should expose one stable logo URL when a package ships a logo."""
         extension_root = self._write_hook_extension()
         (extension_root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             extension_root,
             bundle_name="acme-hooks",
             trust_confirmed=True,
@@ -353,7 +500,8 @@ class ExtensionsApiTestCase(unittest.TestCase):
 
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
 
         self.assertEqual(install_response.status_code, 200)
@@ -398,7 +546,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
         """The logo endpoint should preserve explicit webp assets for browsers."""
         extension_root = self._write_hook_extension()
         (extension_root / "logo.webp").write_bytes(b"RIFFtestWEBP")
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             extension_root,
             bundle_name="acme-hooks",
             trust_confirmed=True,
@@ -406,7 +554,8 @@ class ExtensionsApiTestCase(unittest.TestCase):
 
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
 
         self.assertEqual(install_response.status_code, 200)
@@ -422,14 +571,15 @@ class ExtensionsApiTestCase(unittest.TestCase):
     def test_installation_configuration_endpoints(self) -> None:
         """Configuration endpoints should expose schema and persist values."""
         extension_root = self._write_hook_extension()
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             extension_root,
             bundle_name="acme-hooks",
             trust_confirmed=True,
         )
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
         self.assertEqual(install_response.status_code, 200)
         installation_id = int(install_response.json()["id"])
@@ -456,14 +606,15 @@ class ExtensionsApiTestCase(unittest.TestCase):
 
     def test_agent_extension_binding_api_flow(self) -> None:
         """Agent extension endpoints should expose selection state after binding."""
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             self._sample_extension_root(),
             bundle_name="acme-providers",
             trust_confirmed=True,
         )
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
         self.assertEqual(install_response.status_code, 200)
         installation_payload = install_response.json()
@@ -508,14 +659,15 @@ class ExtensionsApiTestCase(unittest.TestCase):
 
     def test_bundle_import_requires_explicit_trust(self) -> None:
         """Local bundle import should fail until trust is explicitly confirmed."""
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             self._sample_extension_root(),
             bundle_name="acme-providers",
         )
 
         response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
 
         self.assertEqual(response.status_code, 400)
@@ -630,14 +782,15 @@ class ExtensionsApiTestCase(unittest.TestCase):
     def test_replay_hook_execution_endpoint_returns_safe_replay_result(self) -> None:
         """Replay API should rerun one historical hook without mutating live state."""
         extension_root = self._write_hook_extension()
-        install_parts = self._build_bundle_upload(
+        install_files, install_data = self._build_bundle_upload(
             extension_root,
             bundle_name="acme-hooks",
             trust_confirmed=True,
         )
         install_response = self.client.post(
             "/api/extensions/installations/import/bundle",
-            files=install_parts,
+            files=install_files,
+            data=install_data,
         )
         self.assertEqual(install_response.status_code, 200)
         installation_payload = install_response.json()

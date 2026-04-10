@@ -14,7 +14,6 @@ import ast
 import importlib.util
 import inspect
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,21 +24,24 @@ from typing import Any
 
 from app.models.workspace import Workspace
 from app.orchestration.tool.metadata import ToolMetadata
+from app.storage import get_resolved_storage_profile
 from app.utils.logging_config import get_logger
 from sqlmodel import Session as DBSession, select
 
 logger = get_logger("workspace_service")
 
-# Root that contains per-user subdirectories.
-# Resolved relative to this file: server/app/services/ -> server/
-_WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent / "workspace"
-_BACKEND_WORKSPACE_ROOT = "/app/server/workspace"
-
 
 def workspace_root() -> Path:
     """Return the root directory that stores all user workspaces."""
-    _WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-    return _WORKSPACE_ROOT
+    root = get_resolved_storage_profile().posix_workspace.local_root()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def backend_workspace_root() -> str:
+    """Return the workspace root path visible inside the backend container."""
+    root = get_resolved_storage_profile().posix_workspace.local_root()
+    return str(root).rstrip("/") or "/"
 
 
 def _user_tools_dir(username: str) -> Path:
@@ -66,18 +68,38 @@ def ensure_agent_workspace(username: str, agent_id: int) -> Path:
     return agent_dir
 
 
+def session_workspace_logical_root(
+    username: str,
+    agent_id: int,
+    session_id: str,
+) -> str:
+    """Return the logical root for one private session workspace."""
+    return f"users/{username}/agents/{agent_id}/sessions/{session_id}/workspace"
+
+
+def project_workspace_logical_root(
+    username: str,
+    agent_id: int,
+    project_id: str,
+) -> str:
+    """Return the logical root for one shared project workspace."""
+    return f"users/{username}/agents/{agent_id}/projects/{project_id}/workspace"
+
+
 def session_workspace_dir(username: str, agent_id: int, session_id: str) -> Path:
     """Return the directory reserved for one private session workspace."""
-    path = ensure_agent_workspace(username, agent_id) / "sessions" / session_id
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    handle = get_resolved_storage_profile().posix_workspace.ensure_workspace(
+        session_workspace_logical_root(username, agent_id, session_id)
+    )
+    return handle.host_path
 
 
 def project_workspace_dir(username: str, agent_id: int, project_id: str) -> Path:
     """Return the directory reserved for one shared project workspace."""
-    path = ensure_agent_workspace(username, agent_id) / "projects" / project_id
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    handle = get_resolved_storage_profile().posix_workspace.ensure_workspace(
+        project_workspace_logical_root(username, agent_id, project_id)
+    )
+    return handle.host_path
 
 
 class WorkspaceService:
@@ -177,10 +199,42 @@ class WorkspaceService:
             )
         raise ValueError(f"Unsupported workspace scope '{workspace.scope}'.")
 
+    def get_workspace_logical_root(self, workspace: Workspace) -> str:
+        """Return the logical storage root for one workspace row."""
+        if workspace.scope == "session_private":
+            if workspace.session_id is None:
+                raise ValueError("Workspace row is missing session_id.")
+            return session_workspace_logical_root(
+                workspace.user,
+                workspace.agent_id,
+                workspace.session_id,
+            )
+        if workspace.scope == "project_shared":
+            if workspace.project_id is None:
+                raise ValueError("Workspace row is missing project_id.")
+            return project_workspace_logical_root(
+                workspace.user,
+                workspace.agent_id,
+                workspace.project_id,
+            )
+        raise ValueError(f"Unsupported workspace scope '{workspace.scope}'.")
+
     def get_workspace_backend_path(self, workspace: Workspace) -> str:
         """Return the path visible inside the backend container for one workspace."""
-        relative_path = self.get_workspace_path(workspace).relative_to(workspace_root())
-        return f"{_BACKEND_WORKSPACE_ROOT}/{relative_path.as_posix()}"
+        backend_root = backend_workspace_root()
+        logical_root = self.get_workspace_logical_root(workspace)
+        return f"{backend_root}/{logical_root}"
+
+    def get_workspace_uploads_path(self, workspace: Workspace) -> Path:
+        """Return the runtime `.uploads` directory for one workspace.
+
+        Why: upload and assistant-generated file references should always stay
+        under the active workspace root so both local and external POSIX
+        providers expose the same runtime layout.
+        """
+        uploads_dir = self.get_workspace_path(workspace) / ".uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        return uploads_dir
 
     def delete_workspace(self, workspace_id: str) -> bool:
         """Delete one workspace record and its host-side directory.
@@ -195,8 +249,9 @@ class WorkspaceService:
         if workspace is None:
             return False
 
-        workspace_dir = self.get_workspace_path(workspace)
-        shutil.rmtree(workspace_dir, ignore_errors=True)
+        get_resolved_storage_profile().posix_workspace.delete_workspace(
+            self.get_workspace_logical_root(workspace)
+        )
         self.db.delete(workspace)
         self.db.commit()
         return True

@@ -162,10 +162,13 @@ class SkillServiceTestCase(unittest.TestCase):
         self.assertEqual(visible["team-writer"]["creator"], "alice")
         self.assertEqual(visible["team-writer"]["read_only"], False)
         self.assertEqual(visible["coding"]["source"], "builtin")
+        self.assertEqual(visible["qa-playbook"]["kind"], "shared")
         self.assertEqual(visible["research-notes"]["source"], "manual")
         self.assertEqual(visible["team-writer"]["source"], "manual")
         self.assertTrue(visible["coding"]["created_at"].endswith("+00:00"))
         self.assertTrue(visible["coding"]["updated_at"].endswith("+00:00"))
+        self.assertTrue(visible["qa-playbook"]["created_at"].endswith("+00:00"))
+        self.assertTrue(visible["qa-playbook"]["updated_at"].endswith("+00:00"))
 
         mounts = skill_service.build_skill_mounts(
             self.session,

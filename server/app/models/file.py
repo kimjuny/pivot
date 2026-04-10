@@ -14,7 +14,14 @@ class FileAsset(SQLModel, table=True):
     source: str = Field(description="Upload source such as local or clipboard")
     original_name: str = Field(description="Original client-side filename")
     stored_name: str = Field(description="Stored filename on disk")
-    storage_path: str = Field(description="Absolute path to the stored file")
+    storage_backend: str = Field(
+        default="local_fs",
+        description="Stable object-storage backend identifier for the file payload",
+    )
+    object_key: str | None = Field(
+        default=None,
+        description="Canonical object-storage key for the original file payload",
+    )
     kind: str = Field(
         default="image",
         description="Normalized asset kind such as image or document",
@@ -29,9 +36,9 @@ class FileAsset(SQLModel, table=True):
         default=None,
         description="Estimated page count for document uploads",
     )
-    markdown_path: str | None = Field(
+    markdown_object_key: str | None = Field(
         default=None,
-        description="Absolute path to cached markdown extracted from a document",
+        description="Canonical object-storage key for cached extracted markdown",
     )
     can_extract_text: bool = Field(
         default=False,
@@ -49,6 +56,10 @@ class FileAsset(SQLModel, table=True):
         default=None,
         index=True,
         description="Session UUID once the file is actually used",
+    )
+    workspace_relative_path: str | None = Field(
+        default=None,
+        description="Stable path relative to the bound workspace root once projected",
     )
     task_id: str | None = Field(
         default=None,

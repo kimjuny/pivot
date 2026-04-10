@@ -60,7 +60,7 @@ class SkillChangeApprovalRequest:
 
 def _submission_root(username: str) -> Path:
     """Return the per-user storage root for staged skill change submissions."""
-    root = workspace_root() / username / "skill_change_submissions"
+    root = workspace_root() / "users" / username / "skills" / ".submissions"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -335,10 +335,6 @@ def stage_skill_change_submission(
         if existing is None:
             change_type = "create"
         else:
-            if existing.builtin:
-                raise PermissionError(
-                    f"Skill '{skill_name}' is built-in and cannot be changed."
-                )
             if existing.creator_id != current_user.id:
                 raise PermissionError(
                     f"Skill '{skill_name}' is owned by another creator."

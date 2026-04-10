@@ -50,7 +50,7 @@ class Agent(SQLModel, table=True):
             ``None`` means no restriction (all tools visible); an empty list means
             no tools are available to the agent.
         skill_ids: JSON-encoded list of skill names this agent is allowed to use.
-            Names are globally unique across builtin, shared, and private skills.
+            Names are globally unique across shared and private skills.
             ``None`` means no restriction (all visible skills); an empty list means
             no skills are available to the agent.
         created_at: UTC timestamp when the agent was created.
