@@ -320,7 +320,9 @@ class TaskAttachmentService:
             )
             return None
 
-        workspace_dir = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        workspace_dir = (
+            WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        )
         host_path = (workspace_dir / attachment.workspace_relative_path).resolve()
         if not host_path.is_relative_to(workspace_dir):
             logger.warning(

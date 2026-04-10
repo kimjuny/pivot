@@ -124,7 +124,7 @@ describe("ChatContainer session rollover", () => {
       id: 1,
       project_id: "project-1",
       agent_id: 7,
-      name: "New project",
+      name: "New Project",
       description: null,
       workspace_id: "workspace-1",
       created_at: "2026-03-19T00:00:00.000Z",
@@ -1402,7 +1402,7 @@ describe("ChatContainer session rollover", () => {
       expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
     });
 
-    await user.click(screen.getByRole("button", { name: "New Session" }));
+    await user.click(screen.getByRole("button", { name: "New Chat" }));
     await user.type(screen.getByPlaceholderText("Ask anything"), "Start fresh");
     await user.click(screen.getByRole("button", { name: "Send" }));
 

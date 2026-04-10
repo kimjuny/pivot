@@ -160,6 +160,10 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         resolved_payload.get("summary"),
         "summary",
     )
+    thinking_next_turn = _expect_optional_bool(
+        resolved_payload.get("thinking_next_turn"),
+        "thinking_next_turn",
+    )
     session_title = _expect_optional_string(
         resolved_payload.get("session_title"),
         "session_title",
@@ -175,6 +179,7 @@ def parse_react_output(content: str) -> ParsedReactDecision:
         observe=observe,
         reason=reason,
         summary=summary,
+        thinking_next_turn=thinking_next_turn,
         session_title=session_title,
         action=action,
         task_summary=task_summary,
@@ -236,6 +241,26 @@ def _parse_action(payload: dict[str, Any]) -> ParsedAction:
         step_status_update=step_status_update,
         tool_calls=tool_calls,
     )
+
+
+def _expect_optional_bool(value: Any, field_name: str) -> bool | None:
+    """Return an optional boolean field after strict validation.
+
+    Args:
+        value: Raw parsed value.
+        field_name: Human-readable field name for error messages.
+
+    Returns:
+        ``None`` when the field is absent, otherwise the validated boolean.
+
+    Raises:
+        ValueError: If the value exists but is not a boolean.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{field_name} must be a boolean when provided.")
 
 
 def _parse_step_id(raw_value: Any) -> str | None:

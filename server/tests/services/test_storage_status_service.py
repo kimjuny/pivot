@@ -30,7 +30,9 @@ class StorageStatusServiceTestCase(unittest.TestCase):
                 "requested_profile": "seaweedfs",
                 "active_profile": "local_fs",
                 "fallback_reason": "external_profile_unavailable",
-                "object_storage": type("ObjectStorage", (), {"backend_name": "local_fs"})(),
+                "object_storage": type(
+                    "ObjectStorage", (), {"backend_name": "local_fs"}
+                )(),
                 "posix_workspace": type(
                     "PosixWorkspace",
                     (),
@@ -40,7 +42,9 @@ class StorageStatusServiceTestCase(unittest.TestCase):
         )()
 
         with (
-            patch.object(module, "get_resolved_storage_profile", return_value=fake_profile),
+            patch.object(
+                module, "get_resolved_storage_profile", return_value=fake_profile
+            ),
             patch.object(
                 module,
                 "backend_workspace_root",
@@ -84,7 +88,9 @@ class StorageStatusServiceTestCase(unittest.TestCase):
         self.assertEqual(snapshot.fallback_reason, "external_profile_unavailable")
         self.assertEqual(snapshot.backend_workspace_root, "/srv/pivot-workspaces")
         self.assertEqual(snapshot.external_posix_root, "/srv/pivot-external-posix")
-        self.assertEqual(snapshot.external_host_posix_root, "/host/pivot-external-posix")
+        self.assertEqual(
+            snapshot.external_host_posix_root, "/host/pivot-external-posix"
+        )
         self.assertTrue(snapshot.external_posix_root_exists)
         self.assertTrue(snapshot.external_filer_reachable)
         self.assertFalse(snapshot.external_namespace_shared)

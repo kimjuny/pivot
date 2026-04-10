@@ -24,9 +24,7 @@ class MountedPOSIXWorkspaceProvider(POSIXWorkspaceProvider):
     def healthcheck(self) -> None:
         """Ensure the mounted POSIX root is available on the host."""
         if not self._root.exists() or not self._root.is_dir():
-            raise FileNotFoundError(
-                f"Mounted POSIX root does not exist: {self._root}"
-            )
+            raise FileNotFoundError(f"Mounted POSIX root does not exist: {self._root}")
 
     def ensure_workspace(self, logical_root: str) -> WorkspaceHandle:
         """Ensure one logical workspace directory exists under the mount root."""

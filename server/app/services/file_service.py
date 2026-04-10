@@ -645,9 +645,11 @@ class FileService:
         if file_asset.markdown_object_key and self._object_storage().exists(
             file_asset.markdown_object_key
         ):
-            return self._object_storage().get_bytes(
-                file_asset.markdown_object_key
-            ).decode("utf-8")
+            return (
+                self._object_storage()
+                .get_bytes(file_asset.markdown_object_key)
+                .decode("utf-8")
+            )
 
         if not file_asset.object_key:
             raise ValueError("File asset does not have an object key.")
@@ -1014,12 +1016,17 @@ class FileService:
                 workspace_relative_path=relative_path,
             )
 
-        projection_path = workspace_service.get_workspace_path(workspace) / relative_path
+        projection_path = (
+            workspace_service.get_workspace_path(workspace) / relative_path
+        )
         object_projection_path = self._resolve_projection_object_path(
             projection_object_key
         )
         payload = self._read_object_bytes(file_asset)
-        if object_projection_path is not None and object_projection_path == projection_path:
+        if (
+            object_projection_path is not None
+            and object_projection_path == projection_path
+        ):
             self._object_storage().put_bytes(
                 projection_object_key,
                 payload,
@@ -1046,7 +1053,10 @@ class FileService:
         object_projection_path = self._resolve_projection_object_path(
             projection_object_key
         )
-        if object_projection_path is not None and object_projection_path == projection_path:
+        if (
+            object_projection_path is not None
+            and object_projection_path == projection_path
+        ):
             self._object_storage().delete(projection_object_key)
         else:
             projection_path.unlink(missing_ok=True)

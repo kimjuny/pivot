@@ -43,9 +43,7 @@ ExtensionHookEffectService = import_module(
 ExtensionHookReplayService = import_module(
     "app.services.extension_hook_replay_service"
 ).ExtensionHookReplayService
-artifact_storage_service_module = import_module(
-    "app.services.artifact_storage_service"
-)
+artifact_storage_service_module = import_module("app.services.artifact_storage_service")
 extension_service_module = import_module("app.services.extension_service")
 ExtensionBundleImportFile = extension_service_module.ExtensionBundleImportFile
 ExtensionService = extension_service_module.ExtensionService

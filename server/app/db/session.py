@@ -357,7 +357,9 @@ def ensure_file_schema_compatibility() -> None:
     columns = {column["name"] for column in inspector.get_columns("fileasset")}
     with engine.begin() as conn:
         if "storage_backend" not in columns:
-            conn.execute(text("ALTER TABLE fileasset ADD COLUMN storage_backend VARCHAR"))
+            conn.execute(
+                text("ALTER TABLE fileasset ADD COLUMN storage_backend VARCHAR")
+            )
         if "object_key" not in columns:
             conn.execute(text("ALTER TABLE fileasset ADD COLUMN object_key VARCHAR"))
         if "kind" not in columns:
@@ -416,7 +418,9 @@ def ensure_task_attachment_schema_compatibility() -> None:
     columns = {column["name"] for column in inspector.get_columns("taskattachment")}
     with engine.begin() as conn:
         if "workspace_id" not in columns:
-            conn.execute(text("ALTER TABLE taskattachment ADD COLUMN workspace_id VARCHAR"))
+            conn.execute(
+                text("ALTER TABLE taskattachment ADD COLUMN workspace_id VARCHAR")
+            )
         if "workspace_relative_path" not in columns:
             conn.execute(
                 text(
@@ -462,7 +466,9 @@ def ensure_skill_schema_compatibility() -> None:
         if "artifact_digest" not in columns:
             conn.execute(text("ALTER TABLE skill ADD COLUMN artifact_digest VARCHAR"))
         if "artifact_size_bytes" not in columns:
-            conn.execute(text("ALTER TABLE skill ADD COLUMN artifact_size_bytes INTEGER"))
+            conn.execute(
+                text("ALTER TABLE skill ADD COLUMN artifact_size_bytes INTEGER")
+            )
             conn.execute(
                 text(
                     "UPDATE skill SET artifact_size_bytes = 0 "

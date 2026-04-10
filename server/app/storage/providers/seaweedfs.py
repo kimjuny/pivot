@@ -94,5 +94,7 @@ class SeaweedFSFilerObjectStorageProvider(ObjectStorageProvider):
     def _object_url(self, key: str) -> str:
         """Build one filer URL from a logical storage key."""
         normalized_key = "/".join(_normalize_key(key))
-        encoded_path = "/".join(quote(part, safe="") for part in normalized_key.split("/"))
+        encoded_path = "/".join(
+            quote(part, safe="") for part in normalized_key.split("/")
+        )
         return f"{self._filer_endpoint}/{encoded_path}"

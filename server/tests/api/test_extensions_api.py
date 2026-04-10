@@ -133,9 +133,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
             "contributions": {
                 "web_search_providers": [
                     {
-                        "entrypoint": (
-                            "web_search_providers/acme_search/provider.py"
-                        ),
+                        "entrypoint": ("web_search_providers/acme_search/provider.py"),
                     }
                 ]
             },
@@ -343,8 +341,7 @@ class ExtensionsApiTestCase(unittest.TestCase):
         self.assertEqual(installation_payload["trust_status"], "trusted_local")
         self.assertEqual(
             installation_payload["artifact_storage_backend"],
-            artifact_storage_service_module.get_resolved_storage_profile()
-            .object_storage.backend_name,
+            artifact_storage_service_module.get_resolved_storage_profile().object_storage.backend_name,
         )
         self.assertTrue(installation_payload["artifact_key"].endswith(".tar.gz"))
         self.assertGreater(installation_payload["artifact_size_bytes"], 0)

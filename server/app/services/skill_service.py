@@ -481,7 +481,11 @@ def _serialize_skill(
         creator_lookup.get(skill.creator_id) if skill.creator_id is not None else None
     )
     read_only = False
-    if creator is not None and current_username is not None and creator != current_username:
+    if (
+        creator is not None
+        and current_username is not None
+        and creator != current_username
+    ):
         read_only = True
 
     return {
@@ -1342,7 +1346,9 @@ def _create_skill_row(
         artifact_storage_backend=(
             stored_artifact.storage_backend if stored_artifact is not None else None
         ),
-        artifact_key=stored_artifact.artifact_key if stored_artifact is not None else None,
+        artifact_key=stored_artifact.artifact_key
+        if stored_artifact is not None
+        else None,
         artifact_digest=(
             stored_artifact.artifact_digest if stored_artifact is not None else None
         ),

@@ -159,6 +159,7 @@ class ReactEngine:
         runtime_kwargs = dict(self.llm_runtime_kwargs)
         if not self.thinking_runtime_config:
             return runtime_kwargs
+        previous_iteration_failed = self._previous_recursion_failed(task)
 
         runtime_kwargs.update(
             build_runtime_thinking_kwargs(
@@ -170,10 +171,64 @@ class ReactEngine:
                 ),
                 thinking_mode=self.thinking_runtime_config.get("thinking_mode"),
                 iteration_index=task.iteration,
-                previous_iteration_failed=self._previous_recursion_failed(task),
+                next_turn_thinking=(
+                    None
+                    if previous_iteration_failed
+                    else self._previous_recursion_requested_thinking(task)
+                ),
+                previous_iteration_failed=previous_iteration_failed,
             )
         )
         return runtime_kwargs
+
+    def _previous_recursion_requested_thinking(
+        self,
+        task: ReactTask,
+    ) -> bool | None:
+        """Return the previous recursion's Auto-mode thinking hint.
+
+        Why: the prompt contract lets the agent choose whether the next
+        recursion should think deeply. We persist raw assistant messages in the
+        session runtime window already, so Auto mode can recover that hint
+        without introducing extra task schema state.
+
+        Args:
+            task: Task whose latest assistant decision should be inspected.
+
+        Returns:
+            ``True`` or ``False`` when the latest current-task assistant payload
+            contains ``thinking_next_turn``; otherwise ``None``.
+        """
+        if not task.session_id:
+            return None
+
+        try:
+            runtime_state = self.runtime_service.load(task)
+        except RuntimeError:
+            return None
+
+        start_index = max(task.runtime_message_start_index, 0)
+        task_messages = runtime_state.messages[start_index:]
+        for message in reversed(task_messages):
+            if message.get("role") != "assistant":
+                continue
+
+            content = message.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+
+            try:
+                decision = parse_react_output(content)
+            except ValueError:
+                logger.warning(
+                    "Failed to parse previous assistant payload while resolving "
+                    "Auto thinking. task_id=%s",
+                    task.task_id,
+                )
+                return None
+            return decision.thinking_next_turn
+
+        return None
 
     def _new_token_counter(self) -> dict[str, int]:
         """Create a token counter used across parse retries.

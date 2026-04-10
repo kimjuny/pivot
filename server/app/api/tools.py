@@ -3,7 +3,7 @@
 Provides two categories of tools:
 - **Shared tools**: built-in tools loaded at startup, available to all users.
 - **Private tools**: per-user Python source files stored under
-  ``server/workspace/{username}/tools/``.
+  ``users/{username}/tools/`` in the active POSIX storage root.
 
 All endpoints require authentication.
 """

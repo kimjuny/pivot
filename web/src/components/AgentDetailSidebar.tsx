@@ -281,6 +281,7 @@ function AgentDetailSidebar({
     const hasFetchedSkillsRef = useRef(false);
     const hasFetchedChannelsCatalogRef = useRef(false);
     const hasFetchedWebSearchCatalogRef = useRef(false);
+    const latestAgentIdRef = useRef<number | null>(agent?.id ?? null);
     const { openTab, activeTabId } = useAgentTabStore();
 
     // Sync localToolIds when the agent prop changes
@@ -292,6 +293,24 @@ function AgentDetailSidebar({
     useEffect(() => {
         setLocalSkillIds(agent?.skill_ids);
     }, [agent?.skill_ids]);
+
+    /**
+     * Reset agent-scoped sidebar projections when the inspected agent changes.
+     * Why: the detail page reuses one sidebar instance across agents, so the
+     * previous agent's bindings can otherwise linger until the next fetch wins.
+     */
+    useEffect(() => {
+        latestAgentIdRef.current = agent?.id ?? null;
+        setChannels([]);
+        setWebSearchBindings([]);
+        setExtensionPackages([]);
+        setEditingChannel(null);
+        setEditingWebSearchBinding(null);
+        setEditingExtensionPackage(null);
+        setIsChannelDialogOpen(false);
+        setIsWebSearchDialogOpen(false);
+        setIsExtensionDialogOpen(false);
+    }, [agent?.id]);
 
     /**
      * Sidebar should display tools that are currently configured for this agent,
@@ -505,14 +524,18 @@ function AgentDetailSidebar({
      * agent changes or after any binding mutation.
      */
     const loadChannels = useCallback(async () => {
-        if (!agent?.id) {
+        const requestedAgentId = agent?.id ?? null;
+        if (!requestedAgentId) {
             setChannels([]);
             return;
         }
 
         setChannelsLoading(true);
         try {
-            const bindings = await getAgentChannels(agent.id);
+            const bindings = await getAgentChannels(requestedAgentId);
+            if (latestAgentIdRef.current !== requestedAgentId) {
+                return;
+            }
             const nextBindings = bindings.map((binding) => ({
                 id: binding.id,
                 name: binding.name,
@@ -535,7 +558,9 @@ function AgentDetailSidebar({
             console.error('Failed to fetch channel bindings:', error);
             toast.error('Failed to load agent channels');
         } finally {
-            setChannelsLoading(false);
+            if (latestAgentIdRef.current === requestedAgentId) {
+                setChannelsLoading(false);
+            }
         }
     }, [agent?.id, onChannelBindingsLoaded]);
 
@@ -548,14 +573,18 @@ function AgentDetailSidebar({
      * current agent changes or after any binding mutation.
      */
     const loadWebSearchBindings = useCallback(async () => {
-        if (!agent?.id) {
+        const requestedAgentId = agent?.id ?? null;
+        if (!requestedAgentId) {
             setWebSearchBindings([]);
             return;
         }
 
         setWebSearchLoading(true);
         try {
-            const bindings = await getAgentWebSearchBindings(agent.id);
+            const bindings = await getAgentWebSearchBindings(requestedAgentId);
+            if (latestAgentIdRef.current !== requestedAgentId) {
+                return;
+            }
             const nextBindings = bindings.map((binding) => ({
                 id: binding.id,
                 providerKey: binding.provider_key,
@@ -576,7 +605,9 @@ function AgentDetailSidebar({
             console.error('Failed to fetch web search bindings:', error);
             toast.error('Failed to load web search providers');
         } finally {
-            setWebSearchLoading(false);
+            if (latestAgentIdRef.current === requestedAgentId) {
+                setWebSearchLoading(false);
+            }
         }
     }, [agent?.id, onWebSearchBindingsLoaded]);
 
@@ -766,21 +797,27 @@ function AgentDetailSidebar({
      * the current agent changes or after any extension mutation.
      */
     const loadExtensionPackages = useCallback(async () => {
-        if (!agent?.id) {
+        const requestedAgentId = agent?.id ?? null;
+        if (!requestedAgentId) {
             setExtensionPackages([]);
             return;
         }
 
         setExtensionsLoading(true);
         try {
-            const packages = await getAgentExtensionPackages(agent.id);
+            const packages = await getAgentExtensionPackages(requestedAgentId);
+            if (latestAgentIdRef.current !== requestedAgentId) {
+                return;
+            }
             setExtensionPackages(packages);
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             console.error('Failed to fetch extension packages:', error);
             toast.error('Failed to load extensions');
         } finally {
-            setExtensionsLoading(false);
+            if (latestAgentIdRef.current === requestedAgentId) {
+                setExtensionsLoading(false);
+            }
         }
     }, [agent?.id]);
 

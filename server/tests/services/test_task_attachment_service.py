@@ -174,7 +174,9 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
 
     def test_live_attachment_resolution_supports_workspace_uploads(self) -> None:
         """Assistant files in `.uploads` should resolve under the active workspace root."""
-        uploads_dir = WorkspaceService(self.db).get_workspace_uploads_path(self.workspace)
+        uploads_dir = WorkspaceService(self.db).get_workspace_uploads_path(
+            self.workspace
+        )
         source_file = uploads_dir / "artifact.txt"
         source_file.write_text("hello from uploads", encoding="utf-8")
 

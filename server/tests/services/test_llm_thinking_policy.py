@@ -20,27 +20,43 @@ thinking_policy = import_module("app.llm.thinking_policy")
 class ThinkingPolicyTestCase(unittest.TestCase):
     """Verify thinking configuration maps cleanly onto provider payloads."""
 
-    def test_auto_mode_defaults_to_thinking_on_first_iteration(self) -> None:
-        """Auto mode should preserve deep reasoning for the opening plan pass."""
+    def test_auto_mode_defaults_to_fast_without_agent_hint(self) -> None:
+        """Auto mode should stay fast until the agent explicitly asks for thinking."""
         kwargs = thinking_policy.build_runtime_thinking_kwargs(
             protocol="openai_response_llm",
             thinking_policy="openai-response-reasoning-effort",
             thinking_effort="high",
             thinking_mode="auto",
             iteration_index=0,
+            next_turn_thinking=None,
             previous_iteration_failed=False,
         )
 
-        self.assertEqual(kwargs, {"reasoning": {"effort": "high"}})
+        self.assertEqual(kwargs, {"reasoning": {"effort": "none"}})
 
-    def test_auto_mode_falls_back_to_fast_after_clean_iteration(self) -> None:
-        """Auto mode should stay cheap once the task is progressing normally."""
+    def test_auto_mode_uses_agent_requested_thinking(self) -> None:
+        """Auto mode should honor the prior recursion's explicit deep-think request."""
         kwargs = thinking_policy.build_runtime_thinking_kwargs(
             protocol="openai_response_llm",
             thinking_policy="openai-response-reasoning-effort",
             thinking_effort="high",
             thinking_mode="auto",
             iteration_index=1,
+            next_turn_thinking=True,
+            previous_iteration_failed=False,
+        )
+
+        self.assertEqual(kwargs, {"reasoning": {"effort": "high"}})
+
+    def test_auto_mode_falls_back_to_fast_after_clean_iteration(self) -> None:
+        """Auto mode should stay cheap when the prior recursion declined thinking."""
+        kwargs = thinking_policy.build_runtime_thinking_kwargs(
+            protocol="openai_response_llm",
+            thinking_policy="openai-response-reasoning-effort",
+            thinking_effort="high",
+            thinking_mode="auto",
+            iteration_index=1,
+            next_turn_thinking=False,
             previous_iteration_failed=False,
         )
 
@@ -54,6 +70,7 @@ class ThinkingPolicyTestCase(unittest.TestCase):
             thinking_effort="high",
             thinking_mode="auto",
             iteration_index=2,
+            next_turn_thinking=False,
             previous_iteration_failed=True,
         )
 

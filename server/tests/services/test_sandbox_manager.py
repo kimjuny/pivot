@@ -241,7 +241,7 @@ class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
             ),
             self.assertRaisesRegex(Exception, "/srv/pivot-workspaces"),
         ):
-                module._ensure_workspace_dir("/app/server/workspace/alice")
+            module._ensure_workspace_dir("/app/server/workspace/alice")
 
     def test_ensure_workspace_dir_accepts_external_posix_root(self) -> None:
         """External POSIX roots should be treated as valid workspace parents."""

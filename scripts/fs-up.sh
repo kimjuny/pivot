@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POSIX_ROOT="${PIVOT_EXTERNAL_POSIX_ROOT:-/tmp/pivot-seaweedfs-posix}"
 FILER_ENDPOINT="${PIVOT_SEAWEEDFS_FILER_ENDPOINT:-127.0.0.1:8888}"
+FILER_GRPC_ENDPOINT="${PIVOT_SEAWEEDFS_FILER_GRPC_ENDPOINT:-}"
 MOUNT_LOG="${PIVOT_SEAWEEDFS_MOUNT_LOG:-/tmp/pivot-seaweedfs-mount.log}"
 
 usage() {
@@ -24,6 +25,7 @@ Behavior:
 Environment overrides:
 - PIVOT_EXTERNAL_POSIX_ROOT
 - PIVOT_SEAWEEDFS_FILER_ENDPOINT
+- PIVOT_SEAWEEDFS_FILER_GRPC_ENDPOINT
 - PIVOT_SEAWEEDFS_MOUNT_LOG
 EOF
 }
@@ -47,6 +49,21 @@ ensure_seaweedfs_service() {
   )
 }
 
+derive_filer_grpc_endpoint() {
+  if [ -n "$FILER_GRPC_ENDPOINT" ]; then
+    printf '%s\n' "$FILER_GRPC_ENDPOINT"
+    return 0
+  fi
+
+  local filer_host="${FILER_ENDPOINT%:*}"
+  local filer_port="${FILER_ENDPOINT##*:}"
+  if [[ "$filer_host" == "$FILER_ENDPOINT" ]] || ! [[ "$filer_port" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  printf '%s:%s\n' "$filer_host" "$((filer_port + 10000))"
+}
+
 wait_for_filer() {
   require_command curl
 
@@ -67,6 +84,48 @@ wait_for_filer() {
   exit 1
 }
 
+wait_for_filer_grpc() {
+  require_command python3
+
+  local grpc_endpoint
+  if ! grpc_endpoint="$(derive_filer_grpc_endpoint)"; then
+    log "Skipping filer gRPC readiness probe because endpoint could not be derived"
+    return 0
+  fi
+
+  local grpc_host="${grpc_endpoint%:*}"
+  local grpc_port="${grpc_endpoint##*:}"
+  local attempts=30
+  local index=1
+
+  log "Waiting for SeaweedFS filer gRPC at ${grpc_endpoint}"
+  while [ "$index" -le "$attempts" ]; do
+    if python3 - "$grpc_host" "$grpc_port" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+sock = socket.socket()
+sock.settimeout(2)
+try:
+    sock.connect((host, port))
+except OSError:
+    raise SystemExit(1)
+finally:
+    sock.close()
+PY
+    then
+      return 0
+    fi
+    sleep 1
+    index=$((index + 1))
+  done
+
+  printf '[fs-up] SeaweedFS filer gRPC did not become ready at %s\n' "$grpc_endpoint" >&2
+  exit 1
+}
+
 mount_probe_snippet() {
   cat <<'EOF'
 probe_path="$1/.pivot-fs-up-probe.$$"
@@ -83,6 +142,28 @@ if command -v fusermount >/dev/null 2>&1; then
 else
   umount "$1"
 fi
+EOF
+}
+
+wait_for_mount_ready_snippet() {
+  cat <<'EOF'
+mount_root="$1"
+attempts=20
+index=1
+while [ "$index" -le "$attempts" ]; do
+  if mountpoint -q "$mount_root" && bash -lc "$(cat <<'INNER'
+probe_path="$1/.pivot-fs-up-probe.$$"
+printf 'pivot-fs-up\n' >"$probe_path"
+grep -q 'pivot-fs-up' "$probe_path"
+rm -f "$probe_path"
+INNER
+)" -- "$mount_root" >/dev/null 2>&1; then
+    exit 0
+  fi
+  sleep 1
+  index=$((index + 1))
+done
+exit 1
 EOF
 }
 
@@ -122,15 +203,8 @@ ensure_linux_mount() {
     -volumeServerAccess=filerProxy \
     >"$MOUNT_LOG" 2>&1 &
 
-  sleep 2
-
-  if ! mountpoint -q "$POSIX_ROOT"; then
-    printf '[fs-up] mount did not appear at %s; check %s\n' "$POSIX_ROOT" "$MOUNT_LOG" >&2
-    exit 1
-  fi
-
-  if ! bash -lc "$(mount_probe_snippet)" -- "$POSIX_ROOT" >/dev/null 2>&1; then
-    printf '[fs-up] mounted path is not writable at %s; check %s\n' "$POSIX_ROOT" "$MOUNT_LOG" >&2
+  if ! bash -lc "$(wait_for_mount_ready_snippet)" -- "$POSIX_ROOT"; then
+    printf '[fs-up] mounted path did not become ready at %s; check %s\n' "$POSIX_ROOT" "$MOUNT_LOG" >&2
     exit 1
   fi
 
@@ -188,9 +262,7 @@ if mountpoint -q "$POSIX_ROOT"; then
   $(unmount_snippet)
 fi
 nohup $(mount_command_snippet) >"$MOUNT_LOG" 2>&1 &
-sleep 2
-mountpoint -q "$POSIX_ROOT"
-$(mount_probe_snippet)
+bash -lc '$(wait_for_mount_ready_snippet)' -- "$POSIX_ROOT"
 EOF
 )"
 
@@ -215,11 +287,13 @@ main() {
     Darwin)
       ensure_seaweedfs_service
       wait_for_filer
+      wait_for_filer_grpc
       ensure_macos_mount
       ;;
     Linux)
       ensure_seaweedfs_service
       wait_for_filer
+      wait_for_filer_grpc
       ensure_linux_mount
       ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)

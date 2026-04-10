@@ -187,6 +187,7 @@ def resolve_runtime_thinking_mode(
     thinking_effort: str | None = None,
     thinking_mode: ThinkingMode | None = None,
     iteration_index: int | None = None,
+    next_turn_thinking: bool | None = None,
     previous_iteration_failed: bool = False,
 ) -> Literal["fast", "thinking"]:
     """Resolve the effective runtime mode for one recursion.
@@ -196,6 +197,8 @@ def resolve_runtime_thinking_mode(
         thinking_effort: Optional effort tier.
         thinking_mode: User-selected runtime mode.
         iteration_index: Zero-based iteration index of the current recursion.
+        next_turn_thinking: Agent-authored Auto-mode hint persisted from the
+            previous recursion for the current recursion to honor.
         previous_iteration_failed: Whether the immediately preceding recursion
             failed and should unlock deeper reasoning for recovery.
 
@@ -214,8 +217,9 @@ def resolve_runtime_thinking_mode(
     if effective_mode == "fast":
         return "fast"
 
-    current_iteration_index = iteration_index if iteration_index is not None else 0
-    if current_iteration_index <= 0 or previous_iteration_failed:
+    if previous_iteration_failed:
+        return "thinking"
+    if next_turn_thinking is True:
         return "thinking"
     return "fast"
 
@@ -228,6 +232,7 @@ def build_runtime_thinking_kwargs(
     thinking_budget_tokens: int | None = None,
     thinking_mode: ThinkingMode | None = None,
     iteration_index: int | None = None,
+    next_turn_thinking: bool | None = None,
     previous_iteration_failed: bool = False,
 ) -> dict[str, Any]:
     """Translate stored thinking config plus runtime mode into request kwargs.
@@ -239,6 +244,8 @@ def build_runtime_thinking_kwargs(
         thinking_budget_tokens: Optional budget for extended thinking.
         thinking_mode: User-selected runtime mode.
         iteration_index: Zero-based iteration index of the current recursion.
+        next_turn_thinking: Agent-authored Auto-mode hint from the immediately
+            preceding recursion, if available.
         previous_iteration_failed: Whether the immediately preceding recursion
             failed and should enable recovery-oriented thinking in Auto mode.
 
@@ -263,6 +270,7 @@ def build_runtime_thinking_kwargs(
         thinking_effort=normalized_effort,
         thinking_mode=thinking_mode,
         iteration_index=iteration_index,
+        next_turn_thinking=next_turn_thinking,
         previous_iteration_failed=previous_iteration_failed,
     )
     if effective_mode == "thinking":

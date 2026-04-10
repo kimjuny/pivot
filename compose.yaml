@@ -143,14 +143,21 @@ services:
     profiles:
       - seaweedfs
     ports:
-      - "7333:7333"
       - "8333:8333"
       - "8888:8888"
       - "18888:18888"
-      - "9333:9333"
     volumes:
       - seaweedfs-data:/data
-    command: mini -dir=/data
+    command:
+      - mini
+      - -dir=/data
+      # Why: fs-up mounts from the Podman VM host, not from inside the
+      # container network. Advertising loopback keeps the filer's grpc address
+      # aligned with the published host ports instead of leaking an internal
+      # bridge IP into mount clients.
+      - -ip=127.0.0.1
+      - -ip.bind=0.0.0.0
+      - -filer.port.grpc=18888
 
 volumes:
   seaweedfs-data:

@@ -41,7 +41,10 @@ class StorageResolverTestCase(unittest.TestCase):
 
             with (
                 patch.object(resolver_module, "get_settings", return_value=settings),
-                patch("app.storage.providers.seaweedfs.requests.get", return_value=response),
+                patch(
+                    "app.storage.providers.seaweedfs.requests.get",
+                    return_value=response,
+                ),
                 patch.object(
                     resolver_module,
                     "_verify_seaweedfs_shared_namespace",
@@ -133,7 +136,10 @@ class StorageResolverTestCase(unittest.TestCase):
 
             with (
                 patch.object(resolver_module, "get_settings", return_value=settings),
-                patch("app.storage.providers.seaweedfs.requests.get", return_value=response),
+                patch(
+                    "app.storage.providers.seaweedfs.requests.get",
+                    return_value=response,
+                ),
                 patch.object(
                     resolver_module,
                     "_verify_seaweedfs_shared_namespace",
@@ -164,7 +170,10 @@ class StorageResolverTestCase(unittest.TestCase):
 
             with (
                 patch.object(resolver_module, "get_settings", return_value=settings),
-                patch("app.storage.providers.seaweedfs.requests.get", return_value=response),
+                patch(
+                    "app.storage.providers.seaweedfs.requests.get",
+                    return_value=response,
+                ),
                 patch.object(
                     resolver_module,
                     "_verify_seaweedfs_shared_namespace",

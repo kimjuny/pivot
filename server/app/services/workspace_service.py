@@ -1,8 +1,9 @@
-"""Workspace service for managing per-user private tool files.
+"""Workspace service for managing workspace-backed runtime paths.
 
-Each user has an isolated workspace directory under ``server/workspace/{username}/``.
-This service provides CRUD operations over the ``tools/`` sub-folder of that
-workspace, keeping private tools as plain ``.py`` source files on disk.
+User-owned runtime files live under the unified storage namespace
+``users/{username}/...``. This service provides CRUD operations over the
+workspace-backed ``tools/`` sub-folder, keeping private tools as plain ``.py``
+source files on disk.
 
 The service intentionally works with raw source code strings so that:
 1. The frontend can display and edit the full file contents in an editor.
@@ -51,9 +52,9 @@ def _user_tools_dir(username: str) -> Path:
         username: The authenticated username.
 
     Returns:
-        Absolute path to ``server/workspace/{username}/tools/``.
+        Absolute path to ``users/{username}/tools/`` under the active POSIX root.
     """
-    tools_dir = workspace_root() / username / "tools"
+    tools_dir = workspace_root() / "users" / username / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
     return tools_dir
 
@@ -61,9 +62,9 @@ def _user_tools_dir(username: str) -> Path:
 def ensure_agent_workspace(username: str, agent_id: int) -> Path:
     """Return (and create) an agent workspace directory.
 
-    Path format: ``server/workspace/{username}/agents/{agent_id}/``.
+    Path format: ``users/{username}/agents/{agent_id}/``.
     """
-    agent_dir = workspace_root() / username / "agents" / str(agent_id)
+    agent_dir = workspace_root() / "users" / username / "agents" / str(agent_id)
     agent_dir.mkdir(parents=True, exist_ok=True)
     return agent_dir
 

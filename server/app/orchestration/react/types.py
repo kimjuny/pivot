@@ -100,6 +100,8 @@ class ParsedReactDecision:
         observe: Assistant observation text.
         reason: Assistant reasoning text.
         summary: Optional user-facing progress summary.
+        thinking_next_turn: Optional hint controlling whether the next recursion
+            should use provider thinking mode when the runtime is in Auto mode.
         session_title: Optional session title proposed by the assistant.
         action: Parsed action definition.
         task_summary: Optional summary payload for the completed task.
@@ -109,6 +111,7 @@ class ParsedReactDecision:
     observe: str
     reason: str
     summary: str
+    thinking_next_turn: bool | None
     session_title: str
     action: ParsedAction
     task_summary: dict[str, Any]

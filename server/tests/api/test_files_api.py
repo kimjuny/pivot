@@ -196,7 +196,9 @@ class FilesApiTestCase(unittest.TestCase):
         )
         self.session.commit()
 
-        uploads_dir = WorkspaceService(self.session).get_workspace_uploads_path(workspace)
+        uploads_dir = WorkspaceService(self.session).get_workspace_uploads_path(
+            workspace
+        )
         live_file = uploads_dir / "report.md"
         live_file.write_text("# Live report\n\nhello", encoding="utf-8")
 

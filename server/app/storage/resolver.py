@@ -119,8 +119,7 @@ def _resolve_seaweedfs_profile(
         )
     if not readiness.posix_writable:
         raise RuntimeError(
-            readiness.reason_detail
-            or "SeaweedFS POSIX root is not reliably writable."
+            readiness.reason_detail or "SeaweedFS POSIX root is not reliably writable."
         )
 
     settings = get_settings()
@@ -188,7 +187,9 @@ def _verify_seaweedfs_shared_namespace(
         try:
             object_storage.delete(probe_key)
         except Exception:
-            logger.warning("Failed to remove SeaweedFS healthcheck probe '%s'.", probe_key)
+            logger.warning(
+                "Failed to remove SeaweedFS healthcheck probe '%s'.", probe_key
+            )
 
 
 def _verify_posix_root_writable(posix_root: Path) -> None:

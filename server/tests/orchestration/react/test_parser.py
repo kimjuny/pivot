@@ -24,6 +24,7 @@ class ReactParserTestCase(unittest.TestCase):
   "observe": "Need file content",
   "reason": "Call the file tool",
   "summary": "Reading the requested file",
+  "thinking_next_turn": true,
   "session_title": "Read demo file",
   "action": {
     "action_type": "CALL_TOOL",
@@ -57,6 +58,7 @@ class ReactParserTestCase(unittest.TestCase):
 
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
         self.assertEqual(decision.summary, "Reading the requested file")
+        self.assertIs(decision.thinking_next_turn, True)
         self.assertEqual(decision.session_title, "Read demo file")
         self.assertEqual(decision.action.step_id, "1")
         self.assertEqual(len(decision.action.tool_calls), 1)
@@ -135,6 +137,24 @@ class ReactParserTestCase(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError,
             r"action\.step_status_update must be a list",
+        ):
+            parse_react_output(content)
+
+    def test_reject_non_boolean_thinking_next_turn(self) -> None:
+        """thinking_next_turn must be a boolean when present."""
+        content = """
+{
+  "thinking_next_turn": "yes",
+  "action": {
+    "action_type": "REFLECT",
+    "output": {}
+  }
+}
+""".strip()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "thinking_next_turn must be a boolean",
         ):
             parse_react_output(content)
 

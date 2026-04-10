@@ -151,3 +151,57 @@ class WorkspaceServiceBackendPathTestCase(unittest.TestCase):
             / "workspace"
             / ".uploads",
         )
+
+    def test_user_tools_dir_uses_unified_users_namespace(self) -> None:
+        """Private tools should live under ``users/{username}/tools``."""
+        module = cast(Any, workspace_service)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            resolved_profile = type(
+                "ResolvedProfile",
+                (),
+                {
+                    "posix_workspace": _FakeExternalPOSIXProvider(
+                        Path(temp_root),
+                        Path("/app/server/external-posix"),
+                    ),
+                },
+            )()
+            with patch.object(
+                module,
+                "get_resolved_storage_profile",
+                return_value=resolved_profile,
+            ):
+                tools_dir = module._user_tools_dir("dana")
+
+        self.assertEqual(
+            tools_dir,
+            Path("/app/server/external-posix") / "users" / "dana" / "tools",
+        )
+
+    def test_agent_workspace_uses_unified_users_namespace(self) -> None:
+        """Request-scoped agent runtime files should stay under ``users/...``."""
+        module = cast(Any, workspace_service)
+
+        with tempfile.TemporaryDirectory() as temp_root:
+            resolved_profile = type(
+                "ResolvedProfile",
+                (),
+                {
+                    "posix_workspace": _FakeExternalPOSIXProvider(
+                        Path(temp_root),
+                        Path("/app/server/external-posix"),
+                    ),
+                },
+            )()
+            with patch.object(
+                module,
+                "get_resolved_storage_profile",
+                return_value=resolved_profile,
+            ):
+                agent_dir = module.ensure_agent_workspace("erin", 17)
+
+        self.assertEqual(
+            agent_dir,
+            Path("/app/server/external-posix") / "users" / "erin" / "agents" / "17",
+        )

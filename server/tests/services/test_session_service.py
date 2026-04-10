@@ -100,7 +100,9 @@ class SessionServiceTestCase(unittest.TestCase):
         """Close the session after each test."""
         self.session.close()
 
-    def _external_workspace_profile(self) -> tuple[tempfile.TemporaryDirectory[str], Any]:
+    def _external_workspace_profile(
+        self,
+    ) -> tuple[tempfile.TemporaryDirectory[str], Any]:
         """Create one provider profile that simulates mounted external POSIX roots."""
         temp_dir = tempfile.TemporaryDirectory()
         provider = _FakeExternalPOSIXProvider(
@@ -434,7 +436,9 @@ class SessionServiceTestCase(unittest.TestCase):
             "get_resolved_storage_profile",
             return_value=profile,
         ):
-            workspace_row = workspace_service.WorkspaceService(self.session).create_workspace(
+            workspace_row = workspace_service.WorkspaceService(
+                self.session
+            ).create_workspace(
                 agent_id=self.agent.id or 0,
                 username="alice",
                 scope="session_private",
@@ -622,7 +626,9 @@ class SessionServiceTestCase(unittest.TestCase):
             f"{self.agent.id or 0}/sessions/{created.session_id}/workspace",
         )
 
-    def test_delete_session_uses_external_workspace_backend_path_for_sandbox(self) -> None:
+    def test_delete_session_uses_external_workspace_backend_path_for_sandbox(
+        self,
+    ) -> None:
         """Session deletion should destroy warm sandboxes via external roots."""
         self.agent.active_release_id = 9
         self.session.add(self.agent)

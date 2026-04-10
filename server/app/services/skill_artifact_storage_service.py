@@ -36,9 +36,7 @@ class SkillArtifactStorageService:
         artifact_digest: str,
     ) -> str:
         """Return the canonical artifact key for one skill directory snapshot."""
-        return (
-            f"users/{username}/skills/{skill_name}/artifact/{artifact_digest}.tar.gz"
-        )
+        return f"users/{username}/skills/{skill_name}/artifact/{artifact_digest}.tar.gz"
 
     def store_directory(
         self,

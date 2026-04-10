@@ -87,6 +87,21 @@ const baseAgent: Agent = {
   scenes: [],
 };
 
+/**
+ * Build one controllable promise for async race-condition tests.
+ * Why: agent switching bugs only show up when an older request resolves out of order.
+ */
+function createDeferredPromise<T>() {
+  let resolvePromise!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
+  };
+}
+
 describe("AgentDetailSidebar", () => {
   it("persists extension removals into the parent draft workflow", async () => {
     const user = userEvent.setup();
@@ -318,5 +333,102 @@ describe("AgentDetailSidebar", () => {
       "src",
       "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
     );
+  });
+
+  it("clears the previous agent's web search bindings before the next agent finishes loading", async () => {
+    const user = userEvent.setup();
+    const nextAgentBindings = createDeferredPromise<[]>();
+    const nextAgent: Agent = {
+      ...baseAgent,
+      id: 9,
+      name: "Claude Agent",
+    };
+
+    vi.mocked(getSharedTools).mockResolvedValue([]);
+    vi.mocked(getPrivateTools).mockResolvedValue([]);
+    vi.mocked(getSharedSkills).mockResolvedValue([]);
+    vi.mocked(getPrivateSkills).mockResolvedValue([]);
+    vi.mocked(getChannels).mockResolvedValue([]);
+    vi.mocked(getAgentChannels).mockResolvedValue([]);
+    vi.mocked(getWebSearchProviders).mockResolvedValue([]);
+    vi.mocked(getAgentExtensionPackages).mockResolvedValue([]);
+    vi.mocked(getAgentWebSearchBindings)
+      .mockResolvedValueOnce([
+        {
+          id: 41,
+          agent_id: baseAgent.id,
+          provider_key: "baidu",
+          enabled: true,
+          auth_config: {},
+          runtime_config: {},
+          last_health_status: "healthy",
+          last_health_message: "ok",
+          last_health_check_at: "2026-04-03T00:00:00+00:00",
+          created_at: "2026-04-03T00:00:00+00:00",
+          updated_at: "2026-04-03T00:00:00+00:00",
+          manifest: {
+            key: "baidu",
+            name: "Baidu Search",
+            description: "Baidu search provider",
+            docs_url: "https://example.com/baidu",
+            visibility: "builtin",
+            status: "active",
+            logo_url: null,
+            extension_name: null,
+            extension_display_name: null,
+            extension_version: null,
+            setup_steps: [],
+            supported_parameters: [],
+            auth_schema: [],
+            config_schema: [],
+          },
+        },
+      ])
+      .mockImplementation((agentId: number) => {
+        if (agentId === nextAgent.id) {
+          return nextAgentBindings.promise;
+        }
+        return Promise.resolve([]);
+      });
+
+    const { rerender } = render(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar
+          agent={baseAgent}
+          scenes={[] as Scene[]}
+          selectedScene={null}
+          onSceneSelect={vi.fn()}
+          onCreateScene={vi.fn()}
+          onDeleteScene={vi.fn()}
+        />
+      </SidebarProvider>,
+    );
+
+    await user.click(screen.getAllByText("Web Search")[1]);
+
+    expect((await screen.findAllByText("Baidu Search")).length).toBeGreaterThan(0);
+
+    rerender(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar
+          agent={nextAgent}
+          scenes={[] as Scene[]}
+          selectedScene={null}
+          onSceneSelect={vi.fn()}
+          onCreateScene={vi.fn()}
+          onDeleteScene={vi.fn()}
+        />
+      </SidebarProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryAllByText("Baidu Search")).toHaveLength(0);
+    });
+
+    nextAgentBindings.resolve([]);
+
+    expect(
+      await screen.findByText("No web search providers configured for this agent"),
+    ).toBeInTheDocument();
   });
 });

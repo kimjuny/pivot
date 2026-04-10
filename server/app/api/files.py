@@ -149,8 +149,6 @@ async def get_image_content(
         content=payload,
         media_type=file_asset.mime_type,
         headers={
-            "Content-Disposition": (
-                f'inline; filename="{file_asset.original_name}"'
-            )
+            "Content-Disposition": (f'inline; filename="{file_asset.original_name}"')
         },
     )

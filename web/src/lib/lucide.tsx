@@ -25,6 +25,7 @@ import {
   FileSpreadsheet as FileSpreadsheetIcon,
   FileText as FileTextIcon,
   Folder as FolderIcon,
+  FolderUp as FolderUpIcon,
   Github as GithubIcon,
   History as HistoryIcon,
   Globe as GlobeIcon,
@@ -113,6 +114,7 @@ export const EyeOff = withDefaultStroke(EyeOffIcon);
 export const FileSpreadsheet = withDefaultStroke(FileSpreadsheetIcon);
 export const FileText = withDefaultStroke(FileTextIcon);
 export const Folder = withDefaultStroke(FolderIcon);
+export const FolderUp = withDefaultStroke(FolderUpIcon);
 export const Github = withDefaultStroke(GithubIcon);
 export const History = withDefaultStroke(HistoryIcon);
 export const Globe = withDefaultStroke(GlobeIcon);

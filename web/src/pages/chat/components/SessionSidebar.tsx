@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   Folder,
+  FolderUp,
   Loader2,
   MoreHorizontal,
   Pencil,
@@ -40,6 +41,11 @@ import {
 import { useSidebar } from "@/hooks/use-sidebar";
 import type { ChatSidebarNavigationItem, ChatSidebarProjectItem } from "@/pages/chat/types";
 import type { SessionListItem } from "@/utils/api";
+
+const EMPTY_PROJECTS: ChatSidebarProjectItem[] = [];
+const EMPTY_NAVIGATION_ITEMS: ChatSidebarNavigationItem[] = [];
+const SIDEBAR_ITEM_HOVER_CLASS =
+  "text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground";
 
 interface SessionSidebarProps {
   sessions: SessionListItem[];
@@ -81,6 +87,65 @@ function getSessionTitle(session: SessionListItem): string {
   return session.title?.trim() || "New conversation";
 }
 
+interface SidebarEmptyActionProps {
+  kind: "project" | "session";
+  title: string;
+  icon: ReactNode;
+  onClick: () => void | Promise<void>;
+  disabled?: boolean;
+}
+
+/**
+ * Presents an obvious next step when a sidebar section has no content yet.
+ */
+function SidebarEmptyAction({
+  kind,
+  title,
+  icon,
+  onClick,
+  disabled = false,
+}: SidebarEmptyActionProps) {
+  if (kind === "project") {
+    return (
+      <SidebarMenuItem>
+        <div className="relative">
+          <span className="absolute left-2 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-sidebar-foreground/55">
+            {icon}
+          </span>
+          <SidebarMenuButton
+            tooltip={title}
+            onClick={() => {
+              void onClick();
+            }}
+            disabled={disabled}
+            className={`h-9 rounded-xl border border-dashed border-sidebar-border/70 pl-8 pr-8 text-[13px] hover:border-sidebar-border ${SIDEBAR_ITEM_HOVER_CLASS}`}
+          >
+            <span className="truncate">{title}</span>
+          </SidebarMenuButton>
+        </div>
+      </SidebarMenuItem>
+    );
+  }
+
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        tooltip={title}
+        onClick={() => {
+          void onClick();
+        }}
+        disabled={disabled}
+        className={`h-9 rounded-xl border border-dashed border-sidebar-border/70 px-2.5 pr-8 text-[13px] hover:border-sidebar-border ${SIDEBAR_ITEM_HOVER_CLASS}`}
+      >
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center text-sidebar-foreground/60">
+          {icon}
+        </span>
+        <span>{title}</span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 /**
  * Whether the sidebar should show a live execution indicator for this session.
  *
@@ -98,7 +163,7 @@ function isSessionRunning(session: SessionListItem): boolean {
  */
 export function SessionSidebar({
   sessions,
-  projects = [],
+  projects = EMPTY_PROJECTS,
   currentSessionId,
   currentProjectId = null,
   isNewSessionDraftActive = false,
@@ -116,7 +181,7 @@ export function SessionSidebar({
   onRenameSession,
   onTogglePinSession,
   onDeleteSession,
-  navigationItems = [],
+  navigationItems = EMPTY_NAVIGATION_ITEMS,
   footer,
 }: SessionSidebarProps) {
   const { state } = useSidebar();
@@ -265,6 +330,7 @@ export function SessionSidebar({
   const renderSessionRow = (session: SessionListItem) => {
     const isActive = session.session_id === currentSessionId;
     const isEditing = session.session_id === editingSessionId;
+    const isRunning = isSessionRunning(session);
 
     return (
       <SidebarMenuItem key={session.session_id}>
@@ -293,17 +359,25 @@ export function SessionSidebar({
               onClick={() => {
                 void onSelectSession(session.session_id);
               }}
-              className="h-9 rounded-xl px-2.5 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+              className={`h-9 gap-0 rounded-xl px-2.5 pr-8 text-[13px] ${SIDEBAR_ITEM_HOVER_CLASS}`}
             >
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-                {isSessionRunning(session) ? (
+              <span
+                data-testid={`session-running-indicator-${session.session_id}`}
+                aria-hidden={!isRunning}
+                className={`flex shrink-0 items-center justify-center overflow-hidden transition-[width,margin,opacity] duration-200 ease-out ${
+                  isRunning ? "mr-2 w-4 opacity-100" : "mr-0 w-0 opacity-0"
+                }`}
+              >
+                {isRunning ? (
                   <Loader2
                     className="h-3.5 w-3.5 animate-spin text-sidebar-foreground/60"
                     aria-hidden="true"
                   />
                 ) : null}
               </span>
-              <span>{getSessionTitle(session)}</span>
+              <span className="min-w-0 flex-1 truncate transition-[transform] duration-200 ease-out">
+                {getSessionTitle(session)}
+              </span>
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -395,18 +469,18 @@ export function SessionSidebar({
 
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={isNewSessionDraftActive}
-              tooltip="New Session"
-              onClick={() => {
-                void onNewSession();
-              }}
-              disabled={isLoadingSession || isStreaming}
-              className="text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
-            >
-              <SquarePen className="h-4 w-4" />
-              <span>New Session</span>
-            </SidebarMenuButton>
+              <SidebarMenuButton
+                isActive={isNewSessionDraftActive}
+                tooltip="New Chat"
+                onClick={() => {
+                  void onNewSession();
+                }}
+                disabled={isLoadingSession || isStreaming}
+                className={SIDEBAR_ITEM_HOVER_CLASS}
+              >
+                <SquarePen className="h-4 w-4" />
+                <span>New Chat</span>
+              </SidebarMenuButton>
           </SidebarMenuItem>
 
           {navigationItems.map((item) => (
@@ -417,7 +491,7 @@ export function SessionSidebar({
                 onClick={() => {
                   void item.onSelect();
                 }}
-                className="text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+                className={SIDEBAR_ITEM_HOVER_CLASS}
               >
                 {item.icon}
                 <span>{item.label}</span>
@@ -449,8 +523,8 @@ export function SessionSidebar({
               </SidebarGroupLabel>
               <SidebarGroupContent className="px-1 pt-1">
                 {projects.length === 0 ? (
-                  <div className="px-3 py-2 text-sm text-muted-foreground">
-                    {isSessionListPending ? (
+                  isSessionListPending ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
                       <div className="space-y-2" role="status" aria-live="polite">
                         <span className="sr-only">Loading projects...</span>
                         {Array.from({ length: 2 }, (_, index) => (
@@ -461,10 +535,22 @@ export function SessionSidebar({
                           />
                         ))}
                       </div>
-                    ) : (
+                    </div>
+                  ) : onCreateProject ? (
+                    <SidebarMenu>
+                      <SidebarEmptyAction
+                        kind="project"
+                        title="New Project"
+                        icon={<FolderUp className="h-3.5 w-3.5" />}
+                        onClick={onCreateProject}
+                        disabled={isLoadingSession || isStreaming}
+                      />
+                    </SidebarMenu>
+                  ) : (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">
                       <span>No projects yet</span>
-                    )}
-                  </div>
+                    </div>
+                  )
                 ) : (
                   <SidebarMenu>
                     {projects.map((project) => {
@@ -534,7 +620,7 @@ export function SessionSidebar({
                                   onClick={() => {
                                     void onSelectProject?.(project.project_id);
                                   }}
-                                  className="h-9 rounded-xl pl-8 pr-8 text-[13px] text-sidebar-foreground/68 hover:bg-sidebar-accent/85 hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground"
+                                  className={`h-9 rounded-xl pl-8 pr-8 text-[13px] ${SIDEBAR_ITEM_HOVER_CLASS}`}
                                 >
                                   <span className="truncate">{project.name}</span>
                                 </SidebarMenuButton>
@@ -617,8 +703,8 @@ export function SessionSidebar({
               className={`${footer ? "session-sidebar-group-content " : ""}px-1 pt-1`}
             >
               {sessions.length === 0 ? (
-                <div className="px-3 py-4 text-sm text-muted-foreground">
-                  {isSessionListPending ? (
+                isSessionListPending ? (
+                  <div className="px-3 py-4 text-sm text-muted-foreground">
                     <div className="space-y-2" role="status" aria-live="polite">
                       <span className="sr-only">Loading sessions...</span>
                       {Array.from({ length: 3 }, (_, index) => (
@@ -629,10 +715,18 @@ export function SessionSidebar({
                         />
                       ))}
                     </div>
-                  ) : (
-                    <span>No standalone sessions yet</span>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <SidebarMenu>
+                    <SidebarEmptyAction
+                      kind="session"
+                      title="New Chat"
+                      icon={<SquarePen className="h-4 w-4" />}
+                      onClick={onNewSession}
+                      disabled={isLoadingSession || isStreaming}
+                    />
+                  </SidebarMenu>
+                )
               ) : (
                 <SidebarMenu>{sessions.map((session) => renderSessionRow(session))}</SidebarMenu>
               )}

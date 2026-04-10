@@ -1814,7 +1814,7 @@ function ChatContainer({
     try {
       const project = await createProject({
         agent_id: agentId,
-        name: "New project",
+        name: "New Project",
       });
       setProjects((previous) =>
         sortProjectsForSidebar([...previous, project], sessions),

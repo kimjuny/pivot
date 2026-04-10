@@ -182,9 +182,8 @@ class FileServiceTestCase(unittest.TestCase):
 
         self.assertEqual(len(attached), 1)
         self.assertEqual(attached[0].workspace_relative_path, ".uploads/diagram.png")
-        projected_path = (
-            WorkspaceService(self.db).get_workspace_path(workspace)
-            / (attached[0].workspace_relative_path or "")
+        projected_path = WorkspaceService(self.db).get_workspace_path(workspace) / (
+            attached[0].workspace_relative_path or ""
         )
         self.assertTrue(projected_path.is_file())
         self.assertEqual(projected_path.read_bytes(), self._build_png_bytes("#ef4444"))
@@ -355,7 +354,9 @@ class FileServiceTestCase(unittest.TestCase):
         self.assertFalse(
             self.service._object_storage().exists(expired_asset.object_key or "")
         )
-        self.assertTrue(self.service._object_storage().exists(used_asset.object_key or ""))
+        self.assertTrue(
+            self.service._object_storage().exists(used_asset.object_key or "")
+        )
 
 
 if __name__ == "__main__":

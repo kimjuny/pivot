@@ -62,9 +62,7 @@ class RuntimeWorkspaceViewsTestCase(unittest.TestCase):
         body: str,
     ) -> Path:
         """Create one skill in the unified on-disk layout."""
-        skill_dir = (
-            self.workspace_root / "users" / username / "skills" / kind / name
-        )
+        skill_dir = self.workspace_root / "users" / username / "skills" / kind / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_path = skill_dir / "SKILL.md"
         skill_path.write_text(

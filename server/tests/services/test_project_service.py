@@ -135,7 +135,9 @@ class ProjectServiceTestCase(unittest.TestCase):
         ).first()
         self.assertIsNone(remaining_session)
 
-    def test_delete_project_uses_external_workspace_backend_path_for_sandbox(self) -> None:
+    def test_delete_project_uses_external_workspace_backend_path_for_sandbox(
+        self,
+    ) -> None:
         """Project deletion should tear down sandboxes using external workspace paths."""
         sandbox_service = Mock()
         with patch.object(

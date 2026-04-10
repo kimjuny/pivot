@@ -41,9 +41,20 @@
     ]
   },
   "summary": "向用户反馈当前的进展", // 必须返回
+  "thinking_next_turn": true, // 决定下一轮iteration是否启用thinking模式
   "session_title": "本轮session的标题" // 如果当前在返回的是第一个assistant的message且messages中没有compact memory时，一定要返回
 }
 ```
+
+关于`thinking_next_turn`，以下情况可以为`true`:
+- 下一轮需要执行 RE_PLAN；
+- 下一轮需要在多个合理 action 之间做非显然决策；
+- 下一轮需要根据已有观察结果，重新判断多个 plan step 的完成状态或依赖关系；
+- 下一轮将执行高代价、难回滚、或会显著改变任务方向的动作；
+- 当前存在关键歧义，且该歧义无法通过一次低风险执行或直接回答来消解。
+其余情况一律为false
+
+
 ### 3.2. action_type = CALL_TOOL
 - 仅当你需要借助外部能力，只能使用可用工具列表
 - **切记要发动工具调用时，action_type是CALL_TOOL而不是要调用的tool名**
@@ -90,9 +101,11 @@
 ```
 ### 3.3. action_type = RE_PLAN
 - **重新制定规划是代价昂贵的action，请斟酌必要性再重新规划**
-- 仅当以下情况之一触发：
+- 以下情况鼓励触发：
   - 当前无plan
   - plan由于意外情况已不可完成
+- 以下情况杜绝触发：
+  - 未了解清楚整体事实，信息不足以帮助做出严谨、准确的计划
 ```json
 {
   // ...
