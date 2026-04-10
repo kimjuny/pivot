@@ -19,6 +19,17 @@ Endpoints:
 - `GET /health`
 - `POST /v1/memories/recall`
 - `POST /v1/memories/persist`
+- `GET /v1/memories/persist/jobs/{job_id}`
+
+Both write and read endpoints now emit structured logs with:
+
+- namespace
+- short query/candidate previews
+- submit duration
+- per-attempt duration
+- whether fallback storage was used
+- exception stack traces when the underlying provider fails
+- background persist job ids and final job outcomes
 
 ## Scope
 
@@ -107,3 +118,42 @@ This means:
 - runtime requests decide which logical memory namespace to read or write
 - future extensions can change the namespace derivation strategy without
   changing the service deployment model
+
+## Persist Submit Behavior
+
+`POST /v1/memories/persist` now accepts the request quickly and returns a
+background `job_id`.
+
+The expensive Mem0 extraction and storage work continues in one worker thread
+inside the service. This keeps Pivot's `task.completed` hook on a short submit
+path instead of waiting for the full memory write to finish.
+
+You can inspect one submitted job at:
+
+- `GET /v1/memories/persist/jobs/{job_id}`
+
+Each job record includes:
+
+- `status`
+- `submitted_at`, `started_at`, `finished_at`
+- `duration_ms`
+- `stored_count`
+- `used_fallback`
+- `attempts`
+- `error_type` and `error_message`
+
+## Persist Fallback Behavior
+
+The service first sends the task-derived `user + assistant` messages into
+Mem0's normal `add()` flow.
+
+If that attempt fails, times out, or returns zero stored memories, the service
+tries one fallback attempt using a more explicit "remember this memory" prompt
+constructed from Pivot's memory candidate text.
+
+This keeps the extension behavior conservative:
+
+- the original Mem0 extraction path remains the primary path
+- fallback is only used when the primary attempt stores nothing
+- every attempt is logged so operators can see why a memory was or was not
+  persisted

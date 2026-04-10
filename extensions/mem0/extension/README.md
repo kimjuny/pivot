@@ -58,6 +58,13 @@ The provided compose file publishes the service on host port `8765` by default.
 Open the extension detail page in Pivot, go to the `Setup` tab, and fill
 `Mem0 Server URL`.
 
+You can also optionally tune `Request Timeout Seconds`.
+
+- default: `5`
+- this timeout only covers the HTTP request from Pivot to the Mem0 service
+- it applies to recall requests and persist-submit requests
+- it does not limit the background persist job runtime inside the Mem0 service
+
 Use one of these values depending on how Pivot itself is running:
 
 - `http://host.containers.internal:8765`
@@ -99,7 +106,11 @@ the namespace.
 
 Once everything is configured:
 
-- a completed task should send one memory candidate to the external service
+- a completed task should submit one memory candidate to the external service
 - a later task with the same `user + agent` pair should recall related memory
-- hook logs in Pivot should show `memory_recalled` or `memory_persisted`
-  observation events
+- hook logs in Pivot should show `memory_recalled` or
+  `memory_persist_submitted` observation events
+- Mem0 service logs should show per-request timing, retry/fallback details, and
+  any underlying provider exceptions
+- the Mem0 service can expose one background persist job by `job_id` through
+  `GET /v1/memories/persist/jobs/{job_id}`

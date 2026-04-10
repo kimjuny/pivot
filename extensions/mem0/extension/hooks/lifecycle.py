@@ -6,7 +6,7 @@ import json
 from typing import Any
 from urllib import error, request
 
-DEFAULT_TIMEOUT_SECONDS = 8
+DEFAULT_TIMEOUT_SECONDS = 5
 DEFAULT_RECALL_LIMIT = 5
 
 
@@ -39,7 +39,11 @@ def _service_settings(context: dict[str, Any]) -> tuple[str | None, int]:
     """Resolve the external memory service endpoint and timeout."""
     installation = _installation_config(context)
     base_url = _as_string(installation.get("base_url"))
-    return base_url, DEFAULT_TIMEOUT_SECONDS
+    timeout_seconds = _as_positive_int(
+        installation.get("timeout_seconds"),
+        fallback=DEFAULT_TIMEOUT_SECONDS,
+    )
+    return base_url, timeout_seconds
 
 
 def _namespace(context: dict[str, Any]) -> str:
@@ -237,7 +241,7 @@ def inject_memory(context: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def persist_memory(context: dict[str, Any]) -> list[dict[str, Any]]:
-    """Persist one memory candidate after successful live task completion."""
+    """Submit one memory candidate for background persistence after completion."""
     if context.get("execution_mode") != "live":
         return []
 
@@ -270,16 +274,22 @@ def persist_memory(context: dict[str, Any]) -> list[dict[str, Any]]:
             }
         ]
 
-    stored_count = payload.get("stored_count")
-    normalized_count = stored_count if isinstance(stored_count, int) else None
+    accepted = payload.get("accepted") is True
+    job_id = _as_string(payload.get("job_id"))
+    status = _as_string(payload.get("status"))
+    duration_ms = payload.get("duration_ms")
+    normalized_duration_ms = duration_ms if isinstance(duration_ms, int) else None
     return [
         {
             "type": "emit_event",
             "payload": {
                 "type": "observe",
                 "data": {
-                    "type": "memory_persisted",
-                    "stored_count": normalized_count,
+                    "type": "memory_persist_submitted",
+                    "accepted": accepted,
+                    "job_id": job_id,
+                    "status": status,
+                    "duration_ms": normalized_duration_ms,
                 },
             },
         }
