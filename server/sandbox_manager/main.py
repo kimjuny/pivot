@@ -302,6 +302,31 @@ def _resolve_host_path_from_backend_path(path_in_backend: str) -> str | None:
     return matched_source
 
 
+def _format_sandbox_start_failure_detail(
+    *,
+    name: str,
+    workspace_backend_path: str,
+    exc: Exception,
+) -> str:
+    """Return one actionable sandbox start failure detail string."""
+    message = str(exc)
+    lowered_message = message.lower()
+
+    if "statfs " in lowered_message and "no such file or directory" in lowered_message:
+        return (
+            f"Failed to create/start sandbox '{name}': {exc}. "
+            "The resolved host workspace path is missing. This usually means "
+            "the external POSIX bridge was remounted after backend or "
+            "sandbox-manager started, so the runtime and Podman daemon no "
+            "longer see the same workspace namespace. Re-run "
+            "`scripts/fs-up.sh` or `scripts/fs-down.sh` and let them refresh "
+            "backend + sandbox-manager before retrying. "
+            f"workspace_backend_path={workspace_backend_path!r}"
+        )
+
+    return f"Failed to create/start sandbox '{name}': {exc}"
+
+
 def _normalize_skill_mounts(
     raw_skills: Sequence[SandboxSkillMount | dict[str, Any]] | None,
 ) -> list[dict[str, str]]:
@@ -854,7 +879,11 @@ def _ensure_sandbox(
     except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create/start sandbox '{name}': {exc}",
+            detail=_format_sandbox_start_failure_detail(
+                name=name,
+                workspace_backend_path=workspace_backend_path,
+                exc=exc,
+            ),
         ) from exc
 
 

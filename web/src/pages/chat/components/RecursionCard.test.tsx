@@ -24,7 +24,7 @@ function buildRecursion(
 }
 
 describe("RecursionCard", () => {
-  it("shows a blinking Thinking label while reasoning tokens are still streaming", () => {
+  it("shows the rotating thinking ticker while reasoning tokens are still streaming", () => {
     render(
       <RecursionCard
         messageId="message-1"
@@ -45,7 +45,43 @@ describe("RecursionCard", () => {
       />,
     );
 
-    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    expect(screen.getByTestId("thinking-word-ticker")).toBeInTheDocument();
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+  });
+
+  it("replaces the fallback iteration title with the ticker until stable output exists", () => {
+    render(
+      <RecursionCard
+        messageId="message-iteration"
+        recursion={buildRecursion({
+          iteration: 2,
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-iteration",
+              trace_id: "trace-iteration",
+              iteration: 2,
+              timestamp: "2026-03-24T00:00:00.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-iteration-1",
+                    name: "read_files",
+                    arguments: { path: "server/app" },
+                  },
+                ],
+                tool_results: [],
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("thinking-word-ticker")).toBeInTheDocument();
+    expect(screen.queryByText("Iteration 3")).not.toBeInTheDocument();
   });
 
   it("switches to the latest stable running label after visible output starts", () => {

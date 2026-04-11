@@ -50,8 +50,30 @@ class SandboxService:
                 headers=self._headers,
                 timeout=request_timeout,
             )
+        except requests.ReadTimeout as exc:
+            raise RuntimeError(
+                self._format_timeout_error(
+                    path=path,
+                    request_timeout=request_timeout,
+                )
+            ) from exc
+        except requests.ConnectTimeout as exc:
+            raise RuntimeError(
+                self._format_connect_timeout_error(
+                    path=path,
+                    request_timeout=request_timeout,
+                )
+            ) from exc
+        except requests.ConnectionError as exc:
+            raise RuntimeError(self._format_connection_error(path=path)) from exc
         except requests.RequestException as exc:
-            raise RuntimeError(f"Sandbox manager request failed: {exc}") from exc
+            raise RuntimeError(
+                self._format_generic_request_error(
+                    path=path,
+                    request_timeout=request_timeout,
+                    exc=exc,
+                )
+            ) from exc
 
         if response.status_code >= 400:
             detail = response.text.strip()
@@ -63,6 +85,73 @@ class SandboxService:
         if not isinstance(data, dict):
             raise RuntimeError("Sandbox manager response is not a JSON object.")
         return data
+
+    def _operation_label(self, path: str) -> str:
+        """Return a human-readable sandbox operation label for one API path."""
+        operation_labels = {
+            "/sandboxes/exec": "finish a workspace command",
+            "/sandboxes/create": "prepare a workspace sandbox",
+            "/sandboxes/destroy": "tear down a workspace sandbox",
+        }
+        return operation_labels.get(path, "complete a workspace sandbox request")
+
+    def _format_timeout_error(self, *, path: str, request_timeout: int) -> str:
+        """Return an actionable timeout message for agent-facing tool errors."""
+        operation_label = self._operation_label(path)
+        return (
+            "Workspace sandbox timed out after "
+            f"{request_timeout} seconds while the backend was waiting for "
+            f"sandbox-manager to {operation_label}. This does not necessarily "
+            "mean the command failed; the sandbox may still be starting, or "
+            "the command may still be running. Retry once for read-only "
+            "actions like listing, reading, or searching files. For write, "
+            "install, or edit actions, do not blindly retry; inspect the "
+            "workspace first, or increase this agent's "
+            "`sandbox_timeout_seconds` setting if longer runs are expected."
+        )
+
+    def _format_connect_timeout_error(
+        self,
+        *,
+        path: str,
+        request_timeout: int,
+    ) -> str:
+        """Return an actionable connect-timeout message."""
+        operation_label = self._operation_label(path)
+        return (
+            "Workspace sandbox service did not respond within "
+            f"{request_timeout} seconds while the backend was trying to "
+            f"ask sandbox-manager to {operation_label}. This usually means "
+            "the sandbox service is unhealthy or still booting. Wait briefly "
+            "and retry. If it keeps failing, ask the user to check backend "
+            "and sandbox-manager health."
+        )
+
+    def _format_connection_error(self, *, path: str) -> str:
+        """Return an actionable connection failure message."""
+        operation_label = self._operation_label(path)
+        return (
+            "Workspace sandbox service is unreachable while trying to "
+            f"{operation_label}. This is an infrastructure problem, not a "
+            "command syntax problem. Ask the user to check backend and "
+            "sandbox-manager health before retrying."
+        )
+
+    def _format_generic_request_error(
+        self,
+        *,
+        path: str,
+        request_timeout: int,
+        exc: requests.RequestException,
+    ) -> str:
+        """Return a fallback agent-facing request failure message."""
+        operation_label = self._operation_label(path)
+        return (
+            "Workspace sandbox request failed while trying to "
+            f"{operation_label} (timeout={request_timeout}s): {exc}. "
+            "Retry once if the action is read-only. Otherwise inspect the "
+            "workspace or ask the user to check sandbox health before retrying."
+        )
 
     def exec(
         self,

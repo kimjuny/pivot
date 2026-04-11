@@ -18,6 +18,7 @@ import {
   getRecursionStatus,
 } from "../utils/chatSelectors";
 import { RecursionStateViewer } from "./RecursionStateViewer";
+import { ThinkingWordTicker } from "./ThinkingWordTicker";
 import { TokenUsageLabel } from "./TokenUsageLabel";
 
 interface ToolExecutionSnapshot {
@@ -211,21 +212,11 @@ export function RecursionCard({
   const key = `${messageId}-${recursion.uid}`;
   const effectiveStatus = getRecursionStatus(recursion);
   const toolCallEvents = recursion.events.filter((event) => event.type === "tool_call");
-  const hasStartedGenerating =
-    Boolean(
-      recursion.observe ||
-        recursion.reason ||
-        recursion.summary ||
-        recursion.action,
-    ) ||
-    recursion.events.some(
-      (event) =>
-        !["recursion_start", "reasoning", "token_rate"].includes(event.type),
-    );
-  const isThinkingPhase =
-    effectiveStatus === "running" &&
-    Boolean(recursion.thinking) &&
-    !hasStartedGenerating;
+  const hasStableRunningLabel = Boolean(
+    recursion.summary || recursion.reason || recursion.observe || recursion.action,
+  );
+  const shouldShowPendingTicker =
+    effectiveStatus === "running" && !hasStableRunningLabel;
   const stableRunningLabel =
     recursion.summary ||
     recursion.reason ||
@@ -243,13 +234,13 @@ export function RecursionCard({
           {effectiveStatus === "running" && (
             <Loader2
               key={`${key}-running`}
-              className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-primary"
+              className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-foreground/60"
             />
           )}
           {effectiveStatus === "completed" && (
             <CheckCircle2
               key={`${key}-completed`}
-              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-success"
+              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
             />
           )}
           {effectiveStatus === "warning" && (
@@ -271,12 +262,8 @@ export function RecursionCard({
             />
           )}
           {effectiveStatus === "running" ? (
-            isThinkingPhase ? (
-              <span
-                className="animate-pulse truncate text-xs font-semibold text-muted-foreground"
-              >
-                Thinking...
-              </span>
+            shouldShowPendingTicker ? (
+              <ThinkingWordTicker className="truncate text-xs font-semibold text-muted-foreground" />
             ) : (
               <span
                 className="truncate text-xs font-semibold text-foreground"

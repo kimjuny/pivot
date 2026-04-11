@@ -304,3 +304,25 @@ class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
             resolved,
             "/tmp/pivot-seaweedfs-posix/users/alice/agents/7/sessions/s1/workspace",
         )
+
+
+class SandboxManagerStartFailureDetailTestCase(unittest.TestCase):
+    """Validate actionable sandbox start diagnostics for bridge mismatches."""
+
+    def test_formats_missing_workspace_mount_as_bridge_remount_hint(self) -> None:
+        """Statfs mount misses should explain the bridge remount recovery path."""
+        module = cast(Any, sandbox_manager)
+
+        detail = module._format_sandbox_start_failure_detail(
+            name="pivot-sandbox-default-demo",
+            workspace_backend_path="/app/server/external-posix/users/default/demo",
+            exc=RuntimeError(
+                "500 Server Error: Internal Server Error (statfs "
+                "/tmp/pivot-seaweedfs-posix/users/default/demo: "
+                "no such file or directory)"
+            ),
+        )
+
+        self.assertIn("external POSIX bridge was remounted", detail)
+        self.assertIn("scripts/fs-up.sh", detail)
+        self.assertIn("workspace_backend_path=", detail)

@@ -55,7 +55,8 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         ) as post_mock:
             result = self.service.exec(
                 username="alice",
-                agent_id=1,
+                workspace_id="workspace-1",
+                workspace_backend_path="/app/server/workspace/alice",
                 cmd=["echo", "hi"],
                 timeout_seconds=60,
             )
@@ -80,7 +81,8 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         ) as post_mock:
             self.service.exec(
                 username="alice",
-                agent_id=1,
+                workspace_id="workspace-1",
+                workspace_backend_path="/app/server/workspace/alice",
                 cmd=["pwd"],
             )
 
@@ -99,8 +101,62 @@ class SandboxServiceTimeoutTestCase(unittest.TestCase):
         ) as post_mock:
             self.service.create(
                 username="alice",
-                agent_id=1,
+                workspace_id="workspace-1",
+                workspace_backend_path="/app/server/workspace/alice",
                 timeout_seconds=75,
             )
 
         self.assertEqual(post_mock.call_args.kwargs["timeout"], 75)
+
+    def test_exec_timeout_error_is_actionable_for_agent(self) -> None:
+        """Read timeouts should explain next actions in agent-friendly language."""
+        with (
+            patch.object(
+                sandbox_service_module.requests,
+                "post",
+                side_effect=sandbox_service_module.requests.ReadTimeout(
+                    "HTTPConnectionPool(host='sandbox-manager', port=8051): "
+                    "Read timed out."
+                ),
+            ),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Workspace sandbox timed out after 45 seconds",
+            ) as context,
+        ):
+            self.service.exec(
+                username="alice",
+                workspace_id="workspace-1",
+                workspace_backend_path="/app/server/workspace/alice",
+                cmd=["bash", "-lc", "sleep 90"],
+                timeout_seconds=45,
+            )
+
+        message = str(context.exception)
+        self.assertIn("backend was waiting for sandbox-manager", message)
+        self.assertIn("Retry once for read-only actions", message)
+        self.assertIn("do not blindly retry", message)
+        self.assertIn("sandbox_timeout_seconds", message)
+
+    def test_connection_error_explains_infrastructure_problem(self) -> None:
+        """Connection failures should not look like command syntax mistakes."""
+        with (
+            patch.object(
+                sandbox_service_module.requests,
+                "post",
+                side_effect=sandbox_service_module.requests.ConnectionError(
+                    "connection refused"
+                ),
+            ),
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Workspace sandbox service is unreachable",
+            ) as context,
+        ):
+            self.service.create(
+                username="alice",
+                workspace_id="workspace-1",
+                workspace_backend_path="/app/server/workspace/alice",
+            )
+
+        self.assertIn("infrastructure problem", str(context.exception))

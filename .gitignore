@@ -98,3 +98,6 @@ openspec
 # Desktop (Tauri)
 desktop/src-tauri/target/
 web/dist-desktop/
+
+# POSIX
+*external-posix

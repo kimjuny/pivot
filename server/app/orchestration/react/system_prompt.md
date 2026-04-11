@@ -40,7 +40,7 @@
       }
     ]
   },
-  "summary": "向用户反馈当前的进展", // 必须返回
+  "summary": "向用户反馈的本轮进展", // 必须返回
   "thinking_next_turn": true, // 决定下一轮iteration是否启用thinking模式
   "session_title": "本轮session的标题" // 如果当前在返回的是第一个assistant的message且messages中没有compact memory时，一定要返回
 }

@@ -34,11 +34,50 @@ log() {
   printf '[fs-up] %s\n' "$*"
 }
 
+compose_service_is_running() {
+  podman compose ps --services --filter status=running 2>/dev/null | grep -qx "$1"
+}
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf '[fs-up] missing required command: %s\n' "$1" >&2
     exit 1
   fi
+}
+
+refresh_runtime_services() {
+  require_command podman
+
+  local backend_running=false
+  local sandbox_manager_running=false
+
+  (
+    cd "$ROOT_DIR"
+    if compose_service_is_running backend; then
+      backend_running=true
+    fi
+    if compose_service_is_running sandbox-manager; then
+      sandbox_manager_running=true
+    fi
+
+    if [ "$backend_running" = false ] && [ "$sandbox_manager_running" = false ]; then
+      log "Backend and sandbox-manager are not running; no runtime refresh is needed"
+      exit 0
+    fi
+
+    log "Refreshing backend and sandbox-manager so they observe the same POSIX bridge"
+
+    local sandbox_ids
+    sandbox_ids="$(podman ps -aq --filter label=pivot.sandbox.workspace_id)"
+    if [ -n "$sandbox_ids" ]; then
+      log "Removing workspace sandboxes so they reconnect to the refreshed bridge"
+      # shellcheck disable=SC2086
+      podman rm -f $sandbox_ids >/dev/null
+    fi
+
+    podman compose stop backend sandbox-manager >/dev/null 2>&1 || true
+    podman compose up -d backend sandbox-manager >/dev/null
+  )
 }
 
 ensure_seaweedfs_service() {
@@ -289,12 +328,14 @@ main() {
       wait_for_filer
       wait_for_filer_grpc
       ensure_macos_mount
+      refresh_runtime_services
       ;;
     Linux)
       ensure_seaweedfs_service
       wait_for_filer
       wait_for_filer_grpc
       ensure_linux_mount
+      refresh_runtime_services
       ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
       log "Windows uses local_fs by default; no external POSIX bridge is required"

@@ -42,11 +42,19 @@ podman compose --profile seaweedfs up -d
 profile. It is needed for macOS and Linux when you want real external
 workspace storage. Windows continues to use `local_fs` by default.
 
+When `backend` or `sandbox-manager` are already running, `scripts/fs-up.sh`
+also refreshes them and clears warm workspace sandboxes so every runtime sees
+the same bridge state after the command completes.
+
 To tear the bridge down again:
 
 ```bash
 scripts/fs-down.sh
 ```
+
+When `backend` or `sandbox-manager` are already running, `scripts/fs-down.sh`
+also refreshes them and clears warm workspace sandboxes so the stack cleanly
+falls back away from the external bridge without split-brain mounts.
 
 To inspect the current external-fs state:
 
