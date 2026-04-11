@@ -1,2 +1,0 @@
-
-仅在failed to parse json和timeout这类需立即重试的错误下，我们会进行回滚（iteration不增长，messages不增加错误信息不污染）
