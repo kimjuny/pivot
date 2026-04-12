@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "@/lib/lucide";
 import { toast } from "sonner";
 
@@ -15,7 +15,9 @@ interface UserMessageBubbleProps {
 /**
  * Renders the user side of the conversation with the existing timestamp and attachment treatment.
  */
-export function UserMessageBubble({ message }: UserMessageBubbleProps) {
+export const UserMessageBubble = memo(function UserMessageBubble({
+  message,
+}: UserMessageBubbleProps) {
   const [hasCopied, setHasCopied] = useState(false);
   const copyResetTimeoutRef = useRef<number | null>(null);
 
@@ -99,4 +101,4 @@ export function UserMessageBubble({ message }: UserMessageBubbleProps) {
       </div>
     </div>
   );
-}
+});

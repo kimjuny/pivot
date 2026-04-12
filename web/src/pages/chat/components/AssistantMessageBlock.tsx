@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import {
   Check,
   CheckCircle2,
@@ -41,7 +41,7 @@ interface AssistantMessageBlockProps {
 /**
  * Renders the assistant side of the timeline, including recursions and final answer state.
  */
-export function AssistantMessageBlock({
+export const AssistantMessageBlock = memo(function AssistantMessageBlock({
   message,
   expandedRecursions,
   isStreaming,
@@ -242,4 +242,4 @@ export function AssistantMessageBlock({
       </div>
     </div>
   );
-}
+});

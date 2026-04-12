@@ -76,12 +76,12 @@ import { ComposerTaskPlan } from "./ComposerTaskPlan";
 import { ContextUsageRing } from "./ContextUsageRing";
 
 interface ChatComposerProps {
-  inputMessage: string;
+  inputMessage?: string;
   error: string | null;
   compactStatusMessage: string | null;
   replyTarget: ChatReplyTarget | null;
   pendingFiles: PendingUploadItem[];
-  canSendMessage: boolean;
+  canSendMessage?: boolean;
   isStreaming: boolean;
   isConversationEmpty: boolean;
   hasUploadingFiles: boolean;
@@ -97,14 +97,16 @@ interface ChatComposerProps {
   selectedMandatorySkills: MandatorySkillSelection[];
   imageInputRef: RefObject<HTMLInputElement>;
   documentInputRef: RefObject<HTMLInputElement>;
-  onInputChange: (value: string) => void;
+  resetDraftSignal?: number;
+  onInputChange?: (value: string) => void;
   onAddMandatorySkill: (skill: MandatorySkillSelection) => void;
   onRemoveMandatorySkill: (skillName: string) => void;
   onThinkingModeChange: (mode: ChatThinkingMode) => void;
   onWebSearchProviderChange: (providerKey: string) => void;
-  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  onSubmitMessage?: (message: string) => void | Promise<void>;
   onStop: () => void;
   onCancelReply: () => void;
   onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -171,6 +173,7 @@ export function ChatComposer({
   selectedMandatorySkills,
   imageInputRef,
   documentInputRef,
+  resetDraftSignal = 0,
   onInputChange,
   onAddMandatorySkill,
   onRemoveMandatorySkill,
@@ -179,6 +182,7 @@ export function ChatComposer({
   onKeyDown,
   onPaste,
   onSubmit,
+  onSubmitMessage,
   onStop,
   onCancelReply,
   onImageInputChange,
@@ -209,15 +213,22 @@ export function ChatComposer({
   const mandatorySkillItemRefs = useRef<
     Record<string, HTMLDivElement | null>
   >({});
+  const hasSeenResetSignalRef = useRef(false);
+  const [draftMessage, setDraftMessage] = useState(inputMessage ?? "");
   const [composerSelectionStart, setComposerSelectionStart] = useState(0);
   const [highlightedMandatorySkillIndex, setHighlightedMandatorySkillIndex] =
     useState(0);
   const [dismissedMandatorySkillMentionKey, setDismissedMandatorySkillMentionKey] =
     useState<string | null>(null);
+  const computedCanSendMessage =
+    canSendMessage ??
+    (!isStreaming &&
+      !hasUploadingFiles &&
+      (draftMessage.trim().length > 0 || pendingFiles.length > 0));
   const replyPreview = replyTarget?.question.replace(/\s+/g, " ").trim() ?? "";
   const activeMandatorySkillMention = useMemo(
-    () => getActiveMandatorySkillMention(inputMessage, composerSelectionStart),
-    [composerSelectionStart, inputMessage],
+    () => getActiveMandatorySkillMention(draftMessage, composerSelectionStart),
+    [composerSelectionStart, draftMessage],
   );
   const activeMandatorySkillMentionKey = activeMandatorySkillMention
     ? `${activeMandatorySkillMention.start}:${activeMandatorySkillMention.query}`
@@ -250,6 +261,27 @@ export function ChatComposer({
     !isStreaming &&
     activeMandatorySkillMention !== null &&
     activeMandatorySkillMentionKey !== dismissedMandatorySkillMentionKey;
+
+  /**
+   * Keeps local draft ownership inside the composer while still letting the
+   * container observe draft changes for debounced side effects like context
+   * estimation.
+   */
+  const updateDraftMessage = (value: string) => {
+    setDraftMessage(value);
+    onInputChange?.(value);
+  };
+
+  /**
+   * Submits the current local draft through the container-owned send path.
+   */
+  const submitDraftMessage = () => {
+    if (!computedCanSendMessage || !onSubmitMessage) {
+      return;
+    }
+
+    void onSubmitMessage(draftMessage);
+  };
 
   /**
    * Centralizes mention dismissal so pointer and keyboard exits share the same
@@ -302,6 +334,33 @@ export function ChatComposer({
   }, [replyTarget]);
 
   /**
+   * Supports externally seeded drafts in tests and future restore flows
+   * without turning the textarea back into a fully controlled parent state.
+   */
+  useEffect(() => {
+    if (inputMessage === undefined) {
+      return;
+    }
+
+    setDraftMessage(inputMessage);
+  }, [inputMessage]);
+
+  /**
+   * Clears the local draft after successful send/reset signals from the
+   * container so typing no longer re-renders the full conversation tree.
+   */
+  useEffect(() => {
+    if (!hasSeenResetSignalRef.current) {
+      hasSeenResetSignalRef.current = true;
+      return;
+    }
+
+    setDraftMessage("");
+    setComposerSelectionStart(0);
+    setDismissedMandatorySkillMentionKey(null);
+  }, [resetDraftSignal]);
+
+  /**
    * Keep the composer height aligned with the current draft so the reply and
    * action rows can stay visually attached instead of trapping the user in a
    * tiny scroll area.
@@ -319,7 +378,7 @@ export function ChatComposer({
       Math.max(nextTextarea.scrollHeight, minHeight),
       maxHeight,
     )}px`;
-  }, [inputMessage, replyTarget]);
+  }, [draftMessage, replyTarget]);
 
   useEffect(() => {
     setHighlightedMandatorySkillIndex(0);
@@ -369,15 +428,15 @@ export function ChatComposer({
       return;
     }
 
-    const beforeMention = inputMessage.slice(0, activeMandatorySkillMention.start);
-    const afterMention = inputMessage.slice(activeMandatorySkillMention.end);
+    const beforeMention = draftMessage.slice(0, activeMandatorySkillMention.start);
+    const afterMention = draftMessage.slice(activeMandatorySkillMention.end);
     const nextMessage =
       beforeMention.endsWith(" ") && afterMention.startsWith(" ")
         ? `${beforeMention}${afterMention.slice(1)}`
         : `${beforeMention}${afterMention}`;
     setDismissedMandatorySkillMentionKey(null);
     onAddMandatorySkill(skill);
-    onInputChange(nextMessage);
+    updateDraftMessage(nextMessage);
 
     window.requestAnimationFrame(() => {
       const nextTextarea = textareaRef.current;
@@ -444,7 +503,22 @@ export function ChatComposer({
       }
     }
 
-    onKeyDown(event);
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      submitDraftMessage();
+      return;
+    }
+
+    onKeyDown?.(event);
+  };
+
+  /**
+   * Normalizes button and enter-key sends into the same local draft submit path.
+   */
+  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    submitDraftMessage();
+    onSubmit?.(event);
   };
 
   return (
@@ -479,7 +553,7 @@ export function ChatComposer({
         {taskPlan && <ComposerTaskPlan taskPlan={taskPlan} />}
 
         <form
-          onSubmit={onSubmit}
+          onSubmit={handleFormSubmit}
           className={`relative overflow-hidden rounded-2xl border bg-background shadow-lg transition-all focus-within:border-ring ${
             taskPlan ? "-mt-px rounded-t-[12px]" : ""
           }`}
@@ -575,9 +649,9 @@ export function ChatComposer({
               <PopoverAnchor asChild>
                 <InputGroupTextarea
                   ref={textareaRef}
-                  value={inputMessage}
+                  value={draftMessage}
                   onChange={(event) => {
-                    onInputChange(event.target.value);
+                    updateDraftMessage(event.target.value);
                     setComposerSelectionStart(event.target.selectionStart ?? 0);
                     setDismissedMandatorySkillMentionKey(null);
                   }}
@@ -819,7 +893,7 @@ export function ChatComposer({
                   <InputGroupButton
                     type="submit"
                     variant="default"
-                    disabled={!canSendMessage}
+                    disabled={!computedCanSendMessage}
                     size="icon-sm"
                     className="rounded-full"
                     title="Send message"

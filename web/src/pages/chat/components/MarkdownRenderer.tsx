@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ComponentPropsWithoutRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -112,7 +113,7 @@ const MARKDOWN_COMPONENTS = {
 /**
  * Renders model-authored markdown with the same parser and typography across chat surfaces.
  */
-export function MarkdownRenderer({
+export const MarkdownRenderer = memo(function MarkdownRenderer({
   content,
   variant = "chat",
 }: MarkdownRendererProps) {
@@ -133,4 +134,4 @@ export function MarkdownRenderer({
       </ReactMarkdown>
     </article>
   );
-}
+});

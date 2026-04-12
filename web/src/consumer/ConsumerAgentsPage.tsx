@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot } from "@/lib/lucide";
+import { Bot, Loader2 } from "@/lib/lucide";
 import { useNavigate } from "react-router-dom";
 
-import { MotionReorderLoading } from "@/components/MotionReorderLoading";
 import { Badge } from "@/components/ui/badge";
 import {
   SidebarInset,
@@ -223,7 +222,7 @@ function ConsumerAgentsPage() {
           <div className="flex-1">
             {isLoading ? (
               <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-                <MotionReorderLoading className="h-4 w-4" />
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 <span>Loading agents…</span>
               </div>
             ) : error ? (

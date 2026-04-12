@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { MessageSquare } from "@/lib/lucide";
 
 import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
@@ -24,7 +25,7 @@ interface ConversationViewProps {
 /**
  * Renders the conversation empty state and the full message timeline.
  */
-export function ConversationView({
+export const ConversationView = memo(function ConversationView({
   messages,
   agentName,
   expandedRecursions,
@@ -76,4 +77,4 @@ export function ConversationView({
       ))}
     </>
   );
-}
+});

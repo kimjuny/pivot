@@ -1,4 +1,3 @@
-import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 import { getThinkingEasterEggWords } from "../../../utils/easteregg";
@@ -203,16 +202,10 @@ export function ThinkingWordTicker({
         </span>
         <span className="col-start-1 row-start-1 inline-flex items-center gap-0.5 whitespace-nowrap">
           <span data-testid="thinking-word-ticker-text">{visibleWord}</span>
-          <motion.span
-            animate={{ opacity: [0.25, 1, 0.25] }}
+          <span
             aria-hidden="true"
-            className="inline-block h-3.5 w-px rounded-full bg-current"
+            className="inline-block h-3.5 w-px animate-pulse rounded-full bg-current"
             data-testid="thinking-word-ticker-cursor"
-            transition={{
-              duration: 0.9,
-              ease: "easeInOut",
-              repeat: Number.POSITIVE_INFINITY,
-            }}
           />
         </span>
       </span>

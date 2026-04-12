@@ -49,8 +49,11 @@ class ManagerSettings(BaseSettings):
     SANDBOX_BACKEND_WORKSPACE_ROOT: str = "/app/server/workspace"
     SANDBOX_EXTERNAL_POSIX_ROOT: str | None = "/app/server/external-posix"
     SANDBOX_POOL_SCAN_INTERVAL_SECONDS: int = 30
-    SANDBOX_POOL_IDLE_TTL_SECONDS: int = 86400
-    SANDBOX_POOL_MAX_SIZE: int = 100
+    SANDBOX_POOL_IDLE_TTL_SECONDS: int = 900
+    SANDBOX_POOL_MAX_SIZE: int = 8
+    SANDBOX_MEMORY_LIMIT: str = "1g"
+    SANDBOX_CPU_LIMIT: float = 1.0
+    SANDBOX_PIDS_LIMIT: int = 256
 
 
 @lru_cache
@@ -119,6 +122,21 @@ def _sandbox_name(username: str, workspace_id: str) -> str:
 def _skills_volume_name(username: str, workspace_id: str) -> str:
     """Build deterministic named-volume identifier for sandbox-local skills."""
     return f"{_sandbox_name(username, workspace_id)}-skills"
+
+
+def _to_nano_cpus(cpu_limit: float) -> int | None:
+    """Convert one fractional CPU limit into Podman-compatible nano CPUs.
+
+    Args:
+        cpu_limit: Requested CPU quota where ``1.0`` means one full core.
+
+    Returns:
+        The Podman-compatible ``nano_cpus`` integer, or None when the limit is
+        not positive and should be omitted.
+    """
+    if cpu_limit <= 0:
+        return None
+    return max(1, int(cpu_limit * 1_000_000_000))
 
 
 def _backend_container() -> Any:
@@ -835,6 +853,7 @@ def _ensure_sandbox(
     volumes.update(skill_volumes)
     setup_cmd = "sleep infinity"
     base_image_id = _resolve_image_id(settings.SANDBOX_BASE_IMAGE)
+    nano_cpus = _to_nano_cpus(settings.SANDBOX_CPU_LIMIT)
     labels = {
         "pivot.sandbox.base_image_ref": settings.SANDBOX_BASE_IMAGE,
         "pivot.sandbox.network_mode": settings.SANDBOX_NETWORK_MODE,
@@ -856,6 +875,9 @@ def _ensure_sandbox(
             stdin_open=False,
             working_dir="/workspace",
             network_mode=settings.SANDBOX_NETWORK_MODE,
+            mem_limit=settings.SANDBOX_MEMORY_LIMIT,
+            nano_cpus=nano_cpus,
+            pids_limit=settings.SANDBOX_PIDS_LIMIT,
             # Mount only the current agent workspace; never mount full project tree.
             volumes=volumes,
             environment={"PYTHONUNBUFFERED": "1"},

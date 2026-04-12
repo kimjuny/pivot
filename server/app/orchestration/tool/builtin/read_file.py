@@ -18,8 +18,7 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 start_line = int(sys.argv[2])
-end_line = int(sys.argv[3])
-max_lines = int(sys.argv[4])
+max_lines = int(sys.argv[3])
 
 text = path.read_text(encoding="utf-8", errors="replace")
 lines = text.splitlines(keepends=True)
@@ -47,8 +46,7 @@ if start_line > total_lines:
         f"start_line {start_line} exceeds file length ({total_lines} lines)"
     )
 
-requested_end_line = total_lines if end_line == 0 else min(end_line, total_lines)
-actual_end_line = min(requested_end_line, start_line + max_lines - 1)
+actual_end_line = min(total_lines, start_line + max_lines - 1)
 chunk_lines = lines[start_line - 1 : actual_end_line]
 
 payload = {
@@ -59,7 +57,7 @@ payload = {
     "returned_line_count": len(chunk_lines),
     "has_more_before": start_line > 1,
     "has_more_after": actual_end_line < total_lines,
-    "truncated": actual_end_line < requested_end_line,
+    "truncated": actual_end_line < total_lines,
     "next_start_line": actual_end_line + 1 if actual_end_line < total_lines else None,
     "previous_start_line": max(1, start_line - max_lines) if start_line > 1 else None,
     "content": "".join(chunk_lines),
@@ -72,8 +70,7 @@ print(json.dumps(payload, ensure_ascii=False))
 def read_file(
     path: str,
     start_line: int = 1,
-    end_line: int = 0,
-    max_lines: int = 120,
+    max_lines: int = 400,
 ) -> dict[str, object]:
     """Read an exact text chunk from a UTF-8 file under ``/workspace``.
 
@@ -85,10 +82,8 @@ def read_file(
     Args:
         path: Relative or absolute workspace path to a text file.
         start_line: 1-based starting line to read.
-        end_line: Inclusive ending line. Use ``0`` to read forward from
-            ``start_line`` up to ``max_lines``.
-        max_lines: Hard upper bound on returned lines, even when ``end_line`` is
-            larger. This keeps reads focused and predictable.
+        max_lines: Hard upper bound on returned lines from ``start_line``. This
+            keeps reads focused while still allowing larger single-pass reads.
 
     Returns:
         Structured payload with chunk bounds, pagination hints, and exact file
@@ -100,12 +95,10 @@ def read_file(
     """
     if start_line < 1:
         raise ValueError("start_line must be greater than or equal to 1.")
-    if end_line != 0 and end_line < start_line:
-        raise ValueError("end_line must be 0 or greater than or equal to start_line.")
     if max_lines < 1:
         raise ValueError("max_lines must be greater than or equal to 1.")
-    if max_lines > 400:
-        raise ValueError("max_lines must be less than or equal to 400.")
+    if max_lines > 800:
+        raise ValueError("max_lines must be less than or equal to 800.")
 
     target = workspace_path(path)
     output = exec_in_sandbox(
@@ -115,7 +108,6 @@ def read_file(
             _READ_FILE_SCRIPT,
             target,
             str(start_line),
-            str(end_line),
             str(max_lines),
         ]
     )

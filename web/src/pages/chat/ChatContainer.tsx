@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   cancelReactTask,
@@ -355,7 +354,6 @@ function ChatContainer({
   onRuntimeDebugChange,
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputMessage, setInputMessage] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRecursions, setExpandedRecursions] = useState<
@@ -400,7 +398,9 @@ function ChatContainer({
   const [selectedMandatorySkills, setSelectedMandatorySkills] = useState<
     MandatorySkillSelection[]
   >([]);
+  const [composerResetSignal, setComposerResetSignal] = useState(0);
   const messagesRef = useRef<ChatMessage[]>([]);
+  const draftMessageRef = useRef("");
   const currentSessionIdRef = useRef<string | null>(null);
   const sessionStreamAbortControllerRef = useRef<AbortController | null>(null);
   const sessionStreamReconnectTimerRef = useRef<number | null>(null);
@@ -410,6 +410,7 @@ function ChatContainer({
   const liveTaskIdRef = useRef<string | null>(null);
   const liveRecursionRef = useRef<RecursionRecord | null>(null);
   const contextUsageRequestIdRef = useRef(0);
+  const contextUsageDebounceTimerRef = useRef<number | null>(null);
   const runtimeDebugRequestIdRef = useRef(0);
   const compactStatusStartedAtRef = useRef<number | null>(null);
   const compactStatusClearTimerRef = useRef<number | null>(null);
@@ -438,6 +439,17 @@ function ChatContainer({
     sessionIdleTimeoutMinutes,
   );
   const canUseWebSearch = canAccessWebSearchTool(agentToolIds);
+
+  /**
+   * Clears pending draft estimation so only the latest idle draft reaches the
+   * context-usage endpoint.
+   */
+  const clearContextUsageDebounceTimer = useCallback(() => {
+    if (contextUsageDebounceTimerRef.current !== null) {
+      window.clearTimeout(contextUsageDebounceTimerRef.current);
+      contextUsageDebounceTimerRef.current = null;
+    }
+  }, []);
 
   /**
    * Keep the selected thinking mode aligned with the primary LLM capability set.
@@ -562,18 +574,23 @@ function ChatContainer({
     [],
   );
 
-  const standaloneSessions = sortSessionsForSidebar(
-    sessions.filter((session) => !session.project_id),
+  const standaloneSessions = useMemo(
+    () =>
+      sortSessionsForSidebar(
+        sessions.filter((session) => !session.project_id),
+      ),
+    [sessions],
   );
-  const sidebarProjects: ChatSidebarProjectItem[] = sortProjectsForSidebar(
-    projects,
-    sessions,
-  ).map((project) => ({
-    ...project,
-    sessions: sortSessionsForSidebar(
-      sessions.filter((session) => session.project_id === project.project_id),
-    ),
-  }));
+  const sidebarProjects: ChatSidebarProjectItem[] = useMemo(
+    () =>
+      sortProjectsForSidebar(projects, sessions).map((project) => ({
+        ...project,
+        sessions: sortSessionsForSidebar(
+          sessions.filter((session) => session.project_id === project.project_id),
+        ),
+      })),
+    [projects, sessions],
+  );
 
   /**
    * Reload project and session navigation data so sidebar metadata stays fresh
@@ -1554,10 +1571,6 @@ function ChatContainer({
     sessionRuntimeDebug,
   ]);
 
-  const canSendMessage =
-    !isStreaming &&
-    !hasUploadingFiles &&
-    (inputMessage.trim().length > 0 || readyPendingFiles.length > 0);
   const readyPendingFileIds = readyPendingFiles.map((file) => file.fileId);
   const readyPendingFileIdsKey = readyPendingFileIds.join(",");
 
@@ -1657,61 +1670,83 @@ function ChatContainer({
     }
   }, [selectedWebSearchProvider, webSearchProviders]);
 
-  useEffect(() => {
-    if (isStreaming) {
-      return;
-    }
-
+  const requestDraftContextUsageEstimate = useCallback(() => {
     const draftFileIds = readyPendingFileIdsKey
       ? readyPendingFileIdsKey.split(",")
       : [];
-    const timer = window.setTimeout(() => {
-      const requestId = contextUsageRequestIdRef.current + 1;
-      contextUsageRequestIdRef.current = requestId;
-      setIsContextUsageLoading(true);
+    const requestId = contextUsageRequestIdRef.current + 1;
+    contextUsageRequestIdRef.current = requestId;
+    setIsContextUsageLoading(true);
 
-      void getReactContextUsage({
-        agent_id: agentId,
-        session_id: currentSessionId,
-        task_id: replyTaskId,
-        draft_message: inputMessage,
-        file_ids: draftFileIds,
-        session_type: sessionType,
-        test_snapshot: currentSessionId ? undefined : testSnapshot,
-        mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
+    void getReactContextUsage({
+      agent_id: agentId,
+      session_id: currentSessionId,
+      task_id: replyTaskId,
+      draft_message: draftMessageRef.current,
+      file_ids: draftFileIds,
+      session_type: sessionType,
+      test_snapshot: currentSessionId ? undefined : testSnapshot,
+      mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
+    })
+      .then((usage) => {
+        if (contextUsageRequestIdRef.current === requestId) {
+          setContextUsage(usage);
+        }
       })
-        .then((usage) => {
-          if (contextUsageRequestIdRef.current === requestId) {
-            setContextUsage(usage);
-          }
-        })
-        .catch((contextError) => {
-          console.error("Failed to estimate context usage:", contextError);
-          if (contextUsageRequestIdRef.current === requestId) {
-            setContextUsage(null);
-            clearCompactStatusImmediately();
-          }
-        })
-        .finally(() => {
-          if (contextUsageRequestIdRef.current === requestId) {
-            setIsContextUsageLoading(false);
-          }
-        });
-    }, 250);
-
-    return () => window.clearTimeout(timer);
+      .catch((contextError) => {
+        console.error("Failed to estimate context usage:", contextError);
+        if (contextUsageRequestIdRef.current === requestId) {
+          setContextUsage(null);
+          clearCompactStatusImmediately();
+        }
+      })
+      .finally(() => {
+        if (contextUsageRequestIdRef.current === requestId) {
+          setIsContextUsageLoading(false);
+        }
+      });
   }, [
     agentId,
     clearCompactStatusImmediately,
     currentSessionId,
-    inputMessage,
-    isStreaming,
     readyPendingFileIdsKey,
     replyTaskId,
     selectedMandatorySkills,
     sessionType,
     testSnapshot,
   ]);
+
+  /**
+   * Debounces draft-driven context requests so high-frequency typing and IME
+   * composition do not force the whole chat surface through synchronous work.
+   */
+  const scheduleDraftContextUsageEstimate = useCallback(() => {
+    clearContextUsageDebounceTimer();
+    if (isStreaming) {
+      return;
+    }
+
+    contextUsageDebounceTimerRef.current = window.setTimeout(() => {
+      contextUsageDebounceTimerRef.current = null;
+      requestDraftContextUsageEstimate();
+    }, 250);
+  }, [
+    clearContextUsageDebounceTimer,
+    isStreaming,
+    requestDraftContextUsageEstimate,
+  ]);
+
+  useEffect(() => {
+    scheduleDraftContextUsageEstimate();
+
+    return clearContextUsageDebounceTimer;
+  }, [clearContextUsageDebounceTimer, scheduleDraftContextUsageEstimate]);
+
+  useEffect(() => {
+    if (isStreaming) {
+      clearContextUsageDebounceTimer();
+    }
+  }, [clearContextUsageDebounceTimer, isStreaming]);
 
   useEffect(() => {
     if (!isStreaming || !activeContextTaskId) {
@@ -2012,217 +2047,238 @@ function ChatContainer({
   /**
    * Requests cancellation for the active task from the composer.
    */
-  const handleStop = () => {
+  const handleStop = useCallback(() => {
     const activeTaskId = liveTaskIdRef.current;
-    if (activeTaskId) {
-      markTaskStopped(activeTaskId, new Date().toISOString());
-      setError(null);
-
-      void cancelReactTask(activeTaskId)
-        .then(() =>
-          refreshSidebarData().catch((refreshError) => {
-            console.error(
-              "Failed to refresh session list after stopping task:",
-              refreshError,
-            );
-          }),
-        )
-        .catch((cancelError) => {
-          console.error("Failed to cancel task:", cancelError);
-          stoppedTaskIdsRef.current.delete(activeTaskId);
-          setError("Failed to stop execution");
-          if (currentSessionIdRef.current) {
-            void getFullSessionHistory(currentSessionIdRef.current)
-              .then((history) => {
-                const nextMessages = buildMessagesFromHistory(history.tasks);
-                applyHistoryMessages(nextMessages);
-              })
-              .catch((historyError) => {
-                console.error(
-                  "Failed to restore session after stop request failed:",
-                  historyError,
-                );
-              });
-          }
-        });
+    if (!activeTaskId) {
+      return;
     }
-  };
+
+    markTaskStopped(activeTaskId, new Date().toISOString());
+    setError(null);
+
+    void cancelReactTask(activeTaskId)
+      .then(() =>
+        refreshSidebarData().catch((refreshError) => {
+          console.error(
+            "Failed to refresh session list after stopping task:",
+            refreshError,
+          );
+        }),
+      )
+      .catch((cancelError) => {
+        console.error("Failed to cancel task:", cancelError);
+        stoppedTaskIdsRef.current.delete(activeTaskId);
+        setError("Failed to stop execution");
+        if (currentSessionIdRef.current) {
+          void getFullSessionHistory(currentSessionIdRef.current)
+            .then((history) => {
+              const nextMessages = buildMessagesFromHistory(history.tasks);
+              applyHistoryMessages(nextMessages);
+            })
+            .catch((historyError) => {
+              console.error(
+                "Failed to restore session after stop request failed:",
+                historyError,
+              );
+            });
+        }
+      });
+  }, [applyHistoryMessages, markTaskStopped, refreshSidebarData]);
 
   /**
    * Sends the current composer state and incrementally applies streamed backend updates.
    */
-  const sendMessage = async (options?: {
-    messageOverride?: string;
-    replyTaskIdOverride?: string | null;
-  }) => {
-    const pendingMessage = options?.messageOverride ?? inputMessage;
-    const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
-    let assistantMessageId: string | null = null;
-    const filesToSend = options?.messageOverride ? [] : readyPendingFiles;
-    const sentAttachments = filesToSend.map((file) => ({
-      fileId: file.fileId,
-      kind: file.kind,
-      originalName: file.originalName,
-      mimeType: file.mimeType,
-      format: file.format,
-      extension: file.extension,
-      width: file.width,
-      height: file.height,
-      sizeBytes: file.sizeBytes,
-      pageCount: file.pageCount,
-      canExtractText: file.canExtractText,
-      suspectedScanned: file.suspectedScanned,
-      textEncoding: file.textEncoding,
-      previewUrl: file.previewUrl,
-    }));
+  const sendMessage = useCallback(
+    async (options?: {
+      messageOverride?: string;
+      replyTaskIdOverride?: string | null;
+    }) => {
+      const pendingMessage = options?.messageOverride ?? draftMessageRef.current;
+      const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
+      let assistantMessageId: string | null = null;
+      const filesToSend = options?.messageOverride ? [] : readyPendingFiles;
+      const sentAttachments = filesToSend.map((file) => ({
+        fileId: file.fileId,
+        kind: file.kind,
+        originalName: file.originalName,
+        mimeType: file.mimeType,
+        format: file.format,
+        extension: file.extension,
+        width: file.width,
+        height: file.height,
+        sizeBytes: file.sizeBytes,
+        pageCount: file.pageCount,
+        canExtractText: file.canExtractText,
+        suspectedScanned: file.suspectedScanned,
+        textEncoding: file.textEncoding,
+        previewUrl: file.previewUrl,
+      }));
 
-    prepareForProgrammaticScroll();
+      prepareForProgrammaticScroll();
 
-    try {
-      let activeSessionId = currentSessionId;
-      const requestTaskId = currentReplyTaskId;
-      let shouldResetConversation = false;
-      let initialCursor = sessionEventCursorRef.current;
+      try {
+        let activeSessionId = currentSessionId;
+        const requestTaskId = currentReplyTaskId;
+        let shouldResetConversation = false;
+        let initialCursor = sessionEventCursorRef.current;
 
-      if (!activeSessionId) {
-        const session = await createSession(agentId, {
-          projectId: currentProjectId,
-          type: sessionType,
-          testSnapshot: sessionType === "studio_test" ? testSnapshot : undefined,
+        if (!activeSessionId) {
+          const session = await createSession(agentId, {
+            projectId: currentProjectId,
+            type: sessionType,
+            testSnapshot: sessionType === "studio_test" ? testSnapshot : undefined,
+          });
+          activeSessionId = session.session_id;
+          shouldResetConversation = true;
+          const sessionItem = toSessionListItem(session);
+          setCurrentProjectId(session.project_id ?? currentProjectId);
+          setCurrentSessionId(activeSessionId);
+          currentSessionIdRef.current = activeSessionId;
+          setSessions((previous) => upsertSessionListItem(previous, sessionItem));
+          initialCursor = 0;
+          openSessionStream(activeSessionId, initialCursor);
+        }
+
+        if (currentReplyTaskId) {
+          setReplyTaskId(null);
+        }
+        setActiveContextIteration(null);
+
+        if (!isTokenValid()) {
+          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+          throw new Error("Token expired or invalid. Please log in again.");
+        }
+
+        const messageTimestamp = new Date().toISOString();
+        const userMessage: ChatMessage = {
+          id: `user-${Date.now()}`,
+          role: "user",
+          content: pendingMessage,
+          attachments: sentAttachments,
+          mandatorySkills: selectedMandatorySkills,
+          timestamp: messageTimestamp,
+        };
+        assistantMessageId = `assistant-${Date.now()}`;
+        const assistantMessage: ChatMessage = {
+          id: assistantMessageId,
+          role: "assistant",
+          content: "",
+          timestamp: messageTimestamp,
+          recursions: [],
+          status: "running" as const,
+        };
+
+        if (shouldResetConversation) {
+          commitMessages([userMessage, assistantMessage]);
+        } else {
+          updateMessages((previous) => [...previous, userMessage, assistantMessage]);
+        }
+        draftMessageRef.current = "";
+        setComposerResetSignal((previous) => previous + 1);
+        setSelectedMandatorySkills([]);
+        if (!options?.messageOverride) {
+          discardReadyPendingFiles();
+        }
+        setError(null);
+        clearCompactStatusImmediately();
+        setIsStreaming(true);
+        liveAssistantMessageIdRef.current = assistantMessageId;
+        liveTaskIdRef.current = null;
+        liveRecursionRef.current = null;
+
+        const launchResult = await startReactTask({
+          agent_id: agentId,
+          message: userMessage.content,
+          task_id: requestTaskId,
+          session_id: activeSessionId,
+          file_ids: filesToSend.map((file) => file.fileId),
+          web_search_provider: selectedWebSearchProvider,
+          thinking_mode: selectedThinkingMode,
+          mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
         });
-        activeSessionId = session.session_id;
-        shouldResetConversation = true;
-        const sessionItem = toSessionListItem(session);
-        setCurrentProjectId(session.project_id ?? currentProjectId);
-        setCurrentSessionId(activeSessionId);
-        currentSessionIdRef.current = activeSessionId;
-        setSessions((previous) => upsertSessionListItem(previous, sessionItem));
-        initialCursor = 0;
-        openSessionStream(activeSessionId, initialCursor);
-      }
 
-      if (currentReplyTaskId) {
-        setReplyTaskId(null);
-      }
-      setActiveContextIteration(null);
+        if (!sessionStreamAbortControllerRef.current && activeSessionId) {
+          openSessionStream(
+            activeSessionId,
+            Math.max(initialCursor, launchResult.cursor_before_start),
+          );
+        } else {
+          sessionEventCursorRef.current = Math.max(
+            sessionEventCursorRef.current,
+            launchResult.cursor_before_start,
+          );
+        }
 
-      if (!isTokenValid()) {
-        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
-        throw new Error("Token expired or invalid. Please log in again.");
-      }
-
-      setSessions((previous) =>
-        previous,
-      );
-      const messageTimestamp = new Date().toISOString();
-      const userMessage: ChatMessage = {
-        id: `user-${Date.now()}`,
-        role: "user",
-        content: pendingMessage,
-        attachments: sentAttachments,
-        mandatorySkills: selectedMandatorySkills,
-        timestamp: messageTimestamp,
-      };
-      assistantMessageId = `assistant-${Date.now()}`;
-      const assistantMessage: ChatMessage = {
-        id: assistantMessageId,
-        role: "assistant",
-        content: "",
-        timestamp: messageTimestamp,
-        recursions: [],
-        status: "running" as const,
-      };
-
-      if (shouldResetConversation) {
-        commitMessages([userMessage, assistantMessage]);
-      } else {
-        updateMessages((previous) => [...previous, userMessage, assistantMessage]);
-      }
-      setInputMessage("");
-      setSelectedMandatorySkills([]);
-      if (!options?.messageOverride) {
-        discardReadyPendingFiles();
-      }
-      setError(null);
-      clearCompactStatusImmediately();
-      setIsStreaming(true);
-      liveAssistantMessageIdRef.current = assistantMessageId;
-      liveTaskIdRef.current = null;
-      liveRecursionRef.current = null;
-
-      const launchResult = await startReactTask({
-        agent_id: agentId,
-        message: userMessage.content,
-        task_id: requestTaskId,
-        session_id: activeSessionId,
-        file_ids: filesToSend.map((file) => file.fileId),
-        web_search_provider: selectedWebSearchProvider,
-        thinking_mode: selectedThinkingMode,
-        mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
-      });
-
-      if (!sessionStreamAbortControllerRef.current && activeSessionId) {
-        openSessionStream(
-          activeSessionId,
-          Math.max(initialCursor, launchResult.cursor_before_start),
-        );
-      } else {
-        sessionEventCursorRef.current = Math.max(
-          sessionEventCursorRef.current,
-          launchResult.cursor_before_start,
-        );
-      }
-
-      updateMessages((previous) =>
-        previous.map((message) =>
-          message.id === assistantMessageId
-            ? {
-                ...message,
-                task_id: launchResult.task_id,
-                status: "running" as const,
-              }
-            : message,
-        ),
-      );
-      liveTaskIdRef.current = launchResult.task_id;
-      void refreshSidebarData().catch((refreshError) => {
-        console.error(
-          "Failed to refresh session list after task launch:",
-          refreshError,
-        );
-      });
-    } catch (streamError) {
-      setActiveContextTaskId(null);
-      setActiveContextIteration(null);
-      clearCompactStatusImmediately();
-      const normalizedError =
-        streamError instanceof Error
-          ? streamError
-          : new Error(String(streamError));
-      setError(normalizedError.message);
-      if (assistantMessageId) {
-        const errorTime = new Date().toISOString();
         updateMessages((previous) =>
           previous.map((message) =>
             message.id === assistantMessageId
               ? {
                   ...message,
-                  status: "error",
-                  errorMessage: normalizedError.message,
-                  timestamp: errorTime,
+                  task_id: launchResult.task_id,
+                  status: "running" as const,
                 }
               : message,
           ),
         );
+        liveTaskIdRef.current = launchResult.task_id;
+        void refreshSidebarData().catch((refreshError) => {
+          console.error(
+            "Failed to refresh session list after task launch:",
+            refreshError,
+          );
+        });
+      } catch (streamError) {
+        setActiveContextTaskId(null);
+        setActiveContextIteration(null);
+        clearCompactStatusImmediately();
+        const normalizedError =
+          streamError instanceof Error
+            ? streamError
+            : new Error(String(streamError));
+        setError(normalizedError.message);
+        if (assistantMessageId) {
+          const errorTime = new Date().toISOString();
+          updateMessages((previous) =>
+            previous.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    status: "error",
+                    errorMessage: normalizedError.message,
+                    timestamp: errorTime,
+                  }
+                : message,
+            ),
+          );
+        }
+        setIsStreaming(false);
       }
-      setIsStreaming(false);
-    }
-  };
+    },
+    [
+      agentId,
+      clearCompactStatusImmediately,
+      commitMessages,
+      currentProjectId,
+      currentSessionId,
+      discardReadyPendingFiles,
+      openSessionStream,
+      prepareForProgrammaticScroll,
+      readyPendingFiles,
+      refreshSidebarData,
+      replyTaskId,
+      selectedMandatorySkills,
+      selectedThinkingMode,
+      selectedWebSearchProvider,
+      sessionType,
+      testSnapshot,
+      updateMessages,
+    ],
+  );
 
   /**
    * Sends an explicit approval or rejection reply for a pending inline skill change request.
    */
-  const handleSkillChangeDecision = (
+  const handleSkillChangeDecision = useCallback((
     decision: "approve" | "reject",
     taskId: string,
     _request: SkillChangeApprovalRequest,
@@ -2276,48 +2332,116 @@ function ChatContainer({
             });
         }
       });
-  };
-
-  /**
-   * Keeps enter-to-send behavior local to the composer while preserving shift+enter for multiline input.
-   */
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      if (canSendMessage) {
-        void sendMessage();
-      }
-    }
-  };
-
-  /**
-   * Normalizes form submission into the same send path used by the enter shortcut.
-   */
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!canSendMessage) {
-      return;
-    }
-
-    void sendMessage();
-  };
+  }, [
+    applyHistoryMessages,
+    clearCompactStatusImmediately,
+    refreshSidebarData,
+    updateMessages,
+  ]);
 
   /**
    * Tracks recursion accordion state per message without leaking that detail into message models.
    */
-  const toggleRecursion = (messageId: string, recursionUid: string) => {
+  const toggleRecursion = useCallback((messageId: string, recursionUid: string) => {
     const key = `${messageId}-${recursionUid}`;
     setExpandedRecursions((previous) => ({
       ...previous,
       [key]: !previous[key],
     }));
-  };
+  }, []);
+
+  /**
+   * Mirrors the latest composer draft into a ref so send and estimate paths
+   * can read it without promoting each keystroke into top-level React state.
+   */
+  const handleDraftChange = useCallback(
+    (value: string) => {
+      draftMessageRef.current = value;
+      scheduleDraftContextUsageEstimate();
+    },
+    [scheduleDraftContextUsageEstimate],
+  );
+
+  /**
+   * Sends one explicit draft payload from the locally owned composer state.
+   */
+  const handleSubmitMessage = useCallback(
+    (message: string) => {
+      if (isStreaming || hasUploadingFiles) {
+        return;
+      }
+      if (message.trim().length === 0 && readyPendingFiles.length === 0) {
+        return;
+      }
+
+      void sendMessage({ messageOverride: message });
+    },
+    [hasUploadingFiles, isStreaming, readyPendingFiles.length, sendMessage],
+  );
+
+  /**
+   * Stabilizes approval and rejection actions so memoized timeline rows can
+   * skip work when unrelated composer state changes elsewhere.
+   */
+  const handleApproveSkillChange = useCallback(
+    (taskId: string, request: SkillChangeApprovalRequest) => {
+      handleSkillChangeDecision("approve", taskId, request);
+    },
+    [handleSkillChangeDecision],
+  );
+
+  /**
+   * Stabilizes rejection actions for memoized assistant rows.
+   */
+  const handleRejectSkillChange = useCallback(
+    (taskId: string, request: SkillChangeApprovalRequest) => {
+      handleSkillChangeDecision("reject", taskId, request);
+    },
+    [handleSkillChangeDecision],
+  );
+
+  /**
+   * Stabilizes mandatory-skill chip mutations so the composer can memoize well.
+   */
+  const handleAddMandatorySkill = useCallback((skill: MandatorySkillSelection) => {
+    setSelectedMandatorySkills((previous) =>
+      previous.some((item) => item.name === skill.name)
+        ? previous
+        : [...previous, skill],
+    );
+  }, []);
+
+  /**
+   * Removes one selected skill without recreating the callback every render.
+   */
+  const handleRemoveMandatorySkill = useCallback((skillName: string) => {
+    setSelectedMandatorySkills((previous) =>
+      previous.filter((skill) => skill.name !== skillName),
+    );
+  }, []);
+
+  /**
+   * Keeps clarify-dismissal referentially stable for the memoized composer.
+   */
+  const handleCancelReply = useCallback(() => {
+    setReplyTaskId(null);
+  }, []);
 
   const isConversationEmpty = messages.length === 0;
-  const composerTaskPlan = deriveComposerTaskPlan(messages);
-  const replyTarget = findReplyTarget(messages, replyTaskId);
-  const selectedProject =
-    sidebarProjects.find((project) => project.project_id === currentProjectId) ?? null;
+  const composerTaskPlan = useMemo(
+    () => deriveComposerTaskPlan(messages),
+    [messages],
+  );
+  const replyTarget = useMemo(
+    () => findReplyTarget(messages, replyTaskId),
+    [messages, replyTaskId],
+  );
+  const selectedProject = useMemo(
+    () =>
+      sidebarProjects.find((project) => project.project_id === currentProjectId) ??
+      null,
+    [currentProjectId, sidebarProjects],
+  );
   const isNewSessionDraftActive =
     currentSessionId === null && currentProjectId === null;
 
@@ -2402,12 +2526,8 @@ function ChatContainer({
                 isStreaming={isStreaming}
                 onToggleRecursion={toggleRecursion}
                 onReplyTask={setReplyTaskId}
-                onApproveSkillChange={(taskId, request) =>
-                  handleSkillChangeDecision("approve", taskId, request)
-                }
-                onRejectSkillChange={(taskId, request) =>
-                  handleSkillChangeDecision("reject", taskId, request)
-                }
+                onApproveSkillChange={handleApproveSkillChange}
+                onRejectSkillChange={handleRejectSkillChange}
               />
             )}
             <div className="h-1" />
@@ -2415,12 +2535,10 @@ function ChatContainer({
         </div>
 
         <ChatComposer
-          inputMessage={inputMessage}
           error={error}
           compactStatusMessage={compactStatusMessage}
           replyTarget={replyTarget}
           pendingFiles={pendingFiles}
-          canSendMessage={canSendMessage}
           isStreaming={isStreaming}
           isConversationEmpty={isConversationEmpty}
           hasUploadingFiles={hasUploadingFiles}
@@ -2436,26 +2554,16 @@ function ChatContainer({
           selectedMandatorySkills={selectedMandatorySkills}
           imageInputRef={imageInputRef}
           documentInputRef={documentInputRef}
-          onInputChange={setInputMessage}
-          onAddMandatorySkill={(skill) =>
-            setSelectedMandatorySkills((previous) =>
-              previous.some((item) => item.name === skill.name)
-                ? previous
-                : [...previous, skill],
-            )
-          }
-          onRemoveMandatorySkill={(skillName) =>
-            setSelectedMandatorySkills((previous) =>
-              previous.filter((skill) => skill.name !== skillName),
-            )
-          }
+          resetDraftSignal={composerResetSignal}
+          onInputChange={handleDraftChange}
+          onAddMandatorySkill={handleAddMandatorySkill}
+          onRemoveMandatorySkill={handleRemoveMandatorySkill}
           onThinkingModeChange={setSelectedThinkingMode}
           onWebSearchProviderChange={setSelectedWebSearchProvider}
-          onKeyDown={handleKeyDown}
           onPaste={handlePaste}
-          onSubmit={handleSubmit}
+          onSubmitMessage={handleSubmitMessage}
           onStop={handleStop}
-          onCancelReply={() => setReplyTaskId(null)}
+          onCancelReply={handleCancelReply}
           onImageInputChange={handleFileInputChange}
           onDocumentInputChange={handleDocumentInputChange}
           onRemovePendingFile={removePendingFile}

@@ -1,4 +1,4 @@
-import { MotionReorderLoading } from "@/components/MotionReorderLoading";
+import { Loader2 } from "@/lib/lucide";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,10 +15,10 @@ export interface CenteredLoadingIndicatorProps {
    */
   className?: string;
   /**
-   * Optional size overrides for the loading animation footprint.
+   * Optional size overrides for the loading icon footprint.
    *
    * Why: this keeps the legacy prop name stable for existing call sites while
-   * letting the new Motion-based indicator stay drop-in compatible.
+   * letting the shared loading treatment stay drop-in compatible.
    */
   spinnerClassName?: string;
 }
@@ -36,14 +36,18 @@ export function CenteredLoadingIndicator({
     className,
   );
   const iconClassName = cn(
-    "h-10 w-10",
+    "h-6 w-6",
     spinnerClassName,
   );
 
   return (
     <div className={containerClassName} role="status" aria-live="polite">
       <span className="sr-only">{label}</span>
-      <MotionReorderLoading className={iconClassName} />
+      <Loader2
+        aria-hidden="true"
+        className={cn(iconClassName, "animate-spin text-muted-foreground/70")}
+        data-testid="centered-loading-spinner"
+      />
     </div>
   );
 }

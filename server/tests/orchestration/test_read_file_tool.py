@@ -35,7 +35,6 @@ class ReadFileToolTestCase(unittest.TestCase):
                     module._READ_FILE_SCRIPT,
                     str(file_path),
                     "2",
-                    "3",
                     "10",
                 ],
                 check=False,
@@ -64,7 +63,6 @@ class ReadFileToolTestCase(unittest.TestCase):
                     module._READ_FILE_SCRIPT,
                     str(file_path),
                     "2",
-                    "4",
                     "2",
                 ],
                 check=False,
@@ -82,5 +80,5 @@ class ReadFileToolTestCase(unittest.TestCase):
         """Huge chunks should fail fast to keep reads focused."""
         module = cast(Any, read_file_module)
 
-        with self.assertRaisesRegex(ValueError, "less than or equal to 400"):
-            module.read_file(path="src/app.py", max_lines=401)
+        with self.assertRaisesRegex(ValueError, "less than or equal to 800"):
+            module.read_file(path="src/app.py", max_lines=801)
