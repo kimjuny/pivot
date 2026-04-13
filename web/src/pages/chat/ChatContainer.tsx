@@ -2092,11 +2092,13 @@ function ChatContainer({
     async (options?: {
       messageOverride?: string;
       replyTaskIdOverride?: string | null;
+      includeReadyAttachments?: boolean;
     }) => {
       const pendingMessage = options?.messageOverride ?? draftMessageRef.current;
       const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
       let assistantMessageId: string | null = null;
-      const filesToSend = options?.messageOverride ? [] : readyPendingFiles;
+      const includeReadyAttachments = options?.includeReadyAttachments ?? true;
+      const filesToSend = includeReadyAttachments ? readyPendingFiles : [];
       const sentAttachments = filesToSend.map((file) => ({
         fileId: file.fileId,
         kind: file.kind,
@@ -2176,7 +2178,7 @@ function ChatContainer({
         draftMessageRef.current = "";
         setComposerResetSignal((previous) => previous + 1);
         setSelectedMandatorySkills([]);
-        if (!options?.messageOverride) {
+        if (includeReadyAttachments) {
           discardReadyPendingFiles();
         }
         setError(null);

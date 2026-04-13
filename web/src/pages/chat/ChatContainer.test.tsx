@@ -12,6 +12,7 @@ vi.mock("@/utils/api", async () => {
     cancelReactTask: vi.fn(),
     createProject: vi.fn(),
     createSession: vi.fn(),
+    deleteChatFile: vi.fn(),
     deleteProject: vi.fn(),
     deleteSession: vi.fn(),
     getAgentWebSearchBindings: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/utils/api", async () => {
     listSessions: vi.fn(),
     startReactTask: vi.fn(),
     submitReactUserAction: vi.fn(),
+    uploadChatFile: vi.fn(),
     updateProject: vi.fn(),
     updateSession: vi.fn(),
   };
@@ -54,6 +56,7 @@ import {
   listSessions,
   startReactTask,
   submitReactUserAction,
+  uploadChatFile,
   updateProject,
 } from "@/utils/api";
 
@@ -313,6 +316,94 @@ describe("ChatContainer session rollover", () => {
       web_search_provider: null,
       thinking_mode: null,
       mandatory_skill_names: [],
+    });
+  });
+
+  it("sends ready document attachments together with a typed message", async () => {
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 3,
+      session_id: "attachment-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(uploadChatFile).mockResolvedValue({
+      file_id: "file-markdown-1",
+      kind: "document",
+      source: "local",
+      original_name: "proposal.md",
+      mime_type: "text/markdown",
+      format: "markdown",
+      extension: "md",
+      size_bytes: 24,
+      width: 0,
+      height: 0,
+      page_count: null,
+      can_extract_text: true,
+      suspected_scanned: false,
+      text_encoding: "utf-8",
+      session_id: null,
+      task_id: null,
+      created_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-with-attachment",
+      session_id: "attachment-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(listSessions).toHaveBeenCalledWith(...expectedSessionListArgs);
+    });
+
+    const documentInput = container.querySelector(
+      'input[type="file"][accept=".pdf,.docx,.pptx,.xlsx,.md,.markdown"]',
+    );
+    expect(documentInput).not.toBeNull();
+
+    await user.upload(
+      documentInput as HTMLInputElement,
+      new File(["# Proposal"], "proposal.md", { type: "text/markdown" }),
+    );
+
+    await screen.findByText("proposal.md");
+
+    await user.type(
+      screen.getByPlaceholderText("Ask anything"),
+      "Evaluate this markdown proposal",
+    );
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(startReactTask).toHaveBeenCalledWith({
+        agent_id: 7,
+        message: "Evaluate this markdown proposal",
+        session_id: "attachment-session",
+        task_id: null,
+        file_ids: ["file-markdown-1"],
+        web_search_provider: null,
+        thinking_mode: null,
+        mandatory_skill_names: [],
+      });
     });
   });
 

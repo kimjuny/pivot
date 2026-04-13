@@ -581,7 +581,7 @@ export function ChatComposer({
             onRemovePendingFile={onRemovePendingFile}
           />
 
-          <InputGroup className="rounded-none border-0 bg-transparent shadow-none">
+          <InputGroup className="rounded-none !border-0 bg-transparent !shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0">
             {replyTarget && (
               <InputGroupAddon
                 align="block-start"
@@ -663,7 +663,7 @@ export function ChatComposer({
                   onSelect={syncComposerSelection}
                   onPaste={onPaste}
                   placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
-                  className="min-h-[60px] max-h-80 overflow-y-auto px-4 [field-sizing:content]"
+                  className="min-h-[60px] max-h-80 overflow-y-auto !border-0 px-4 !shadow-none focus:!border-0 focus-visible:!border-0 [field-sizing:content]"
                   disabled={isStreaming}
                 />
               </PopoverAnchor>

@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.config import get_settings
 from app.models.user import User
 from app.services.skill_service import (
     BundleImportFile,
@@ -17,11 +18,13 @@ from app.services.skill_service import (
     read_user_skill,
     upsert_user_skill,
 )
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ValidationError
 from sqlmodel import Session
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 router = APIRouter()
+settings = get_settings()
 
 
 class SkillWriteRequest(BaseModel):
@@ -45,6 +48,15 @@ class GitHubSkillImportRequest(BaseModel):
     ref_type: Literal["branch", "tag"]
     kind: Literal["private", "shared"]
     remote_directory_name: str
+    skill_name: str
+
+
+class BundleSkillImportRequest(BaseModel):
+    """Multipart fields required to install one uploaded skill bundle."""
+
+    relative_paths: list[str]
+    bundle_name: str
+    kind: Literal["private", "shared"]
     skill_name: str
 
 
@@ -85,36 +97,62 @@ async def get_shared_skill_source(
 
 @router.post("/skills/import/bundle")
 async def import_bundle_skill_endpoint(
-    files: list[UploadFile] = File(...),
-    relative_paths: list[str] = Form(...),
-    bundle_name: str = Form(...),
-    kind: Literal["private", "shared"] = Form(...),
-    skill_name: str = Form(...),
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Install one skill bundle uploaded from the local machine."""
-    if len(files) != len(relative_paths):
+    form_data = await request.form(
+        max_files=int(settings.SKILL_IMPORT_MULTIPART_MAX_FILES),
+        max_fields=int(settings.SKILL_IMPORT_MULTIPART_MAX_FIELDS),
+    )
+
+    try:
+        parsed_form = BundleSkillImportRequest.model_validate(
+            {
+                "relative_paths": form_data.getlist("relative_paths"),
+                "bundle_name": form_data.get("bundle_name"),
+                "kind": form_data.get("kind"),
+                "skill_name": form_data.get("skill_name"),
+            }
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    uploads = form_data.getlist("files")
+    if len(uploads) != len(parsed_form.relative_paths):
         raise HTTPException(
             status_code=400,
             detail="Uploaded files and relative paths must have the same length.",
         )
 
-    bundle_files = [
-        BundleImportFile(
-            relative_path=relative_paths[index],
-            content=await upload.read(),
+    bundle_files: list[BundleImportFile] = []
+    for index, upload in enumerate(uploads):
+        if not isinstance(upload, StarletteUploadFile):
+            raise HTTPException(
+                status_code=422,
+                detail="Uploaded files payload is invalid.",
+            )
+
+        try:
+            content = await upload.read()
+        finally:
+            await upload.close()
+
+        bundle_files.append(
+            BundleImportFile(
+                relative_path=parsed_form.relative_paths[index],
+                content=content,
+            )
         )
-        for index, upload in enumerate(files)
-    ]
 
     try:
         metadata = install_bundle_skill(
             db,
             current_user,
-            bundle_name=bundle_name,
-            kind=kind,
-            skill_name=skill_name,
+            bundle_name=parsed_form.bundle_name,
+            kind=parsed_form.kind,
+            skill_name=parsed_form.skill_name,
             files=bundle_files,
         )
     except PermissionError as exc:

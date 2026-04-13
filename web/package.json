@@ -19,7 +19,7 @@
     "pretest": "node scripts/generate-llm-icon-manifest.mjs",
     "test": "vitest --run",
     "test:watch": "vitest --watch",
-    "dev:all": "concurrently \"npm run dev\" \"npm run test:watch\" \"poetry run uvicorn server.app.main:app --reload --host 0.0.0.0 --port 8003\" --names \"FRONTEND,TEST,BACKEND\" --prefix-colors \"blue,green,yellow\""
+    "dev:all": "concurrently \"npm run dev\" \"npm run test:watch\" \"poetry run uvicorn server.app.main:app --reload --timeout-graceful-shutdown 3 --host 0.0.0.0 --port 8003\" --names \"FRONTEND,TEST,BACKEND\" --prefix-colors \"blue,green,yellow\""
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

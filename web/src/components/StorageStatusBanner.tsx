@@ -1,100 +1,156 @@
 import { useEffect, useState } from "react";
 
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { AlertTriangle } from "@/lib/lucide";
 import { getStorageStatus, type StorageStatus } from "@/utils/api";
+
+let cachedBannerStatus: StorageStatus | null | undefined;
+let pendingBannerStatusRequest: Promise<StorageStatus | null> | null = null;
 
 /**
  * Shows one prominent warning when storage falls back from an external profile.
  */
 export function StorageStatusBanner() {
-  const [status, setStatus] = useState<StorageStatus | null>(null);
+  const [status, setStatus] = useState<StorageStatus | null | undefined>(
+    cachedBannerStatus,
+  );
 
   useEffect(() => {
     let ignore = false;
+    let timerId = 0;
 
     async function loadStorageStatus(): Promise<void> {
-      try {
-        const nextStatus = await getStorageStatus();
-        if (!ignore) {
-          setStatus(nextStatus);
-        }
-      } catch {
-        // Why: the banner is purely diagnostic and should never block Studio
-        // navigation if the status probe itself is temporarily unavailable.
+      const nextStatus = await getBannerStatus();
+      if (!ignore) {
+        setStatus(nextStatus);
       }
     }
 
-    void loadStorageStatus();
+    if (cachedBannerStatus !== undefined) {
+      setStatus(cachedBannerStatus);
+      return () => {
+        ignore = true;
+      };
+    }
+
+    timerId = window.setTimeout(() => {
+      void loadStorageStatus();
+    }, 0);
+
     return () => {
       ignore = true;
+      window.clearTimeout(timerId);
     };
   }, []);
 
-  if (
-    status === null ||
-    status.fallback_reason === null ||
-    status.requested_profile === status.active_profile
-  ) {
+  if (status === null || status === undefined) {
     return null;
   }
 
-  const rootGuidance = status.external_posix_root
-    ? !status.external_filer_reachable
-      ? "SeaweedFS is configured, but the filer endpoint is not reachable from backend yet."
-      : !status.external_posix_root_exists
-        ? "Prepare the external POSIX entrypoint before startup. A plain missing directory will keep Pivot on local_fs."
-        : status.external_namespace_shared
-          ? null
-          : "The configured POSIX root is visible to backend, but it is still a plain local directory or other non-shared path. It must expose the same namespace as the SeaweedFS filer."
-      : null;
+  const message = getStorageWarningMessage(status);
 
   return (
-    <div className="border-b border-warning/25 bg-warning/10">
-      <div className="mx-auto flex w-full max-w-7xl items-start gap-3 px-4 py-3 text-sm text-warning-foreground">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-        <div className="min-w-0">
-          <p className="font-medium text-foreground">
-            External storage is unavailable. Pivot is using local fallback storage.
-          </p>
-          <p className="mt-1 text-muted-foreground">
-            Requested profile: <span className="font-medium text-foreground">{status.requested_profile}</span>
-            {" · "}
-            Active profile: <span className="font-medium text-foreground">{status.active_profile}</span>
-            {" · "}
-            Reason: <span className="font-medium text-foreground">{status.fallback_reason}</span>
-          </p>
-          {status.external_posix_root ? (
-            <p className="mt-1 text-muted-foreground">
-              External POSIX root:{" "}
-              <span className="font-medium text-foreground">{status.external_posix_root}</span>
-              {" · "}
-              Visible to backend:{" "}
-              <span className="font-medium text-foreground">
-                {status.external_posix_root_exists ? "yes" : "no"}
-              </span>
-            </p>
-          ) : null}
-          {status.external_host_posix_root ? (
-            <p className="mt-1 text-muted-foreground">
-              Host POSIX root:{" "}
-              <span className="font-medium text-foreground">
-                {status.external_host_posix_root}
-              </span>
-            </p>
-          ) : null}
-          {rootGuidance ? (
-            <p className="mt-1 text-muted-foreground">{rootGuidance}</p>
-          ) : null}
-          {status.external_readiness_reason ? (
-            <p className="mt-1 text-muted-foreground">
-              External readiness:{" "}
-              <span className="font-medium text-foreground">
-                {status.external_readiness_reason}
-              </span>
-            </p>
-          ) : null}
-        </div>
+    <div className="bg-background/95">
+      <div className="mx-auto w-full max-w-5xl px-6 py-3">
+        <Alert className="border-warning/30 bg-warning/10 text-warning-foreground">
+          <AlertTriangle className="h-4 w-4 text-warning" />
+          <AlertTitle className="text-foreground">
+            External storage is not ready. Pivot is saving files locally for
+            now.
+          </AlertTitle>
+          <AlertDescription className="text-muted-foreground">
+            <p>{message}</p>
+          </AlertDescription>
+        </Alert>
       </div>
     </div>
   );
+}
+
+async function getBannerStatus(): Promise<StorageStatus | null> {
+  if (cachedBannerStatus !== undefined) {
+    return cachedBannerStatus;
+  }
+
+  if (pendingBannerStatusRequest !== null) {
+    return pendingBannerStatusRequest;
+  }
+
+  pendingBannerStatusRequest = (async () => {
+    try {
+      const nextStatus = await getStorageStatus();
+      cachedBannerStatus = shouldShowStorageWarning(nextStatus)
+        ? nextStatus
+        : null;
+    } catch {
+      // Why: the banner is purely diagnostic and should never block Studio
+      // navigation if the status probe itself is temporarily unavailable.
+      cachedBannerStatus = null;
+    } finally {
+      pendingBannerStatusRequest = null;
+    }
+
+    return cachedBannerStatus;
+  })();
+
+  return pendingBannerStatusRequest;
+}
+
+function shouldShowStorageWarning(status: StorageStatus): boolean {
+  return !(
+    status.fallback_reason === null ||
+    status.requested_profile === status.active_profile
+  );
+}
+
+function getStorageWarningMessage(status: StorageStatus): string {
+  switch (status.fallback_reason) {
+    case "seaweedfs_namespace_mismatch":
+      return (
+        "Pivot can see the SeaweedFS bridge folder, but it is not connected to " +
+        "the same storage space yet. The bridge mount is likely missing or " +
+        "pointing to the wrong folder."
+      );
+    case "seaweedfs_filer_unreachable":
+      return (
+        "Pivot cannot reach SeaweedFS right now. Please check whether the " +
+        "SeaweedFS filer and bridge are running normally."
+      );
+    case "seaweedfs_posix_root_missing":
+      return (
+        "Pivot cannot find the SeaweedFS bridge folder from the backend. " +
+        "Please check whether the mount directory exists and is shared " +
+        "correctly."
+      );
+    case "seaweedfs_posix_io_failed":
+      return (
+        "Pivot found the SeaweedFS bridge, but it cannot write files through " +
+        "it yet. Please check whether the bridge mount is healthy and " +
+        "writable."
+      );
+    default:
+      if (status.external_filer_reachable === false) {
+        return (
+          "Pivot cannot reach SeaweedFS right now. Please check whether the " +
+          "SeaweedFS filer and bridge are running normally."
+        );
+      }
+      if (
+        status.external_posix_root_exists &&
+        status.external_namespace_shared === false
+      ) {
+        return (
+          "Pivot can see the SeaweedFS bridge folder, but it is not connected " +
+          "to the same storage space yet."
+        );
+      }
+      return (
+        "External storage is temporarily unavailable. Please check the " +
+        "SeaweedFS bridge status and try again."
+      );
+  }
 }
