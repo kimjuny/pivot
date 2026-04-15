@@ -2,6 +2,7 @@ import { memo } from "react";
 import { MessageSquare } from "@/lib/lucide";
 
 import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
+import { getChatMessageRenderKey } from "../utils/chatData";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";
 import { UserMessageBubble } from "./UserMessageBubble";
 
@@ -59,7 +60,10 @@ export const ConversationView = memo(function ConversationView({
   return (
     <>
       {messages.map((message) => (
-        <div key={message.id} className="mb-6 space-y-2 last:mb-0">
+        <div
+          key={getChatMessageRenderKey(message)}
+          className="mb-6 space-y-2 last:mb-0"
+        >
           {message.role === "user" ? (
             <UserMessageBubble message={message} />
           ) : (

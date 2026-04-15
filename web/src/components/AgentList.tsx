@@ -202,6 +202,7 @@ function AgentList() {
     session_idle_timeout_minutes: number;
     sandbox_timeout_seconds: number;
     compact_threshold_percent: number;
+    max_iteration: number;
   }) => {
     if (modalMode === 'create') {
       if (!agentData.llm_id) { toast.error('LLM selection is required'); return; }
@@ -212,6 +213,7 @@ function AgentList() {
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
+        max_iteration: agentData.max_iteration,
       });
       toast.success('Agent created');
       navigate(`/studio/agents/${newAgent.id}`);
@@ -223,6 +225,7 @@ function AgentList() {
         session_idle_timeout_minutes: agentData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
+        max_iteration: agentData.max_iteration,
       });
       toast.success('Agent updated');
       await loadAgents();
@@ -528,6 +531,7 @@ function AgentList() {
                   editingAgent.sandbox_timeout_seconds,
                 compact_threshold_percent:
                   editingAgent.compact_threshold_percent,
+                max_iteration: editingAgent.max_iteration,
               }
             : undefined
         }

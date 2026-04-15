@@ -299,6 +299,7 @@ export const createAgent = async (agentData: {
   session_idle_timeout_minutes?: number;
   sandbox_timeout_seconds?: number;
   compact_threshold_percent?: number;
+  max_iteration?: number;
   is_active?: boolean;
 }): Promise<Agent> => {
   return apiRequest('/agents', {
@@ -563,6 +564,7 @@ export const updateAgent = async (
     session_idle_timeout_minutes?: number;
     sandbox_timeout_seconds?: number;
     compact_threshold_percent?: number;
+    max_iteration?: number;
     is_active?: boolean;
     tool_ids?: string | null;
     skill_ids?: string | null;
@@ -930,6 +932,64 @@ export interface WebSearchBinding {
 }
 
 /**
+ * One schema-driven field used by the image-generation provider binding form.
+ */
+export interface ImageProviderConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'secret' | 'textarea' | 'boolean';
+  required: boolean;
+  placeholder?: string | null;
+  description?: string | null;
+}
+
+/**
+ * Declarative manifest for one image-generation provider.
+ */
+export interface ImageProviderManifest {
+  key: string;
+  name: string;
+  description: string;
+  docs_url: string;
+  visibility: string;
+  status: string;
+  extension_name?: string | null;
+  extension_version?: string | null;
+  extension_display_name?: string | null;
+  auth_schema: ImageProviderConfigField[];
+  config_schema: ImageProviderConfigField[];
+  setup_steps: string[];
+  supported_operations: string[];
+  supported_parameters: string[];
+  capability_flags: Record<string, boolean>;
+}
+
+/**
+ * Image-generation provider catalog row returned by the backend.
+ */
+export interface ImageProviderCatalogItem {
+  manifest: ImageProviderManifest;
+}
+
+/**
+ * Configured image-generation provider binding returned for an agent.
+ */
+export interface ImageProviderBinding {
+  id: number;
+  agent_id: number;
+  provider_key: string;
+  enabled: boolean;
+  auth_config: Record<string, string>;
+  runtime_config: Record<string, unknown>;
+  manifest: ImageProviderManifest;
+  last_health_status: string | null;
+  last_health_message: string | null;
+  last_health_check_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * Fetch the built-in web-search provider catalog.
  */
 export const getWebSearchProviders = async (): Promise<WebSearchCatalogItem[]> => {
@@ -1014,6 +1074,91 @@ export const testWebSearchProviderDraft = async (
   }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
 };
 
+/**
+ * Fetch the installed image-generation provider catalog.
+ */
+export const getImageGenerationProviders = async (): Promise<ImageProviderCatalogItem[]> => {
+  return apiRequest('/image-generation/providers') as Promise<ImageProviderCatalogItem[]>;
+};
+
+/**
+ * Fetch all image-generation provider bindings configured for one agent.
+ */
+export const getAgentImageProviderBindings = async (agentId: number): Promise<ImageProviderBinding[]> => {
+  return apiRequest(`/agents/${agentId}/image-providers`) as Promise<ImageProviderBinding[]>;
+};
+
+/**
+ * Create a new image-generation provider binding for an agent.
+ */
+export const createAgentImageProviderBinding = async (
+  agentId: number,
+  payload: {
+    provider_key: string;
+    enabled?: boolean;
+    auth_config: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+  }
+): Promise<ImageProviderBinding> => {
+  return apiRequest(`/agents/${agentId}/image-providers`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<ImageProviderBinding>;
+};
+
+/**
+ * Update one configured image-generation provider binding.
+ */
+export const updateAgentImageProviderBinding = async (
+  bindingId: number,
+  payload: {
+    enabled?: boolean;
+    auth_config?: Record<string, unknown>;
+    runtime_config?: Record<string, unknown>;
+  }
+): Promise<ImageProviderBinding> => {
+  return apiRequest(`/agent-image-providers/${bindingId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }) as Promise<ImageProviderBinding>;
+};
+
+/**
+ * Delete one configured image-generation provider binding.
+ */
+export const deleteAgentImageProviderBinding = async (bindingId: number): Promise<void> => {
+  await apiRequest(`/agent-image-providers/${bindingId}`, {
+    method: 'DELETE',
+  });
+};
+
+/**
+ * Run one saved image-generation provider health check.
+ */
+export const testAgentImageProviderBinding = async (
+  bindingId: number
+): Promise<{ result: { ok: boolean; status: string; message: string } }> => {
+  return apiRequest(`/agent-image-providers/${bindingId}/test`, {
+    method: 'POST',
+  }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
+};
+
+/**
+ * Run one provider health check against unsaved image-provider form values.
+ */
+export const testImageProviderDraft = async (
+  providerKey: string,
+  payload: {
+    auth_config: Record<string, unknown>;
+    runtime_config: Record<string, unknown>;
+  }
+): Promise<{ result: { ok: boolean; status: string; message: string } }> => {
+  return apiRequest(`/image-generation/providers/${encodeURIComponent(providerKey)}/test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
+};
+
 // ---------------------------------------------------------------------------
 // Extensions API
 // ---------------------------------------------------------------------------
@@ -1092,6 +1237,8 @@ export interface ExtensionContributionSummary {
   hooks: string[];
   /** Channel provider keys contributed by this version. */
   channel_providers: string[];
+  /** Image-generation provider keys contributed by this version. */
+  image_providers?: string[];
   /** Web-search provider keys contributed by this version. */
   web_search_providers: string[];
 }
@@ -1182,6 +1329,8 @@ export interface ExtensionReferenceSummary {
   extension_binding_count: number;
   /** Agent channel bindings using providers from this installation. */
   channel_binding_count: number;
+  /** Agent image-provider bindings using providers from this installation. */
+  image_provider_binding_count?: number;
   /** Agent web-search bindings using providers from this installation. */
   web_search_binding_count: number;
   /** Agent binding rows referencing this installation. */

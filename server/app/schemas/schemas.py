@@ -55,7 +55,7 @@ class AgentCreate(AppBaseModel):
     )
     is_active: bool = Field(default=True, description="Whether agent is active")
     max_iteration: int = Field(
-        default=30, description="Maximum iterations for ReAct recursion"
+        default=50, ge=1, description="Maximum iterations for ReAct recursion"
     )
 
 
@@ -67,7 +67,7 @@ class AgentUpdate(AppBaseModel):
     sandbox_timeout_seconds: int | None = Field(default=None, ge=1)
     compact_threshold_percent: int | None = Field(default=None, ge=1, le=100)
     is_active: bool | None = None
-    max_iteration: int | None = None
+    max_iteration: int | None = Field(default=None, ge=1)
     # JSON-encoded list of tool names, or None to leave unchanged
     tool_ids: str | None = None
     # JSON-encoded list of globally unique skill names, or None to leave unchanged

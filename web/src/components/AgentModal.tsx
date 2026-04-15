@@ -38,6 +38,8 @@ export interface AgentFormData {
   sandbox_timeout_seconds: number;
   /** Context percentage that triggers automatic compaction. */
   compact_threshold_percent: number;
+  /** Maximum ReAct iterations allowed for one task. */
+  max_iteration: number;
 }
 
 interface AgentModalProps {
@@ -58,6 +60,7 @@ function createDefaultFormData(): AgentFormData {
     session_idle_timeout_minutes: 15,
     sandbox_timeout_seconds: 60,
     compact_threshold_percent: 60,
+    max_iteration: 50,
   };
 }
 
@@ -86,6 +89,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           sandbox_timeout_seconds: initialData.sandbox_timeout_seconds ?? 60,
           compact_threshold_percent:
             initialData.compact_threshold_percent ?? 60,
+          max_iteration: initialData.max_iteration ?? 50,
         });
       } else {
         setFormData(createDefaultFormData());
@@ -145,6 +149,14 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
       setServerError('Compact threshold must be between 1% and 100%');
       return;
     }
+    if (
+      !Number.isInteger(formData.max_iteration) ||
+      formData.max_iteration < 1
+    ) {
+      setActiveTab('advanced');
+      setServerError('Max iteration must be at least 1');
+      return;
+    }
 
     setIsSubmitting(true);
     setServerError(null);
@@ -157,6 +169,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         session_idle_timeout_minutes: formData.session_idle_timeout_minutes,
         sandbox_timeout_seconds: formData.sandbox_timeout_seconds,
         compact_threshold_percent: formData.compact_threshold_percent,
+        max_iteration: formData.max_iteration,
       });
       onClose();
     } catch (err) {
@@ -342,6 +355,35 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
               <p className="text-sm text-muted-foreground">
                 Wait this many seconds for sandbox-backed function calls before
                 surfacing a timeout error. Default is 60.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="max_iteration">
+                Max Iteration
+              </Label>
+              <Input
+                id="max_iteration"
+                type="number"
+                min={1}
+                step={1}
+                value={formData.max_iteration}
+                onChange={(e) => {
+                  const nextValue = Number.parseInt(e.target.value, 10);
+                  setFormData({
+                    ...formData,
+                    max_iteration: Number.isNaN(nextValue)
+                      ? 0
+                      : nextValue,
+                  });
+                }}
+                disabled={isSubmitting}
+                placeholder="50"
+                autoComplete="off"
+              />
+              <p className="text-sm text-muted-foreground">
+                Limit how many ReAct iterations one task can use before the agent
+                is forced to stop. Default is 50.
               </p>
             </div>
 

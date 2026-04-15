@@ -11,6 +11,7 @@ import type {
   ChatMessage,
   MandatorySkillSelection,
   ChatPendingUserAction,
+  RecursionRecord,
   ReactStreamEvent,
   TokenUsage,
 } from "../types";
@@ -29,6 +30,34 @@ const CLIPBOARD_FILE_EXTENSION_BY_MIME: Record<string, string> = {
   "text/x-markdown": "md",
   "text/plain": "md",
 };
+
+/**
+ * Builds the canonical message ID shared by optimistic UI state and history replays.
+ *
+ * Why: task history rehydrates messages by task ID, so the live timeline needs
+ * to converge on the same identifier to avoid React remounting whole rows.
+ */
+export function getCanonicalChatMessageId(
+  role: ChatMessage["role"],
+  taskId: string,
+): string {
+  return `${role}-${taskId}`;
+}
+
+/**
+ * Derives the most stable render key available for one chat row.
+ *
+ * Why: optimistic messages start with temporary client IDs and later adopt the
+ * persisted task ID, so rendering by task identity prevents visible list jumps.
+ */
+export function getChatMessageRenderKey(message: ChatMessage): string {
+  if (typeof message.task_id !== "string" || message.task_id.length === 0) {
+    return message.id;
+  }
+
+  const canonicalId = getCanonicalChatMessageId(message.role, message.task_id);
+  return message.id === canonicalId ? canonicalId : message.id;
+}
 
 /**
  * Safely parses JSON payloads coming from the backend.
@@ -274,6 +303,84 @@ function getLatestTaskErrorMessage(task: TaskMessage): string | undefined {
 }
 
 /**
+ * Maps persisted backend task state onto the assistant message lifecycle.
+ */
+function getTaskAssistantStatus(task: TaskMessage): ChatMessage["status"] {
+  if (task.status === "completed") {
+    return "completed";
+  }
+  if (task.status === "cancelled") {
+    return "stopped";
+  }
+  if (task.status === "failed") {
+    return "error";
+  }
+  if (task.status === "waiting_input") {
+    return "waiting_input";
+  }
+  if (task.status === "running" || task.status === "pending") {
+    return "running";
+  }
+  return "completed";
+}
+
+/**
+ * Aggregates token accounting for one visible assistant segment.
+ */
+function sumRecursionTokens(recursions: RecursionRecord[]): TokenUsage {
+  return recursions.reduce<TokenUsage>(
+    (accumulator, recursion) => ({
+      prompt_tokens:
+        accumulator.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
+      completion_tokens:
+        accumulator.completion_tokens + (recursion.tokens?.completion_tokens ?? 0),
+      total_tokens:
+        accumulator.total_tokens + (recursion.tokens?.total_tokens ?? 0),
+      cached_input_tokens:
+        (accumulator.cached_input_tokens ?? 0) +
+        (recursion.tokens?.cached_input_tokens ?? 0),
+    }),
+    {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      cached_input_tokens: 0,
+    },
+  );
+}
+
+/**
+ * Reads the durable question/reply payload persisted on one CLARIFY recursion.
+ */
+function getClarifyPayload(
+  recursion: RecursionDetail,
+): { question: string; reply?: string } | null {
+  if (recursion.action_type !== "CLARIFY" || !recursion.action_output) {
+    return null;
+  }
+
+  const actionOutput = asRecord(parseJson(recursion.action_output));
+  const question = actionOutput?.question;
+  if (typeof question !== "string" || question.trim().length === 0) {
+    return null;
+  }
+
+  const reply = actionOutput?.reply;
+  return {
+    question,
+    reply: typeof reply === "string" && reply.trim().length > 0 ? reply : undefined,
+  };
+}
+
+/**
+ * Builds stable segment IDs for clarify history without colliding with the
+ * task-level canonical IDs used by live, non-clarify turns.
+ */
+function getClarifySegmentKey(recursion: RecursionRecord): string {
+  return recursion.trace_id ?? `iter-${recursion.iteration}`;
+}
+
+/**
  * Maps persisted task history into the same message model used by live streaming updates.
  */
 export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
@@ -286,7 +393,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         : undefined;
 
     loadedMessages.push({
-      id: `user-${task.task_id}`,
+      id: getCanonicalChatMessageId("user", task.task_id),
       role: "user",
       content: task.user_message,
       attachments: (task.files ?? []).map((file) => toChatAttachment(file)),
@@ -294,6 +401,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         toMandatorySkillSelection(mandatorySkill),
       ),
       timestamp: task.created_at,
+      task_id: task.task_id,
     });
 
     const recursions = task.recursions.map((recursion: RecursionDetail) => {
@@ -403,59 +511,120 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       };
     });
 
-    const aggregatedTaskTokens = recursions.reduce<TokenUsage>(
-      (accumulator, recursion) => ({
-        prompt_tokens:
-          accumulator.prompt_tokens + (recursion.tokens?.prompt_tokens ?? 0),
-        completion_tokens:
-          accumulator.completion_tokens +
-          (recursion.tokens?.completion_tokens ?? 0),
-        total_tokens:
-          accumulator.total_tokens + (recursion.tokens?.total_tokens ?? 0),
-        cached_input_tokens:
-          (accumulator.cached_input_tokens ?? 0) +
-          (recursion.tokens?.cached_input_tokens ?? 0),
-      }),
-      {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-        cached_input_tokens: 0,
-      },
-    );
+    const clarifySegments = task.recursions
+      .map((recursion, index) => ({
+        index,
+        payload: getClarifyPayload(recursion),
+      }))
+      .filter(
+        (segment): segment is {
+          index: number;
+          payload: { question: string; reply?: string };
+        } => segment.payload !== null,
+      );
 
-    loadedMessages.push({
-      id: `assistant-${task.task_id}`,
-      role: "assistant",
-      content: buildAssistantContent(task),
-      errorMessage: task.status === "failed" ? getLatestTaskErrorMessage(task) : undefined,
-      assistantAttachments: (task.assistant_attachments ?? []).map((attachment) =>
-        toAssistantAttachment(attachment),
-      ),
-      timestamp: task.updated_at,
-      task_id: task.task_id,
-      pendingUserAction,
-      currentPlan: task.current_plan,
-      recursions,
-      status:
-        task.status === "completed"
-          ? ("completed" as const)
-          : task.status === "cancelled"
-            ? ("stopped" as const)
-            : task.status === "failed"
-            ? ("error" as const)
-            : task.status === "waiting_input"
-              ? ("waiting_input" as const)
-              : task.status === "running" || task.status === "pending"
-                ? ("running" as const)
-                : ("completed" as const),
-      totalTokens: {
-        prompt_tokens: aggregatedTaskTokens.prompt_tokens,
-        completion_tokens: aggregatedTaskTokens.completion_tokens,
-        total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
-        cached_input_tokens: aggregatedTaskTokens.cached_input_tokens ?? 0,
-      },
+    if (clarifySegments.length === 0) {
+      const aggregatedTaskTokens = sumRecursionTokens(recursions);
+      loadedMessages.push({
+        id: getCanonicalChatMessageId("assistant", task.task_id),
+        role: "assistant",
+        content: buildAssistantContent(task),
+        errorMessage:
+          task.status === "failed" ? getLatestTaskErrorMessage(task) : undefined,
+        assistantAttachments: (task.assistant_attachments ?? []).map((attachment) =>
+          toAssistantAttachment(attachment),
+        ),
+        timestamp: task.updated_at,
+        task_id: task.task_id,
+        pendingUserAction,
+        currentPlan: task.current_plan,
+        recursions,
+        status: getTaskAssistantStatus(task),
+        totalTokens: {
+          ...aggregatedTaskTokens,
+          total_tokens: aggregatedTaskTokens.total_tokens || task.total_tokens,
+        },
+      });
+      continue;
+    }
+
+    let segmentStartIndex = 0;
+    clarifySegments.forEach((segment, segmentIndex) => {
+      const segmentRecursion = recursions[segment.index];
+      const sourceRecursion = task.recursions[segment.index];
+      if (!segmentRecursion || !sourceRecursion) {
+        return;
+      }
+      const segmentRecursions = recursions.slice(
+        segmentStartIndex,
+        segment.index + 1,
+      );
+      const lastSegment = segmentIndex === clarifySegments.length - 1;
+      const waitingForThisClarify =
+        task.status === "waiting_input" &&
+        lastSegment &&
+        segment.payload.reply === undefined;
+      const segmentKey = getClarifySegmentKey(segmentRecursion);
+      const segmentTokens = sumRecursionTokens(segmentRecursions);
+
+      loadedMessages.push({
+        id: `assistant-${task.task_id}-clarify-${segmentKey}`,
+        role: "assistant",
+        content: segment.payload.question,
+        timestamp: sourceRecursion.updated_at,
+        task_id: task.task_id,
+        pendingUserAction: waitingForThisClarify ? pendingUserAction : undefined,
+        currentPlan: task.current_plan,
+        recursions: segmentRecursions,
+        status: waitingForThisClarify ? "waiting_input" : "completed",
+        totalTokens: segmentTokens,
+      });
+
+      if (segment.payload.reply) {
+        loadedMessages.push({
+          id: `user-${task.task_id}-clarify-reply-${segmentKey}`,
+          role: "user",
+          content: segment.payload.reply,
+          timestamp: sourceRecursion.updated_at,
+          task_id: task.task_id,
+        });
+      }
+
+      segmentStartIndex = segment.index + 1;
     });
+
+    const remainingRecursions = recursions.slice(segmentStartIndex);
+    const shouldRenderFinalSegment =
+      remainingRecursions.length > 0 ||
+      Boolean(task.agent_answer) ||
+      task.status === "completed" ||
+      task.status === "failed" ||
+      task.status === "cancelled" ||
+      task.status === "running" ||
+      task.status === "pending";
+
+    if (shouldRenderFinalSegment) {
+      const finalTokens = sumRecursionTokens(remainingRecursions);
+      loadedMessages.push({
+        id: `assistant-${task.task_id}-final`,
+        role: "assistant",
+        content: typeof task.agent_answer === "string" ? task.agent_answer : "",
+        errorMessage:
+          task.status === "failed" ? getLatestTaskErrorMessage(task) : undefined,
+        assistantAttachments: (task.assistant_attachments ?? []).map((attachment) =>
+          toAssistantAttachment(attachment),
+        ),
+        timestamp: task.updated_at,
+        task_id: task.task_id,
+        currentPlan: task.current_plan,
+        recursions: remainingRecursions,
+        status: getTaskAssistantStatus(task),
+        totalTokens: {
+          ...finalTokens,
+          total_tokens: finalTokens.total_tokens || task.total_tokens,
+        },
+      });
+    }
   }
 
   return loadedMessages;

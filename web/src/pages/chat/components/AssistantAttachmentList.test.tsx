@@ -64,7 +64,9 @@ describe("AssistantAttachmentList", () => {
     expect(screen.queryByText("Download")).not.toBeInTheDocument();
   });
 
-  it("renders download-only artifacts as static raw cards", () => {
+  it("opens download-only artifacts with an unsupported preview state", async () => {
+    const user = userEvent.setup();
+
     render(
       <AssistantAttachmentList
         attachments={[
@@ -85,8 +87,14 @@ describe("AssistantAttachmentList", () => {
 
     expect(screen.getByText("archive.bin")).toBeInTheDocument();
     expect(screen.getByText("Raw · 920B")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open archive.bin" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Unsupported file type")).toBeInTheDocument();
+    });
     expect(
-      screen.queryByRole("button", { name: "Open archive.bin" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Download archive.bin" }),
+    ).toBeInTheDocument();
   });
 });

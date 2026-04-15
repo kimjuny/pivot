@@ -45,8 +45,10 @@ import SkillSelectorDialog from './SkillSelectorDialog';
 import ChannelBindingDialog from './ChannelBindingDialog';
 import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
+import ImageGenerationBindingDialog from './ImageGenerationBindingDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
 import { ExtensionLogoAvatar } from './ExtensionLogoAvatar';
+import { ImageProviderBadge } from './ImageProviderBadge';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
 import { WebSearchProviderBadge } from './WebSearchProviderBadge';
 import {
@@ -64,6 +66,9 @@ import {
     getAgentExtensionPackages,
     deleteAgentChannel,
     deleteAgentExtensionBinding,
+    getImageGenerationProviders,
+    getAgentImageProviderBindings,
+    deleteAgentImageProviderBinding,
     getWebSearchProviders,
     getAgentWebSearchBindings,
     deleteAgentWebSearchBinding,
@@ -75,6 +80,8 @@ import {
     type UserSkill,
     type ChannelBinding,
     type ChannelCatalogItem,
+    type ImageProviderBinding,
+    type ImageProviderCatalogItem,
     type WebSearchBinding,
     type WebSearchCatalogItem,
 } from '../utils/api';
@@ -119,6 +126,19 @@ export interface SidebarChannel {
  * Compact web-search binding snapshot used by the sidebar and workspace status.
  */
 export interface SidebarWebSearchBinding {
+    id: number;
+    providerKey: string;
+    providerName: string;
+    providerVisibility: string;
+    providerExtensionLabel: string | null;
+    enabled: boolean;
+    lastHealthStatus: string | null;
+}
+
+/**
+ * Compact image-provider binding snapshot used by the sidebar and workspace status.
+ */
+export interface SidebarImageProviderBinding {
     id: number;
     providerKey: string;
     providerName: string;
@@ -220,9 +240,11 @@ interface AgentDetailSidebarProps {
     onDeleteScene: (scene: Scene) => void;
     onAgentDraftUpdate?: (agent: Agent) => void;
     onChannelBindingsLoaded?: (bindings: SidebarChannel[]) => void;
+    onImageProviderBindingsLoaded?: (bindings: SidebarImageProviderBinding[]) => void;
     onWebSearchBindingsLoaded?: (bindings: SidebarWebSearchBinding[]) => void;
     onExtensionBindingsChanged?: () => void | Promise<void>;
     onChannelBindingsChanged?: () => void | Promise<void>;
+    onImageProviderBindingsChanged?: () => void | Promise<void>;
     onWebSearchBindingsChanged?: () => void | Promise<void>;
 }
 
@@ -240,9 +262,11 @@ function AgentDetailSidebar({
     onDeleteScene,
     onAgentDraftUpdate,
     onChannelBindingsLoaded,
+    onImageProviderBindingsLoaded,
     onWebSearchBindingsLoaded,
     onExtensionBindingsChanged,
     onChannelBindingsChanged,
+    onImageProviderBindingsChanged,
     onWebSearchBindingsChanged,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
@@ -250,27 +274,33 @@ function AgentDetailSidebar({
     const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isChannelsOpen, setIsChannelsOpen] = useState(false);
+    const [isImageProvidersOpen, setIsImageProvidersOpen] = useState(false);
     const [isWebSearchOpen, setIsWebSearchOpen] = useState(false);
     const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
+    const [isImageProviderDialogOpen, setIsImageProviderDialogOpen] = useState(false);
     const [isWebSearchDialogOpen, setIsWebSearchDialogOpen] = useState(false);
     const [isExtensionDialogOpen, setIsExtensionDialogOpen] = useState(false);
     const [editingChannel, setEditingChannel] = useState<ChannelBinding | null>(null);
+    const [editingImageProviderBinding, setEditingImageProviderBinding] = useState<ImageProviderBinding | null>(null);
     const [editingWebSearchBinding, setEditingWebSearchBinding] = useState<WebSearchBinding | null>(null);
     const [editingExtensionPackage, setEditingExtensionPackage] = useState<AgentExtensionPackage | null>(null);
     const [tools, setTools] = useState<SidebarTool[]>([]);
     const [skills, setSkills] = useState<SidebarSkill[]>([]);
     const [channels, setChannels] = useState<SidebarChannel[]>([]);
+    const [imageProviderBindings, setImageProviderBindings] = useState<SidebarImageProviderBinding[]>([]);
     const [webSearchBindings, setWebSearchBindings] = useState<SidebarWebSearchBinding[]>([]);
     const [extensionPackages, setExtensionPackages] = useState<AgentExtensionPackage[]>([]);
     const [channelCatalog, setChannelCatalog] = useState<ChannelCatalogItem[]>([]);
+    const [imageProviderCatalog, setImageProviderCatalog] = useState<ImageProviderCatalogItem[]>([]);
     const [webSearchCatalog, setWebSearchCatalog] = useState<WebSearchCatalogItem[]>([]);
     const [toolsLoading, setToolsLoading] = useState(false);
     const [skillsLoading, setSkillsLoading] = useState(false);
     const [channelsLoading, setChannelsLoading] = useState(false);
+    const [imageProvidersLoading, setImageProvidersLoading] = useState(false);
     const [webSearchLoading, setWebSearchLoading] = useState(false);
     const [extensionsLoading, setExtensionsLoading] = useState(false);
     // Local copy of the agent's tool_ids so it updates without a page reload
@@ -280,6 +310,7 @@ function AgentDetailSidebar({
     const hasFetchedToolsRef = useRef(false);
     const hasFetchedSkillsRef = useRef(false);
     const hasFetchedChannelsCatalogRef = useRef(false);
+    const hasFetchedImageProviderCatalogRef = useRef(false);
     const hasFetchedWebSearchCatalogRef = useRef(false);
     const latestAgentIdRef = useRef<number | null>(agent?.id ?? null);
     const { openTab, activeTabId } = useAgentTabStore();
@@ -498,6 +529,28 @@ function AgentDetailSidebar({
     }, []);
 
     /**
+     * Load the installed image-generation provider catalog once because the
+     * binding dialog reuses it for schema-driven provider forms.
+     */
+    useEffect(() => {
+        if (hasFetchedImageProviderCatalogRef.current) return;
+
+        const fetchImageProviderCatalog = async () => {
+            hasFetchedImageProviderCatalogRef.current = true;
+            try {
+                const catalog = await getImageGenerationProviders();
+                setImageProviderCatalog(catalog);
+            } catch (err) {
+                const error = err instanceof Error ? err : new Error(String(err));
+                console.error('Failed to fetch image provider catalog:', error);
+                toast.error('Failed to load image providers');
+            }
+        };
+
+        void fetchImageProviderCatalog();
+    }, []);
+
+    /**
      * Load the built-in web-search provider catalog once because the binding
      * dialog reuses it for schema-driven provider forms.
      */
@@ -569,6 +622,53 @@ function AgentDetailSidebar({
     }, [loadChannels]);
 
     /**
+     * Image-provider bindings are agent-specific, so reload them whenever the
+     * current agent changes or after any binding mutation.
+     */
+    const loadImageProviderBindings = useCallback(async () => {
+        const requestedAgentId = agent?.id ?? null;
+        if (!requestedAgentId) {
+            setImageProviderBindings([]);
+            return;
+        }
+
+        setImageProvidersLoading(true);
+        try {
+            const bindings = await getAgentImageProviderBindings(requestedAgentId);
+            if (latestAgentIdRef.current !== requestedAgentId) {
+                return;
+            }
+            const nextBindings = bindings.map((binding) => ({
+                id: binding.id,
+                providerKey: binding.provider_key,
+                providerName: binding.manifest.name,
+                providerVisibility: binding.manifest.visibility,
+                providerExtensionLabel: formatProviderExtensionLabel(
+                    binding.manifest.extension_display_name,
+                    binding.manifest.extension_name,
+                    binding.manifest.extension_version,
+                ),
+                enabled: binding.enabled,
+                lastHealthStatus: binding.last_health_status,
+            }));
+            setImageProviderBindings(nextBindings);
+            onImageProviderBindingsLoaded?.(nextBindings);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch image provider bindings:', error);
+            toast.error('Failed to load image providers');
+        } finally {
+            if (latestAgentIdRef.current === requestedAgentId) {
+                setImageProvidersLoading(false);
+            }
+        }
+    }, [agent?.id, onImageProviderBindingsLoaded]);
+
+    useEffect(() => {
+        void loadImageProviderBindings();
+    }, [loadImageProviderBindings]);
+
+    /**
      * Web-search bindings are agent-specific, so reload them whenever the
      * current agent changes or after any binding mutation.
      */
@@ -637,7 +737,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'extensions' | 'channels' | 'webSearch') => {
+    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -648,6 +748,7 @@ function AgentDetailSidebar({
                 setIsSkillsOpen(section === 'skills');
                 setIsExtensionsOpen(section === 'extensions');
                 setIsChannelsOpen(section === 'channels');
+                setIsImageProvidersOpen(section === 'imageProviders');
                 setIsWebSearchOpen(section === 'webSearch');
             }, 100);
         } else {
@@ -657,6 +758,7 @@ function AgentDetailSidebar({
             setIsSkillsOpen(section === 'skills');
             setIsExtensionsOpen(section === 'extensions');
             setIsChannelsOpen(section === 'channels');
+            setIsImageProvidersOpen(section === 'imageProviders');
             setIsWebSearchOpen(section === 'webSearch');
         }
     };
@@ -758,6 +860,46 @@ function AgentDetailSidebar({
     const handleAddWebSearchBinding = () => {
         setEditingWebSearchBinding(null);
         setIsWebSearchDialogOpen(true);
+    };
+
+    /**
+     * Open the image-provider binding dialog in create mode.
+     */
+    const handleAddImageProviderBinding = () => {
+        setEditingImageProviderBinding(null);
+        setIsImageProviderDialogOpen(true);
+    };
+
+    /**
+     * Open the image-provider binding dialog with the latest binding payload.
+     */
+    const handleEditImageProviderBinding = async (bindingId: number) => {
+        if (!agent?.id) {
+            return;
+        }
+        try {
+            const bindings = await getAgentImageProviderBindings(agent.id);
+            const selectedBinding = bindings.find((binding) => binding.id === bindingId) ?? null;
+            setEditingImageProviderBinding(selectedBinding);
+            setIsImageProviderDialogOpen(true);
+        } catch {
+            toast.error('Failed to load image provider');
+        }
+    };
+
+    /**
+     * Delete one image-provider binding from the current agent.
+     */
+    const handleDeleteImageProviderBinding = async (bindingId: number) => {
+        try {
+            await deleteAgentImageProviderBinding(bindingId);
+            toast.success('Image provider removed');
+            await loadImageProviderBindings();
+            await onImageProviderBindingsChanged?.();
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            toast.error(error.message);
+        }
     };
 
     /**
@@ -1564,6 +1706,126 @@ function AgentDetailSidebar({
                         </SidebarGroup>
                     </Collapsible>
 
+                    {/* Image Providers Section */}
+                    <Collapsible
+                        open={isImageProvidersOpen}
+                        onOpenChange={setIsImageProvidersOpen}
+                        className="group/collapsible"
+                    >
+                        <SidebarGroup className="py-0">
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('imageProviders')}
+                                        tooltip="Image Providers"
+                                        isActive={isImageProvidersOpen}
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
+                                    >
+                                        <Layers className="size-4" />
+                                        <span>Image Providers</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('imageProviders')}
+                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                >
+                                    <Layers className="size-4" />
+                                    <span className="flex-1 text-left">Image Providers</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+                                        {imageProvidersLoading ? '…' : imageProviderBindings.length}
+                                    </span>
+                                    {agent?.id && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(e) => { e.stopPropagation(); handleAddImageProviderBinding(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddImageProviderBinding(); } }}
+                                                    className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                    aria-label="Add image provider"
+                                                >
+                                                    <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right">Add image provider</TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                </CollapsibleTrigger>
+                            </SidebarGroupLabel>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
+                                <SidebarGroupContent>
+                                    {imageProvidersLoading ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            Loading image providers…
+                                        </div>
+                                    ) : imageProviderBindings.length === 0 ? (
+                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
+                                            No image providers configured for this agent
+                                        </div>
+                                    ) : (
+                                        <SidebarMenu>
+                                            {imageProviderBindings.map((binding) => (
+                                                <SidebarMenuItem key={binding.id} className="group/item">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <SidebarMenuButton
+                                                                size="sm"
+                                                                onClick={() => void handleEditImageProviderBinding(binding.id)}
+                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                                                            >
+                                                                <ImageProviderBadge
+                                                                    name={binding.providerName}
+                                                                    className="w-4 shrink-0 justify-center"
+                                                                    textClassName="hidden"
+                                                                />
+                                                                <span className="truncate flex-1">{binding.providerName}</span>
+                                                                <span className="text-[9px] px-1 rounded border border-sidebar-border/60 text-sidebar-foreground/50 shrink-0">
+                                                                    {binding.providerVisibility === 'extension' ? 'ext' : 'core'}
+                                                                </span>
+                                                                <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                    {binding.enabled ? 'on' : 'off'}
+                                                                </span>
+                                                            </SidebarMenuButton>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-xs">
+                                                            <div className="space-y-1">
+                                                                <p className="font-semibold">{binding.providerName}</p>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {formatProviderVisibilityLabel(binding.providerVisibility)} · {binding.providerKey} · {formatChannelStatus(binding.lastHealthStatus)}
+                                                                </p>
+                                                                {binding.providerExtensionLabel ? (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {binding.providerExtensionLabel}
+                                                                    </p>
+                                                                ) : null}
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    <SidebarMenuAction
+                                                        showOnHover
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            void handleDeleteImageProviderBinding(binding.id);
+                                                        }}
+                                                        className="hover:bg-destructive/10 hover:text-destructive"
+                                                    >
+                                                        <X className="size-3.5" />
+                                                        <span className="sr-only">Delete image provider</span>
+                                                    </SidebarMenuAction>
+                                                </SidebarMenuItem>
+                                            ))}
+                                        </SidebarMenu>
+                                    )}
+                                </SidebarGroupContent>
+                            </CollapsibleContent>
+                        </SidebarGroup>
+                    </Collapsible>
+
                     {/* Web Search Section */}
                     <Collapsible
                         open={isWebSearchOpen}
@@ -1706,6 +1968,7 @@ function AgentDetailSidebar({
                                 agent.sandbox_timeout_seconds,
                             compact_threshold_percent:
                                 agent.compact_threshold_percent,
+                            max_iteration: agent.max_iteration,
                         }
                         : undefined
                 }
@@ -1775,6 +2038,21 @@ function AgentDetailSidebar({
             )}
 
             {/* Web Search Binding Dialog */}
+            {agent?.id && (
+                <ImageGenerationBindingDialog
+                    open={isImageProviderDialogOpen}
+                    onOpenChange={setIsImageProviderDialogOpen}
+                    agentId={agent.id}
+                    catalog={imageProviderCatalog}
+                    configuredProviderKeys={imageProviderBindings.map((binding) => binding.providerKey)}
+                    initialBinding={editingImageProviderBinding}
+                    onSaved={async () => {
+                        await loadImageProviderBindings();
+                        await onImageProviderBindingsChanged?.();
+                    }}
+                />
+            )}
+
             {agent?.id && (
                 <WebSearchBindingDialog
                     open={isWebSearchDialogOpen}

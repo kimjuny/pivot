@@ -549,6 +549,38 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(bundle[0]["hooks"][0]["callable"], "handle_task_event")
         self.assertTrue(Path(bundle[0]["hooks"][0]["source_path"]).is_file())
 
+    def test_extension_tools_remain_available_under_legacy_tool_allowlist(
+        self,
+    ) -> None:
+        """Bound extension tools should stay visible even with restrictive tool_ids."""
+        extension_root = self._write_extension(
+            tool_name="seedream_generate_image",
+            skill_name="seedream_skill",
+        )
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+            enabled=True,
+        )
+
+        runtime_config = AgentReleaseRuntimeService(self.session).resolve_for_agent(
+            self.agent.id or 0
+        )
+        tool_manager = service.build_request_tool_manager(
+            username="alice",
+            agent_id=self.agent.id or 0,
+            raw_tool_ids=json.dumps(["read_file"]),
+            extension_bundle=runtime_config.extension_bundle,
+        )
+
+        self.assertIsNotNone(tool_manager.get_tool("seedream_generate_image"))
+
     def test_installation_configuration_defaults_are_persisted(self) -> None:
         """Installations should resolve manifest defaults for setup fields."""
         extension_root = self._write_extension(

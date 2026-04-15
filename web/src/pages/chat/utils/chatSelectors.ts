@@ -88,7 +88,10 @@ export function getLastRecursion(
  */
 export function isClarifyMessage(message: ChatMessage): boolean {
   return (
-    message.status === "waiting_input" || getLastRecursion(message)?.action === "CLARIFY"
+    message.status === "waiting_input" ||
+    getLastRecursion(message)?.action === "CLARIFY" ||
+    getLastRecursion(message)?.events.some((event) => event.type === "clarify") ===
+      true
   );
 }
 

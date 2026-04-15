@@ -58,6 +58,7 @@ import type {
 import type { ChatThinkingMode } from "@/utils/llmThinking";
 import {
   buildMessagesFromHistory,
+  getCanonicalChatMessageId,
   getStreamErrorData,
   isReactStreamEvent,
   parseJson,
@@ -302,6 +303,7 @@ function findReplyTarget(
     if (
       message.role === "assistant" &&
       message.task_id === taskId &&
+      isClarifyMessage(message) &&
       message.content.trim().length > 0
     ) {
       return {
@@ -324,6 +326,7 @@ function findLatestWaitingReplyTaskId(messages: ChatMessage[]): string | null {
     if (
       message.role === "assistant" &&
       typeof message.task_id === "string" &&
+      message.status === "waiting_input" &&
       isClarifyMessage(message) &&
       !extractSkillChangeApprovalRequest(message)
     ) {
@@ -783,7 +786,7 @@ function ChatContainer({
 
       if (!targetMessageId) {
         targetMessageId =
-          previous.find(
+          [...previous].reverse().find(
             (message) =>
               message.role === "assistant" && message.task_id === targetTaskId,
           )?.id ?? null;
@@ -1200,7 +1203,9 @@ function ChatContainer({
       }
 
       const currentRecursion =
-        currentRecursionFromRefs ??
+        (currentRecursionFromRefs?.status === "running"
+          ? currentRecursionFromRefs
+          : null) ??
         (matchingRecursionFromMessage?.status === "running"
           ? matchingRecursionFromMessage
           : runningRecursionFromMessage) ??
@@ -2096,6 +2101,7 @@ function ChatContainer({
     }) => {
       const pendingMessage = options?.messageOverride ?? draftMessageRef.current;
       const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
+      const isClarifyReply = Boolean(currentReplyTaskId);
       let assistantMessageId: string | null = null;
       const includeReadyAttachments = options?.includeReadyAttachments ?? true;
       const filesToSend = includeReadyAttachments ? readyPendingFiles : [];
@@ -2123,6 +2129,7 @@ function ChatContainer({
         const requestTaskId = currentReplyTaskId;
         let shouldResetConversation = false;
         let initialCursor = sessionEventCursorRef.current;
+        let optimisticUserMessageId: string | null = null;
 
         if (!activeSessionId) {
           const session = await createSession(agentId, {
@@ -2152,15 +2159,20 @@ function ChatContainer({
         }
 
         const messageTimestamp = new Date().toISOString();
+        optimisticUserMessageId = isClarifyReply
+          ? `user-${currentReplyTaskId}-clarify-reply-${Date.now()}`
+          : `user-${Date.now()}`;
         const userMessage: ChatMessage = {
-          id: `user-${Date.now()}`,
+          id: optimisticUserMessageId,
           role: "user",
           content: pendingMessage,
           attachments: sentAttachments,
           mandatorySkills: selectedMandatorySkills,
           timestamp: messageTimestamp,
         };
-        assistantMessageId = `assistant-${Date.now()}`;
+        assistantMessageId = isClarifyReply
+          ? `assistant-${currentReplyTaskId}-resume-${Date.now()}`
+          : `assistant-${Date.now()}`;
         const assistantMessage: ChatMessage = {
           id: assistantMessageId,
           role: "assistant",
@@ -2173,7 +2185,18 @@ function ChatContainer({
         if (shouldResetConversation) {
           commitMessages([userMessage, assistantMessage]);
         } else {
-          updateMessages((previous) => [...previous, userMessage, assistantMessage]);
+          updateMessages((previous) => [
+            ...previous.map((message) =>
+              isClarifyReply &&
+              message.role === "assistant" &&
+              message.task_id === currentReplyTaskId &&
+              message.status === "waiting_input"
+                ? { ...message, status: "completed" as const }
+                : message,
+            ),
+            userMessage,
+            assistantMessage,
+          ]);
         }
         draftMessageRef.current = "";
         setComposerResetSignal((previous) => previous + 1);
@@ -2211,17 +2234,33 @@ function ChatContainer({
           );
         }
 
+        const canonicalAssistantId =
+          isClarifyReply && assistantMessageId
+            ? assistantMessageId
+            : getCanonicalChatMessageId("assistant", launchResult.task_id);
+        const canonicalUserId =
+          isClarifyReply && optimisticUserMessageId
+            ? optimisticUserMessageId
+            : getCanonicalChatMessageId("user", launchResult.task_id);
         updateMessages((previous) =>
           previous.map((message) =>
             message.id === assistantMessageId
               ? {
                   ...message,
+                  id: canonicalAssistantId,
                   task_id: launchResult.task_id,
                   status: "running" as const,
                 }
-              : message,
+              : message.id === optimisticUserMessageId
+                ? {
+                    ...message,
+                    id: canonicalUserId,
+                    task_id: launchResult.task_id,
+                  }
+                : message,
           ),
         );
+        liveAssistantMessageIdRef.current = canonicalAssistantId;
         liveTaskIdRef.current = launchResult.task_id;
         void refreshSidebarData().catch((refreshError) => {
           console.error(

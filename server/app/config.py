@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # File uploads
     MAX_IMAGE_SIZE: int = Field(
-        default=2 * 1024 * 1024,
+        default=10 * 1024 * 1024,
         validation_alias=AliasChoices("MAX_IMAGE_SIZE", "MAX_FILESIZE"),
     )
     MAX_FILE_SIZE: int = 20 * 1024 * 1024

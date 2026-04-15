@@ -213,11 +213,16 @@ export function SessionSidebar({
     setExpandedProjects((currentState) => {
       const nextState: Record<string, boolean> = {};
       projects.forEach((project) => {
-        nextState[project.project_id] = currentState[project.project_id] ?? false;
+        const shouldAutoExpand = project.sessions.some(
+          (session) =>
+            session.session_id === currentSessionId || isSessionRunning(session),
+        );
+        nextState[project.project_id] =
+          shouldAutoExpand || (currentState[project.project_id] ?? false);
       });
       return nextState;
     });
-  }, [projects]);
+  }, [currentSessionId, projects]);
 
   /**
    * Enter inline-title editing so renames stay lightweight and fast.

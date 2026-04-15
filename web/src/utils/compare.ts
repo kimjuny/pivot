@@ -16,6 +16,7 @@ export function compareAgents(agentA: Agent | null, agentB: Agent | null): boole
     agentA.session_idle_timeout_minutes !== agentB.session_idle_timeout_minutes ||
     agentA.sandbox_timeout_seconds !== agentB.sandbox_timeout_seconds ||
     agentA.compact_threshold_percent !== agentB.compact_threshold_percent ||
+    agentA.max_iteration !== agentB.max_iteration ||
     agentA.tool_ids !== agentB.tool_ids ||
     agentA.skill_ids !== agentB.skill_ids ||
     agentA.model_name !== agentB.model_name ||

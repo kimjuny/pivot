@@ -126,6 +126,10 @@ def _serialize_contribution_summary(
             contributions.get("channel_providers"),
             primary_field="key",
         ),
+        image_providers=_extract_manifest_names(
+            contributions.get("image_providers"),
+            primary_field="key",
+        ),
         web_search_providers=_extract_manifest_names(
             contributions.get("web_search_providers"),
             primary_field="key",
@@ -279,6 +283,10 @@ def _serialize_preview(
             hooks=preview.contribution_summary.get("hooks", []),
             channel_providers=preview.contribution_summary.get(
                 "channel_providers",
+                [],
+            ),
+            image_providers=preview.contribution_summary.get(
+                "image_providers",
                 [],
             ),
             web_search_providers=preview.contribution_summary.get(

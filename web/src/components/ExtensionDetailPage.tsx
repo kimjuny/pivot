@@ -105,6 +105,11 @@ function buildContributionGroups(summary: ExtensionContributionSummary): Contrib
       tone: "provider",
     },
     {
+      label: "Image Providers",
+      values: summary.image_providers ?? [],
+      tone: "provider",
+    },
+    {
       label: "Web Search Providers",
       values: summary.web_search_providers,
       tone: "provider",
@@ -187,6 +192,13 @@ function getContributionPresentation(
         badgeLabel: "Web Search",
         item,
         icon: Globe2,
+      };
+    case "image_provider":
+      return {
+        id: `image_provider-${item.name}`,
+        badgeLabel: "Image",
+        item,
+        icon: Server,
       };
     default:
       return {
@@ -279,6 +291,11 @@ function buildReferenceBadges(installation: ExtensionInstallation): ReferenceBad
     {
       label: "Channel Bindings",
       count: summary.channel_binding_count,
+      tone: "provider",
+    },
+    {
+      label: "Image Bindings",
+      count: summary.image_provider_binding_count ?? 0,
       tone: "provider",
     },
     {
@@ -456,6 +473,9 @@ export default function ExtensionDetailPage() {
     const merged = {
       channel_providers: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.channel_providers)),
+      ),
+      image_providers: Array.from(
+        new Set(pkg.versions.flatMap((version) => version.contribution_summary.image_providers ?? [])),
       ),
       web_search_providers: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.web_search_providers)),

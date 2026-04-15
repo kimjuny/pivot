@@ -31,8 +31,9 @@ interface ConfigFieldGroupProps {
 
 /**
  * Renders a schema-driven group of provider configuration fields.
- * Why: channel and web-search bindings use the same manifest contract, so a
- * shared renderer keeps the dialogs visually aligned and easier to extend.
+ * Why: channel, image-generation, and web-search bindings use the same
+ * manifest contract, so a shared renderer keeps the dialogs visually aligned
+ * and easier to extend.
  */
 function ConfigFieldGroup({
   title,

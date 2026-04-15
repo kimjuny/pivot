@@ -166,4 +166,52 @@ describe("AssistantMessageBlock", () => {
     });
     expect(onRejectSkillChange).not.toHaveBeenCalled();
   });
+
+  it("labels completed clarify history as a question without offering another reply", () => {
+    render(
+      <AssistantMessageBlock
+        message={{
+          id: "assistant-clarify-history",
+          role: "assistant",
+          task_id: "task-clarify-history",
+          content: "Which export format do you prefer?",
+          timestamp: "2026-03-17T00:00:00.000Z",
+          status: "completed",
+          recursions: [
+            {
+              uid: "assistant-clarify-history-recursion-0",
+              iteration: 0,
+              trace_id: "trace-clarify-history",
+              action: "CLARIFY",
+              events: [
+                {
+                  type: "clarify",
+                  task_id: "task-clarify-history",
+                  trace_id: "trace-clarify-history",
+                  iteration: 0,
+                  timestamp: "2026-03-17T00:00:00.000Z",
+                  data: {
+                    question: "Which export format do you prefer?",
+                  },
+                },
+              ],
+              status: "completed",
+              startTime: "2026-03-17T00:00:00.000Z",
+              endTime: "2026-03-17T00:00:00.000Z",
+            },
+          ],
+        }}
+        expandedRecursions={{}}
+        isStreaming={false}
+        onToggleRecursion={vi.fn()}
+        onReplyTask={vi.fn()}
+        onApproveSkillChange={vi.fn()}
+        onRejectSkillChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("QUESTION")).toBeInTheDocument();
+    expect(screen.queryByText("FINAL ANSWER")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reply" })).not.toBeInTheDocument();
+  });
 });

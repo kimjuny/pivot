@@ -156,6 +156,7 @@ function Navigation() {
   const isAssetsActive = currentPath.startsWith('/studio/assets') || currentPath === '/llms' || currentPath === '/tools' || currentPath === '/skills' || currentPath === '/extensions';
   const isConnectionsActive = currentPath.startsWith('/studio/connections')
     || currentPath === '/channels'
+    || currentPath === '/image-providers'
     || currentPath === '/web-search-providers';
   const isOperationsActive = currentPath.startsWith('/studio/operations');
 
@@ -204,6 +205,12 @@ function Navigation() {
       description: 'Review installed delivery surfaces such as built-in and extension-backed channels.',
       to: '/studio/connections/channels',
       icon: Radio,
+    },
+    {
+      title: 'Image Providers',
+      description: 'Review installed image-generation providers before binding them to agents.',
+      to: '/studio/connections/image-generation',
+      icon: Layers,
     },
     {
       title: 'Web Search Providers',

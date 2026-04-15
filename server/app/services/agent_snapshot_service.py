@@ -10,6 +10,7 @@ from typing import Any
 from app.models.agent import Agent, Connection, Scene, Subscene
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import AgentChannelBinding
+from app.models.image_generation import AgentImageProviderBinding
 from app.models.web_search import AgentWebSearchBinding
 from app.services.agent_service import AgentService
 from app.services.extension_service import ExtensionService
@@ -183,6 +184,21 @@ class AgentSnapshotService:
             "runtime_config": runtime_config,
         }
 
+    def _normalize_image_provider_binding(
+        self, binding: AgentImageProviderBinding
+    ) -> dict[str, Any]:
+        """Build one canonical image-provider binding snapshot."""
+        auth_config = _load_json_object(binding.auth_config)
+        runtime_config = _load_json_object(binding.runtime_config)
+        return {
+            "id": binding.id,
+            "provider_key": binding.provider_key,
+            "enabled": binding.enabled,
+            "auth_config_keys": sorted(auth_config.keys()),
+            "auth_config_hash": _hash_payload(auth_config),
+            "runtime_config": runtime_config,
+        }
+
     def build_current_snapshot(self, agent_id: int) -> dict[str, Any]:
         """Build the normalized current persisted snapshot for one agent.
 
@@ -209,6 +225,11 @@ class AgentSnapshotService:
             .where(AgentWebSearchBinding.agent_id == agent_id)
             .order_by(col(AgentWebSearchBinding.id))
         ).all()
+        image_provider_bindings = self.db.exec(
+            select(AgentImageProviderBinding)
+            .where(AgentImageProviderBinding.agent_id == agent_id)
+            .order_by(col(AgentImageProviderBinding.id))
+        ).all()
 
         return {
             "schema_version": 1,
@@ -232,6 +253,10 @@ class AgentSnapshotService:
             "web_search_bindings": [
                 self._normalize_web_search_binding(binding)
                 for binding in web_search_bindings
+            ],
+            "image_provider_bindings": [
+                self._normalize_image_provider_binding(binding)
+                for binding in image_provider_bindings
             ],
             "extensions": ExtensionService(self.db).build_agent_extension_snapshot(
                 agent_id
@@ -396,6 +421,7 @@ class AgentSnapshotService:
             "agent": normalized_agent,
             "scenes": normalized_scenes,
             "channel_bindings": base_snapshot["channel_bindings"],
+            "image_provider_bindings": base_snapshot["image_provider_bindings"],
             "web_search_bindings": base_snapshot["web_search_bindings"],
             "extensions": base_snapshot["extensions"],
         }
@@ -529,6 +555,16 @@ class AgentSnapshotService:
                     provider_keys, noun="Web search providers", verb="configured"
                 )
             )
+        image_provider_bindings = snapshot.get("image_provider_bindings", [])
+        if image_provider_bindings:
+            provider_keys = [
+                binding["provider_key"] for binding in image_provider_bindings
+            ]
+            changes.append(
+                _format_name_list(
+                    provider_keys, noun="Image providers", verb="configured"
+                )
+            )
         return changes
 
     def _compare_named_collection(
@@ -658,6 +694,15 @@ class AgentSnapshotService:
                 key_field="id",
                 label_field="provider_key",
                 noun="Web search providers",
+            )
+        )
+        changes.extend(
+            self._compare_named_collection(
+                before_snapshot.get("image_provider_bindings", []),
+                after_snapshot.get("image_provider_bindings", []),
+                key_field="id",
+                label_field="provider_key",
+                noun="Image providers",
             )
         )
         changes.extend(

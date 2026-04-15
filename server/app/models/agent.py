@@ -97,7 +97,7 @@ class Agent(SQLModel, table=True):
     )
     is_active: bool = Field(default=True)
     max_iteration: int = Field(
-        default=30, description="Maximum iterations for ReAct recursion"
+        default=50, description="Maximum iterations for ReAct recursion"
     )
     tool_ids: str | None = Field(
         default=None,

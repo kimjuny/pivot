@@ -54,8 +54,10 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
   const approvalRequest = extractSkillChangeApprovalRequest(message);
   const [hasCopied, setHasCopied] = useState(false);
   const copyResetTimeoutRef = useRef<number | null>(null);
+  const canReplyToClarify =
+    clarifyMessage && message.status === "waiting_input" && Boolean(message.task_id);
   const canRenderApprovalActions =
-    clarifyMessage &&
+    canReplyToClarify &&
     typeof message.task_id === "string" &&
     approvalRequest !== undefined;
   const hasFooterMetadata =
@@ -157,8 +159,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
                   </button>
                 </div>
               ) : (
-                clarifyMessage &&
-                message.task_id && (
+                canReplyToClarify && (
                   <button
                     type="button"
                     onClick={() => onReplyTask(message.task_id || null)}

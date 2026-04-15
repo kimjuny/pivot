@@ -134,4 +134,38 @@ describe("AssistantAttachmentDialog", () => {
     expect(screen.queryByTestId("monaco-editor")).not.toBeInTheDocument();
     expect(screen.getByText("Body copy")).toBeInTheDocument();
   });
+
+  it("shows an unsupported preview state for download-only attachments", async () => {
+    vi.mocked(fetchTaskAttachmentBlob).mockResolvedValue(
+      new Blob(["raw bytes"], { type: "application/octet-stream" }),
+    );
+
+    renderWithTheme(
+      <AssistantAttachmentDialog
+        attachment={{
+          attachmentId: "attachment-raw",
+          displayName: "archive.bin",
+          originalName: "archive.bin",
+          mimeType: "application/octet-stream",
+          extension: "bin",
+          sizeBytes: 9,
+          renderKind: "download",
+          workspaceRelativePath: "outputs/archive.bin",
+          createdAt: "2026-03-31T00:00:00Z",
+        }}
+        open
+        onOpenChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Unsupported file type")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/cannot be previewed inline yet/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Download archive.bin" }),
+    ).toBeInTheDocument();
+  });
 });

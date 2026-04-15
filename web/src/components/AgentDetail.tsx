@@ -28,6 +28,7 @@ import ConnectionModal from './ConnectionModal';
 import SubsceneNode from './SubsceneNode';
 import AgentDetailSidebar, {
   type SidebarChannel,
+  type SidebarImageProviderBinding,
   type SidebarWebSearchBinding,
 } from './AgentDetailSidebar';
 import AgentWorkspaceToolbar from './AgentWorkspaceToolbar';
@@ -202,7 +203,8 @@ function buildDraftChangeSummary(
     originalAgent.sandbox_timeout_seconds !==
       workspaceAgent.sandbox_timeout_seconds ||
     originalAgent.compact_threshold_percent !==
-      workspaceAgent.compact_threshold_percent;
+      workspaceAgent.compact_threshold_percent ||
+    originalAgent.max_iteration !== workspaceAgent.max_iteration;
   const toolAccessChanged = originalAgent.tool_ids !== workspaceAgent.tool_ids;
   const skillAccessChanged = originalAgent.skill_ids !== workspaceAgent.skill_ids;
 
@@ -1198,6 +1200,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         session_idle_timeout_minutes: workspaceAgent.session_idle_timeout_minutes,
         sandbox_timeout_seconds: workspaceAgent.sandbox_timeout_seconds,
         compact_threshold_percent: workspaceAgent.compact_threshold_percent,
+        max_iteration: workspaceAgent.max_iteration,
         is_active: workspaceAgent.is_active,
         tool_ids: workspaceAgent.tool_ids ?? null,
         skill_ids: workspaceAgent.skill_ids ?? null,
@@ -1314,11 +1317,16 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     void refreshDraftState();
   }, [refreshDraftState]);
 
+  const handleImageProviderBindingsLoaded = useCallback((_bindings: SidebarImageProviderBinding[]) => {
+    void refreshDraftState();
+  }, [refreshDraftState]);
+
   /**
    * Persist sidebar-managed binding changes into the saved draft baseline.
-   * Why: extensions, channel bindings, and web-search bindings are edited via
-   * immediate backend mutations, so Publish must refresh the saved draft rather
-   * than relying on the local scene/agent workstore dirty flag.
+   * Why: extensions, channel bindings, image-provider bindings, and web-search
+   * bindings are edited via immediate backend mutations, so Publish must
+   * refresh the saved draft rather than relying on the local scene/agent
+   * workstore dirty flag.
    */
   const handlePersistedBindingDraftChanged = useCallback(async () => {
     try {
@@ -1342,9 +1350,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         onDeleteScene={handleDeleteScene}
         onAgentDraftUpdate={handleAgentDraftUpdate}
         onChannelBindingsLoaded={handleChannelBindingsLoaded}
+        onImageProviderBindingsLoaded={handleImageProviderBindingsLoaded}
         onWebSearchBindingsLoaded={handleWebSearchBindingsLoaded}
         onExtensionBindingsChanged={handlePersistedBindingDraftChanged}
         onChannelBindingsChanged={handlePersistedBindingDraftChanged}
+        onImageProviderBindingsChanged={handlePersistedBindingDraftChanged}
         onWebSearchBindingsChanged={handlePersistedBindingDraftChanged}
       />
 

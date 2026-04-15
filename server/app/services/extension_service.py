@@ -18,6 +18,7 @@ from typing import Any
 
 from app.channels.types import ChannelManifest
 from app.config import get_settings
+from app.image_generation.types import ImageGenerationProviderManifest
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
 from app.models.skill import Skill
@@ -32,6 +33,7 @@ from app.services.artifact_storage_service import ExtensionArtifactStorageServic
 from app.services.provider_registry_service import (
     ProviderRegistryService,
     load_channel_provider_from_file,
+    load_image_generation_provider_from_file,
     load_web_search_provider_from_file,
 )
 from app.services.workspace_service import ensure_agent_workspace
@@ -52,7 +54,9 @@ _SUPPORTED_CONFIGURATION_FIELD_TYPES = frozenset(
     {"string", "secret", "number", "boolean"}
 )
 _TOOL_ENTRY_TYPES = frozenset({"tools"})
-_ENTRYPOINT_TYPES = frozenset({"hooks", "channel_providers", "web_search_providers"})
+_ENTRYPOINT_TYPES = frozenset(
+    {"hooks", "channel_providers", "image_providers", "web_search_providers"}
+)
 _VERSION_TOKEN_PATTERN = re.compile(r"\d+|[A-Za-z]+|[^A-Za-z0-9]+")
 _SUPPORTED_HOOK_EVENTS = frozenset(
     {
@@ -109,6 +113,7 @@ class ExtensionReferenceSummary:
 
     extension_binding_count: int
     channel_binding_count: int
+    image_provider_binding_count: int
     web_search_binding_count: int
     release_count: int
     test_snapshot_count: int
@@ -120,6 +125,7 @@ class ExtensionReferenceSummary:
         return (
             self.extension_binding_count
             + self.channel_binding_count
+            + self.image_provider_binding_count
             + self.web_search_binding_count
         )
 
@@ -138,6 +144,7 @@ class ExtensionReferenceSummary:
         return {
             "extension_binding_count": self.extension_binding_count,
             "channel_binding_count": self.channel_binding_count,
+            "image_provider_binding_count": self.image_provider_binding_count,
             "web_search_binding_count": self.web_search_binding_count,
             "binding_count": self.binding_count,
             "release_count": self.release_count,
@@ -257,6 +264,10 @@ def _build_contribution_summary(
             contributions.get("channel_providers"),
             field_name="key",
         ),
+        "image_providers": _extract_names(
+            contributions.get("image_providers"),
+            field_name="key",
+        ),
         "web_search_providers": _extract_names(
             contributions.get("web_search_providers"),
             field_name="key",
@@ -274,6 +285,7 @@ def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, str]]:
     contribution_order = [
         ("hooks", "hook"),
         ("channel_providers", "channel_provider"),
+        ("image_providers", "image_provider"),
         ("web_search_providers", "web_search_provider"),
         ("tools", "tool"),
         ("skills", "skill"),
@@ -820,6 +832,65 @@ def _normalize_manifest(
                             "description": provider.manifest.description,
                             "entrypoint": relative_entrypoint.as_posix(),
                             "transport_mode": provider.manifest.transport_mode,
+                        }
+                    )
+                    continue
+
+                if key == "image_providers":
+                    entrypoint = raw_item.get("entrypoint")
+                    if not isinstance(entrypoint, str):
+                        raise ValueError(
+                            "Image-generation provider contributions must declare "
+                            "an entrypoint."
+                        )
+                    relative_entrypoint = _safe_relative_path(
+                        entrypoint,
+                        field_name=(
+                            f"contributions.image_providers[{index}].entrypoint"
+                        ),
+                    )
+                    entrypoint_path = source_dir.joinpath(*relative_entrypoint.parts)
+                    if not entrypoint_path.is_file():
+                        raise ValueError(
+                            f"Entrypoint '{relative_entrypoint.as_posix()}' does not exist."
+                        )
+
+                    provider = load_image_generation_provider_from_file(
+                        source_path=entrypoint_path,
+                        module_key=(
+                            "_pivot_extension_validate_image_"
+                            f"{normalized_name}_{normalized_version}_{index}"
+                        ),
+                    )
+                    if not isinstance(
+                        provider.manifest, ImageGenerationProviderManifest
+                    ):
+                        raise ValueError(
+                            "Image-generation provider entrypoint must expose an "
+                            "ImageGenerationProviderManifest."
+                        )
+                    provider_key = _validate_extension_provider_key(
+                        provider_key=provider.manifest.key,
+                        scope=normalized_scope,
+                        field_name=(
+                            "contributions.image_providers" f"[{index}].manifest.key"
+                        ),
+                    )
+                    if provider_key in seen_names:
+                        raise ValueError(
+                            "Duplicate image-generation provider contribution "
+                            f"'{provider_key}'."
+                        )
+                    seen_names.add(provider_key)
+                    normalized_items.append(
+                        {
+                            "key": provider_key,
+                            "name": provider.manifest.name,
+                            "description": provider.manifest.description,
+                            "entrypoint": relative_entrypoint.as_posix(),
+                            "supported_operations": list(
+                                provider.manifest.supported_operations
+                            ),
                         }
                     )
                     continue
@@ -2069,6 +2140,9 @@ class ExtensionService:
         return ExtensionReferenceSummary(
             extension_binding_count=extension_binding_count,
             channel_binding_count=provider_binding_summary.channel_binding_count,
+            image_provider_binding_count=(
+                provider_binding_summary.image_provider_binding_count
+            ),
             web_search_binding_count=provider_binding_summary.web_search_binding_count,
             release_count=release_count,
             test_snapshot_count=test_snapshot_count,
@@ -2189,6 +2263,23 @@ class ExtensionService:
                 and isinstance(hook.get("callable"), str)
                 and isinstance(hook.get("entrypoint"), str)
             ],
+            "image_providers": [
+                {
+                    "key": provider["key"],
+                    "name": provider.get("name", provider["key"]),
+                    "description": provider.get("description", ""),
+                    "supported_operations": provider.get("supported_operations", []),
+                    "entrypoint": provider["entrypoint"],
+                    "source_path": str(
+                        install_root.joinpath(
+                            *PurePosixPath(provider["entrypoint"]).parts
+                        ).resolve()
+                    ),
+                }
+                for provider in contributions.get("image_providers", [])
+                if isinstance(provider, dict)
+                and isinstance(provider.get("entrypoint"), str)
+            ],
         }
 
     def build_request_tool_manager(
@@ -2199,7 +2290,15 @@ class ExtensionService:
         raw_tool_ids: str | None,
         extension_bundle: list[dict[str, Any]],
     ) -> ToolManager:
-        """Build the runtime tool catalog for one request-scoped execution."""
+        """Build the runtime tool catalog for one request-scoped execution.
+
+        Why: extension bindings are already the agent-scoped opt-in for packaged
+        capabilities. Once an extension is enabled for an agent, its declared
+        tools should remain available even when the legacy ``tool_ids`` allowlist
+        restricts built-in or private tools. Otherwise newly added extension
+        tools disappear from released agents until users manually update a second
+        allowlist that does not currently surface extension entries in Studio.
+        """
         ensure_agent_workspace(username, agent_id)
         shared_manager = get_tool_manager()
         request_tool_manager = ToolManager()
@@ -2213,7 +2312,9 @@ class ExtensionService:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
 
-        for metadata in self.load_bundle_tool_metadata(extension_bundle):
+        bundle_tool_metadata = self.load_bundle_tool_metadata(extension_bundle)
+        bundle_tool_names = {metadata.name for metadata in bundle_tool_metadata}
+        for metadata in bundle_tool_metadata:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
 
@@ -2228,7 +2329,7 @@ class ExtensionService:
 
         filtered_manager = ToolManager()
         for metadata in request_tool_manager.list_tools():
-            if metadata.name in allowed_tools:
+            if metadata.name in allowed_tools or metadata.name in bundle_tool_names:
                 filtered_manager.add_entry(metadata)
         return filtered_manager
 

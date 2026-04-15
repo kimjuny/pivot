@@ -128,6 +128,11 @@ function buildContributionGroups(
       tone: 'provider',
     },
     {
+      label: 'Image Providers',
+      values: summary.image_providers ?? [],
+      tone: 'provider',
+    },
+    {
       label: 'Web Search Providers',
       values: summary.web_search_providers,
       tone: 'provider',
@@ -273,6 +278,7 @@ function ExtensionsPage() {
       const contributionText = pkg.versions
         .flatMap((version) => [
           ...version.contribution_summary.channel_providers,
+          ...(version.contribution_summary.image_providers ?? []),
           ...version.contribution_summary.web_search_providers,
           ...version.contribution_summary.hooks,
           ...version.contribution_summary.tools,
@@ -607,6 +613,7 @@ function ExtensionsPage() {
                 `${pendingUninstall.installation.display_name} ${pendingUninstall.installation.version}`,
                 `Extension bindings: ${pendingUninstall.references.extension_binding_count}`,
                 `Channel bindings: ${pendingUninstall.references.channel_binding_count}`,
+                `Image bindings: ${pendingUninstall.references.image_provider_binding_count ?? 0}`,
                 `Web-search bindings: ${pendingUninstall.references.web_search_binding_count}`,
                 `Total bindings: ${pendingUninstall.references.binding_count}`,
                 `Releases: ${pendingUninstall.references.release_count}`,

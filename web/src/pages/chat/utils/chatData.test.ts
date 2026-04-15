@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildMessagesFromHistory, getUniqueClipboardFiles } from "./chatData";
+import {
+  buildMessagesFromHistory,
+  getChatMessageRenderKey,
+  getUniqueClipboardFiles,
+} from "./chatData";
 
 interface ClipboardDataStubOptions {
   itemFiles?: File[];
@@ -58,6 +62,18 @@ describe("getUniqueClipboardFiles", () => {
 });
 
 describe("buildMessagesFromHistory", () => {
+  it("keeps clarify segment render keys unique within one task", () => {
+    expect(
+      getChatMessageRenderKey({
+        id: "assistant-task-1-clarify-trace-1",
+        role: "assistant",
+        task_id: "task-1",
+        content: "Which format?",
+        timestamp: "2026-03-16T00:00:00.000Z",
+      }),
+    ).toBe("assistant-task-1-clarify-trace-1");
+  });
+
   it("preserves running recursion state so reconnecting observers can continue applying live events", () => {
     const messages = buildMessagesFromHistory([
       {
@@ -266,9 +282,82 @@ describe("buildMessagesFromHistory", () => {
       },
     ]);
 
-    const assistantMessage = messages.find((message) => message.role === "assistant");
-    expect(assistantMessage?.status).toBe("running");
-    expect(assistantMessage?.content).toBe("");
+    const assistantMessages = messages.filter(
+      (message) => message.role === "assistant",
+    );
+    expect(assistantMessages[0]?.status).toBe("completed");
+    expect(assistantMessages[0]?.content).toBe(
+      "Approve the request to create private skill `planning-kit`?",
+    );
+    expect(assistantMessages[1]?.status).toBe("running");
+    expect(assistantMessages[1]?.content).toBe("");
+  });
+
+  it("restores completed clarify question and user reply before the final answer", () => {
+    const messages = buildMessagesFromHistory([
+      {
+        task_id: "task-clarify-completed",
+        user_message: "Help me export",
+        agent_answer: "I created the PowerPoint export.",
+        status: "completed",
+        total_tokens: 30,
+        current_plan: [],
+        recursions: [
+          {
+            iteration: 0,
+            trace_id: "trace-clarify-completed",
+            observe: null,
+            thinking: null,
+            reason: null,
+            summary: null,
+            action_type: "CLARIFY",
+            action_output: JSON.stringify({
+              question: "Which export format do you prefer?",
+              reply: "PowerPoint, please.",
+            }),
+            tool_call_results: null,
+            status: "done",
+            error_log: null,
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            cached_input_tokens: 0,
+            created_at: "2026-03-16T00:00:00.000Z",
+            updated_at: "2026-03-16T00:00:01.000Z",
+          },
+          {
+            iteration: 1,
+            trace_id: "trace-final-answer",
+            observe: null,
+            thinking: null,
+            reason: null,
+            summary: null,
+            action_type: "ANSWER",
+            action_output: JSON.stringify({
+              answer: "I created the PowerPoint export.",
+            }),
+            tool_call_results: null,
+            status: "done",
+            error_log: null,
+            prompt_tokens: 10,
+            completion_tokens: 5,
+            total_tokens: 15,
+            cached_input_tokens: 0,
+            created_at: "2026-03-16T00:00:02.000Z",
+            updated_at: "2026-03-16T00:00:03.000Z",
+          },
+        ],
+        created_at: "2026-03-16T00:00:00.000Z",
+        updated_at: "2026-03-16T00:00:03.000Z",
+      },
+    ]);
+
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", "Help me export"],
+      ["assistant", "Which export format do you prefer?"],
+      ["user", "PowerPoint, please."],
+      ["assistant", "I created the PowerPoint export."],
+    ]);
   });
 
   it("keeps failed task errors out of the final answer content", () => {

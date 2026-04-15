@@ -38,6 +38,7 @@ class ExtensionContributionSummaryResponse(AppBaseModel):
     skills: list[str] = Field(default_factory=list)
     hooks: list[str] = Field(default_factory=list)
     channel_providers: list[str] = Field(default_factory=list)
+    image_providers: list[str] = Field(default_factory=list)
     web_search_providers: list[str] = Field(default_factory=list)
 
 
@@ -219,6 +220,7 @@ class ExtensionReferenceSummaryResponse(AppBaseModel):
 
     extension_binding_count: int
     channel_binding_count: int
+    image_provider_binding_count: int
     web_search_binding_count: int
     binding_count: int
     release_count: int
