@@ -816,6 +816,7 @@ class SessionService:
                     {
                         "iteration": recursion.iteration_index,
                         "trace_id": recursion.trace_id,
+                        "input_message_json": recursion.input_message_json,
                         "observe": recursion.observe,
                         "thinking": recursion.thinking,
                         "reason": recursion.reason,

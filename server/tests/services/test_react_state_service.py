@@ -72,12 +72,15 @@ class ReactStateServiceTestCase(unittest.TestCase):
         """RE_PLAN should replace plan rows and write a snapshot."""
         context = self.service.load_context(self.task)
         context.update_for_new_recursion("trace-1")
-        recursion = self.service.start_recursion(self.task, "trace-1")
+        recursion = self.service.start_recursion(
+            self.task,
+            "trace-1",
+            {"role": "user", "content": "{}"},
+        )
 
-        tokens = self.service.finalize_success(
+        tokens = self.service.record_llm_decision(
             task=self.task,
             recursion=recursion,
-            context=context,
             observe="observe",
             thinking="provider thinking",
             reason="reason",
@@ -94,15 +97,38 @@ class ReactStateServiceTestCase(unittest.TestCase):
                 ]
             },
             action_step_id=None,
-            step_status_updates=[],
             summary="",
-            tool_results=[],
             token_counter={
                 "prompt_tokens": 10,
                 "completion_tokens": 5,
                 "total_tokens": 15,
                 "cached_input_tokens": 2,
             },
+        )
+        self.session.refresh(recursion)
+        self.assertEqual(recursion.status, "running")
+        self.assertEqual(recursion.observe, "observe")
+        self.assertIsNotNone(recursion.input_message_json)
+
+        self.service.finalize_success(
+            task=self.task,
+            recursion=recursion,
+            context=context,
+            action_type="RE_PLAN",
+            action_output={
+                "plan": [
+                    {
+                        "step_id": "1",
+                        "general_goal": "Goal",
+                        "specific_description": "Do work",
+                        "completion_criteria": "Done",
+                        "status": "pending",
+                    }
+                ]
+            },
+            step_status_updates=[],
+            summary="",
+            tool_results=[],
         )
 
         self.session.refresh(self.task)
@@ -141,26 +167,44 @@ class ReactStateServiceTestCase(unittest.TestCase):
 
         context = self.service.load_context(self.task)
         context.update_for_new_recursion("trace-2")
-        recursion = self.service.start_recursion(self.task, "trace-2")
+        recursion = self.service.start_recursion(
+            self.task,
+            "trace-2",
+            {"role": "user", "content": "{}"},
+        )
+
+        action_output = {
+            "tool_calls": [
+                {
+                    "id": "call-1",
+                    "name": "read_file",
+                    "arguments": {"path": "/tmp/demo.txt"},
+                }
+            ]
+        }
+        self.service.record_llm_decision(
+            task=self.task,
+            recursion=recursion,
+            observe="observe",
+            thinking=None,
+            reason="reason",
+            action_type="CALL_TOOL",
+            action_output=action_output,
+            action_step_id="1",
+            summary="Working through the file analysis",
+            token_counter={},
+        )
+        self.session.refresh(recursion)
+        self.assertEqual(recursion.status, "running")
+        self.assertEqual(recursion.action_type, "CALL_TOOL")
+        self.assertIsNone(recursion.tool_call_results)
 
         self.service.finalize_success(
             task=self.task,
             recursion=recursion,
             context=context,
-            observe="observe",
-            thinking=None,
-            reason="reason",
             action_type="CALL_TOOL",
-            action_output={
-                "tool_calls": [
-                    {
-                        "id": "call-1",
-                        "name": "read_file",
-                        "arguments": {"path": "/tmp/demo.txt"},
-                    }
-                ]
-            },
-            action_step_id="1",
+            action_output=action_output,
             step_status_updates=[{"step_id": "1", "status": "done"}],
             summary="Working through the file analysis",
             tool_results=[
@@ -172,7 +216,6 @@ class ReactStateServiceTestCase(unittest.TestCase):
                     "success": True,
                 }
             ],
-            token_counter={},
         )
 
         self.session.refresh(recursion)
@@ -203,7 +246,11 @@ class ReactStateServiceTestCase(unittest.TestCase):
 
     def test_finalize_error_and_task_lifecycle_helpers(self) -> None:
         """Error finalization and lifecycle helpers should persist task state."""
-        recursion = self.service.start_recursion(self.task, "trace-3")
+        recursion = self.service.start_recursion(
+            self.task,
+            "trace-3",
+            {"role": "user", "content": "{}"},
+        )
         tokens = self.service.finalize_error(
             task=self.task,
             recursion=recursion,

@@ -841,6 +841,7 @@ describe("ChatContainer session rollover", () => {
             {
               iteration: 1,
               trace_id: "trace-live-1",
+              input_message_json: null,
               observe: "Reading the requirements",
               thinking: null,
               reason: null,
@@ -1073,6 +1074,7 @@ describe("ChatContainer session rollover", () => {
             {
               iteration: 0,
               trace_id: "trace-skill-approval",
+              input_message_json: null,
               observe: null,
               thinking: null,
               reason: null,
@@ -1184,6 +1186,7 @@ describe("ChatContainer session rollover", () => {
             {
               iteration: 0,
               trace_id: "trace-clarify-history",
+              input_message_json: null,
               observe: null,
               thinking: null,
               reason: null,
@@ -1401,6 +1404,124 @@ describe("ChatContainer session rollover", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps live tool results attached after a CALL_TOOL action event", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 10,
+      session_id: "tool-live-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-21T00:00:00.000Z",
+      updated_at: "2026-03-21T00:00:00.000Z",
+    });
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-live-tool",
+      session_id: "tool-live-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+
+    const encoder = new TextEncoder();
+    vi.mocked(httpClient).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const events = [
+                {
+                  event_id: 1,
+                  type: "recursion_start",
+                  task_id: "task-live-tool",
+                  trace_id: "trace-live-tool",
+                  iteration: 0,
+                  timestamp: "2026-03-21T00:00:01.000Z",
+                },
+                {
+                  event_id: 2,
+                  type: "action",
+                  task_id: "task-live-tool",
+                  trace_id: "trace-live-tool",
+                  iteration: 0,
+                  delta: "CALL_TOOL",
+                  timestamp: "2026-03-21T00:00:02.000Z",
+                },
+                {
+                  event_id: 3,
+                  type: "tool_call",
+                  task_id: "task-live-tool",
+                  trace_id: "trace-live-tool",
+                  iteration: 0,
+                  data: {
+                    tool_calls: [
+                      {
+                        id: "call-1",
+                        name: "read_file",
+                        arguments: { path: "README.md" },
+                      },
+                    ],
+                    tool_results: [
+                      {
+                        tool_call_id: "call-1",
+                        name: "read_file",
+                        result: "file contents",
+                        success: true,
+                      },
+                    ],
+                  },
+                  timestamp: "2026-03-21T00:00:03.000Z",
+                },
+                {
+                  event_id: 4,
+                  type: "task_complete",
+                  task_id: "task-live-tool",
+                  iteration: 0,
+                  timestamp: "2026-03-21T00:00:04.000Z",
+                },
+              ];
+
+              events.forEach((event, index) => {
+                window.setTimeout(() => {
+                  controller.enqueue(
+                    encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+                  );
+                  if (index === events.length - 1) {
+                    controller.close();
+                  }
+                }, index * 10);
+              });
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Read the file");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await screen.findByText("1 tool");
+    await user.click(screen.getByText("1 tool"));
+
+    expect(await screen.findByText("TOOL EXECUTION")).toBeInTheDocument();
+    expect(screen.getByText("📤 Result: read_file")).toBeInTheDocument();
+  });
+
   it("reorders the sidebar from the backend after launching a new session task", async () => {
     const olderUpdatedAt = new Date(Date.now() - 30_000).toISOString();
     const olderCreatedAt = new Date(Date.now() - 60_000).toISOString();
@@ -1556,6 +1677,7 @@ describe("ChatContainer session rollover", () => {
             {
               iteration: 0,
               trace_id: "trace-stop",
+              input_message_json: null,
               observe: null,
               thinking: "thinking",
               reason: null,
@@ -1654,6 +1776,7 @@ describe("ChatContainer session rollover", () => {
             {
               iteration: 0,
               trace_id: "trace-title",
+              input_message_json: null,
               observe: null,
               thinking: null,
               reason: null,

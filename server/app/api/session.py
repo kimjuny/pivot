@@ -358,6 +358,7 @@ async def get_full_session_history(
             RecursionDetail(
                 iteration=r["iteration"],
                 trace_id=r["trace_id"],
+                input_message_json=r["input_message_json"],
                 observe=r["observe"],
                 thinking=r["thinking"],
                 reason=r["reason"],

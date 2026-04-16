@@ -2210,6 +2210,7 @@ export const getSessionHistory = async (sessionId: string): Promise<SessionChatH
 export interface RecursionDetail {
   iteration: number;
   trace_id: string;
+  input_message_json: string | null;
   observe: string | null;
   thinking: string | null;
   reason: string | null;

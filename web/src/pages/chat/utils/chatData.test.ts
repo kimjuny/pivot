@@ -87,6 +87,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 0,
             trace_id: "trace-1",
+            input_message_json: null,
             observe: null,
             thinking: "thinking",
             reason: null,
@@ -128,6 +129,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 0,
             trace_id: "trace-2",
+            input_message_json: null,
             observe: null,
             thinking: "thinking",
             reason: null,
@@ -171,6 +173,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 0,
             trace_id: "trace-clarify",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,
@@ -259,6 +262,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 0,
             trace_id: "trace-resumed",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,
@@ -306,6 +310,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 0,
             trace_id: "trace-clarify-completed",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,
@@ -328,6 +333,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 1,
             trace_id: "trace-final-answer",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,
@@ -373,6 +379,7 @@ describe("buildMessagesFromHistory", () => {
           {
             iteration: 0,
             trace_id: "trace-failed",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,

@@ -43,6 +43,7 @@ describe("summarizeOperationsTasks", () => {
           {
             iteration: 0,
             trace_id: "trace-older",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,
@@ -62,6 +63,7 @@ describe("summarizeOperationsTasks", () => {
           {
             iteration: 1,
             trace_id: "trace-newer",
+            input_message_json: null,
             observe: null,
             thinking: null,
             reason: null,

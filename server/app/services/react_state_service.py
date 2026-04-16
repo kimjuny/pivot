@@ -52,12 +52,18 @@ class ReactStateService:
 
         return ReactContext.from_task(task, self.db)
 
-    def start_recursion(self, task: ReactTask, trace_id: str) -> ReactRecursion:
+    def start_recursion(
+        self,
+        task: ReactTask,
+        trace_id: str,
+        input_message: dict[str, Any],
+    ) -> ReactRecursion:
         """Create and persist a new recursion row.
 
         Args:
             task: Task that owns the recursion.
             trace_id: Server-generated recursion trace ID.
+            input_message: Exact per-recursion user message sent to the LLM.
 
         Returns:
             The persisted recursion row.
@@ -67,6 +73,7 @@ class ReactStateService:
             task_id=task.task_id,
             react_task_id=task.id or 0,
             iteration_index=task.iteration,
+            input_message_json=json.dumps(input_message, ensure_ascii=False),
             status="running",
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
@@ -76,42 +83,32 @@ class ReactStateService:
         self.db.refresh(recursion)
         return recursion
 
-    def finalize_success(
+    def record_llm_decision(
         self,
         task: ReactTask,
         recursion: ReactRecursion,
-        context: ReactContext,
         observe: str,
         thinking: str | None,
         reason: str,
         action_type: str,
         action_output: dict[str, Any],
         action_step_id: str | None,
-        step_status_updates: list[dict[str, str]],
         summary: str,
-        tool_results: list[dict[str, Any]],
         token_counter: dict[str, int],
-        pending_user_action: dict[str, Any] | None = None,
     ) -> dict[str, int] | None:
-        """Persist a successful recursion and update derived task state.
+        """Persist the parsed LLM decision before side effects run.
 
         Args:
             task: Owning task.
             recursion: Recursion row created for this cycle.
-            context: Mutable in-memory context snapshot for this cycle.
             observe: Assistant observe content.
             thinking: Raw provider reasoning content, if available.
             reason: Assistant reason content.
             action_type: Final normalized action type.
-            action_output: Mutable action output payload. Tool results may be
-                merged into it for snapshot/event consistency.
+            action_output: Parsed action output payload before tool results.
             action_step_id: Optional plan step associated with this recursion.
-            step_status_updates: Validated step status updates.
             summary: Optional user-facing progress summary text.
-            tool_results: Executed tool results for this recursion.
             token_counter: Aggregated token usage for the recursion.
-            pending_user_action: Optional system-owned waiting action created by
-                a tool result and persisted on the task row.
 
         Returns:
             Persisted token usage payload, or `None` if empty.
@@ -133,10 +130,44 @@ class ReactStateService:
         if summary:
             recursion.summary = summary
 
+        tokens_data = self._apply_token_usage(task, recursion, token_counter)
+        recursion.updated_at = datetime.now(UTC)
+        self.db.add(recursion)
+        self.db.add(task)
+        self.db.commit()
+        return tokens_data
+
+    def finalize_success(
+        self,
+        task: ReactTask,
+        recursion: ReactRecursion,
+        context: ReactContext,
+        action_type: str,
+        action_output: dict[str, Any],
+        step_status_updates: list[dict[str, str]],
+        summary: str,
+        tool_results: list[dict[str, Any]],
+        pending_user_action: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist final side effects for a successful recursion.
+
+        Args:
+            task: Owning task.
+            recursion: Recursion row created for this cycle.
+            context: Mutable in-memory context snapshot for this cycle.
+            action_type: Final normalized action type.
+            action_output: Mutable action output payload. Tool results may be
+                merged into it for snapshot/event consistency.
+            step_status_updates: Validated step status updates.
+            summary: Optional user-facing progress summary text.
+            tool_results: Executed tool results for this recursion.
+            pending_user_action: Optional system-owned waiting action created by
+                a tool result and persisted on the task row.
+        """
+
         if tool_results:
             recursion.tool_call_results = json.dumps(tool_results, ensure_ascii=False)
 
-        tokens_data = self._apply_token_usage(task, recursion, token_counter)
         recursion.status = "done"
         recursion.updated_at = datetime.now(UTC)
         self.db.add(recursion)
@@ -163,7 +194,6 @@ class ReactStateService:
             self._set_task_status(task, "waiting_input", commit=False)
 
         self.db.commit()
-        return tokens_data
 
     def finalize_error(
         self,

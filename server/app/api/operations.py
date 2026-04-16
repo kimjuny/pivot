@@ -230,6 +230,7 @@ async def get_operations_session_detail(
             RecursionDetail(
                 iteration=r["iteration"],
                 trace_id=r["trace_id"],
+                input_message_json=r["input_message_json"],
                 observe=r["observe"],
                 thinking=r["thinking"],
                 reason=r["reason"],

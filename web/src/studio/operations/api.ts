@@ -133,6 +133,7 @@ export interface OperationsTaskMessage {
 export interface OperationsRecursion {
   iteration: number;
   trace_id: string;
+  input_message_json: string | null;
   observe: string | null;
   thinking: string | null;
   reason: string | null;

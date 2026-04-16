@@ -172,6 +172,7 @@ class RecursionDetail(AppBaseModel):
 
     iteration: int
     trace_id: str
+    input_message_json: str | None = None
     observe: str | None = None
     thinking: str | None = None
     reason: str | None = None

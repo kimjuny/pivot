@@ -56,31 +56,43 @@ class ReactContextTestCase(unittest.TestCase):
         """Snapshot data should drive context, while live task metadata stays current."""
         context = self.state_service.load_context(self.task)
         context.update_for_new_recursion("trace-1")
-        recursion = self.state_service.start_recursion(self.task, "trace-1")
-        self.state_service.finalize_success(
+        recursion = self.state_service.start_recursion(
+            self.task,
+            "trace-1",
+            {"role": "user", "content": "{}"},
+        )
+        action_output = {
+            "plan": [
+                {
+                    "step_id": "1",
+                    "general_goal": "Goal",
+                    "specific_description": "Do work",
+                    "completion_criteria": "Done",
+                    "status": "pending",
+                }
+            ]
+        }
+        self.state_service.record_llm_decision(
             task=self.task,
             recursion=recursion,
-            context=context,
             observe="observe",
             thinking=None,
             reason="reason",
             action_type="RE_PLAN",
-            action_output={
-                "plan": [
-                    {
-                        "step_id": "1",
-                        "general_goal": "Goal",
-                        "specific_description": "Do work",
-                        "completion_criteria": "Done",
-                        "status": "pending",
-                    }
-                ]
-            },
+            action_output=action_output,
             action_step_id=None,
+            summary="",
+            token_counter={},
+        )
+        self.state_service.finalize_success(
+            task=self.task,
+            recursion=recursion,
+            context=context,
+            action_type="RE_PLAN",
+            action_output=action_output,
             step_status_updates=[],
             summary="",
             tool_results=[],
-            token_counter={},
         )
 
         self.task.iteration = 3

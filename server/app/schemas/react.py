@@ -342,6 +342,7 @@ class ReactRecursionResponse(AppBaseModel):
     trace_id: str
     task_id: str
     iteration_index: int
+    input_message_json: str | None
     observe: str | None
     thinking: str | None
     reason: str | None

@@ -128,6 +128,8 @@ class ReactRecursion(SQLModel, table=True):
         task_id: Foreign key to the parent task (string UUID).
         react_task_id: Foreign key to ReactTask table (integer).
         iteration_index: Index of this recursion in the task (0-based).
+        input_message_json: JSON string of the per-recursion user message sent to
+            the LLM.
         observe: LLM's observation of current state.
         thinking: Raw protocol-level reasoning text returned by the provider.
         reason: LLM's reasoning/analysis.
@@ -147,6 +149,10 @@ class ReactRecursion(SQLModel, table=True):
     task_id: str = Field(index=True, description="Task UUID")
     react_task_id: int = Field(foreign_key="reacttask.id", index=True)
     iteration_index: int = Field(description="Recursion index in task")
+    input_message_json: str | None = Field(
+        default=None,
+        description="JSON string of the per-recursion user message sent to the LLM",
+    )
     observe: str | None = Field(default=None, description="LLM observation")
     thinking: str | None = Field(
         default=None,

@@ -1202,13 +1202,17 @@ function ChatContainer({
         return;
       }
 
+      const canAppendToCompletedRecursion =
+        event.type === "tool_call" || event.type === "tool_result";
       const currentRecursion =
         (currentRecursionFromRefs?.status === "running"
           ? currentRecursionFromRefs
           : null) ??
         (matchingRecursionFromMessage?.status === "running"
           ? matchingRecursionFromMessage
-          : runningRecursionFromMessage) ??
+          : canAppendToCompletedRecursion
+            ? matchingRecursionFromMessage
+            : runningRecursionFromMessage) ??
         null;
       if (!currentRecursion) {
         return;
@@ -1284,12 +1288,19 @@ function ChatContainer({
           tokens: event.tokens ?? currentRecursion.tokens,
         };
       } else if (event.type === "action") {
+        const isToolCallAction = event.delta === "CALL_TOOL";
         nextRecursion = {
           ...nextRecursion,
           action: event.delta ?? "",
+          status: isToolCallAction ? "running" : "completed",
+          endTime: isToolCallAction ? undefined : event.timestamp,
+          tokens: event.tokens ?? currentRecursion.tokens,
+        };
+      } else if (event.type === "tool_call" || event.type === "tool_result") {
+        nextRecursion = {
+          ...nextRecursion,
           status: "completed",
           endTime: event.timestamp,
-          tokens: event.tokens ?? currentRecursion.tokens,
         };
       }
 

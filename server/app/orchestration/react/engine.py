@@ -995,6 +995,7 @@ class ReactEngine:
         task: ReactTask,
         context: ReactContext,
         trace_id: str,
+        input_message: dict[str, Any],
         messages: list[dict[str, Any]],
         llm_chat_kwargs: dict[str, Any] | None = None,
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
@@ -1005,6 +1006,7 @@ class ReactEngine:
         Args:
             task: The ReactTask being executed
             context: Current context state
+            input_message: Exact per-recursion user message appended for this cycle.
             messages: Message history for LLM
             llm_chat_kwargs: Extra runtime kwargs passed to LLM chat call.
             token_meter_queue: Optional queue for realtime token-rate snapshots.
@@ -1018,7 +1020,7 @@ class ReactEngine:
         # Use server-generated trace_id from this recursion cycle.
         context.update_for_new_recursion(trace_id)
 
-        recursion = self.state_service.start_recursion(task, trace_id)
+        recursion = self.state_service.start_recursion(task, trace_id, input_message)
 
         # Call LLM WITHOUT tools parameter (using prompt-based approach).
         # Stable schema rules live in the session-level system prompt, while the
@@ -1127,6 +1129,18 @@ class ReactEngine:
             action_step_id = action.step_id
 
             task_summary = decision.task_summary
+            tokens_data = self.state_service.record_llm_decision(
+                task=task,
+                recursion=recursion,
+                observe=observe,
+                thinking=thinking,
+                reason=reason,
+                action_type=action_type,
+                action_output=action_output,
+                action_step_id=action_step_id,
+                summary=summary,
+                token_counter=token_counter,
+            )
 
             # Handle CALL_TOOL with native function calling
             tool_results: list[dict[str, Any]] = []
@@ -1189,20 +1203,15 @@ class ReactEngine:
             pending_user_action = self._extract_pending_user_action_from_tool_results(
                 tool_results
             )
-            tokens_data = self.state_service.finalize_success(
+            self.state_service.finalize_success(
                 task=task,
                 recursion=recursion,
                 context=context,
-                observe=observe,
-                thinking=thinking,
-                reason=reason,
                 action_type=action_type,
                 action_output=action_output,
-                action_step_id=action_step_id,
                 step_status_updates=step_status_updates_validated,
                 summary=summary,
                 tool_results=tool_results,
-                token_counter=token_counter,
                 pending_user_action=pending_user_action,
             )
             persisted_session_title = self._persist_session_title(task, session_title)
@@ -1450,6 +1459,7 @@ class ReactEngine:
                     user_payload,
                     attachments=attachments,
                 )
+                input_message = dict(runtime_state.messages[-1])
                 pending_turn_file_blocks = None
                 self._log_messages_pretty(
                     messages=runtime_state.messages,
@@ -1488,6 +1498,7 @@ class ReactEngine:
                         task=task,
                         context=context,
                         trace_id=trace_id,
+                        input_message=input_message,
                         messages=messages_for_llm,
                         llm_chat_kwargs=llm_chat_kwargs,
                         token_meter_queue=token_meter_queue,

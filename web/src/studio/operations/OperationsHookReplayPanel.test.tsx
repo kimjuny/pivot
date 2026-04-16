@@ -76,6 +76,7 @@ describe("OperationsHookReplayPanel", () => {
               {
                 iteration: 2,
                 trace_id: "trace-1",
+                input_message_json: null,
                 observe: null,
                 thinking: null,
                 reason: null,
