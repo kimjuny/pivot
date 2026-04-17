@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BugPlay, Loader2 } from "@/lib/lucide";
 
 import ChatPage from "@/pages/chat/ChatPage";
+import { useChatDebugPanelSections } from "@/pages/chat/components/ChatDebugPanelContext";
+import { ChatDebugPanelProvider } from "@/pages/chat/components/ChatDebugPanelProvider";
 import type {
   ChatRuntimeDebugState,
   ReactChatInterfaceProps,
@@ -54,8 +56,15 @@ function formatCompactPayload(
  */
 function CompactDebugButton({
   debugState,
+  debugSections,
 }: {
   debugState: ChatRuntimeDebugState;
+  debugSections: Array<{
+    key: string;
+    title: string;
+    description?: string;
+    content: ReactNode;
+  }>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const openTimerRef = useRef<number | null>(null);
@@ -176,6 +185,26 @@ function CompactDebugButton({
                     </div>
                   )
                 )}
+
+                {debugSections.length > 0 ? (
+                  <div className="space-y-3 border-t border-border/70 pt-3">
+                    {debugSections.map((section) => (
+                      <div key={section.key} className="space-y-2">
+                        <div>
+                          <div className="text-sm font-semibold">
+                            {section.title}
+                          </div>
+                          {section.description ? (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {section.description}
+                            </div>
+                          ) : null}
+                        </div>
+                        {section.content}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
@@ -205,22 +234,38 @@ function CompactDebugButton({
 }
 
 /**
- * Backward-compatible entrypoint that now owns the floating compact debug shell.
+ * Render the page shell inside the debug-panel registry so descendants can
+ * contribute developer tools without coupling to the top-level host.
  */
-function ReactChatInterface({
+function ReactChatInterfaceShell({
   showCompactDebug = true,
   ...props
 }: ReactChatInterfaceProps) {
   const [debugState, setDebugState] =
     useState<ChatRuntimeDebugState>(EMPTY_DEBUG_STATE);
+  const debugSections = useChatDebugPanelSections();
 
   return (
     <div className="relative h-full">
       <ChatPage {...props} onRuntimeDebugChange={setDebugState} />
       {showCompactDebug ? (
-        <CompactDebugButton debugState={debugState} />
+        <CompactDebugButton
+          debugState={debugState}
+          debugSections={debugSections}
+        />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Backward-compatible entrypoint that now owns the floating compact debug shell.
+ */
+function ReactChatInterface(props: ReactChatInterfaceProps) {
+  return (
+    <ChatDebugPanelProvider>
+      <ReactChatInterfaceShell {...props} />
+    </ChatDebugPanelProvider>
   );
 }
 

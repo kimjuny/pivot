@@ -1235,6 +1235,8 @@ export interface ExtensionContributionSummary {
   skills: string[];
   /** Lifecycle hook labels declared by this version. */
   hooks: string[];
+  /** Chat surface keys declared by this version. */
+  chat_surfaces?: string[];
   /** Channel provider keys contributed by this version. */
   channel_providers: string[];
   /** Image-generation provider keys contributed by this version. */
@@ -1249,10 +1251,14 @@ export interface ExtensionContributionSummary {
 export interface ExtensionContributionItem {
   /** Stable contribution type such as `hook`, `tool`, or `skill`. */
   type: string;
+  /** Stable manifest key when the contribution declares one. */
+  key?: string | null;
   /** Human-readable item name shown in detail views. */
   name: string;
   /** Plain-language description of what the item does. */
   description: string;
+  /** Optional surface minimum width in pixels declared by the manifest. */
+  min_width?: number | null;
 }
 
 /**
@@ -3011,6 +3017,192 @@ export const getSharedTools = async (): Promise<SharedTool[]> => {
  */
 export const getPrivateTools = async (): Promise<PrivateTool[]> => {
   return apiRequest('/tools/private') as Promise<PrivateTool[]>;
+};
+
+/**
+ * Surface-scoped workspace file endpoint URLs exposed by the backend bootstrap.
+ */
+export interface SurfaceFilesApiResponse {
+  /** Tree listing endpoint for workspace paths visible to the surface. */
+  tree_url: string;
+  /** UTF-8 file content endpoint for the same surface session. */
+  content_url: string;
+}
+
+/**
+ * Minimal bootstrap payload returned for one development surface session.
+ */
+export interface DevSurfaceBootstrapResponse {
+  /** Stable backend-issued surface session identifier. */
+  surface_session_id: string;
+  /** Short-lived surface token used by iframe bootstrap and future runtime APIs. */
+  surface_token: string;
+  /** Current runtime mode for this surface session. */
+  mode: 'dev';
+  /** Stable surface key declared by the development runtime. */
+  surface_key: string;
+  /** Operator-facing label rendered by the dock. */
+  display_name: string;
+  /** Owning agent identifier for the bound chat session. */
+  agent_id: number;
+  /** Chat session identifier that owns the runtime workspace. */
+  session_id: string;
+  /** Workspace identifier visible to future surface tooling. */
+  workspace_id: string;
+  /** Logical workspace root currently bound to the active chat session. */
+  workspace_logical_root: string;
+  /** Local development runtime URL validated by the backend. */
+  dev_server_url: string;
+  /** Capabilities granted to the surface runtime. */
+  capabilities: string[];
+  /** Surface-scoped file endpoints available to the runtime. */
+  files_api: SurfaceFilesApiResponse;
+}
+
+/**
+ * Development surface session metadata returned to the chat host.
+ */
+export interface DevSurfaceSessionResponse {
+  /** Stable backend-issued surface session identifier. */
+  surface_session_id: string;
+  /** Short-lived surface token used by the initial iframe navigation. */
+  surface_token: string;
+  /** Stable surface key declared by the runtime. */
+  surface_key: string;
+  /** Operator-facing label rendered by the dock. */
+  display_name: string;
+  /** Owning agent identifier for the bound chat session. */
+  agent_id: number;
+  /** Bound chat session identifier. */
+  session_id: string;
+  /** Bound workspace identifier. */
+  workspace_id: string;
+  /** Logical workspace root currently bound to the active chat session. */
+  workspace_logical_root: string;
+  /** Local development runtime URL validated by the backend. */
+  dev_server_url: string;
+  /** UTC creation timestamp for the dev surface session. */
+  created_at: string;
+  /** Minimum runtime bootstrap payload returned by the backend. */
+  bootstrap: DevSurfaceBootstrapResponse;
+}
+
+/**
+ * Minimal bootstrap payload returned for one installed surface session.
+ */
+export interface InstalledSurfaceBootstrapResponse {
+  /** Stable backend-issued surface session identifier. */
+  surface_session_id: string;
+  /** Short-lived surface token used by iframe bootstrap and later runtime APIs. */
+  surface_token: string;
+  /** Current runtime mode for this surface session. */
+  mode: 'installed';
+  /** Stable surface key declared by the installed extension. */
+  surface_key: string;
+  /** Operator-facing label rendered by the dock. */
+  display_name: string;
+  /** Canonical package id that owns this installed surface. */
+  package_id: string;
+  /** Installed extension version selected for this runtime. */
+  extension_installation_id: number;
+  /** Owning agent identifier for the bound chat session. */
+  agent_id: number;
+  /** Chat session identifier that owns the runtime workspace. */
+  session_id: string;
+  /** Workspace identifier visible to the installed runtime. */
+  workspace_id: string;
+  /** Logical workspace root currently bound to the active chat session. */
+  workspace_logical_root: string;
+  /** Host-relative runtime iframe URL served by the backend. */
+  runtime_url: string;
+  /** Capabilities granted to the surface runtime. */
+  capabilities: string[];
+  /** Surface-scoped file endpoints available to the runtime. */
+  files_api: SurfaceFilesApiResponse;
+}
+
+/**
+ * Installed surface session metadata returned to the chat host.
+ */
+export interface InstalledSurfaceSessionResponse {
+  /** Stable backend-issued surface session identifier. */
+  surface_session_id: string;
+  /** Short-lived surface token used by the initial iframe navigation. */
+  surface_token: string;
+  /** Stable surface key declared by the installed extension. */
+  surface_key: string;
+  /** Operator-facing label rendered by the dock. */
+  display_name: string;
+  /** Canonical package id that owns this installed surface. */
+  package_id: string;
+  /** Installed extension version selected for this runtime. */
+  extension_installation_id: number;
+  /** Owning agent identifier for the bound chat session. */
+  agent_id: number;
+  /** Bound chat session identifier. */
+  session_id: string;
+  /** Bound workspace identifier. */
+  workspace_id: string;
+  /** Logical workspace root currently bound to the active chat session. */
+  workspace_logical_root: string;
+  /** Host-relative runtime iframe URL served by the backend. */
+  runtime_url: string;
+  /** UTC creation timestamp for the installed surface session. */
+  created_at: string;
+  /** Minimum runtime bootstrap payload returned by the backend. */
+  bootstrap: InstalledSurfaceBootstrapResponse;
+}
+
+/**
+ * Create one development-mode chat surface session for the current chat session.
+ *
+ * Why: the dock needs a backend-issued surface session before later phases can
+ * proxy a local dev server or grant surface-scoped file access.
+ *
+ * @param payload - Session id plus local dev runtime details
+ * @returns Promise resolving to the created surface session and bootstrap
+ */
+export const createDevSurfaceSession = async (payload: {
+  sessionId: string;
+  surfaceKey: string;
+  /** Runtime URL. May point at a dev server root or entry HTML page. */
+  devServerUrl: string;
+  displayName?: string | null;
+}): Promise<DevSurfaceSessionResponse> => {
+  return apiRequest('/chat-surfaces/dev-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: payload.sessionId,
+      surface_key: payload.surfaceKey,
+      dev_server_url: payload.devServerUrl,
+      display_name: payload.displayName ?? null,
+    }),
+  }) as Promise<DevSurfaceSessionResponse>;
+};
+
+/**
+ * Create one installed-surface session for the current chat session.
+ *
+ * Why: installed chat surfaces should reuse the same dock and iframe host as
+ * development surfaces, but their runtime assets come from the selected
+ * extension installation rather than a local dev server.
+ *
+ * @param payload - Session id plus installed extension identifiers
+ * @returns Promise resolving to the created installed surface session
+ */
+export const createInstalledSurfaceSession = async (payload: {
+  sessionId: string;
+  extensionInstallationId: number;
+  surfaceKey: string;
+}): Promise<InstalledSurfaceSessionResponse> => {
+  return apiRequest('/chat-surfaces/installed-sessions', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: payload.sessionId,
+      extension_installation_id: payload.extensionInstallationId,
+      surface_key: payload.surfaceKey,
+    }),
+  }) as Promise<InstalledSurfaceSessionResponse>;
 };
 
 /**

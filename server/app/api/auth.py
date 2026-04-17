@@ -85,6 +85,22 @@ def get_current_user(
     Raises:
         HTTPException: If the token is invalid or the user doesn't exist.
     """
+    return resolve_user_from_access_token(credentials.credentials, session)
+
+
+def resolve_user_from_access_token(token: str, session: Session) -> User:
+    """Resolve one user from a raw bearer access token.
+
+    Args:
+        token: Encoded JWT access token.
+        session: Active database session.
+
+    Returns:
+        Authenticated user model.
+
+    Raises:
+        HTTPException: If the token is invalid or the user doesn't exist.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -92,9 +108,7 @@ def get_current_user(
     )
 
     try:
-        payload = jwt.decode(
-            credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM]
-        )
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: int | None = payload.get("sub")
         if user_id is None:
             raise credentials_exception

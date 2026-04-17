@@ -20,6 +20,7 @@ sys.path.append(str(Path(server_dir).parent))
 from app.api.agents import router as agents_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
 from app.api.channels import router as channels_router  # noqa: E402
+from app.api.chat_surfaces import router as chat_surfaces_router  # noqa: E402
 from app.api.consumer import router as consumer_router  # noqa: E402
 from app.api.extensions import router as extensions_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
@@ -109,6 +110,7 @@ app.include_router(projects_router, prefix="/api")
 app.include_router(session_router, prefix="/api")
 app.include_router(task_attachments_router, prefix="/api")
 app.include_router(channels_router, prefix="/api")
+app.include_router(chat_surfaces_router, prefix="/api")
 app.include_router(consumer_router, prefix="/api")
 app.include_router(extensions_router, prefix="/api")
 app.include_router(image_generation_router, prefix="/api")

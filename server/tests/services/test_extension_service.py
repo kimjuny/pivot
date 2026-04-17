@@ -140,6 +140,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         binding_config_fields: list[dict[str, object]] | None = None,
         logo_path: str | None = None,
         include_default_logo: bool = False,
+        chat_surface_key: str | None = None,
     ) -> Path:
         """Create one local extension folder with a tool and a skill."""
         package_scope, package_basename = self._split_package_name(package_name)
@@ -304,6 +305,31 @@ class ExtensionServiceTestCase(unittest.TestCase):
             )
             (provider_dir / "logo.svg").write_text(
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"></svg>\n',
+                encoding="utf-8",
+            )
+
+        if chat_surface_key is not None:
+            surface_dir = extension_root / "ui" / chat_surface_key
+            surface_dir.mkdir(parents=True, exist_ok=True)
+            manifest["contributions"].setdefault("chat_surfaces", []).append(
+                {
+                    "key": chat_surface_key,
+                    "display_name": "Workspace Editor",
+                    "description": "A coding workbench surface.",
+                    "entrypoint": f"ui/{chat_surface_key}/index.html",
+                    "placement": "right_dock",
+                    "min_width": 560,
+                }
+            )
+            (surface_dir / "index.html").write_text(
+                (
+                    "<!doctype html>\n"
+                    "<html>\n"
+                    "  <body>\n"
+                    '    <div id="app">Workspace Editor</div>\n'
+                    "  </body>\n"
+                    "</html>\n"
+                ),
                 encoding="utf-8",
             )
 
@@ -1289,6 +1315,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
             channel_provider_key="acme@chat",
             web_search_provider_key="acme@search",
             hook_event="task.before_start",
+            chat_surface_key="workspace-editor",
         )
         installation = ExtensionService(self.session).install_from_path(
             source_dir=extension_root,
@@ -1313,6 +1340,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 "type": "hook",
                 "name": "Recall CRM Context",
                 "description": "Restores CRM context before the task starts.",
+                "key": None,
+                "min_width": None,
             },
         )
         self.assertEqual(response.scope, "acme")
@@ -1335,10 +1364,49 @@ class ExtensionServiceTestCase(unittest.TestCase):
             response.contribution_summary.web_search_providers,
             ["acme@search"],
         )
+        self.assertEqual(
+            response.contribution_summary.chat_surfaces,
+            ["workspace-editor"],
+        )
+        chat_surface_item = next(
+            item for item in response.contribution_items if item.type == "chat_surface"
+        )
+        self.assertEqual(chat_surface_item.key, "workspace-editor")
+        self.assertEqual(chat_surface_item.min_width, 560)
         self.assertIsNotNone(response.reference_summary)
         if response.reference_summary is None:
             self.fail("Expected reference summary to be serialized.")
         self.assertEqual(response.reference_summary.binding_count, 0)
+
+    def test_runtime_bundle_includes_chat_surfaces(self) -> None:
+        """Resolved extension bundles should include declared chat surfaces."""
+        extension_root = self._write_extension(chat_surface_key="workspace-editor")
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+            enabled=True,
+        )
+
+        bundle = service.build_agent_extension_snapshot(self.agent.id or 0)
+
+        self.assertEqual(len(bundle), 1)
+        self.assertEqual(bundle[0]["chat_surfaces"][0]["key"], "workspace-editor")
+        self.assertEqual(
+            bundle[0]["chat_surfaces"][0]["display_name"],
+            "Workspace Editor",
+        )
+        self.assertEqual(
+            bundle[0]["chat_surfaces"][0]["placement"],
+            "right_dock",
+        )
+        self.assertEqual(bundle[0]["chat_surfaces"][0]["min_width"], 560)
+        self.assertTrue(Path(bundle[0]["chat_surfaces"][0]["source_path"]).is_file())
 
     def test_sample_memory_extension_recalls_and_persists_external_memory(self) -> None:
         """The sample memory extension should store externally and recall on start."""
@@ -1927,6 +1995,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 "type": "hook",
                 "name": "Recall CRM Context",
                 "description": "Restores CRM context before the task starts.",
+                "key": None,
+                "min_width": None,
             },
         )
 

@@ -37,6 +37,7 @@ class ExtensionContributionSummaryResponse(AppBaseModel):
     tools: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
     hooks: list[str] = Field(default_factory=list)
+    chat_surfaces: list[str] = Field(default_factory=list)
     channel_providers: list[str] = Field(default_factory=list)
     image_providers: list[str] = Field(default_factory=list)
     web_search_providers: list[str] = Field(default_factory=list)
@@ -48,6 +49,8 @@ class ExtensionContributionItemResponse(AppBaseModel):
     type: str
     name: str
     description: str = ""
+    key: str | None = None
+    min_width: int | None = None
 
 
 class ExtensionConfigurationFieldResponse(AppBaseModel):

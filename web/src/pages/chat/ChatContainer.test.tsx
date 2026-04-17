@@ -1,6 +1,41 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { HTMLAttributes, PropsWithChildren } from "react";
+
+vi.mock("react-resizable-panels", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    PanelGroup: ({
+      children,
+      className,
+      direction,
+    }: PropsWithChildren<{
+      className?: string;
+      direction: "horizontal" | "vertical";
+    }>) => (
+      <div data-panel-group-direction={direction} className={className}>
+        {children}
+      </div>
+    ),
+    Panel: ({
+      children,
+      className,
+    }: PropsWithChildren<{ className?: string }>) => (
+      <div className={className}>{children}</div>
+    ),
+    PanelResizeHandle: ({
+      children,
+      className,
+      ...props
+    }: PropsWithChildren<HTMLAttributes<HTMLDivElement>>) => (
+      <div className={className} {...props}>
+        {children}
+      </div>
+    ),
+  };
+});
 
 vi.mock("@/utils/api", async () => {
   const actual = await vi.importActual<typeof import("@/utils/api")>(
@@ -11,11 +46,14 @@ vi.mock("@/utils/api", async () => {
     ...actual,
     cancelReactTask: vi.fn(),
     createProject: vi.fn(),
+    createDevSurfaceSession: vi.fn(),
+    createInstalledSurfaceSession: vi.fn(),
     createSession: vi.fn(),
     deleteChatFile: vi.fn(),
     deleteProject: vi.fn(),
     deleteSession: vi.fn(),
     getAgentWebSearchBindings: vi.fn(),
+    getAgentExtensionPackages: vi.fn(),
     getFullSessionHistory: vi.fn(),
     getLLMById: vi.fn(),
     getReactContextUsage: vi.fn(),
@@ -44,7 +82,10 @@ vi.mock("@/contexts/auth-core", () => ({
 import {
   cancelReactTask,
   createProject,
+  createDevSurfaceSession,
+  createInstalledSurfaceSession,
   createSession,
+  getAgentExtensionPackages,
   getAgentWebSearchBindings,
   getFullSessionHistory,
   getLLMById,
@@ -61,6 +102,7 @@ import {
 } from "@/utils/api";
 
 import ChatContainer from "./ChatContainer";
+import ReactChatInterface from "@/components/ReactChatInterface";
 
 /**
  * Build the smallest valid context-usage payload needed by the composer ring.
@@ -118,6 +160,44 @@ describe("ChatContainer session rollover", () => {
     vi.resetAllMocks();
     vi.stubGlobal("fetch", vi.fn());
     applyPointerCapturePolyfill();
+    vi.mocked(getAgentExtensionPackages).mockResolvedValue([]);
+    vi.mocked(createInstalledSurfaceSession).mockResolvedValue({
+      surface_session_id: "installed-surface-1",
+      surface_token: "installed-token-1",
+      surface_key: "workspace-editor",
+      display_name: "Workspace Editor",
+      package_id: "@acme/workspace-tools",
+      extension_installation_id: 8,
+      agent_id: 7,
+      session_id: "session-1",
+      workspace_id: "workspace-1",
+      workspace_logical_root: "/workspace",
+      runtime_url:
+        "/api/chat-surfaces/installed-sessions/installed-surface-1/runtime/ui/workspace/",
+      created_at: "2026-03-16T00:00:00.000Z",
+      bootstrap: {
+        surface_session_id: "installed-surface-1",
+        surface_token: "installed-token-1",
+        mode: "installed",
+        surface_key: "workspace-editor",
+        display_name: "Workspace Editor",
+        package_id: "@acme/workspace-tools",
+        extension_installation_id: 8,
+        agent_id: 7,
+        session_id: "session-1",
+        workspace_id: "workspace-1",
+        workspace_logical_root: "/workspace",
+        runtime_url:
+          "/api/chat-surfaces/installed-sessions/installed-surface-1/runtime/ui/workspace/",
+        capabilities: ["workspace.read", "workspace.write"],
+        files_api: {
+          tree_url:
+            "/api/chat-surfaces/installed-sessions/installed-surface-1/files/tree",
+          content_url:
+            "/api/chat-surfaces/installed-sessions/installed-surface-1/files/content",
+        },
+      },
+    });
     vi.mocked(getLLMById).mockResolvedValue({
       image_input: false,
       thinking_policy: "auto",
@@ -230,6 +310,207 @@ describe("ChatContainer session rollover", () => {
     expect(getFullSessionHistory).not.toHaveBeenCalled();
     expect(screen.getByText("Old chat")).toBeInTheDocument();
     expect(screen.getByText("Chat with Pivot Agent")).toBeInTheDocument();
+  });
+
+  it("attaches one dev surface from debug tools and opens it from the header", async () => {
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: "session-1",
+          agent_id: 7,
+          status: "active",
+          title: "Surface thread",
+          is_pinned: false,
+          created_at: "2026-03-16T00:00:00.000Z",
+          updated_at: "2026-03-16T00:00:00.000Z",
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(createDevSurfaceSession).mockResolvedValue({
+      surface_session_id: "surf-1",
+      surface_token: "token-1",
+      surface_key: "workspace-editor",
+      display_name: "Workspace Editor",
+      agent_id: 7,
+      session_id: "session-1",
+      workspace_id: "workspace-1",
+      workspace_logical_root: "/workspace",
+      dev_server_url: "http://127.0.0.1:4173",
+      created_at: "2026-03-16T00:00:00.000Z",
+      bootstrap: {
+        surface_session_id: "surf-1",
+        surface_token: "token-1",
+        mode: "dev",
+        surface_key: "workspace-editor",
+        display_name: "Workspace Editor",
+        agent_id: 7,
+        session_id: "session-1",
+        workspace_id: "workspace-1",
+        workspace_logical_root: "/workspace",
+        dev_server_url: "http://127.0.0.1:4173",
+        capabilities: ["workspace.read", "workspace.write"],
+        files_api: {
+          tree_url: "/tree",
+          content_url: "/content",
+        },
+      },
+    });
+
+    const user = userEvent.setup();
+
+    render(
+      <ReactChatInterface
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        initialSessionId="session-1"
+      />,
+    );
+
+    const debugButton = await screen.findByRole("button", {
+      name: "Open compact debug inspector",
+    });
+    await user.hover(debugButton);
+
+    expect(await screen.findByText("Surface Dev")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Attach Dev Surface" }),
+      ).not.toBeDisabled();
+    });
+    await user.click(screen.getByRole("button", { name: "Open Official Sample" }));
+    await waitFor(() => {
+      expect(createDevSurfaceSession).toHaveBeenCalledWith({
+        sessionId: "session-1",
+        surfaceKey: "workspace-editor",
+        devServerUrl: "http://127.0.0.1:4173",
+      });
+    });
+
+    const surfaceButton = await screen.findByRole("button", {
+      name: "Toggle surface workspace-editor",
+    });
+    expect(surfaceButton).toBeInTheDocument();
+
+    await user.click(surfaceButton);
+    expect(await screen.findByTitle("Surface runtime preview")).toBeInTheDocument();
+
+    await user.click(surfaceButton);
+    await waitFor(() => {
+      expect(screen.queryByTitle("Surface runtime preview")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows installed surface icons in the header and opens the shared dock", async () => {
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: "session-2",
+          agent_id: 7,
+          status: "active",
+          title: "Installed surface thread",
+          is_pinned: false,
+          created_at: "2026-03-16T00:00:00.000Z",
+          updated_at: "2026-03-16T00:00:00.000Z",
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(getAgentExtensionPackages).mockResolvedValue([
+      {
+        scope: "acme",
+        name: "workspace-tools",
+        package_id: "@acme/workspace-tools",
+        display_name: "Workspace Tools",
+        description: "Workspace surfaces",
+        logo_url: null,
+        latest_version: "0.1.0",
+        active_version_count: 1,
+        disabled_version_count: 0,
+        has_update_available: false,
+        selected_binding: {
+          id: 5,
+          agent_id: 7,
+          extension_installation_id: 8,
+          enabled: true,
+          priority: 100,
+          config: {},
+          created_at: "2026-03-16T00:00:00.000Z",
+          updated_at: "2026-03-16T00:00:00.000Z",
+          installation: {
+            id: 8,
+            scope: "acme",
+            name: "workspace-tools",
+            package_id: "@acme/workspace-tools",
+            version: "0.1.0",
+            display_name: "Workspace Tools",
+            description: "Workspace surfaces",
+            logo_url: null,
+            manifest_hash: "hash-1",
+            artifact_storage_backend: "local",
+            artifact_key: "artifact",
+            artifact_digest: "digest",
+            artifact_size_bytes: 123,
+            install_root: "/tmp/install",
+            source: "manual",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            status: "active",
+            created_at: "2026-03-16T00:00:00.000Z",
+            updated_at: "2026-03-16T00:00:00.000Z",
+            contribution_summary: {
+              tools: [],
+              skills: [],
+              hooks: [],
+              chat_surfaces: ["workspace-editor"],
+              channel_providers: [],
+              image_providers: [],
+              web_search_providers: [],
+            },
+            contribution_items: [
+              {
+                type: "chat_surface",
+                name: "Workspace Editor",
+                description: "Installed coding surface",
+              },
+            ],
+            reference_summary: null,
+          },
+        },
+        versions: [],
+      },
+    ]);
+
+    const user = userEvent.setup();
+
+    render(
+      <ReactChatInterface
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        initialSessionId="session-2"
+      />,
+    );
+
+    const surfaceButton = await screen.findByRole("button", {
+      name: "Open surface workspace-editor",
+    });
+    await user.click(surfaceButton);
+
+    await waitFor(() => {
+      expect(createInstalledSurfaceSession).toHaveBeenCalledWith({
+        sessionId: "session-2",
+        extensionInstallationId: 8,
+        surfaceKey: "workspace-editor",
+      });
+    });
+    expect(await screen.findByTitle("Installed surface runtime")).toBeInTheDocument();
   });
 
   it("continues on an explicitly selected session instead of creating a fresh one", async () => {

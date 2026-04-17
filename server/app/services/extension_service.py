@@ -260,6 +260,10 @@ def _build_contribution_summary(
         "tools": _extract_names(contributions.get("tools"), field_name="name"),
         "skills": _extract_names(contributions.get("skills"), field_name="name"),
         "hooks": _extract_names(contributions.get("hooks"), field_name="name"),
+        "chat_surfaces": _extract_names(
+            contributions.get("chat_surfaces"),
+            field_name="key",
+        ),
         "channel_providers": _extract_names(
             contributions.get("channel_providers"),
             field_name="key",
@@ -275,15 +279,16 @@ def _build_contribution_summary(
     }
 
 
-def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, str]]:
+def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract operator-facing contribution entries from one normalized manifest."""
     contributions = manifest.get("contributions", {})
     if not isinstance(contributions, dict):
         contributions = {}
 
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     contribution_order = [
         ("hooks", "hook"),
+        ("chat_surfaces", "chat_surface"),
         ("channel_providers", "channel_provider"),
         ("image_providers", "image_provider"),
         ("web_search_providers", "web_search_provider"),
@@ -297,21 +302,38 @@ def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, str]]:
         for raw_item in raw_items:
             if not isinstance(raw_item, dict):
                 continue
-            raw_name = raw_item.get("name")
+            raw_name = (
+                raw_item.get("display_name")
+                if manifest_key == "chat_surfaces"
+                else raw_item.get("name")
+            )
+            if manifest_key == "chat_surfaces" and not isinstance(raw_name, str):
+                raw_name = raw_item.get("key")
             raw_description = raw_item.get("description")
             if not isinstance(raw_name, str) or not raw_name.strip():
                 continue
-            items.append(
-                {
-                    "type": contribution_type,
-                    "name": raw_name.strip(),
-                    "description": (
-                        raw_description.strip()
-                        if isinstance(raw_description, str)
-                        else ""
-                    ),
-                }
-            )
+            item: dict[str, Any] = {
+                "type": contribution_type,
+                "name": raw_name.strip(),
+                "description": (
+                    raw_description.strip()
+                    if isinstance(raw_description, str)
+                    else ""
+                ),
+            }
+            if contribution_type == "chat_surface":
+                raw_key = raw_item.get("key")
+                item["key"] = (
+                    raw_key.strip()
+                    if isinstance(raw_key, str) and raw_key.strip()
+                    else None
+                )
+                item["min_width"] = (
+                    raw_item.get("min_width")
+                    if isinstance(raw_item.get("min_width"), int)
+                    else None
+                )
+            items.append(item)
     return items
 
 
@@ -740,6 +762,71 @@ def _normalize_manifest(
                                 if isinstance(skill_description, str)
                                 else ""
                             ),
+                        }
+                    )
+                    continue
+
+                if key == "chat_surfaces":
+                    surface_key = raw_item.get("key")
+                    entrypoint = raw_item.get("entrypoint")
+                    if not isinstance(surface_key, str) or not surface_key.strip():
+                        raise ValueError(
+                            "Chat surface contributions must declare a key."
+                        )
+                    if not isinstance(entrypoint, str):
+                        raise ValueError(
+                            "Chat surface contributions must declare an entrypoint."
+                        )
+                    normalized_surface_key = surface_key.strip()
+                    if normalized_surface_key in seen_names:
+                        raise ValueError(
+                            "Duplicate chat surface contribution "
+                            f"'{normalized_surface_key}'."
+                        )
+                    seen_names.add(normalized_surface_key)
+                    relative_entrypoint = _safe_relative_path(
+                        entrypoint,
+                        field_name=(f"contributions.chat_surfaces[{index}].entrypoint"),
+                    )
+                    entrypoint_path = source_dir.joinpath(*relative_entrypoint.parts)
+                    if not entrypoint_path.is_file():
+                        raise ValueError(
+                            "Chat surface entrypoint "
+                            f"'{relative_entrypoint.as_posix()}' does not exist."
+                        )
+                    raw_display_name = raw_item.get("display_name")
+                    raw_description = raw_item.get("description")
+                    raw_placement = raw_item.get("placement")
+                    raw_min_width = raw_item.get("min_width")
+                    normalized_min_width: int | None = None
+                    if raw_min_width is not None:
+                        if not isinstance(raw_min_width, int) or raw_min_width <= 0:
+                            raise ValueError(
+                                "Chat surface min_width must be a positive integer."
+                            )
+                        normalized_min_width = raw_min_width
+                    normalized_items.append(
+                        {
+                            "key": normalized_surface_key,
+                            "display_name": (
+                                raw_display_name.strip()
+                                if isinstance(raw_display_name, str)
+                                and raw_display_name.strip()
+                                else normalized_surface_key
+                            ),
+                            "description": (
+                                raw_description.strip()
+                                if isinstance(raw_description, str)
+                                else ""
+                            ),
+                            "entrypoint": relative_entrypoint.as_posix(),
+                            "placement": (
+                                raw_placement.strip()
+                                if isinstance(raw_placement, str)
+                                and raw_placement.strip()
+                                else "right_dock"
+                            ),
+                            "min_width": normalized_min_width,
                         }
                     )
                     continue
@@ -2279,6 +2366,25 @@ class ExtensionService:
                 for provider in contributions.get("image_providers", [])
                 if isinstance(provider, dict)
                 and isinstance(provider.get("entrypoint"), str)
+            ],
+            "chat_surfaces": [
+                {
+                    "key": surface["key"],
+                    "display_name": surface.get("display_name", surface["key"]),
+                    "description": surface.get("description", ""),
+                    "placement": surface.get("placement", "right_dock"),
+                    "min_width": surface.get("min_width"),
+                    "entrypoint": surface["entrypoint"],
+                    "source_path": str(
+                        install_root.joinpath(
+                            *PurePosixPath(surface["entrypoint"]).parts
+                        ).resolve()
+                    ),
+                }
+                for surface in contributions.get("chat_surfaces", [])
+                if isinstance(surface, dict)
+                and isinstance(surface.get("entrypoint"), str)
+                and isinstance(surface.get("key"), str)
             ],
         }
 

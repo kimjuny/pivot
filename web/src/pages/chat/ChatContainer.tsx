@@ -3,10 +3,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelReactTask,
   createProject,
+  createDevSurfaceSession,
+  createInstalledSurfaceSession,
   createSession,
   deleteProject,
   deleteSession,
   getAgentWebSearchBindings,
+  getAgentExtensionPackages,
   getFullSessionHistory,
   getReactContextUsage,
   getReactRuntimeSkills,
@@ -18,8 +21,11 @@ import {
   updateProject,
   updateSession,
   type ProjectResponse,
+  type DevSurfaceSessionResponse,
+  type AgentExtensionPackage,
   type ReactContextUsageSummary,
   type ReactSessionRuntimeDebug,
+  type InstalledSurfaceSessionResponse,
   type SessionListItem,
   type SessionResponse,
   type WebSearchBinding,
@@ -32,6 +38,11 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+import {
   AUTH_EXPIRED_EVENT,
   getAuthToken,
   isTokenValid,
@@ -39,6 +50,9 @@ import {
 
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationView } from "./components/ConversationView";
+import { ExtensionDock } from "./components/ExtensionDock";
+import type { InstalledChatSurfaceDescriptor } from "./components/ExtensionDock";
+import { useRegisterChatDebugPanelSection } from "./components/ChatDebugPanelContext";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
 import { useChatUploads } from "./hooks/useChatUploads";
@@ -78,6 +92,10 @@ import {
 } from "./utils/chatSelectors";
 
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
+const DOCK_TRANSITION_MS = 200;
+const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
+const OFFICIAL_SAMPLE_RUNTIME_URL = "http://127.0.0.1:4173";
+const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
 
 /**
  * Parse the serialized tool allowlist and determine whether ``web_search`` is
@@ -121,6 +139,63 @@ function toWebSearchProviderOptions(
       name: binding.manifest.name,
       logoUrl: binding.manifest.logo_url ?? null,
     }));
+}
+
+/**
+ * Flatten enabled agent extension packages into one header-friendly installed
+ * chat surface list.
+ */
+function toInstalledChatSurfaces(
+  packages: AgentExtensionPackage[],
+): InstalledChatSurfaceDescriptor[] {
+  const installedSurfaces: InstalledChatSurfaceDescriptor[] = [];
+
+  packages.forEach((pkg) => {
+    const selectedBinding = pkg.selected_binding;
+    const selectedInstallation = selectedBinding?.installation;
+    if (
+      !selectedBinding ||
+      !selectedBinding.enabled ||
+      !selectedInstallation ||
+      selectedInstallation.status !== "active"
+    ) {
+      return;
+    }
+
+    const contributionItemsByKey = new Map(
+      selectedInstallation.contribution_items
+        .filter((item) => item.type === "chat_surface")
+        .map((item) => [item.key ?? item.name, item]),
+    );
+    (selectedInstallation.contribution_summary.chat_surfaces ?? []).forEach(
+      (surfaceKey) => {
+        const contributionItem = contributionItemsByKey.get(surfaceKey);
+        const normalizedMinWidth =
+          typeof contributionItem?.min_width === "number" &&
+          Number.isFinite(contributionItem.min_width) &&
+          contributionItem.min_width > 0
+            ? contributionItem.min_width
+            : null;
+        installedSurfaces.push({
+          installationId: selectedInstallation.id,
+          packageId: pkg.package_id,
+          surfaceKey,
+          displayName:
+            contributionItem?.name && contributionItem.name.trim().length > 0
+              ? contributionItem.name.trim()
+              : surfaceKey,
+          logoUrl: pkg.logo_url,
+          description:
+            contributionItem?.description && contributionItem.description.trim().length > 0
+              ? contributionItem.description.trim()
+              : pkg.description,
+          minWidth: normalizedMinWidth,
+        });
+      },
+    );
+  });
+
+  return installedSurfaces;
 }
 
 /**
@@ -369,6 +444,31 @@ function ChatContainer({
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isExtensionDockOpen, setIsExtensionDockOpen] = useState(false);
+  const [isExtensionDockMounted, setIsExtensionDockMounted] = useState(false);
+  const [dockPanelSize, setDockPanelSize] = useState(58);
+  const [renderedDockPanelSize, setRenderedDockPanelSize] = useState(0);
+  const [surfaceKeyInput, setSurfaceKeyInput] = useState(
+    OFFICIAL_SAMPLE_SURFACE_KEY,
+  );
+  const [surfaceRuntimeUrlInput, setSurfaceRuntimeUrlInput] = useState(
+    OFFICIAL_SAMPLE_RUNTIME_URL,
+  );
+  const [isCreatingSurfaceSession, setIsCreatingSurfaceSession] =
+    useState(false);
+  const [surfaceCreationError, setSurfaceCreationError] = useState<
+    string | null
+  >(null);
+  const [installedChatSurfaces, setInstalledChatSurfaces] = useState<
+    InstalledChatSurfaceDescriptor[]
+  >([]);
+  const [activeInstalledSurface, setActiveInstalledSurface] =
+    useState<InstalledChatSurfaceDescriptor | null>(null);
+  const [activeInstalledSurfaceSession, setActiveInstalledSurfaceSession] =
+    useState<InstalledSurfaceSessionResponse | null>(null);
+  const [activeSurfaceSession, setActiveSurfaceSession] =
+    useState<DevSurfaceSessionResponse | null>(null);
   const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
     null,
   );
@@ -417,6 +517,8 @@ function ChatContainer({
   const runtimeDebugRequestIdRef = useRef(0);
   const compactStatusStartedAtRef = useRef<number | null>(null);
   const compactStatusClearTimerRef = useRef<number | null>(null);
+  const dockTransitionTimerRef = useRef<number | null>(null);
+  const dockOpenFrameRef = useRef<number | null>(null);
   const stoppedTaskIdsRef = useRef<Set<string>>(new Set());
 
   const {
@@ -442,6 +544,74 @@ function ChatContainer({
     sessionIdleTimeoutMinutes,
   );
   const canUseWebSearch = canAccessWebSearchTool(agentToolIds);
+
+  /**
+   * Surface development sessions are scoped to one chat session so the debug
+   * tooling cannot accidentally keep editing the wrong workspace after a pivot.
+   */
+  useEffect(() => {
+    if (dockTransitionTimerRef.current !== null) {
+      window.clearTimeout(dockTransitionTimerRef.current);
+      dockTransitionTimerRef.current = null;
+    }
+    if (dockOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(dockOpenFrameRef.current);
+      dockOpenFrameRef.current = null;
+    }
+    setActiveSurfaceSession(null);
+    setActiveInstalledSurface(null);
+    setActiveInstalledSurfaceSession(null);
+    setSurfaceCreationError(null);
+    setIsExtensionDockOpen(false);
+    setIsExtensionDockMounted(false);
+    setRenderedDockPanelSize(0);
+  }, [currentSessionId]);
+
+  const clearDockAnimationTimers = useCallback(() => {
+    if (dockTransitionTimerRef.current !== null) {
+      window.clearTimeout(dockTransitionTimerRef.current);
+      dockTransitionTimerRef.current = null;
+    }
+    if (dockOpenFrameRef.current !== null) {
+      window.cancelAnimationFrame(dockOpenFrameRef.current);
+      dockOpenFrameRef.current = null;
+    }
+  }, []);
+
+  const handleExtensionDockOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      clearDockAnimationTimers();
+      setIsExtensionDockOpen(nextOpen);
+
+      if (nextOpen) {
+        setIsExtensionDockMounted(true);
+        dockOpenFrameRef.current = window.requestAnimationFrame(() => {
+          setRenderedDockPanelSize(dockPanelSize);
+          dockOpenFrameRef.current = null;
+        });
+        return;
+      }
+
+      setRenderedDockPanelSize(0);
+      dockTransitionTimerRef.current = window.setTimeout(() => {
+        setIsExtensionDockMounted(false);
+        dockTransitionTimerRef.current = null;
+      }, DOCK_TRANSITION_MS);
+    },
+    [clearDockAnimationTimers, dockPanelSize],
+  );
+
+  useEffect(() => {
+    return () => {
+      clearDockAnimationTimers();
+    };
+  }, [clearDockAnimationTimers]);
+
+  useEffect(() => {
+    if (isExtensionDockOpen) {
+      setRenderedDockPanelSize(dockPanelSize);
+    }
+  }, [dockPanelSize, isExtensionDockOpen]);
 
   /**
    * Clears pending draft estimation so only the latest idle draft reaches the
@@ -1637,6 +1807,36 @@ function ChatContainer({
   }, [runtimeSkills]);
 
   useEffect(() => {
+    let isCancelled = false;
+
+    const loadInstalledChatSurfaces = async () => {
+      try {
+        const extensionPackages = await getAgentExtensionPackages(agentId);
+        if (isCancelled) {
+          return;
+        }
+        setInstalledChatSurfaces(toInstalledChatSurfaces(extensionPackages));
+      } catch (loadError) {
+        if (isCancelled) {
+          return;
+        }
+
+        console.error(
+          "Failed to load installed chat surfaces for the current agent:",
+          loadError,
+        );
+        setInstalledChatSurfaces([]);
+      }
+    };
+
+    void loadInstalledChatSurfaces();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [agentId]);
+
+  useEffect(() => {
     if (!canUseWebSearch) {
       setWebSearchProviders([]);
       setSelectedWebSearchProvider(null);
@@ -2479,10 +2679,302 @@ function ChatContainer({
     setReplyTaskId(null);
   }, []);
 
+  /**
+   * Create one temporary development surface binding for the active chat
+   * session so the debug affordance and header icon can share the same host
+   * state instead of maintaining parallel launch paths.
+   */
+  const handleCreateSurfaceDevSession = useCallback(
+    async (nextSurfaceKey: string, nextRuntimeUrl: string) => {
+      if (!currentSessionId || isCreatingSurfaceSession) {
+        return;
+      }
+
+      setIsCreatingSurfaceSession(true);
+      setSurfaceCreationError(null);
+
+      try {
+        const nextSurfaceSession = await createDevSurfaceSession({
+          sessionId: currentSessionId,
+          surfaceKey: nextSurfaceKey,
+          devServerUrl: nextRuntimeUrl,
+        });
+        setActiveInstalledSurface(null);
+        setActiveInstalledSurfaceSession(null);
+        setActiveSurfaceSession(nextSurfaceSession);
+        handleExtensionDockOpenChange(false);
+      } catch (error) {
+        setSurfaceCreationError(
+          error instanceof Error
+            ? error.message
+            : "Failed to attach development surface.",
+        );
+      } finally {
+        setIsCreatingSurfaceSession(false);
+      }
+    },
+    [currentSessionId, handleExtensionDockOpenChange, isCreatingSurfaceSession],
+  );
+
+  /**
+   * Opens one installed surface through the same shared dock host used by dev
+   * sessions so product and debug entry points stay behaviorally aligned.
+   */
+  const handleOpenInstalledSurface = useCallback(
+    async (surface: InstalledChatSurfaceDescriptor) => {
+      if (!currentSessionId || isCreatingSurfaceSession) {
+        return;
+      }
+
+      const isSameInstalledSurface =
+        activeInstalledSurface?.installationId === surface.installationId &&
+        activeInstalledSurface.surfaceKey === surface.surfaceKey;
+      if (isSameInstalledSurface && isExtensionDockOpen) {
+        handleExtensionDockOpenChange(false);
+        return;
+      }
+
+      setIsCreatingSurfaceSession(true);
+      setSurfaceCreationError(null);
+      try {
+        const nextInstalledSurfaceSession = await createInstalledSurfaceSession({
+          sessionId: currentSessionId,
+          extensionInstallationId: surface.installationId,
+          surfaceKey: surface.surfaceKey,
+        });
+        setActiveSurfaceSession(null);
+        setActiveInstalledSurface(surface);
+        setActiveInstalledSurfaceSession(nextInstalledSurfaceSession);
+        handleExtensionDockOpenChange(true);
+      } catch (error) {
+        setSurfaceCreationError(
+          error instanceof Error
+            ? error.message
+            : "Failed to open the installed surface.",
+        );
+      } finally {
+        setIsCreatingSurfaceSession(false);
+      }
+    },
+    [
+      activeInstalledSurface,
+      currentSessionId,
+      handleExtensionDockOpenChange,
+      isCreatingSurfaceSession,
+      isExtensionDockOpen,
+    ],
+  );
+
+  const surfaceDevDebugSection = useMemo(() => {
+    return {
+      key: "surface-dev",
+      title: "Surface Dev",
+      description:
+        "Attach one local surface runtime to this chat session and open it from the chat header.",
+      content: (
+        <div className="space-y-3">
+          <label className="block">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">
+              Surface Key
+            </div>
+            <input
+              type="text"
+              value={surfaceKeyInput}
+              onChange={(event) => setSurfaceKeyInput(event.target.value)}
+              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">
+              Runtime URL
+            </div>
+            <input
+              type="url"
+              value={surfaceRuntimeUrlInput}
+              onChange={(event) =>
+                setSurfaceRuntimeUrlInput(event.target.value)
+              }
+              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
+            />
+            <div className="mt-2 text-xs leading-5 text-muted-foreground">
+              Accepts either a dev server root such as{" "}
+              <span className="font-mono text-foreground/80">
+                {LOCAL_VITE_RUNTIME_URL}
+              </span>{" "}
+              or a concrete entry page.
+            </div>
+          </label>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSurfaceKeyInput(OFFICIAL_SAMPLE_SURFACE_KEY);
+                setSurfaceRuntimeUrlInput(OFFICIAL_SAMPLE_RUNTIME_URL);
+                void handleCreateSurfaceDevSession(
+                  OFFICIAL_SAMPLE_SURFACE_KEY,
+                  OFFICIAL_SAMPLE_RUNTIME_URL,
+                );
+              }}
+              className="inline-flex h-8 items-center rounded-lg border border-border/70 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              Open Official Sample
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSurfaceKeyInput(OFFICIAL_SAMPLE_SURFACE_KEY);
+                setSurfaceRuntimeUrlInput(LOCAL_VITE_RUNTIME_URL);
+                void handleCreateSurfaceDevSession(
+                  OFFICIAL_SAMPLE_SURFACE_KEY,
+                  LOCAL_VITE_RUNTIME_URL,
+                );
+              }}
+              className="inline-flex h-8 items-center rounded-lg border border-border/70 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              Open Local Vite
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              void handleCreateSurfaceDevSession(
+                surfaceKeyInput,
+                surfaceRuntimeUrlInput,
+              );
+            }}
+            disabled={!currentSessionId || isCreatingSurfaceSession}
+            className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-foreground px-3 text-sm font-medium text-background transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isCreatingSurfaceSession ? "Attaching..." : "Attach Dev Surface"}
+          </button>
+
+          {surfaceCreationError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {surfaceCreationError}
+            </div>
+          ) : null}
+
+          {activeSurfaceSession ? (
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-foreground">
+                  {activeSurfaceSession.display_name}
+                </span>
+                <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+                  Dev
+                </span>
+              </div>
+              <div className="mt-2">
+                Attached to this chat session. Use the chat-header surface icon
+                to open the dock.
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ),
+    };
+  }, [
+    activeSurfaceSession,
+    currentSessionId,
+    handleCreateSurfaceDevSession,
+    isCreatingSurfaceSession,
+    surfaceCreationError,
+    surfaceKeyInput,
+    surfaceRuntimeUrlInput,
+  ]);
+
+  useRegisterChatDebugPanelSection(surfaceDevDebugSection);
+
+  const headerSurfaceButtons = useMemo(() => {
+    if (isExtensionDockOpen) {
+      return [];
+    }
+
+    const installedButtons = installedChatSurfaces.map((surface) => {
+      const isActive =
+        activeInstalledSurface?.packageId === surface.packageId &&
+        activeInstalledSurface.surfaceKey === surface.surfaceKey;
+
+      return (
+        <button
+          key={`installed:${surface.packageId}:${surface.surfaceKey}`}
+          type="button"
+          onClick={() => {
+            void handleOpenInstalledSurface(surface);
+          }}
+          className={`pointer-events-auto inline-flex h-8 items-center gap-2 rounded-lg border bg-background/95 px-3 text-xs font-medium shadow-sm backdrop-blur transition-colors ${
+            isActive && isExtensionDockOpen
+              ? "border-primary/50 text-foreground"
+              : "border-border/70 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+          }`}
+          aria-label={`Open surface ${surface.surfaceKey}`}
+          title={surface.displayName}
+        >
+          {surface.logoUrl ? (
+            <img
+              src={surface.logoUrl}
+              alt=""
+              className="h-4 w-4 rounded-sm object-cover"
+            />
+          ) : (
+            <span className="inline-flex h-4 w-4 items-center justify-center rounded-sm bg-muted text-[9px] font-semibold uppercase text-foreground/80">
+              {surface.displayName.slice(0, 1)}
+            </span>
+          )}
+          <span className="max-w-28 truncate">{surface.displayName}</span>
+        </button>
+      );
+    });
+
+    const isDevSurfaceActive =
+      activeSurfaceSession !== null &&
+      activeInstalledSurface === null &&
+      isExtensionDockOpen;
+
+    const devButtons = activeSurfaceSession
+      ? [
+          <button
+            key={`dev:${activeSurfaceSession.surface_session_id}`}
+            type="button"
+            onClick={() => {
+              setActiveInstalledSurface(null);
+              setActiveInstalledSurfaceSession(null);
+              handleExtensionDockOpenChange(!isDevSurfaceActive);
+            }}
+            className={`pointer-events-auto inline-flex h-8 items-center gap-2 rounded-lg border bg-background/95 px-3 text-xs font-medium shadow-sm backdrop-blur transition-colors ${
+              isDevSurfaceActive
+                ? "border-primary/50 text-foreground"
+                : "border-border/70 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+            }`}
+            aria-label={`Toggle surface ${activeSurfaceSession.surface_key}`}
+          >
+            <span className="inline-flex h-5 items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+              Dev
+            </span>
+            <span className="max-w-32 truncate">
+              {activeSurfaceSession.display_name}
+            </span>
+          </button>,
+        ]
+      : [];
+
+    return [...installedButtons, ...devButtons];
+  }, [
+    activeInstalledSurface,
+    handleOpenInstalledSurface,
+    handleExtensionDockOpenChange,
+    activeSurfaceSession,
+    installedChatSurfaces,
+    isExtensionDockOpen,
+  ]);
+
   const isConversationEmpty = messages.length === 0;
   const composerTaskPlan = useMemo(
     () => deriveComposerTaskPlan(messages),
-    [messages],
+  [messages],
   );
   const replyTarget = useMemo(
     () => findReplyTarget(messages, replyTaskId),
@@ -2496,9 +2988,118 @@ function ChatContainer({
   );
   const isNewSessionDraftActive =
     currentSessionId === null && currentProjectId === null;
+  const chatWorkspacePane = (
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+        onScroll={handleScroll}
+      >
+        <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
+          {selectedProject && currentSessionId === null && messages.length === 0 ? (
+            <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Project Workspace
+                </p>
+                <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                  {selectedProject.name}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Your next message will start a new session inside this shared
+                  project workspace.
+                </p>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleNewSession();
+                  }}
+                  className="inline-flex h-9 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+                >
+                  New Private Session
+                </button>
+                {selectedProject.sessions.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSelectSession(selectedProject.sessions[0].session_id);
+                    }}
+                    className="inline-flex h-9 items-center rounded-lg border border-border bg-accent/50 px-4 text-sm font-medium transition-colors hover:bg-accent"
+                  >
+                    Open Latest Session
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <ConversationView
+              messages={messages}
+              agentName={agentName}
+              expandedRecursions={expandedRecursions}
+              isStreaming={isStreaming}
+              onToggleRecursion={toggleRecursion}
+              onReplyTask={setReplyTaskId}
+              onApproveSkillChange={handleApproveSkillChange}
+              onRejectSkillChange={handleRejectSkillChange}
+            />
+          )}
+          <div className="h-1" />
+        </div>
+      </div>
+
+      <ChatComposer
+        error={error}
+        compactStatusMessage={compactStatusMessage}
+        replyTarget={replyTarget}
+        pendingFiles={pendingFiles}
+        isStreaming={isStreaming}
+        isConversationEmpty={isConversationEmpty}
+        hasUploadingFiles={hasUploadingFiles}
+        taskPlan={composerTaskPlan}
+        contextUsage={contextUsage}
+        isContextUsageLoading={isContextUsageLoading}
+        supportsImageInput={supportsImageInput}
+        thinkingModes={thinkingModes}
+        selectedThinkingMode={selectedThinkingMode}
+        webSearchProviders={webSearchProviders}
+        selectedWebSearchProvider={selectedWebSearchProvider}
+        availableMandatorySkills={runtimeSkills}
+        selectedMandatorySkills={selectedMandatorySkills}
+        imageInputRef={imageInputRef}
+        documentInputRef={documentInputRef}
+        resetDraftSignal={composerResetSignal}
+        onInputChange={handleDraftChange}
+        onAddMandatorySkill={handleAddMandatorySkill}
+        onRemoveMandatorySkill={handleRemoveMandatorySkill}
+        onThinkingModeChange={setSelectedThinkingMode}
+        onWebSearchProviderChange={setSelectedWebSearchProvider}
+        onPaste={handlePaste}
+        onSubmitMessage={handleSubmitMessage}
+        onStop={handleStop}
+        onCancelReply={handleCancelReply}
+        onImageInputChange={handleFileInputChange}
+        onDocumentInputChange={handleDocumentInputChange}
+        onRemovePendingFile={removePendingFile}
+      />
+    </div>
+  );
+
+  const isSidebarVisible = !isExtensionDockOpen && isSidebarOpen;
+  const shouldRenderDockLayout = isExtensionDockMounted;
+  const chatPanelSize = 100 - renderedDockPanelSize;
+  const activeDockMinWidth =
+    activeInstalledSurface?.minWidth && activeInstalledSurface.minWidth > 0
+      ? activeInstalledSurface.minWidth
+      : 420;
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider
+      defaultOpen
+      open={isSidebarVisible}
+      onOpenChange={setIsSidebarOpen}
+    >
       <SessionSidebar
         sessions={standaloneSessions}
         projects={sidebarProjects}
@@ -2523,103 +3124,56 @@ function ChatContainer({
         footer={sidebarFooter}
       />
 
-      <SidebarInset className="flex flex-1 flex-col overflow-hidden bg-background text-foreground">
+      <SidebarInset className="relative flex flex-1 overflow-hidden bg-background text-foreground">
         <div className="pointer-events-none absolute left-3 top-3 z-20">
           <SidebarTrigger className="pointer-events-auto h-8 w-8 rounded-lg bg-transparent text-muted-foreground shadow-none hover:bg-accent/70 hover:text-foreground" />
         </div>
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
-          onScroll={handleScroll}
-        >
-          <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
-            {selectedProject && currentSessionId === null && messages.length === 0 ? (
-              <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Project Workspace
-                  </p>
-                  <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-                    {selectedProject.name}
-                  </h2>
-                  <p className="text-sm text-muted-foreground">
-                    Your next message will start a new session inside this shared
-                    project workspace.
-                  </p>
-                </div>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleNewSession();
-                    }}
-                    className="inline-flex h-9 items-center rounded-lg border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    New Private Session
-                  </button>
-                  {selectedProject.sessions.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSelectSession(selectedProject.sessions[0].session_id);
-                      }}
-                      className="inline-flex h-9 items-center rounded-lg border border-border bg-accent/50 px-4 text-sm font-medium transition-colors hover:bg-accent"
-                    >
-                      Open Latest Session
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : (
-              <ConversationView
-                messages={messages}
-                agentName={agentName}
-                expandedRecursions={expandedRecursions}
-                isStreaming={isStreaming}
-                onToggleRecursion={toggleRecursion}
-                onReplyTask={setReplyTaskId}
-                onApproveSkillChange={handleApproveSkillChange}
-                onRejectSkillChange={handleRejectSkillChange}
-              />
-            )}
-            <div className="h-1" />
+        {headerSurfaceButtons.length > 0 ? (
+          <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-2">
+            {headerSurfaceButtons}
           </div>
-        </div>
+        ) : null}
 
-        <ChatComposer
-          error={error}
-          compactStatusMessage={compactStatusMessage}
-          replyTarget={replyTarget}
-          pendingFiles={pendingFiles}
-          isStreaming={isStreaming}
-          isConversationEmpty={isConversationEmpty}
-          hasUploadingFiles={hasUploadingFiles}
-          taskPlan={composerTaskPlan}
-          contextUsage={contextUsage}
-          isContextUsageLoading={isContextUsageLoading}
-          supportsImageInput={supportsImageInput}
-          thinkingModes={thinkingModes}
-          selectedThinkingMode={selectedThinkingMode}
-          webSearchProviders={webSearchProviders}
-          selectedWebSearchProvider={selectedWebSearchProvider}
-          availableMandatorySkills={runtimeSkills}
-          selectedMandatorySkills={selectedMandatorySkills}
-          imageInputRef={imageInputRef}
-          documentInputRef={documentInputRef}
-          resetDraftSignal={composerResetSignal}
-          onInputChange={handleDraftChange}
-          onAddMandatorySkill={handleAddMandatorySkill}
-          onRemoveMandatorySkill={handleRemoveMandatorySkill}
-          onThinkingModeChange={setSelectedThinkingMode}
-          onWebSearchProviderChange={setSelectedWebSearchProvider}
-          onPaste={handlePaste}
-          onSubmitMessage={handleSubmitMessage}
-          onStop={handleStop}
-          onCancelReply={handleCancelReply}
-          onImageInputChange={handleFileInputChange}
-          onDocumentInputChange={handleDocumentInputChange}
-          onRemovePendingFile={removePendingFile}
-        />
+        {shouldRenderDockLayout ? (
+          <ResizablePanelGroup
+            direction="horizontal"
+            className="min-h-0 flex-1"
+            onLayout={(sizes) => {
+              const nextDockSize = sizes[1] ?? 0;
+              if (nextDockSize > 0) {
+                setDockPanelSize(nextDockSize);
+                setRenderedDockPanelSize(nextDockSize);
+              }
+            }}
+          >
+            <ResizablePanel size={chatPanelSize} minSize={26}>
+              {chatWorkspacePane}
+            </ResizablePanel>
+            <ResizableHandle
+              withHandle
+              className={`bg-border/70 transition-opacity duration-200 ${
+                renderedDockPanelSize <= 0
+                  ? "pointer-events-none opacity-0"
+                  : "opacity-100"
+              }`}
+            />
+            <ResizablePanel
+              size={renderedDockPanelSize}
+              minSize={0}
+              minSizePx={activeDockMinWidth}
+            >
+              <ExtensionDock
+                isOpen={isExtensionDockMounted}
+                onOpenChange={handleExtensionDockOpenChange}
+                activeSurfaceSession={activeSurfaceSession}
+                activeInstalledSurface={activeInstalledSurface}
+                activeInstalledSurfaceSession={activeInstalledSurfaceSession}
+              />
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        ) : (
+          <div className="flex min-h-0 flex-1">{chatWorkspacePane}</div>
+        )}
       </SidebarInset>
     </SidebarProvider>
   );

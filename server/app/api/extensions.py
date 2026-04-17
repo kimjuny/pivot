@@ -122,6 +122,10 @@ def _serialize_contribution_summary(
             contributions.get("hooks"),
             primary_field="name",
         ),
+        chat_surfaces=_extract_manifest_names(
+            contributions.get("chat_surfaces"),
+            primary_field="key",
+        ),
         channel_providers=_extract_manifest_names(
             contributions.get("channel_providers"),
             primary_field="key",
@@ -281,6 +285,7 @@ def _serialize_preview(
             tools=preview.contribution_summary.get("tools", []),
             skills=preview.contribution_summary.get("skills", []),
             hooks=preview.contribution_summary.get("hooks", []),
+            chat_surfaces=preview.contribution_summary.get("chat_surfaces", []),
             channel_providers=preview.contribution_summary.get(
                 "channel_providers",
                 [],
