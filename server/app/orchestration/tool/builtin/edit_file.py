@@ -71,12 +71,14 @@ def edit_file(
       ``new_string`` as its content, but only if the file does not already exist.
 
     Args:
-        path: Relative or absolute workspace path to the target file.
-        old_string: Exact literal text to replace. Use ``""`` only when creating
-            a brand new file.
-        new_string: Replacement text, or initial file content during creation.
-        expected_replacements: Exact number of literal occurrences expected in
-            the current file content. Defaults to ``1`` for targeted edits.
+        path (required, str): Relative or absolute workspace path to the target
+            file.
+        old_string (required, str): Exact literal text to replace. Use ``""``
+            only when creating a brand new file.
+        new_string (required, str): Replacement text, or initial file content
+            during creation.
+        expected_replacements (optional, int): Exact number of literal
+            occurrences expected in the current file content. Defaults to ``1``.
 
     Returns:
         Human-readable success message.

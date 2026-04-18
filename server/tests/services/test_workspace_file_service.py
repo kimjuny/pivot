@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import sys
 import tempfile
 import unittest
@@ -119,3 +120,30 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
                 path="../secrets.txt",
                 content="nope",
             )
+
+    def test_read_file_returns_image_payload_for_previewable_binary(self) -> None:
+        """Common image formats should be returned as image preview payloads."""
+        workspace = WorkspaceService(self.db).create_workspace(
+            agent_id=7,
+            username="alice",
+            scope="session_private",
+            session_id="session-3",
+        )
+        service = WorkspaceFileService(self.db)
+        workspace_path = WorkspaceService(self.db).get_workspace_path(workspace)
+        image_path = workspace_path / "assets" / "preview.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7ZxV0AAAAASUVORK5CYII="
+        )
+        image_path.write_bytes(image_bytes)
+
+        result = service.read_file(
+            workspace_id=workspace.workspace_id,
+            username="alice",
+            path="assets/preview.png",
+        )
+
+        self.assertEqual(result.kind, "image")
+        self.assertEqual(result.mime_type, "image/png")
+        self.assertEqual(result.data_base64, base64.b64encode(image_bytes).decode("ascii"))

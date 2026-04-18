@@ -7,8 +7,10 @@ isolated in a dedicated service.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 import requests
 from app.config import get_settings
@@ -21,6 +23,16 @@ class SandboxExecResult:
     exit_code: int
     stdout: str
     stderr: str
+
+
+@dataclass(frozen=True)
+class SandboxHttpProxyResult:
+    """HTTP proxy result returned by sandbox-manager."""
+
+    status_code: int
+    body: bytes
+    headers: dict[str, str]
+    content_type: str | None
 
 
 class SandboxService:
@@ -92,8 +104,21 @@ class SandboxService:
             "/sandboxes/exec": "finish a workspace command",
             "/sandboxes/create": "prepare a workspace sandbox",
             "/sandboxes/destroy": "tear down a workspace sandbox",
+            "/sandboxes/ws-proxy": "open a workspace preview websocket",
         }
         return operation_labels.get(path, "complete a workspace sandbox request")
+
+    def build_websocket_proxy_url(self) -> str:
+        """Return the sandbox-manager websocket proxy URL."""
+        parsed = urlparse(self._base_url)
+        scheme = "wss" if parsed.scheme == "https" else "ws"
+        return urlunparse((scheme, parsed.netloc, "/sandboxes/ws-proxy", "", "", ""))
+
+    def build_websocket_proxy_headers(self) -> dict[str, str]:
+        """Return auth headers for one sandbox-manager websocket tunnel."""
+        return {
+            "X-Sandbox-Token": get_settings().SANDBOX_MANAGER_TOKEN,
+        }
 
     def _format_timeout_error(self, *, path: str, request_timeout: int) -> str:
         """Return an actionable timeout message for agent-facing tool errors."""
@@ -222,6 +247,88 @@ class SandboxService:
                 "skills": [],
             },
             timeout_seconds=timeout_seconds,
+        )
+
+    def proxy_http(
+        self,
+        *,
+        username: str,
+        workspace_id: str,
+        workspace_backend_path: str,
+        skills: list[dict[str, str]] | None = None,
+        port: int,
+        path: str,
+        method: str,
+        query_string: str | None = None,
+        headers: dict[str, str] | None = None,
+        body: bytes | None = None,
+        timeout_seconds: int | None = None,
+        require_existing: bool = False,
+        allow_recreate: bool = True,
+    ) -> SandboxHttpProxyResult:
+        """Proxy one HTTP request through sandbox-manager into a sandbox."""
+        request_timeout = timeout_seconds or self._timeout
+        payload: dict[str, Any] = {
+            "username": username,
+            "workspace_id": workspace_id,
+            "workspace_backend_path": workspace_backend_path,
+            "skills": skills or [],
+            "port": port,
+            "path": path,
+            "method": method,
+            "query_string": query_string or "",
+            "headers": headers or {},
+            "body_base64": (
+                base64.b64encode(body).decode("ascii") if body is not None else None
+            ),
+            "require_existing": require_existing,
+            "allow_recreate": allow_recreate,
+        }
+        try:
+            response = requests.post(
+                f"{self._base_url}/sandboxes/http-proxy",
+                json=payload,
+                headers=self._headers,
+                timeout=request_timeout,
+            )
+        except requests.ReadTimeout as exc:
+            raise RuntimeError(
+                self._format_timeout_error(
+                    path="/sandboxes/http-proxy",
+                    request_timeout=request_timeout,
+                )
+            ) from exc
+        except requests.ConnectTimeout as exc:
+            raise RuntimeError(
+                self._format_connect_timeout_error(
+                    path="/sandboxes/http-proxy",
+                    request_timeout=request_timeout,
+                )
+            ) from exc
+        except requests.ConnectionError as exc:
+            raise RuntimeError(
+                self._format_connection_error(path="/sandboxes/http-proxy")
+            ) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                self._format_generic_request_error(
+                    path="/sandboxes/http-proxy",
+                    request_timeout=request_timeout,
+                    exc=exc,
+                )
+            ) from exc
+
+        if response.status_code >= 500:
+            detail = response.text.strip()
+            raise RuntimeError(
+                f"Sandbox manager error ({response.status_code}): {detail}"
+            )
+
+        return SandboxHttpProxyResult(
+            status_code=response.status_code,
+            body=response.content,
+            headers=dict(response.headers.items()),
+            content_type=response.headers.get("content-type"),
         )
 
 

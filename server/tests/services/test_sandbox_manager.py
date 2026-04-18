@@ -243,6 +243,22 @@ class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
         ):
             module._ensure_workspace_dir("/app/server/workspace/alice")
 
+
+class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
+    """Validate preview-specific error guidance for sandbox-manager."""
+
+    def test_preview_unreachable_detail_mentions_bind_address(self) -> None:
+        """Preview connection errors should explain the required bind host."""
+        module = cast(Any, sandbox_manager)
+
+        detail = module._build_preview_unreachable_detail(
+            port=8080,
+            reason="[Errno 111] Connection refused",
+        )
+
+        self.assertIn("0.0.0.0:8080", detail)
+        self.assertIn("localhost/127.0.0.1", detail)
+
     def test_ensure_workspace_dir_accepts_external_posix_root(self) -> None:
         """External POSIX roots should be treated as valid workspace parents."""
         module = cast(Any, sandbox_manager)

@@ -29,8 +29,10 @@ def submit_skill_change(
         - Built-in, foreign-owned, and shared skill targets are rejected.
 
     Args:
-        skill_path: Sandbox-local skill directory under ``/workspace/skills``.
-        message: Optional reviewer-facing explanation of what changed and why.
+        skill_path (optional, str): Sandbox-local skill directory under
+            ``/workspace/skills``. Defaults to the empty string.
+        message (optional, str): Reviewer-facing explanation of what changed
+            and why. Defaults to the empty string.
 
     Returns:
         Structured submission result including a system-owned pending approval action.

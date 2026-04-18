@@ -80,10 +80,12 @@ def read_file(
     prefixes. Chunk metadata is still included to help with pagination.
 
     Args:
-        path: Relative or absolute workspace path to a text file.
-        start_line: 1-based starting line to read.
-        max_lines: Hard upper bound on returned lines from ``start_line``. This
-            keeps reads focused while still allowing larger single-pass reads.
+        path (required, str): Relative or absolute workspace path to a text
+            file.
+        start_line (optional, int): 1-based starting line to read. Defaults to
+            ``1``.
+        max_lines (optional, int): Hard upper bound on returned lines from
+            ``start_line``. Defaults to ``400``.
 
     Returns:
         Structured payload with chunk bounds, pagination hints, and exact file

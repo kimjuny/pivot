@@ -12,8 +12,9 @@ def write_file(path: str, content: str) -> str:
     Parent directories are created automatically.
 
     Args:
-        path: Relative or absolute workspace path to file.
-        content: File content to write.
+        path (required, str): Relative or absolute workspace path to file.
+        content (required, str): UTF-8 text content to write. This tool expects
+            a string, not a JSON object or other structured value.
 
     Returns:
         Human-readable write confirmation.

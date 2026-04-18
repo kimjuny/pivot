@@ -687,6 +687,7 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         username=launch.username,
                         agent_id=agent.id or 0,
+                        session_id=task.session_id,
                         workspace_id=workspace.workspace_id,
                         workspace_backend_path=workspace_backend_path,
                         sandbox_timeout_seconds=runtime_config.sandbox_timeout_seconds,

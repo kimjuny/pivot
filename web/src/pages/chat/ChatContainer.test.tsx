@@ -299,6 +299,7 @@ describe("ChatContainer session rollover", () => {
         agentName="Pivot Agent"
         primaryLlmId={1}
         sessionIdleTimeoutMinutes={15}
+        initialSessionId="session-1"
       />,
     );
 
@@ -395,11 +396,9 @@ describe("ChatContainer session rollover", () => {
 
     await user.click(surfaceButton);
     expect(await screen.findByTitle("Surface runtime preview")).toBeInTheDocument();
-
-    await user.click(surfaceButton);
-    await waitFor(() => {
-      expect(screen.queryByTitle("Surface runtime preview")).not.toBeInTheDocument();
-    });
+    expect(
+      screen.queryByRole("button", { name: "Toggle surface workspace-editor" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows installed surface icons in the header and opens the shared dock", async () => {

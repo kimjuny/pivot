@@ -162,12 +162,18 @@ def search(
     read next*, not dump enough source text to replace ``read_file``.
 
     Args:
-        query: Text or regex pattern to search for. Must not be blank.
-        path: Relative or absolute workspace path to search under.
-        regex: Whether ``query`` should be treated as a ripgrep regex.
-        case_sensitive: Whether matching should preserve case.
-        max_candidates: Maximum number of files returned as read candidates.
-        max_hits_per_file: Maximum number of anchor hits kept per file.
+        query (required, str): Text or regex pattern to search for. Must not be
+            blank.
+        path (optional, str): Relative or absolute workspace path to search
+            under. Defaults to ``.``.
+        regex (optional, bool): Whether ``query`` should be treated as a
+            ripgrep regex. Defaults to ``False``.
+        case_sensitive (optional, bool): Whether matching should preserve case.
+            Defaults to ``False``.
+        max_candidates (optional, int): Maximum number of files returned as
+            read candidates. Defaults to ``8``.
+        max_hits_per_file (optional, int): Maximum number of anchor hits kept
+            per file. Defaults to ``3``.
 
     Returns:
         Structured payload with ranked file candidates, match counts, and a few

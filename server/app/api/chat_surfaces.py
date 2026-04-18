@@ -17,10 +17,13 @@ from app.api.dependencies import get_db
 from app.schemas.chat_surface import (
     CreateDevSurfaceSessionRequest,
     CreateInstalledSurfaceSessionRequest,
+    CreatePreviewEndpointRequest,
     DevSurfaceBootstrapResponse,
     DevSurfaceSessionResponse,
     InstalledSurfaceBootstrapResponse,
     InstalledSurfaceSessionResponse,
+    PreviewEndpointResponse,
+    ReconnectPreviewEndpointResponse,
     SurfaceFilesApiResponse,
     SurfaceThemeResponse,
     WorkspaceFileContentResponse,
@@ -28,6 +31,14 @@ from app.schemas.chat_surface import (
     WorkspaceFileTreeResponse,
     WriteWorkspaceFileRequest,
 )
+from app.services.preview_endpoint_service import (
+    PreviewEndpointNotFoundError,
+    PreviewEndpointPermissionError,
+    PreviewEndpointRecord,
+    PreviewEndpointService,
+    PreviewEndpointValidationError,
+)
+from app.services.sandbox_service import get_sandbox_service
 from app.services.surface_runtime_service import (
     SurfaceRuntimeNotFoundError,
     SurfaceRuntimeService,
@@ -50,6 +61,7 @@ from app.services.workspace_file_service import (
     WorkspaceFileTreeEntry,
     WorkspaceFileValidationError,
 )
+from app.services.workspace_service import WorkspaceService
 from fastapi import (
     APIRouter,
     Depends,
@@ -187,6 +199,108 @@ def create_installed_surface_session(
     )
 
 
+@router.post(
+    "/chat-previews",
+    response_model=PreviewEndpointResponse,
+    status_code=201,
+)
+def create_preview_endpoint(
+    request: CreatePreviewEndpointRequest,
+    db: DBSession = Depends(get_db),
+    current_user: Any = Depends(get_current_user),
+) -> PreviewEndpointResponse:
+    """Create one session-scoped preview endpoint for the current user."""
+    service = PreviewEndpointService(db)
+    try:
+        record = service.create_preview_endpoint(
+            username=current_user.username,
+            session_id=request.session_id,
+            port=request.port,
+            path=request.path,
+            title=request.title,
+        )
+    except PreviewEndpointNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except PreviewEndpointPermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except PreviewEndpointValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    workspace = WorkspaceService(db).get_workspace(record.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    return _serialize_preview_record(
+        record=record,
+        workspace_logical_root=WorkspaceService(db).get_workspace_logical_root(workspace),
+        service=service,
+    )
+
+
+@router.post(
+    "/chat-surfaces/sessions/{surface_session_id}/previews/{preview_id}/connect",
+    response_model=ReconnectPreviewEndpointResponse,
+)
+def reconnect_surface_preview(
+    surface_session_id: str,
+    preview_id: str,
+    request: FastAPIRequest,
+    db: DBSession = Depends(get_db),
+) -> ReconnectPreviewEndpointResponse:
+    """Reconnect one preview endpoint for an authenticated surface runtime."""
+    surface_record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = PreviewEndpointService(db)
+    try:
+        preview_record = service.get_preview_endpoint(
+            preview_id=preview_id,
+            username=surface_record.username,
+        )
+        if preview_record.session_id != surface_record.session_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Preview endpoint does not belong to the active surface session.",
+            )
+        preview_record = service.connect_preview_endpoint(
+            preview_id=preview_id,
+            username=surface_record.username,
+        )
+        preview_records = service.list_preview_endpoints(
+            username=surface_record.username,
+            session_id=surface_record.session_id,
+        )
+    except PreviewEndpointNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except PreviewEndpointPermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except PreviewEndpointValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    workspace = WorkspaceService(db).get_workspace(surface_record.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    workspace_logical_root = WorkspaceService(db).get_workspace_logical_root(workspace)
+    return ReconnectPreviewEndpointResponse(
+        preview=_serialize_preview_record(
+            record=preview_record,
+            workspace_logical_root=workspace_logical_root,
+            service=service,
+        ),
+        available_previews=[
+            _serialize_preview_record(
+                record=item,
+                workspace_logical_root=workspace_logical_root,
+                service=service,
+            )
+            for item in preview_records
+        ],
+        active_preview_id=preview_record.preview_id,
+    )
+
+
 @router.get(
     "/chat-surfaces/dev-sessions/{surface_session_id}/bootstrap",
     response_model=DevSurfaceBootstrapResponse,
@@ -287,7 +401,7 @@ def read_dev_surface_workspace_file(
     path: str = Query(...),
     db: DBSession = Depends(get_db),
 ) -> WorkspaceFileContentResponse:
-    """Read one UTF-8 workspace file for an owned development surface session."""
+    """Read one previewable workspace file for an owned development surface session."""
     record = _authenticate_surface_request(
         db=db,
         request=request,
@@ -295,7 +409,7 @@ def read_dev_surface_workspace_file(
     )
     service = WorkspaceFileService(db)
     try:
-        content = service.read_text_file(
+        file_payload = service.read_file(
             workspace_id=record.workspace_id,
             username=record.username,
             path=path,
@@ -306,13 +420,14 @@ def read_dev_surface_workspace_file(
         raise HTTPException(status_code=403, detail=str(err)) from err
     except WorkspaceFileValidationError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
-    except UnicodeDecodeError as err:
-        raise HTTPException(
-            status_code=400,
-            detail="Workspace file is not valid UTF-8 text.",
-        ) from err
-
-    return WorkspaceFileContentResponse(path=path, content=content)
+    return WorkspaceFileContentResponse(
+        path=path,
+        kind=file_payload.kind,
+        content=file_payload.content,
+        encoding=file_payload.encoding,
+        mime_type=file_payload.mime_type,
+        data_base64=file_payload.data_base64,
+    )
 
 
 @router.put("/chat-surfaces/dev-sessions/{surface_session_id}/files/content", status_code=204)
@@ -392,7 +507,7 @@ def read_installed_surface_workspace_file(
     path: str = Query(...),
     db: DBSession = Depends(get_db),
 ) -> WorkspaceFileContentResponse:
-    """Read one UTF-8 workspace file for an owned installed surface session."""
+    """Read one previewable workspace file for an owned installed surface session."""
     record = _authenticate_surface_request(
         db=db,
         request=request,
@@ -400,7 +515,7 @@ def read_installed_surface_workspace_file(
     )
     service = WorkspaceFileService(db)
     try:
-        content = service.read_text_file(
+        file_payload = service.read_file(
             workspace_id=record.workspace_id,
             username=record.username,
             path=path,
@@ -411,13 +526,14 @@ def read_installed_surface_workspace_file(
         raise HTTPException(status_code=403, detail=str(err)) from err
     except WorkspaceFileValidationError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
-    except UnicodeDecodeError as err:
-        raise HTTPException(
-            status_code=400,
-            detail="Workspace file is not valid UTF-8 text.",
-        ) from err
-
-    return WorkspaceFileContentResponse(path=path, content=content)
+    return WorkspaceFileContentResponse(
+        path=path,
+        kind=file_payload.kind,
+        content=file_payload.content,
+        encoding=file_payload.encoding,
+        mime_type=file_payload.mime_type,
+        data_base64=file_payload.data_base64,
+    )
 
 
 @router.put(
@@ -452,6 +568,210 @@ def write_installed_surface_workspace_file(
         raise HTTPException(status_code=400, detail=str(err)) from err
 
     return Response(status_code=204)
+
+
+@router.api_route(
+    "/chat-previews/{preview_id}/proxy",
+    methods=["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+)
+@router.api_route(
+    "/chat-previews/{preview_id}/proxy/",
+    methods=["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+)
+@router.api_route(
+    "/chat-previews/{preview_id}/proxy/{proxy_path:path}",
+    methods=["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"],
+)
+async def proxy_chat_preview(
+    preview_id: str,
+    request: FastAPIRequest,
+    proxy_path: str = "",
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Proxy one session-scoped preview request through the sandbox runtime."""
+    record = _authenticate_preview_request(
+        db=db,
+        request=request,
+        preview_id=preview_id,
+    )
+    workspace = WorkspaceService(db).get_workspace(record.workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    upstream_path = f"/{proxy_path.lstrip('/')}" if proxy_path else record.path
+    forwarded_query_items = [
+        (key, value)
+        for key, value in request.query_params.multi_items()
+        if key != "surface_token"
+    ]
+
+    try:
+        proxy_result = get_sandbox_service().proxy_http(
+            username=record.username,
+            workspace_id=record.workspace_id,
+            workspace_backend_path=WorkspaceService(db).get_workspace_backend_path(
+                workspace
+            ),
+            skills=list(record.allowed_skills),
+            port=record.port,
+            path=upstream_path,
+            method=request.method,
+            query_string=urlencode(forwarded_query_items),
+            headers=_extract_preview_request_headers(request=request),
+            body=await request.body(),
+            require_existing=True,
+            allow_recreate=False,
+        )
+    except RuntimeError as err:
+        raise HTTPException(status_code=502, detail=str(err)) from err
+
+    response_headers = _extract_proxy_response_headers(proxy_result.headers)
+    if _is_html_response(
+        content_type=proxy_result.content_type or "",
+        payload=proxy_result.body,
+    ):
+        rewritten_html = _inject_preview_runtime_script(
+            html=proxy_result.body.decode("utf-8"),
+            preview_id=record.preview_id,
+        )
+        response_headers["Content-Type"] = "text/html; charset=utf-8"
+        response = Response(
+            content=rewritten_html.encode("utf-8"),
+            status_code=proxy_result.status_code,
+            headers=response_headers,
+        )
+        request_surface_token = _extract_surface_token(request=request)
+        if request_surface_token:
+            response.set_cookie(
+                key=_SURFACE_ACCESS_COOKIE_NAME,
+                value=request_surface_token,
+                httponly=True,
+                samesite="lax",
+                path=_build_preview_path_scope(preview_id=record.preview_id),
+            )
+        return response
+
+    if _is_javascript_response(
+        content_type=proxy_result.content_type or "",
+        proxy_path=proxy_path,
+    ):
+        rewritten_module = _rewrite_root_relative_js_specifiers(
+            source=proxy_result.body.decode("utf-8"),
+            proxy_base_path=_build_preview_proxy_base_path(preview_id=record.preview_id),
+        )
+        response_headers["Content-Type"] = "application/javascript; charset=utf-8"
+        return Response(
+            content=rewritten_module.encode("utf-8"),
+            status_code=proxy_result.status_code,
+            headers=response_headers,
+        )
+
+    return Response(
+        content=proxy_result.body,
+        status_code=proxy_result.status_code,
+        headers=response_headers,
+        media_type=proxy_result.content_type or None,
+    )
+
+
+@router.websocket("/chat-previews/{preview_id}/ws")
+@router.websocket("/chat-previews/{preview_id}/ws/")
+@router.websocket("/chat-previews/{preview_id}/ws/{proxy_path:path}")
+async def proxy_chat_preview_websocket(
+    websocket: WebSocket,
+    preview_id: str,
+    proxy_path: str = "",
+    db: DBSession = Depends(get_db),
+) -> None:
+    """Tunnel one session-scoped preview websocket through sandbox-manager."""
+    record = _authenticate_preview_websocket(
+        db=db,
+        websocket=websocket,
+        preview_id=preview_id,
+    )
+    workspace = WorkspaceService(db).get_workspace(record.workspace_id)
+    if workspace is None:
+        await websocket.close(code=1011, reason="Workspace not found.")
+        return
+
+    upstream_path = f"/{proxy_path.lstrip('/')}" if proxy_path else record.path
+    forwarded_query_items = [
+        (key, value)
+        for key, value in websocket.query_params.multi_items()
+        if key != "surface_token"
+    ]
+    requested_protocol = websocket.headers.get("sec-websocket-protocol")
+    sandbox_service = get_sandbox_service()
+
+    try:
+        manager_connection = websocket_connect(
+            sandbox_service.build_websocket_proxy_url(),
+            additional_headers=sandbox_service.build_websocket_proxy_headers(),
+        )
+        async with manager_connection as manager_websocket:
+            await manager_websocket.send(
+                json.dumps(
+                    {
+                        "username": record.username,
+                        "workspace_id": record.workspace_id,
+                        "workspace_backend_path": WorkspaceService(
+                            db
+                        ).get_workspace_backend_path(workspace),
+                        "skills": list(record.allowed_skills),
+                        "port": record.port,
+                        "path": upstream_path,
+                        "query_string": urlencode(forwarded_query_items),
+                        "headers": _extract_preview_websocket_headers(
+                            websocket=websocket
+                        ),
+                        "subprotocol": requested_protocol,
+                        "require_existing": True,
+                        "allow_recreate": False,
+                    }
+                )
+            )
+            manager_ready = json.loads(await manager_websocket.recv())
+            if manager_ready.get("type") != "ready":
+                detail = str(
+                    manager_ready.get(
+                        "detail",
+                        "Preview websocket tunnel could not be established.",
+                    )
+                )
+                await websocket.close(code=1011, reason=detail[:120])
+                return
+
+            accepted_subprotocol = manager_ready.get("accepted_subprotocol")
+            await websocket.accept(
+                subprotocol=(
+                    str(accepted_subprotocol)
+                    if isinstance(accepted_subprotocol, str)
+                    and accepted_subprotocol.strip()
+                    else None
+                )
+            )
+
+            client_to_upstream = create_task(
+                _forward_client_messages(websocket=websocket, upstream=manager_websocket)
+            )
+            upstream_to_client = create_task(
+                _forward_upstream_messages(websocket=websocket, upstream=manager_websocket)
+            )
+            done, pending = await wait(
+                {client_to_upstream, upstream_to_client},
+                return_when=FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
+    except ConnectionClosed:
+        await websocket.close()
+    except OSError:
+        await websocket.close(
+            code=1011,
+            reason="Preview websocket service is unreachable.",
+        )
 
 
 @router.get("/chat-surfaces/dev-sessions/{surface_session_id}/proxy")
@@ -726,6 +1046,27 @@ async def proxy_dev_surface_hmr(
 _SURFACE_ACCESS_COOKIE_NAME = "pivot_surface_access"
 
 
+def _serialize_preview_record(
+    *,
+    record: PreviewEndpointRecord,
+    workspace_logical_root: str,
+    service: PreviewEndpointService,
+) -> PreviewEndpointResponse:
+    """Return one API-facing preview endpoint payload."""
+    return PreviewEndpointResponse(
+        preview_id=record.preview_id,
+        session_id=record.session_id,
+        workspace_id=record.workspace_id,
+        workspace_logical_root=workspace_logical_root,
+        title=record.title,
+        port=record.port,
+        path=record.path,
+        has_launch_recipe=bool(record.start_server and record.cwd),
+        proxy_url=service.build_proxy_url(record=record),
+        created_at=record.created_at.replace(tzinfo=UTC).isoformat(),
+    )
+
+
 def _authenticate_surface_request(
     *,
     db: DBSession,
@@ -781,6 +1122,69 @@ def _authenticate_surface_request(
         raise HTTPException(status_code=403, detail=str(err)) from err
 
 
+def _authenticate_preview_request(
+    *,
+    db: DBSession,
+    request: FastAPIRequest | None,
+    preview_id: str,
+) -> PreviewEndpointRecord:
+    """Resolve one preview endpoint from either user auth or a surface token."""
+    preview_service = PreviewEndpointService(db)
+    auth_header = request.headers.get("authorization") if request is not None else None
+    bearer_token = _extract_bearer_token(auth_header)
+    surface_token = _extract_surface_token(request=request)
+
+    if surface_token is not None:
+        try:
+            claims = SurfaceTokenService.validate_surface_token(surface_token)
+        except SurfaceTokenValidationError as err:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(err),
+            ) from err
+
+        try:
+            surface_record = SurfaceSessionService(db).get_surface_session(
+                surface_session_id=claims.surface_session_id,
+                username=claims.username,
+            )
+            preview_record = preview_service.get_preview_endpoint(
+                preview_id=preview_id,
+                username=claims.username,
+            )
+        except SurfaceSessionNotFoundError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        except SurfaceSessionPermissionError as err:
+            raise HTTPException(status_code=403, detail=str(err)) from err
+        except PreviewEndpointNotFoundError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        except PreviewEndpointPermissionError as err:
+            raise HTTPException(status_code=403, detail=str(err)) from err
+        if preview_record.session_id != surface_record.session_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Preview endpoint does not belong to the active surface session.",
+            )
+        return preview_record
+
+    if bearer_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Surface access token or user bearer token is required.",
+        )
+
+    user = resolve_user_from_access_token(bearer_token, db)
+    try:
+        return preview_service.get_preview_endpoint(
+            preview_id=preview_id,
+            username=user.username,
+        )
+    except PreviewEndpointNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except PreviewEndpointPermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+
+
 def _authenticate_surface_websocket(
     *,
     db: DBSession,
@@ -819,6 +1223,55 @@ def _authenticate_surface_websocket(
         raise HTTPException(status_code=404, detail=str(err)) from err
     except SurfaceSessionPermissionError as err:
         raise HTTPException(status_code=403, detail=str(err)) from err
+
+
+def _authenticate_preview_websocket(
+    *,
+    db: DBSession,
+    websocket: WebSocket,
+    preview_id: str,
+) -> PreviewEndpointRecord:
+    """Resolve one preview endpoint from a surface websocket token."""
+    surface_token = _extract_surface_token_from_websocket(websocket=websocket)
+    if surface_token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Surface access token is required for preview websocket access.",
+        )
+
+    try:
+        claims = SurfaceTokenService.validate_surface_token(surface_token)
+    except SurfaceTokenValidationError as err:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(err),
+        ) from err
+
+    preview_service = PreviewEndpointService(db)
+    try:
+        surface_record = SurfaceSessionService(db).get_surface_session(
+            surface_session_id=claims.surface_session_id,
+            username=claims.username,
+        )
+        preview_record = preview_service.get_preview_endpoint(
+            preview_id=preview_id,
+            username=claims.username,
+        )
+    except SurfaceSessionNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except SurfaceSessionPermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except PreviewEndpointNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except PreviewEndpointPermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+
+    if preview_record.session_id != surface_record.session_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Preview endpoint does not belong to the active surface session.",
+        )
+    return preview_record
 
 
 def _serialize_bootstrap(
@@ -1058,11 +1511,26 @@ def _build_hmr_proxy_path(*, surface_session_id: str) -> str:
     return f"/api/chat-surfaces/dev-sessions/{surface_session_id}/hmr"
 
 
+def _build_preview_proxy_base_path(*, preview_id: str) -> str:
+    """Return the stable proxy prefix for one chat preview endpoint."""
+    return f"/api/chat-previews/{preview_id}/proxy/"
+
+
+def _build_preview_ws_base_path(*, preview_id: str) -> str:
+    """Return the stable websocket tunnel prefix for one preview endpoint."""
+    return f"/api/chat-previews/{preview_id}/ws/"
+
+
 def _build_surface_session_path(*, surface_session_id: str, mode: str) -> str:
     """Return the shared path prefix for one surface session cookie scope."""
     if mode == "installed":
         return f"/api/chat-surfaces/installed-sessions/{surface_session_id}"
     return f"/api/chat-surfaces/dev-sessions/{surface_session_id}"
+
+
+def _build_preview_path_scope(*, preview_id: str) -> str:
+    """Return the cookie path scope for one preview endpoint."""
+    return f"/api/chat-previews/{preview_id}"
 
 
 def _extract_bearer_token(auth_header: str | None) -> str | None:
@@ -1086,6 +1554,41 @@ def _extract_surface_token(*, request: FastAPIRequest | None) -> str | None:
     if isinstance(cookie_token, str) and cookie_token:
         return cookie_token
     return None
+
+
+def _extract_preview_request_headers(*, request: FastAPIRequest) -> dict[str, str]:
+    """Return safe request headers to forward to one preview target."""
+    allowed_headers = {
+        "accept",
+        "accept-language",
+        "cache-control",
+        "content-type",
+        "origin",
+        "pragma",
+        "referer",
+        "user-agent",
+    }
+    return {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() in allowed_headers
+    }
+
+
+def _extract_preview_websocket_headers(*, websocket: WebSocket) -> dict[str, str]:
+    """Return safe websocket request headers to forward to one preview target."""
+    allowed_headers = {
+        "accept-language",
+        "origin",
+        "pragma",
+        "referer",
+        "user-agent",
+    }
+    return {
+        key: value
+        for key, value in websocket.headers.items()
+        if key.lower() in allowed_headers
+    }
 
 
 def _resolve_surface_theme(
@@ -1163,6 +1666,55 @@ def _inject_bootstrap_script(
     if "</body>" in rewritten_html:
         return rewritten_html.replace("</body>", f"{bootstrap_script}</body>", 1)
     return f"{bootstrap_script}{rewritten_html}"
+
+
+def _inject_preview_runtime_script(*, html: str, preview_id: str) -> str:
+    """Inject preview runtime helpers into one proxied HTML document."""
+    proxy_base_path = _build_preview_proxy_base_path(preview_id=preview_id)
+    rewritten_html = _rewrite_root_relative_asset_urls(
+        html=html,
+        proxy_base_path=proxy_base_path,
+    )
+    websocket_base_path = _build_preview_ws_base_path(preview_id=preview_id)
+    preview_script = (
+        "<script>"
+        f"window.__PIVOT_PREVIEW_PROXY_BASE__ = {json.dumps(proxy_base_path)};"
+        f"window.__PIVOT_PREVIEW_WS_BASE__ = {json.dumps(websocket_base_path)};"
+        "(function(){"
+        "const OriginalWebSocket = window.WebSocket;"
+        "if (typeof OriginalWebSocket !== 'function') return;"
+        "const wsBasePath = window.__PIVOT_PREVIEW_WS_BASE__;"
+        "const currentWsOrigin = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;"
+        "function rewriteSocketUrl(rawUrl){"
+        "try{"
+        "const resolved = new URL(String(rawUrl), currentWsOrigin);"
+        "if (!(resolved.protocol === 'ws:' || resolved.protocol === 'wss:')) return rawUrl;"
+        "if (resolved.host !== window.location.host) return rawUrl;"
+        "if (resolved.pathname.startsWith(wsBasePath)) return rawUrl;"
+        "const nextPath = resolved.pathname.startsWith('/') ? resolved.pathname.slice(1) : resolved.pathname;"
+        "return `${currentWsOrigin}${wsBasePath}${nextPath}${resolved.search}`;"
+        "}catch(_error){"
+        "return rawUrl;"
+        "}"
+        "}"
+        "class PivotPreviewWebSocket extends OriginalWebSocket {"
+        "constructor(url, protocols){"
+        "super(rewriteSocketUrl(url), protocols);"
+        "}"
+        "}"
+        "PivotPreviewWebSocket.CONNECTING = OriginalWebSocket.CONNECTING;"
+        "PivotPreviewWebSocket.OPEN = OriginalWebSocket.OPEN;"
+        "PivotPreviewWebSocket.CLOSING = OriginalWebSocket.CLOSING;"
+        "PivotPreviewWebSocket.CLOSED = OriginalWebSocket.CLOSED;"
+        "window.WebSocket = PivotPreviewWebSocket;"
+        "})();"
+        "</script>"
+    )
+    if "</head>" in rewritten_html:
+        return rewritten_html.replace("</head>", f"{preview_script}</head>", 1)
+    if "</body>" in rewritten_html:
+        return rewritten_html.replace("</body>", f"{preview_script}</body>", 1)
+    return f"{preview_script}{rewritten_html}"
 
 
 def _rewrite_root_relative_asset_urls(*, html: str, proxy_base_path: str) -> str:

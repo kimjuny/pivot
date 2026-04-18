@@ -3030,6 +3030,44 @@ export interface SurfaceFilesApiResponse {
 }
 
 /**
+ * Session-scoped preview endpoint returned by the backend.
+ */
+export interface PreviewEndpointResponse {
+  /** Stable backend-issued preview identifier. */
+  preview_id: string;
+  /** Chat session that owns this preview endpoint. */
+  session_id: string;
+  /** Workspace identifier bound to the chat session. */
+  workspace_id: string;
+  /** Logical workspace root visible to the current operator. */
+  workspace_logical_root: string;
+  /** Operator-facing preview label. */
+  title: string;
+  /** Sandbox-local port exposed through the preview gateway. */
+  port: number;
+  /** Initial preview path opened through the gateway. */
+  path: string;
+  /** Whether Pivot recorded enough launch metadata to reconnect this preview. */
+  has_launch_recipe: boolean;
+  /** Host-facing preview URL that the surface should open. */
+  proxy_url: string;
+  /** UTC creation timestamp for this preview endpoint. */
+  created_at: string;
+}
+
+/**
+ * Reconnect response returned to one surface runtime.
+ */
+export interface ReconnectPreviewEndpointResponse {
+  /** Preview endpoint that was just reconnected. */
+  preview: PreviewEndpointResponse;
+  /** Full preview registry visible to the current surface session. */
+  available_previews: PreviewEndpointResponse[];
+  /** Preview that should become active after reconnect. */
+  active_preview_id: string | null;
+}
+
+/**
  * Minimal bootstrap payload returned for one development surface session.
  */
 export interface DevSurfaceBootstrapResponse {
@@ -3203,6 +3241,55 @@ export const createInstalledSurfaceSession = async (payload: {
       surface_key: payload.surfaceKey,
     }),
   }) as Promise<InstalledSurfaceSessionResponse>;
+};
+
+/**
+ * Create one session-scoped web preview endpoint for the active chat session.
+ *
+ * Why: preview endpoints are a separate lifecycle from surface sessions and
+ * should not leak raw sandbox ports into the host UI contract.
+ *
+ * @param payload - Session id plus sandbox-local preview details
+ * @returns Promise resolving to the created preview endpoint
+ */
+export const createPreviewEndpoint = async (payload: {
+  sessionId: string;
+  port: number;
+  path?: string | null;
+  title?: string | null;
+}): Promise<PreviewEndpointResponse> => {
+  return apiRequest('/chat-previews', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: payload.sessionId,
+      port: payload.port,
+      path: payload.path ?? '/',
+      title: payload.title ?? null,
+    }),
+  }) as Promise<PreviewEndpointResponse>;
+};
+
+/**
+ * Ask the backend to reconnect one stored preview recipe for a surface session.
+ *
+ * @param payload - Surface session and preview identifiers plus access token
+ * @returns Promise resolving to the refreshed preview registry payload
+ */
+export const reconnectSurfacePreview = async (payload: {
+  surfaceSessionId: string;
+  previewId: string;
+  surfaceToken: string;
+}): Promise<ReconnectPreviewEndpointResponse> => {
+  const nextUrl = new URL(
+    `/api/chat-surfaces/sessions/${payload.surfaceSessionId}/previews/${payload.previewId}/connect`,
+    window.location.origin,
+  );
+  nextUrl.searchParams.set('surface_token', payload.surfaceToken);
+  return apiRequest(nextUrl.pathname + nextUrl.search, {
+    method: 'POST',
+    skipAuth: true,
+    skipTokenCheck: true,
+  }) as Promise<ReconnectPreviewEndpointResponse>;
 };
 
 /**

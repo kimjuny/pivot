@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import mimetypes
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from app.services.workspace_service import WorkspaceService
 
@@ -38,6 +40,17 @@ class WorkspaceFileTreeEntry:
     kind: str
     parent_path: str | None = None
     size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class WorkspaceFileReadResult:
+    """Structured workspace file payload for text or image previews."""
+
+    kind: Literal["text", "image"]
+    content: str | None = None
+    encoding: Literal["utf-8"] | None = None
+    mime_type: str | None = None
+    data_base64: str | None = None
 
 
 class WorkspaceFileService:
@@ -152,6 +165,62 @@ class WorkspaceFileService:
         if not target_path.is_file():
             raise WorkspaceFileValidationError("Workspace path must be a file.")
         return target_path.read_text(encoding="utf-8")
+
+    def read_file(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        path: str,
+    ) -> WorkspaceFileReadResult:
+        """Read one previewable workspace file from an owned workspace.
+
+        Args:
+            workspace_id: Public workspace identifier.
+            username: Authenticated username that must own the workspace.
+            path: Workspace-relative file path.
+
+        Returns:
+            Structured text or image preview payload.
+
+        Raises:
+            WorkspaceFileNotFoundError: If the workspace or file is missing.
+            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFileValidationError: If the path is unsafe, not a file, or
+                the file format is not previewable yet.
+        """
+        workspace = self._get_workspace_for_owner(
+            workspace_id=workspace_id,
+            username=username,
+        )
+        target_path = self._resolve_workspace_path(
+            workspace=workspace,
+            relative_path=path,
+            allow_root=False,
+        )
+        if not target_path.exists():
+            raise WorkspaceFileNotFoundError("Workspace file does not exist.")
+        if not target_path.is_file():
+            raise WorkspaceFileValidationError("Workspace path must be a file.")
+
+        file_bytes = target_path.read_bytes()
+        try:
+            return WorkspaceFileReadResult(
+                kind="text",
+                content=file_bytes.decode("utf-8"),
+                encoding="utf-8",
+            )
+        except UnicodeDecodeError:
+            mime_type = self._guess_previewable_image_mime_type(target_path)
+            if mime_type is None:
+                raise WorkspaceFileValidationError(
+                    "Workspace file preview is not supported yet."
+                ) from None
+            return WorkspaceFileReadResult(
+                kind="image",
+                mime_type=mime_type,
+                data_base64=base64.b64encode(file_bytes).decode("ascii"),
+            )
 
     def write_text_file(
         self,
@@ -277,3 +346,13 @@ class WorkspaceFileService:
         if any(part == "" for part in pure_path.parts):
             raise WorkspaceFileValidationError("Workspace path contains empty segments.")
         return pure_path
+
+    @staticmethod
+    def _guess_previewable_image_mime_type(target_path: Path) -> str | None:
+        """Return one supported image MIME type for inline preview rendering."""
+        mime_type, _encoding = mimetypes.guess_type(target_path.name)
+        if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
+            return None
+        if mime_type == "image/svg+xml":
+            return None
+        return mime_type

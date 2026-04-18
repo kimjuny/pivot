@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import tempfile
@@ -33,6 +34,9 @@ surface_session_service_module = import_module("app.services.surface_session_ser
 workspace_service_module = import_module("app.services.workspace_service")
 WorkspaceService = workspace_service_module.WorkspaceService
 SurfaceSessionService = surface_session_service_module.SurfaceSessionService
+PreviewEndpointService = import_module(
+    "app.services.preview_endpoint_service"
+).PreviewEndpointService
 ExtensionInstallation = import_module("app.models.extension").ExtensionInstallation
 AgentExtensionBinding = import_module("app.models.extension").AgentExtensionBinding
 extension_service_module = import_module("app.services.extension_service")
@@ -111,6 +115,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.client.close()
         self.app.dependency_overrides.clear()
         SurfaceSessionService.clear_dev_surface_sessions()
+        PreviewEndpointService.clear_preview_endpoints()
         self.workspace_profile_patch.stop()
         self.session.close()
         self.tmpdir.cleanup()
@@ -150,6 +155,73 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             payload["bootstrap"]["files_api"]["tree_url"],
             f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/tree",
         )
+
+    def test_create_preview_endpoint_returns_proxy_url(self) -> None:
+        """Preview creation should return a stable session-scoped proxy URL."""
+        response = self.client.post(
+            "/api/chat-previews",
+            json={
+                "session_id": "session-1",
+                "port": 3000,
+                "path": "/app",
+                "title": "App Preview",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["session_id"], "session-1")
+        self.assertEqual(payload["port"], 3000)
+        self.assertEqual(payload["path"], "/app")
+        self.assertEqual(payload["title"], "App Preview")
+        self.assertFalse(payload["has_launch_recipe"])
+        self.assertEqual(
+            payload["proxy_url"],
+            f"/api/chat-previews/{payload['preview_id']}/proxy/app",
+        )
+        self.assertIn("users/alice/agents/7", payload["workspace_logical_root"])
+
+    def test_reconnect_surface_preview_returns_registry_payload(self) -> None:
+        """Surface reconnect should return the refreshed preview plus registry."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+
+        preview_record = PreviewEndpointService(self.session).create_preview_endpoint(
+            username="alice",
+            session_id="session-1",
+            port=3000,
+            path="/",
+            title="App Preview",
+            cwd="/workspace/apps/site",
+            start_server="bash /workspace/.pivot/previews/app-preview.sh",
+            skills=[{"name": "alpha", "location": "/workspace/skills/alpha"}],
+        )
+
+        with patch.object(
+            chat_surfaces_api_module.PreviewEndpointService,
+            "connect_preview_endpoint",
+            return_value=preview_record,
+        ):
+            reconnect_response = self.client.post(
+                "/api/chat-surfaces/sessions/"
+                f"{surface_payload['surface_session_id']}/previews/{preview_record.preview_id}/connect"
+                f"?surface_token={surface_payload['surface_token']}"
+            )
+
+        self.assertEqual(reconnect_response.status_code, 200)
+        payload = reconnect_response.json()
+        self.assertEqual(payload["preview"]["preview_id"], preview_record.preview_id)
+        self.assertTrue(payload["preview"]["has_launch_recipe"])
+        self.assertEqual(payload["active_preview_id"], preview_record.preview_id)
+        self.assertEqual(len(payload["available_previews"]), 1)
 
     def test_create_installed_surface_session_serves_packaged_runtime(self) -> None:
         """Installed surfaces should create a packaged runtime session and serve HTML."""
@@ -346,6 +418,424 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             (source_dir / "App.tsx").read_text(encoding="utf-8"),
             "export const App = () => <div>updated</div>;\n",
         )
+
+    def test_dev_surface_can_read_previewable_image_files(self) -> None:
+        """Surface file reads should return image payloads for common image formats."""
+        workspace_path = WorkspaceService(self.session).get_workspace_path(self.workspace)
+        image_dir = workspace_path / "assets"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        image_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7ZxV0AAAAASUVORK5CYII="
+        )
+        (image_dir / "preview.png").write_bytes(image_bytes)
+
+        create_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://localhost:5173",
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        create_payload = create_response.json()
+
+        read_response = self.client.get(
+            f"/api/chat-surfaces/dev-sessions/{create_payload['surface_session_id']}/files/content",
+            params={
+                "path": "assets/preview.png",
+                "surface_token": create_payload["surface_token"],
+            },
+        )
+        self.assertEqual(read_response.status_code, 200)
+        payload = read_response.json()
+        self.assertEqual(payload["kind"], "image")
+        self.assertEqual(payload["mime_type"], "image/png")
+        self.assertEqual(
+            payload["data_base64"],
+            base64.b64encode(image_bytes).decode("ascii"),
+        )
+
+    def test_preview_proxy_uses_surface_token_and_rewrites_root_assets(self) -> None:
+        """Preview proxy should accept surface auth and keep root assets under proxy."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+
+        create_preview_response = self.client.post(
+            "/api/chat-previews",
+            json={
+                "session_id": "session-1",
+                "port": 3000,
+                "path": "/",
+                "title": "App Preview",
+            },
+        )
+        self.assertEqual(create_preview_response.status_code, 201)
+        preview_payload = create_preview_response.json()
+        preview_id = preview_payload["preview_id"]
+
+        class _SandboxProxyResult:
+            def __init__(
+                self,
+                *,
+                status_code: int,
+                body: bytes,
+                content_type: str,
+                headers: dict[str, str] | None = None,
+            ) -> None:
+                self.status_code = status_code
+                self.body = body
+                self.content_type = content_type
+                self.headers = headers or {"Content-Type": content_type}
+
+        class _StubSandboxService:
+            def proxy_http(self, **kwargs: Any) -> _SandboxProxyResult:
+                path = kwargs["path"]
+                if path == "/":
+                    return _SandboxProxyResult(
+                        status_code=200,
+                        content_type="text/html; charset=utf-8",
+                        body=(
+                            b"<!doctype html><html><head>"
+                            b"<script type='module' src='/src/main.js'></script>"
+                            b"</head><body>Preview</body></html>"
+                        ),
+                    )
+                if path == "/src/main.js":
+                    return _SandboxProxyResult(
+                        status_code=200,
+                        content_type="application/javascript",
+                        body=b'import "/src/deps.js"; console.log("preview");',
+                    )
+                return _SandboxProxyResult(
+                    status_code=404,
+                    content_type="text/plain; charset=utf-8",
+                    body=b"missing",
+                )
+
+        with patch.object(
+            chat_surfaces_api_module,
+            "get_sandbox_service",
+            return_value=_StubSandboxService(),
+        ):
+            html_response = self.client.get(
+                f"/api/chat-previews/{preview_id}/proxy/",
+                params={"surface_token": surface_payload["surface_token"]},
+            )
+            self.assertEqual(html_response.status_code, 200)
+            self.assertIn(
+                f"/api/chat-previews/{preview_id}/proxy/src/main.js",
+                html_response.text,
+            )
+            self.assertIn("window.__PIVOT_PREVIEW_WS_BASE__", html_response.text)
+            self.assertIn(
+                f"/api/chat-previews/{preview_id}/ws/",
+                html_response.text,
+            )
+            self.assertIn(
+                "pivot_surface_access",
+                html_response.headers.get("set-cookie", ""),
+            )
+
+            js_response = self.client.get(
+                f"/api/chat-previews/{preview_id}/proxy/src/main.js",
+                params={"surface_token": surface_payload["surface_token"]},
+            )
+            self.assertEqual(js_response.status_code, 200)
+            self.assertIn(
+                f'/api/chat-previews/{preview_id}/proxy/src/deps.js',
+                js_response.text,
+            )
+
+    def test_preview_websocket_tunnel_forwards_frames(self) -> None:
+        """Preview websocket tunnel should relay browser frames through manager."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+
+        create_preview_response = self.client.post(
+            "/api/chat-previews",
+            json={
+                "session_id": "session-1",
+                "port": 3000,
+                "path": "/socket",
+                "title": "Socket Preview",
+            },
+        )
+        self.assertEqual(create_preview_response.status_code, 201)
+        preview_payload = create_preview_response.json()
+        preview_id = preview_payload["preview_id"]
+
+        observed_init: dict[str, Any] = {}
+
+        class _StubSandboxService:
+            def build_websocket_proxy_url(self) -> str:
+                return f"ws://127.0.0.1:{manager_server.port}"
+
+            def build_websocket_proxy_headers(self) -> dict[str, str]:
+                return {"X-Sandbox-Token": "test-token"}
+
+        class _ManagerEchoServer:
+            def __init__(self) -> None:
+                self.ready = threading.Event()
+                self.server: Any | None = None
+                self.port = 0
+                self.thread = threading.Thread(target=self._run, daemon=True)
+
+            def start(self) -> None:
+                self.thread.start()
+                self.ready.wait(timeout=5)
+
+            def _run(self) -> None:
+                def handler(websocket: Any) -> None:
+                    observed_init.update(json.loads(websocket.recv()))
+                    websocket.send(
+                        json.dumps(
+                            {
+                                "type": "ready",
+                                "accepted_subprotocol": None,
+                            }
+                        )
+                    )
+                    for message in websocket:
+                        if isinstance(message, bytes):
+                            websocket.send(message)
+                        else:
+                            websocket.send(f"echo:{message}")
+
+                with serve(
+                    handler,
+                    "127.0.0.1",
+                    0,
+                    ping_interval=None,
+                ) as server:
+                    self.server = server
+                    self.port = server.socket.getsockname()[1]
+                    self.ready.set()
+                    server.serve_forever()
+
+            def stop(self) -> None:
+                if self.server is None:
+                    return
+                self.server.shutdown()
+                self.thread.join(timeout=5)
+
+        manager_server = _ManagerEchoServer()
+        manager_server.start()
+
+        try:
+            with (
+                patch.object(
+                chat_surfaces_api_module,
+                "get_sandbox_service",
+                return_value=_StubSandboxService(),
+                ),
+                self.client.websocket_connect(
+                    f"/api/chat-previews/{preview_id}/ws/socket"
+                    f"?surface_token={surface_payload['surface_token']}"
+                ) as websocket,
+            ):
+                websocket.send_text("ping")
+                self.assertEqual(websocket.receive_text(), "echo:ping")
+
+            self.assertEqual(observed_init["workspace_id"], self.workspace.workspace_id)
+            self.assertEqual(observed_init["port"], 3000)
+            self.assertEqual(observed_init["path"], "/socket")
+        finally:
+            manager_server.stop()
+
+    def test_preview_http_proxy_reuses_registered_skill_mounts(self) -> None:
+        """Preview HTTP proxy should forward the skill snapshot stored on creation."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+
+        preview_record = PreviewEndpointService(self.session).create_preview_endpoint(
+            username="alice",
+            session_id="session-1",
+            port=3000,
+            path="/",
+            title="App Preview",
+            skills=(
+                {
+                    "name": "ui-kit",
+                    "location": "/app/server/.pivot/skills/ui-kit",
+                },
+            ),
+        )
+
+        observed_kwargs: dict[str, Any] = {}
+
+        class _SandboxProxyResult:
+            def __init__(
+                self,
+                *,
+                status_code: int,
+                body: bytes,
+                content_type: str,
+                headers: dict[str, str] | None = None,
+            ) -> None:
+                self.status_code = status_code
+                self.body = body
+                self.content_type = content_type
+                self.headers = headers or {"Content-Type": content_type}
+
+        class _StubSandboxService:
+            def proxy_http(self, **kwargs: Any) -> _SandboxProxyResult:
+                observed_kwargs.update(kwargs)
+                return _SandboxProxyResult(
+                    status_code=200,
+                    content_type="text/html; charset=utf-8",
+                    body=b"<!doctype html><html><body>Preview</body></html>",
+                )
+
+        with patch.object(
+            chat_surfaces_api_module,
+            "get_sandbox_service",
+            return_value=_StubSandboxService(),
+        ):
+            response = self.client.get(
+                f"/api/chat-previews/{preview_record.preview_id}/proxy/",
+                params={"surface_token": surface_payload["surface_token"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            observed_kwargs["skills"],
+            [{"name": "ui-kit", "location": "/app/server/.pivot/skills/ui-kit"}],
+        )
+        self.assertTrue(observed_kwargs["require_existing"])
+        self.assertFalse(observed_kwargs["allow_recreate"])
+
+    def test_preview_websocket_tunnel_reuses_registered_skill_mounts(self) -> None:
+        """Preview websocket init should forward the stored preview skill snapshot."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+
+        preview_record = PreviewEndpointService(self.session).create_preview_endpoint(
+            username="alice",
+            session_id="session-1",
+            port=3000,
+            path="/socket",
+            title="Socket Preview",
+            skills=(
+                {
+                    "name": "ui-kit",
+                    "location": "/app/server/.pivot/skills/ui-kit",
+                },
+            ),
+        )
+
+        observed_init: dict[str, Any] = {}
+
+        class _StubSandboxService:
+            def build_websocket_proxy_url(self) -> str:
+                return f"ws://127.0.0.1:{manager_server.port}"
+
+            def build_websocket_proxy_headers(self) -> dict[str, str]:
+                return {"X-Sandbox-Token": "test-token"}
+
+        class _ManagerEchoServer:
+            def __init__(self) -> None:
+                self.ready = threading.Event()
+                self.server: Any | None = None
+                self.port = 0
+                self.thread = threading.Thread(target=self._run, daemon=True)
+
+            def start(self) -> None:
+                self.thread.start()
+                self.ready.wait(timeout=5)
+
+            def _run(self) -> None:
+                def handler(websocket: Any) -> None:
+                    observed_init.update(json.loads(websocket.recv()))
+                    websocket.send(
+                        json.dumps(
+                            {
+                                "type": "ready",
+                                "accepted_subprotocol": None,
+                            }
+                        )
+                    )
+                    for message in websocket:
+                        if isinstance(message, bytes):
+                            websocket.send(message)
+                        else:
+                            websocket.send(f"echo:{message}")
+
+                with serve(
+                    handler,
+                    "127.0.0.1",
+                    0,
+                    ping_interval=None,
+                ) as server:
+                    self.server = server
+                    self.port = server.socket.getsockname()[1]
+                    self.ready.set()
+                    server.serve_forever()
+
+            def stop(self) -> None:
+                if self.server is None:
+                    return
+                self.server.shutdown()
+                self.thread.join(timeout=5)
+
+        manager_server = _ManagerEchoServer()
+        manager_server.start()
+
+        try:
+            with (
+                patch.object(
+                    chat_surfaces_api_module,
+                    "get_sandbox_service",
+                    return_value=_StubSandboxService(),
+                ),
+                self.client.websocket_connect(
+                    f"/api/chat-previews/{preview_record.preview_id}/ws/socket"
+                    f"?surface_token={surface_payload['surface_token']}"
+                ) as websocket,
+            ):
+                websocket.send_text("ping")
+                self.assertEqual(websocket.receive_text(), "echo:ping")
+
+            self.assertEqual(
+                observed_init["skills"],
+                [{"name": "ui-kit", "location": "/app/server/.pivot/skills/ui-kit"}],
+            )
+            self.assertTrue(observed_init["require_existing"])
+            self.assertFalse(observed_init["allow_recreate"])
+        finally:
+            manager_server.stop()
 
     def test_dev_surface_proxy_injects_bootstrap_into_html(self) -> None:
         """Proxying the local dev server should inject the bootstrap payload into HTML."""

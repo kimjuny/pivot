@@ -40,6 +40,52 @@ This keeps extension versioning, trust review, release pinning, and uninstall
 behavior coherent while still letting the agent and the surface collaborate
 through the same workspace files.
 
+## Preview and Publish Model
+
+Surface-hosted web preview should be treated as a first-class product concept,
+but it should not be modeled as "open some localhost port directly inside the
+surface".
+
+The right abstraction is:
+
+- `Preview Endpoint` for session-scoped development and validation
+- `Published Deployment` for durable production hosting
+
+This distinction matters because raw ports are only one possible
+implementation detail. They work in local development, but they are not the
+right long-term contract for clustered or gateway-based environments.
+
+### Preview Endpoint
+
+A preview endpoint is tied to the active chat session and sandbox lifecycle.
+
+It is:
+
+- Temporary
+- Session-scoped
+- Backed by a sandbox runtime
+- Intended for iterative development and inspection
+- Allowed to disappear when the sandbox disappears
+
+The agent may still discover that a preview server is listening on a sandbox
+port, but the public Pivot contract should convert that into a Pivot-owned
+preview endpoint record and proxy URL.
+
+### Published Deployment
+
+A published deployment is a different resource.
+
+It is:
+
+- Release-scoped
+- Durable
+- Independently addressable
+- Backed by a production serving target
+- Not coupled to the chat session's sandbox lifetime
+
+Preview and publish should therefore use different data models, different job
+lifecycles, and different serving assumptions.
+
 ## Non-Goals
 
 - Do not let extension code directly mutate Pivot Web's internal React state.
@@ -263,6 +309,95 @@ real-time channel. Pivot already has a reconnectable task-event stream, and the
 surface should be able to subscribe to that stream when it has
 `task.events.read`.
 
+## Workspace Editor Web Preview
+
+`workspace-editor` should evolve toward a dual-view coding surface rather than
+remaining only a source editor.
+
+Recommended top-left view modes:
+
+- `code`
+  A source-tree and editor-focused view.
+- `web`
+  A browser-style preview view that renders the current session preview
+  endpoint.
+
+The first view-switch affordance can be lightweight:
+
+- `chevrons-left-right` for source/code mode
+- `globe` for web preview mode
+
+The surface should not know how to expose ports directly. Instead, it should
+receive a Pivot-managed preview URL and switch to `web` mode when that preview
+becomes available.
+
+### Why not expose raw sandbox ports directly to the surface
+
+Direct port exposure has the wrong lifetime and scaling semantics:
+
+- It leaks an implementation detail into the author contract.
+- It assumes single-node or host-port style networking.
+- It couples the surface to sandbox topology.
+- It makes future clustered routing and publish flows harder to reason about.
+
+So the preferred contract is:
+
+- agent/tool discovers or requests a preview target
+- Pivot creates a `Preview Endpoint`
+- Pivot returns a `proxy_url`
+- `workspace-editor` opens that `proxy_url` in `web` mode
+
+The surface should consume preview URLs, not raw ports.
+
+### Suggested Preview Tool Shape
+
+The tool should not be "open port 3000 in the iframe". The tool should be
+closer to:
+
+```json
+{
+  "tool": "create_preview_endpoint",
+  "port": 3000,
+  "path": "/",
+  "title": "App Preview"
+}
+```
+
+Suggested result:
+
+```json
+{
+  "preview_id": "pv_123",
+  "proxy_url": "/api/previews/pv_123/",
+  "surface": {
+    "surface_key": "workspace-editor",
+    "initial_view": "web"
+  }
+}
+```
+
+Then the host is responsible for:
+
+- opening or focusing `workspace-editor`
+- switching it to the `web` view
+- passing the preview URL into the surface runtime
+
+This keeps tool invocation, host behavior, and surface rendering cleanly
+separated.
+
+### Suggested Lifecycle
+
+1. The agent launches or detects a web server inside the current sandbox.
+2. The agent calls a preview tool that references a port and optional path.
+3. Pivot validates the preview target against the current session sandbox.
+4. Pivot creates a `Preview Endpoint` record and a stable `proxy_url`.
+5. The host opens or focuses `workspace-editor`.
+6. The host tells `workspace-editor` to switch into `web` mode.
+7. `workspace-editor` renders the Pivot-managed `proxy_url`.
+
+This gives the user a consistent chat-to-preview experience while keeping
+networking details out of the surface author contract.
+
 ## Surface APIs
 
 Surface iframes should not use the user's full Pivot auth token and should not
@@ -424,6 +559,36 @@ await surface.fetch("/custom-endpoint", { method: "POST" });
 
 This prevents every server-side API addition from requiring an immediate SDK
 release.
+
+## Publish Pipeline
+
+Publishing should not be implemented as "keep the sandbox preview server alive
+and call it production".
+
+Instead, publishing should create a separate release lifecycle:
+
+1. Build or collect deployable artifacts from the workspace
+2. Persist those artifacts into a release-oriented storage location
+3. Create a publish job or deployment record
+4. Hand the work to a dedicated publish worker
+5. Produce a durable production URL or deployment target
+
+This separation is important because production traffic, concurrency, scaling,
+and failure modes differ from a session-scoped sandbox preview.
+
+Recommended building blocks:
+
+- `Publish Job`
+- `Release Artifact`
+- `Deployment Target`
+- `Published URL`
+
+The `workspace-editor` `web` mode can later support both:
+
+- session preview URLs
+- published deployment URLs
+
+But the underlying resources should remain distinct.
 
 ## Repository Responsibilities
 

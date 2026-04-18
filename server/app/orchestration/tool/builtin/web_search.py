@@ -60,26 +60,46 @@ def web_search(
     - provider request/response metadata useful for debugging
 
     Args:
-        query: Search query to execute.
-        max_results: Maximum number of normalized search results to return.
-        search_depth: Optional search depth hint. Supported today by Tavily only.
-        topic: Optional search topic hint such as ``general`` or ``news``.
-        time_range: Optional recency filter such as ``day``, ``week``, ``month``,
-            or ``year``.
-        start_date: Optional lower date bound in ``YYYY-MM-DD`` format.
-        end_date: Optional upper date bound in ``YYYY-MM-DD`` format.
-        include_answer: Whether the provider should attempt to generate a short answer.
-        include_raw_content: Whether to include richer raw page content when available.
-        include_images: Whether to search for related images in addition to web pages.
-        include_image_descriptions: Whether image descriptions should be returned.
-        include_favicon: Whether favicon URLs should be returned when supported.
-        include_domains: Optional allowlist of domains to include.
-        exclude_domains: Optional denylist of domains to exclude.
-        country: Optional country boost hint.
-        auto_parameters: Whether the provider may infer better search parameters.
-        exact_match: Whether exact quoted phrases should be preserved when supported.
-        include_usage: Whether provider usage metadata should be returned.
-        safe_search: Whether unsafe content should be filtered when supported.
+        query (required, str): Search query to execute.
+        provider (optional, str | None): Explicit provider override. Usually
+            leave this unset and let the runtime resolve the binding. Defaults
+            to ``None``.
+        max_results (optional, int): Maximum number of normalized search
+            results to return. Defaults to ``5``.
+        search_depth (optional, SearchDepth | None): Search depth hint.
+            Supported today by Tavily only. Defaults to ``None``.
+        topic (optional, SearchTopic | None): Search topic hint such as
+            ``general`` or ``news``. Defaults to ``None``.
+        time_range (optional, SearchTimeRange | None): Recency filter such as
+            ``day``, ``week``, ``month``, or ``year``. Defaults to ``None``.
+        start_date (optional, str | None): Lower date bound in ``YYYY-MM-DD``
+            format. Defaults to ``None``.
+        end_date (optional, str | None): Upper date bound in ``YYYY-MM-DD``
+            format. Defaults to ``None``.
+        include_answer (optional, bool): Whether the provider should attempt to
+            generate a short answer. Defaults to ``False``.
+        include_raw_content (optional, bool): Whether to include richer raw
+            page content when available. Defaults to ``False``.
+        include_images (optional, bool): Whether to search for related images
+            in addition to web pages. Defaults to ``False``.
+        include_image_descriptions (optional, bool): Whether image
+            descriptions should be returned. Defaults to ``False``.
+        include_favicon (optional, bool): Whether favicon URLs should be
+            returned when supported. Defaults to ``False``.
+        include_domains (optional, list[str] | None): Allowlist of domains to
+            include. Defaults to ``None``.
+        exclude_domains (optional, list[str] | None): Denylist of domains to
+            exclude. Defaults to ``None``.
+        country (optional, str | None): Country boost hint. Defaults to
+            ``None``.
+        auto_parameters (optional, bool): Whether the provider may infer better
+            search parameters. Defaults to ``False``.
+        exact_match (optional, bool): Whether exact quoted phrases should be
+            preserved when supported. Defaults to ``False``.
+        include_usage (optional, bool): Whether provider usage metadata should
+            be returned. Defaults to ``False``.
+        safe_search (optional, bool): Whether unsafe content should be filtered
+            when supported. Defaults to ``False``.
 
     Returns:
         A structured dict describing the chosen provider, effective parameters,

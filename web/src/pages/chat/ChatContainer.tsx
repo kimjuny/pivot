@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   cancelReactTask,
+  createPreviewEndpoint,
   createProject,
   createDevSurfaceSession,
   createInstalledSurfaceSession,
@@ -26,6 +27,7 @@ import {
   type ReactContextUsageSummary,
   type ReactSessionRuntimeDebug,
   type InstalledSurfaceSessionResponse,
+  type PreviewEndpointResponse,
   type SessionListItem,
   type SessionResponse,
   type WebSearchBinding,
@@ -96,6 +98,8 @@ const DOCK_TRANSITION_MS = 200;
 const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
 const OFFICIAL_SAMPLE_RUNTIME_URL = "http://127.0.0.1:4173";
 const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
+const DEFAULT_PREVIEW_PORT = "3000";
+const DEFAULT_PREVIEW_PATH = "/";
 
 /**
  * Parse the serialized tool allowlist and determine whether ``web_search`` is
@@ -196,6 +200,137 @@ function toInstalledChatSurfaces(
   });
 
   return installedSurfaces;
+}
+
+function extractWorkspacePreviewIntent(
+  event: ReactStreamEvent,
+): {
+  preview: PreviewEndpointResponse;
+  availablePreviews: PreviewEndpointResponse[];
+  activePreviewId: string | null;
+} | null {
+  if (event.type !== "tool_result" || !event.data || typeof event.data !== "object") {
+    return null;
+  }
+
+  const toolResults = (event.data as { tool_results?: unknown }).tool_results;
+  if (!Array.isArray(toolResults)) {
+    return null;
+  }
+
+  for (const item of toolResults) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const result = (item as { result?: unknown; success?: unknown }).result;
+    const success = (item as { success?: unknown }).success;
+    if (success !== true || !result || typeof result !== "object") {
+      continue;
+    }
+
+    const uiIntent = (result as { ui_intent?: unknown }).ui_intent;
+    if (!uiIntent || typeof uiIntent !== "object") {
+      continue;
+    }
+    if (
+      (uiIntent as { type?: unknown }).type !== "open_workspace_web_preview"
+    ) {
+      continue;
+    }
+
+    const preview = normalizePreviewEndpoint(
+      (uiIntent as { preview?: unknown }).preview,
+    );
+    if (!preview) {
+      continue;
+    }
+    return {
+      preview,
+      availablePreviews: normalizePreviewEndpointList(
+        (uiIntent as { available_previews?: unknown }).available_previews,
+      ),
+      activePreviewId:
+        typeof (uiIntent as { active_preview_id?: unknown }).active_preview_id ===
+        "string"
+          ? String(
+              (uiIntent as { active_preview_id?: unknown }).active_preview_id,
+            )
+          : null,
+    };
+  }
+
+  return null;
+}
+
+function normalizePreviewEndpoint(
+  preview: unknown,
+): PreviewEndpointResponse | null {
+  if (!preview || typeof preview !== "object") {
+    return null;
+  }
+  const previewId = (preview as { preview_id?: unknown }).preview_id;
+  const sessionId = (preview as { session_id?: unknown }).session_id;
+  const workspaceId = (preview as { workspace_id?: unknown }).workspace_id;
+  const workspaceLogicalRoot = (
+    preview as { workspace_logical_root?: unknown }
+  ).workspace_logical_root;
+  const title = (preview as { title?: unknown }).title;
+  const port = (preview as { port?: unknown }).port;
+  const path = (preview as { path?: unknown }).path;
+  const hasLaunchRecipe = (preview as { has_launch_recipe?: unknown }).has_launch_recipe;
+  const proxyUrl = (preview as { proxy_url?: unknown }).proxy_url;
+  const createdAt = (preview as { created_at?: unknown }).created_at;
+
+  if (
+    typeof previewId !== "string" ||
+    typeof sessionId !== "string" ||
+    typeof workspaceId !== "string" ||
+    typeof workspaceLogicalRoot !== "string" ||
+    typeof title !== "string" ||
+    typeof port !== "number" ||
+    typeof path !== "string" ||
+    typeof hasLaunchRecipe !== "boolean" ||
+    typeof proxyUrl !== "string" ||
+    typeof createdAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    preview_id: previewId,
+    session_id: sessionId,
+    workspace_id: workspaceId,
+    workspace_logical_root: workspaceLogicalRoot,
+    title,
+    port,
+    path,
+    has_launch_recipe: hasLaunchRecipe,
+    proxy_url: proxyUrl,
+    created_at: createdAt,
+  };
+}
+
+function normalizePreviewEndpointList(
+  payload: unknown,
+): PreviewEndpointResponse[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+  return payload
+    .map((item) => normalizePreviewEndpoint(item))
+    .filter((item): item is PreviewEndpointResponse => item !== null);
+}
+
+function upsertPreviewEndpointList(
+  previews: PreviewEndpointResponse[],
+  nextPreview: PreviewEndpointResponse,
+): PreviewEndpointResponse[] {
+  const filtered = previews.filter(
+    (preview) => preview.preview_id !== nextPreview.preview_id,
+  );
+  return [...filtered, nextPreview].sort((left, right) =>
+    left.created_at.localeCompare(right.created_at),
+  );
 }
 
 /**
@@ -455,11 +590,19 @@ function ChatContainer({
   const [surfaceRuntimeUrlInput, setSurfaceRuntimeUrlInput] = useState(
     OFFICIAL_SAMPLE_RUNTIME_URL,
   );
+  const [previewPortInput, setPreviewPortInput] = useState(DEFAULT_PREVIEW_PORT);
+  const [previewPathInput, setPreviewPathInput] = useState(DEFAULT_PREVIEW_PATH);
+  const [previewTitleInput, setPreviewTitleInput] = useState("App Preview");
   const [isCreatingSurfaceSession, setIsCreatingSurfaceSession] =
+    useState(false);
+  const [isCreatingPreviewEndpoint, setIsCreatingPreviewEndpoint] =
     useState(false);
   const [surfaceCreationError, setSurfaceCreationError] = useState<
     string | null
   >(null);
+  const [previewCreationError, setPreviewCreationError] = useState<string | null>(
+    null,
+  );
   const [installedChatSurfaces, setInstalledChatSurfaces] = useState<
     InstalledChatSurfaceDescriptor[]
   >([]);
@@ -469,6 +612,11 @@ function ChatContainer({
     useState<InstalledSurfaceSessionResponse | null>(null);
   const [activeSurfaceSession, setActiveSurfaceSession] =
     useState<DevSurfaceSessionResponse | null>(null);
+  const [previewEndpoints, setPreviewEndpoints] = useState<
+    PreviewEndpointResponse[]
+  >([]);
+  const [activePreviewEndpoint, setActivePreviewEndpoint] =
+    useState<PreviewEndpointResponse | null>(null);
   const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
     null,
   );
@@ -520,6 +668,15 @@ function ChatContainer({
   const dockTransitionTimerRef = useRef<number | null>(null);
   const dockOpenFrameRef = useRef<number | null>(null);
   const stoppedTaskIdsRef = useRef<Set<string>>(new Set());
+  const processedPreviewIntentIdsRef = useRef<Set<string>>(new Set());
+  const pendingPreviewSurfaceOpenIdRef = useRef<string | null>(null);
+  const openWorkspacePreviewIntentRef = useRef(
+    (_previewIntent: {
+      preview: PreviewEndpointResponse;
+      availablePreviews: PreviewEndpointResponse[];
+      activePreviewId: string | null;
+    }) => {},
+  );
 
   const {
     pendingFiles,
@@ -561,10 +718,15 @@ function ChatContainer({
     setActiveSurfaceSession(null);
     setActiveInstalledSurface(null);
     setActiveInstalledSurfaceSession(null);
+    setPreviewEndpoints([]);
+    setActivePreviewEndpoint(null);
     setSurfaceCreationError(null);
+    setPreviewCreationError(null);
     setIsExtensionDockOpen(false);
     setIsExtensionDockMounted(false);
     setRenderedDockPanelSize(0);
+    processedPreviewIntentIdsRef.current = new Set();
+    pendingPreviewSurfaceOpenIdRef.current = null;
   }, [currentSessionId]);
 
   const clearDockAnimationTimers = useCallback(() => {
@@ -937,6 +1099,11 @@ function ChatContainer({
         event.type !== "task_cancelled"
       ) {
         return;
+      }
+
+      const previewIntent = extractWorkspacePreviewIntent(event);
+      if (previewIntent) {
+        openWorkspacePreviewIntentRef.current(previewIntent);
       }
 
       const targetTaskId = event.task_id;
@@ -2717,6 +2884,58 @@ function ChatContainer({
   );
 
   /**
+   * Create one session-scoped preview endpoint so workspace-editor can switch
+   * into its web view without depending on an imported extension tool first.
+   */
+  const handleCreatePreviewEndpoint = useCallback(async () => {
+    if (!currentSessionId || isCreatingPreviewEndpoint) {
+      return;
+    }
+
+    const parsedPort = Number.parseInt(previewPortInput.trim(), 10);
+    if (!Number.isFinite(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+      setPreviewCreationError("Preview port must be between 1 and 65535.");
+      return;
+    }
+
+    setIsCreatingPreviewEndpoint(true);
+    setPreviewCreationError(null);
+
+    try {
+      const nextPreviewEndpoint = await createPreviewEndpoint({
+        sessionId: currentSessionId,
+        port: parsedPort,
+        path: previewPathInput.trim() || "/",
+        title: previewTitleInput.trim() || "App Preview",
+      });
+      setPreviewEndpoints((previous) =>
+        upsertPreviewEndpointList(previous, nextPreviewEndpoint),
+      );
+      setActivePreviewEndpoint(nextPreviewEndpoint);
+      if (activeSurfaceSession || activeInstalledSurfaceSession) {
+        handleExtensionDockOpenChange(true);
+      }
+    } catch (error) {
+      setPreviewCreationError(
+        error instanceof Error
+          ? error.message
+          : "Failed to create preview endpoint.",
+      );
+    } finally {
+      setIsCreatingPreviewEndpoint(false);
+    }
+  }, [
+    activeInstalledSurfaceSession,
+    activeSurfaceSession,
+    currentSessionId,
+    handleExtensionDockOpenChange,
+    isCreatingPreviewEndpoint,
+    previewPathInput,
+    previewPortInput,
+    previewTitleInput,
+  ]);
+
+  /**
    * Opens one installed surface through the same shared dock host used by dev
    * sessions so product and debug entry points stay behaviorally aligned.
    */
@@ -2764,6 +2983,115 @@ function ChatContainer({
       isExtensionDockOpen,
     ],
   );
+
+  /**
+   * Apply one streamed preview intent by reusing the shared workspace-editor
+   * dock instead of introducing a second preview-only shell.
+   */
+  const handleOpenWorkspacePreviewIntent = useCallback(
+    ({
+      activePreviewId,
+      availablePreviews,
+      preview,
+    }: {
+      preview: PreviewEndpointResponse;
+      availablePreviews: PreviewEndpointResponse[];
+      activePreviewId: string | null;
+    }) => {
+      if (
+        processedPreviewIntentIdsRef.current.has(preview.preview_id)
+      ) {
+        return;
+      }
+      processedPreviewIntentIdsRef.current.add(preview.preview_id);
+      pendingPreviewSurfaceOpenIdRef.current = preview.preview_id;
+      setPreviewEndpoints((previous) => {
+        if (availablePreviews.length > 0) {
+          return availablePreviews;
+        }
+        return upsertPreviewEndpointList(previous, preview);
+      });
+      if (activePreviewId) {
+        const matchingPreview = availablePreviews.find(
+          (item) => item.preview_id === activePreviewId,
+        );
+        setActivePreviewEndpoint(matchingPreview ?? preview);
+      } else {
+        setActivePreviewEndpoint(preview);
+      }
+
+      if (
+        activeSurfaceSession?.surface_key === OFFICIAL_SAMPLE_SURFACE_KEY
+      ) {
+        pendingPreviewSurfaceOpenIdRef.current = null;
+        handleExtensionDockOpenChange(true);
+        return;
+      }
+
+      if (
+        activeInstalledSurfaceSession &&
+        activeInstalledSurface?.surfaceKey === OFFICIAL_SAMPLE_SURFACE_KEY
+      ) {
+        pendingPreviewSurfaceOpenIdRef.current = null;
+        handleExtensionDockOpenChange(true);
+        return;
+      }
+    },
+    [
+      activeInstalledSurface,
+      activeInstalledSurfaceSession,
+      activeSurfaceSession,
+      handleExtensionDockOpenChange,
+    ],
+  );
+
+  openWorkspacePreviewIntentRef.current = (previewIntent) => {
+    void handleOpenWorkspacePreviewIntent(previewIntent);
+  };
+
+  useEffect(() => {
+    if (
+      !activePreviewEndpoint ||
+      pendingPreviewSurfaceOpenIdRef.current !== activePreviewEndpoint.preview_id
+    ) {
+      return;
+    }
+
+    if (activeSurfaceSession?.surface_key === OFFICIAL_SAMPLE_SURFACE_KEY) {
+      pendingPreviewSurfaceOpenIdRef.current = null;
+      handleExtensionDockOpenChange(true);
+      return;
+    }
+
+    if (
+      activeInstalledSurfaceSession &&
+      activeInstalledSurface?.surfaceKey === OFFICIAL_SAMPLE_SURFACE_KEY
+    ) {
+      pendingPreviewSurfaceOpenIdRef.current = null;
+      handleExtensionDockOpenChange(true);
+      return;
+    }
+
+    const installedWorkspaceEditor = installedChatSurfaces.find(
+      (surface) => surface.surfaceKey === OFFICIAL_SAMPLE_SURFACE_KEY,
+    );
+    if (!installedWorkspaceEditor || !currentSessionId || isCreatingSurfaceSession) {
+      return;
+    }
+
+    pendingPreviewSurfaceOpenIdRef.current = null;
+    void handleOpenInstalledSurface(installedWorkspaceEditor);
+  }, [
+    activeInstalledSurface,
+    activeInstalledSurfaceSession,
+    activePreviewEndpoint,
+    activeSurfaceSession,
+    currentSessionId,
+    handleExtensionDockOpenChange,
+    handleOpenInstalledSurface,
+    installedChatSurfaces,
+    isCreatingSurfaceSession,
+  ]);
 
   const surfaceDevDebugSection = useMemo(() => {
     return {
@@ -2886,7 +3214,94 @@ function ChatContainer({
     surfaceRuntimeUrlInput,
   ]);
 
+  const previewDevDebugSection = useMemo(() => {
+    return {
+      key: "preview-dev",
+      title: "Preview Dev",
+      description:
+        "Create one session-scoped preview endpoint and route it into workspace-editor web view.",
+      content: (
+        <div className="space-y-3">
+          <label className="block">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">
+              Port
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={previewPortInput}
+              onChange={(event) => setPreviewPortInput(event.target.value)}
+              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">
+              Path
+            </div>
+            <input
+              type="text"
+              value={previewPathInput}
+              onChange={(event) => setPreviewPathInput(event.target.value)}
+              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
+            />
+          </label>
+
+          <label className="block">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">
+              Title
+            </div>
+            <input
+              type="text"
+              value={previewTitleInput}
+              onChange={(event) => setPreviewTitleInput(event.target.value)}
+              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => {
+              void handleCreatePreviewEndpoint();
+            }}
+            disabled={!currentSessionId || isCreatingPreviewEndpoint}
+            className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-foreground px-3 text-sm font-medium text-background transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isCreatingPreviewEndpoint ? "Creating..." : "Create Preview Endpoint"}
+          </button>
+
+          {previewCreationError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {previewCreationError}
+            </div>
+          ) : null}
+
+          {activePreviewEndpoint ? (
+            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+              <div className="font-semibold text-foreground">
+                {activePreviewEndpoint.title}
+              </div>
+              <div className="mt-2 break-all font-mono text-[11px] text-foreground/80">
+                {activePreviewEndpoint.proxy_url}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ),
+    };
+  }, [
+    activePreviewEndpoint,
+    currentSessionId,
+    handleCreatePreviewEndpoint,
+    isCreatingPreviewEndpoint,
+    previewCreationError,
+    previewPathInput,
+    previewPortInput,
+    previewTitleInput,
+  ]);
+
   useRegisterChatDebugPanelSection(surfaceDevDebugSection);
+  useRegisterChatDebugPanelSection(previewDevDebugSection);
 
   const headerSurfaceButtons = useMemo(() => {
     if (isExtensionDockOpen) {
@@ -3168,6 +3583,8 @@ function ChatContainer({
                 activeSurfaceSession={activeSurfaceSession}
                 activeInstalledSurface={activeInstalledSurface}
                 activeInstalledSurfaceSession={activeInstalledSurfaceSession}
+                previewEndpoints={previewEndpoints}
+                activePreviewEndpoint={activePreviewEndpoint}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

@@ -43,6 +43,44 @@ class CreateInstalledSurfaceSessionRequest(AppBaseModel):
     )
 
 
+class CreatePreviewEndpointRequest(AppBaseModel):
+    """Request payload for creating one session-scoped web preview endpoint."""
+
+    session_id: str = Field(..., description="Owning chat session identifier.")
+    port: int = Field(..., description="Sandbox-local HTTP port to expose.")
+    path: str | None = Field(
+        default="/",
+        description="Optional initial HTTP path served from the preview port.",
+    )
+    title: str | None = Field(
+        default=None,
+        description="Optional operator-facing title shown by the preview surface.",
+    )
+
+
+class PreviewEndpointResponse(AppBaseModel):
+    """Serialized session-scoped web preview endpoint."""
+
+    preview_id: str
+    session_id: str
+    workspace_id: str
+    workspace_logical_root: str
+    title: str
+    port: int
+    path: str
+    has_launch_recipe: bool
+    proxy_url: str
+    created_at: str
+
+
+class ReconnectPreviewEndpointResponse(AppBaseModel):
+    """Reconnect response returned to one surface runtime."""
+
+    preview: PreviewEndpointResponse
+    available_previews: list[PreviewEndpointResponse] = Field(default_factory=list)
+    active_preview_id: str | None = None
+
+
 class SurfaceFilesApiResponse(AppBaseModel):
     """Workspace file endpoints exposed to one surface runtime."""
 
@@ -147,11 +185,14 @@ class WorkspaceFileTreeResponse(AppBaseModel):
 
 
 class WorkspaceFileContentResponse(AppBaseModel):
-    """UTF-8 text file payload returned to a surface runtime."""
+    """Previewable workspace file payload returned to a surface runtime."""
 
     path: str
-    content: str
-    encoding: Literal["utf-8"] = "utf-8"
+    kind: Literal["text", "image"]
+    content: str | None = None
+    encoding: Literal["utf-8"] | None = None
+    mime_type: str | None = None
+    data_base64: str | None = None
 
 
 class WriteWorkspaceFileRequest(AppBaseModel):

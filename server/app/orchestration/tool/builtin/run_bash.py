@@ -13,9 +13,10 @@ def run_bash(command: str, fail_on_nonzero: bool = False) -> dict[str, Any]:
     """Run one bash command from ``/workspace`` and return stdout.
 
     Args:
-        command: Shell command string executed with ``bash -lc``.
-        fail_on_nonzero: When true, raise RuntimeError on non-zero exit code.
-            Default false keeps recursion robust by returning structured result.
+        command (required, str): Shell command string executed with
+            ``bash -lc``.
+        fail_on_nonzero (optional, bool): When true, raise ``RuntimeError`` on
+            non-zero exit code. Defaults to ``False``.
 
     Returns:
         Structured result dict with ``ok``, ``exit_code``, ``stdout``, ``stderr``.

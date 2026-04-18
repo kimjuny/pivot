@@ -184,8 +184,8 @@ def programmatic_tool_call(python_code: str) -> str:
         result = f"{uppercase(text)} has {word_count(text)} words"
 
     Args:
-        python_code: A Python snippet. Must assign the final output to a
-            variable named ``result``.
+        python_code (required, str): Python snippet to execute. It must assign
+            the final output to a variable named ``result``.
 
     Returns:
         String representation of ``result``.

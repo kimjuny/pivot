@@ -4,6 +4,7 @@ import { useTheme } from "@/lib/use-theme";
 import {
   type DevSurfaceSessionResponse,
   type InstalledSurfaceSessionResponse,
+  type PreviewEndpointResponse,
 } from "@/utils/api";
 
 export interface InstalledChatSurfaceDescriptor {
@@ -34,6 +35,10 @@ interface ExtensionDockProps {
   activeInstalledSurface: InstalledChatSurfaceDescriptor | null;
   /** Installed runtime session created for the selected surface, if any. */
   activeInstalledSurfaceSession: InstalledSurfaceSessionResponse | null;
+  /** All preview endpoints currently registered for the active chat session. */
+  previewEndpoints: PreviewEndpointResponse[];
+  /** Active preview endpoint routed into the current surface, if any. */
+  activePreviewEndpoint: PreviewEndpointResponse | null;
 }
 
 /**
@@ -46,6 +51,8 @@ export function ExtensionDock({
   activeSurfaceSession,
   activeInstalledSurface,
   activeInstalledSurfaceSession,
+  previewEndpoints,
+  activePreviewEndpoint,
 }: ExtensionDockProps) {
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const runtimeThemeRef = useRef<{
@@ -175,6 +182,45 @@ export function ExtensionDock({
       window.location.origin,
     );
   }, [isIframeLoaded, isOpen, resolvedTheme, runtime, theme]);
+
+  useEffect(() => {
+    if (!isOpen || !isIframeLoaded || runtime === null || activePreviewEndpoint === null) {
+      return;
+    }
+
+    previewIframeRef.current?.contentWindow?.postMessage(
+      {
+        source: "pivot-host",
+        type: "pivot.host.preview_changed",
+        payload: activePreviewEndpoint,
+      },
+      window.location.origin,
+    );
+  }, [activePreviewEndpoint, isIframeLoaded, isOpen, runtime]);
+
+  useEffect(() => {
+    if (!isOpen || !isIframeLoaded || runtime === null) {
+      return;
+    }
+
+    previewIframeRef.current?.contentWindow?.postMessage(
+      {
+        source: "pivot-host",
+        type: "pivot.host.preview_registry_changed",
+        payload: {
+          previews: previewEndpoints,
+          active_preview_id: activePreviewEndpoint?.preview_id ?? null,
+        },
+      },
+      window.location.origin,
+    );
+  }, [
+    activePreviewEndpoint?.preview_id,
+    isIframeLoaded,
+    isOpen,
+    previewEndpoints,
+    runtime,
+  ]);
 
   if (!isOpen) {
     return null;

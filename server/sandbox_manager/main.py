@@ -6,22 +6,39 @@ service over HTTP to create, execute in, and destroy sandbox containers.
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
 import threading
 import time
+from asyncio import FIRST_COMPLETED, create_task, wait
 from contextlib import suppress
 from functools import lru_cache
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+)
 from podman import PodmanClient  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from websockets import connect as websocket_connect
+from websockets.exceptions import ConnectionClosed
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from websockets.typing import Subprotocol
 
 app = FastAPI(title="Pivot Sandbox Manager")
 logger = logging.getLogger("uvicorn.error")
@@ -655,6 +672,45 @@ def _container_skills_volume_name(container: Any) -> str | None:
     return None
 
 
+def _container_ipv4_address(container: Any) -> str | None:
+    """Return one IPv4 address for an existing sandbox container when available."""
+    attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        network_settings = attrs.get("NetworkSettings")
+        if isinstance(network_settings, dict):
+            direct_ip = network_settings.get("IPAddress")
+            if isinstance(direct_ip, str) and direct_ip:
+                return direct_ip
+            networks = network_settings.get("Networks")
+            if isinstance(networks, dict):
+                for network in networks.values():
+                    if not isinstance(network, dict):
+                        continue
+                    ip_address = network.get("IPAddress")
+                    if isinstance(ip_address, str) and ip_address:
+                        return ip_address
+
+    inspect_func = getattr(container, "inspect", None)
+    if callable(inspect_func):
+        inspected = inspect_func()
+        if isinstance(inspected, dict):
+            network_settings = inspected.get("NetworkSettings")
+            if isinstance(network_settings, dict):
+                direct_ip = network_settings.get("IPAddress")
+                if isinstance(direct_ip, str) and direct_ip:
+                    return direct_ip
+                networks = network_settings.get("Networks")
+                if isinstance(networks, dict):
+                    for network in networks.values():
+                        if not isinstance(network, dict):
+                            continue
+                        ip_address = network.get("IPAddress")
+                        if isinstance(ip_address, str) and ip_address:
+                            return ip_address
+
+    return None
+
+
 def _resolve_image_id(image_ref: str) -> str | None:
     """Resolve the current local image ID for a configured image reference."""
     try:
@@ -757,6 +813,9 @@ def _ensure_sandbox(
     workspace_id: str,
     workspace_backend_path: str,
     skills: Sequence[SandboxSkillMount | dict[str, Any]] | None = None,
+    *,
+    require_existing: bool = False,
+    allow_recreate: bool = True,
 ) -> Any:
     """Create or start a reusable sidecar sandbox container."""
     op_started = time.perf_counter()
@@ -768,7 +827,9 @@ def _ensure_sandbox(
     skill_volumes, expected_skill_sources = _build_skill_mounts(normalized_skills)
 
     existing = _find_container(name)
-    if existing is not None:
+    if existing is not None and require_existing and not allow_recreate:
+        should_recreate, recreate_reason = (False, "existing_container_reuse")
+    elif existing is not None:
         should_recreate, recreate_reason = _should_recreate_container(
             existing,
             expected_skill_sources,
@@ -777,7 +838,25 @@ def _ensure_sandbox(
     else:
         should_recreate, recreate_reason = (False, "no_container")
 
+    if existing is None and require_existing:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Sandbox preview runtime is unavailable because the original "
+                "sandbox container no longer exists. Restart the preview from the agent."
+            ),
+        )
+
     if existing is not None and should_recreate:
+        if not allow_recreate:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Sandbox preview runtime configuration no longer matches the "
+                    f"existing sandbox ({recreate_reason}). Restart the preview "
+                    "from the agent instead of recreating the container automatically."
+                ),
+            )
         try:
             _remove_container_fast(existing, reason=f"recreate:{recreate_reason}")
         except Exception as exc:
@@ -804,6 +883,15 @@ def _ensure_sandbox(
             if 'workdir "/workspace" does not exist' in message:
                 # Backward compatibility: old containers were created with an
                 # invalid workdir and can never be started again.
+                if not allow_recreate:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "Sandbox preview runtime cannot be reused because the "
+                            "existing sandbox has an invalid workdir. Restart the "
+                            "preview from the agent."
+                        ),
+                    ) from exc
                 try:
                     _remove_container_fast(existing, reason="recreate:broken_workdir")
                 except Exception as remove_exc:
@@ -822,6 +910,8 @@ def _ensure_sandbox(
                     workspace_id,
                     workspace_backend_path,
                     skills,
+                    require_existing=require_existing,
+                    allow_recreate=allow_recreate,
                 )
             if "already running" not in message:
                 raise HTTPException(
@@ -940,6 +1030,31 @@ class SandboxExecResponse(BaseModel):
     container_name: str
 
 
+class SandboxHttpProxyRequest(SandboxRequest):
+    """Request payload for proxying one HTTP request into a sandbox."""
+
+    port: int = Field(ge=1, le=65535)
+    path: str = Field(default="/", min_length=1)
+    method: str = Field(default="GET", min_length=1)
+    query_string: str = Field(default="")
+    headers: dict[str, str] = Field(default_factory=dict)
+    body_base64: str | None = None
+    require_existing: bool = False
+    allow_recreate: bool = True
+
+
+class SandboxWebSocketProxyInit(SandboxRequest):
+    """Initialization payload for one sandbox preview websocket tunnel."""
+
+    port: int
+    path: str = "/"
+    query_string: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    subprotocol: str | None = None
+    require_existing: bool = False
+    allow_recreate: bool = True
+
+
 def _cleanup_pool_once() -> None:
     """Run one cleanup pass for idle and over-capacity sandbox containers."""
     settings = get_settings()
@@ -1034,6 +1149,135 @@ def startup_pool_cleanup() -> None:
         get_settings().SANDBOX_POOL_IDLE_TTL_SECONDS,
         get_settings().SANDBOX_POOL_MAX_SIZE,
     )
+
+
+def _extract_upstream_proxy_headers(headers: dict[str, Any]) -> dict[str, str]:
+    """Forward only safe upstream headers to the backend proxy response."""
+    allowed_headers = {
+        "cache-control",
+        "content-language",
+        "content-type",
+        "etag",
+        "last-modified",
+        "location",
+        "vary",
+    }
+    response_headers: dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in allowed_headers and isinstance(value, str):
+            response_headers[key] = value
+    return response_headers
+
+
+def _normalize_preview_path(path: str) -> str:
+    """Return one normalized HTTP path for sandbox preview requests."""
+    normalized = path.strip() or "/"
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    return normalized
+
+
+def _decode_proxy_body(body_base64: str | None) -> bytes | None:
+    """Decode an optional proxy body payload."""
+    if body_base64 is None or body_base64 == "":
+        return None
+    try:
+        return base64.b64decode(body_base64)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid proxy request body encoding: {exc}",
+        ) from exc
+
+
+def _build_preview_target_url(*, container: Any, port: int, path: str, query_string: str) -> str:
+    """Build one concrete upstream preview URL for a sandbox container."""
+    container_ip = _container_ipv4_address(container)
+    if not container_ip:
+        raise HTTPException(
+            status_code=500,
+            detail="Sandbox container does not have a reachable IPv4 address.",
+        )
+    upstream_url = f"http://{container_ip}:{port}{_normalize_preview_path(path)}"
+    if query_string:
+        return f"{upstream_url}?{query_string}"
+    return upstream_url
+
+
+def _build_preview_target_ws_url(
+    *,
+    container: Any,
+    port: int,
+    path: str,
+    query_string: str,
+) -> str:
+    """Build one concrete upstream preview websocket URL for a sandbox."""
+    container_ip = _container_ipv4_address(container)
+    if not container_ip:
+        raise HTTPException(
+            status_code=500,
+            detail="Sandbox container does not have a reachable IPv4 address.",
+        )
+    upstream_url = f"ws://{container_ip}:{port}{_normalize_preview_path(path)}"
+    if query_string:
+        return f"{upstream_url}?{query_string}"
+    return upstream_url
+
+
+def _filter_proxy_request_headers(headers: dict[str, str]) -> dict[str, str]:
+    """Drop hop-by-hop headers before forwarding one preview request."""
+    blocked_headers = {
+        "authorization",
+        "connection",
+        "content-length",
+        "host",
+        "transfer-encoding",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+    }
+    return {
+        key: value
+        for key, value in headers.items()
+        if key.lower() not in blocked_headers
+    }
+
+
+def _build_preview_unreachable_detail(*, port: int, reason: object) -> str:
+    """Explain how preview targets must listen inside one sandbox container."""
+    return (
+        "Sandbox preview target is unreachable: "
+        f"{reason}. Ensure the preview server is running and listening on "
+        f"0.0.0.0:{port} inside the sandbox, not only on localhost/127.0.0.1."
+    )
+
+
+async def _forward_browser_messages(*, websocket: WebSocket, upstream: Any) -> None:
+    """Forward backend websocket frames into the upstream preview socket."""
+    try:
+        while True:
+            message = await websocket.receive()
+            message_type = message.get("type")
+            if message_type == "websocket.disconnect":
+                break
+            if text := message.get("text"):
+                await upstream.send(text)
+            elif (data := message.get("bytes")) is not None:
+                await upstream.send(data)
+    except Exception:
+        return
+
+
+async def _forward_upstream_ws_messages(*, websocket: WebSocket, upstream: Any) -> None:
+    """Forward upstream preview websocket frames back to the backend."""
+    try:
+        async for message in upstream:
+            if isinstance(message, bytes):
+                await websocket.send_bytes(message)
+            else:
+                await websocket.send_text(message)
+    except Exception:
+        return
 
 
 @app.get("/healthz")
@@ -1193,3 +1437,177 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
         stderr=stderr,
         container_name=_sandbox_name(payload.username, payload.workspace_id),
     )
+
+
+@app.post("/sandboxes/http-proxy", dependencies=[Depends(_require_token)])
+def proxy_http_in_sandbox(payload: SandboxHttpProxyRequest) -> Response:
+    """Proxy one HTTP request through the sandbox container network."""
+    try:
+        container = _ensure_sandbox(
+            payload.username,
+            payload.workspace_id,
+            payload.workspace_backend_path,
+            payload.skills,
+            require_existing=payload.require_existing,
+            allow_recreate=payload.allow_recreate,
+        )
+    except HTTPException as err:
+        raise err
+    method = payload.method.strip().upper() or "GET"
+    if method not in {"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"}:
+        raise HTTPException(status_code=400, detail="Unsupported preview HTTP method.")
+
+    target_url = _build_preview_target_url(
+        container=container,
+        port=payload.port,
+        path=payload.path,
+        query_string=payload.query_string,
+    )
+    proxy_body = _decode_proxy_body(payload.body_base64)
+    request_headers = _filter_proxy_request_headers(payload.headers)
+    upstream_request = UrlRequest(
+        target_url,
+        data=proxy_body,
+        headers=request_headers,
+        method=method,
+    )
+
+    try:
+        with urlopen(upstream_request) as upstream_response:
+            upstream_body = upstream_response.read()
+            response_headers = _extract_upstream_proxy_headers(
+                dict(upstream_response.headers.items())
+            )
+            return Response(
+                content=upstream_body,
+                status_code=upstream_response.getcode(),
+                headers=response_headers,
+                media_type=response_headers.get("Content-Type"),
+            )
+    except HTTPError as err:
+        response_headers = _extract_upstream_proxy_headers(dict(err.headers.items()))
+        return Response(
+            content=err.read(),
+            status_code=err.code,
+            headers=response_headers,
+            media_type=response_headers.get("Content-Type"),
+        )
+    except URLError as err:
+        raise HTTPException(
+            status_code=502,
+            detail=_build_preview_unreachable_detail(
+                port=payload.port,
+                reason=err.reason,
+            ),
+        ) from err
+
+
+@app.websocket("/sandboxes/ws-proxy")
+async def proxy_websocket_in_sandbox(websocket: WebSocket) -> None:
+    """Tunnel one preview websocket through sandbox-manager into a sandbox."""
+    if websocket.headers.get("x-sandbox-token") != get_settings().SANDBOX_MANAGER_TOKEN:
+        await websocket.close(code=1008, reason="Invalid sandbox token.")
+        return
+
+    await websocket.accept()
+
+    try:
+        payload = SandboxWebSocketProxyInit.model_validate_json(
+            await websocket.receive_text()
+        )
+    except Exception as err:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "detail": f"Invalid websocket proxy init payload: {err}",
+                }
+            )
+        )
+        await websocket.close(code=1003, reason="Invalid websocket proxy init.")
+        return
+
+    try:
+        container = _ensure_sandbox(
+            payload.username,
+            payload.workspace_id,
+            payload.workspace_backend_path,
+            payload.skills,
+            require_existing=payload.require_existing,
+            allow_recreate=payload.allow_recreate,
+        )
+    except HTTPException as err:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "detail": str(err.detail),
+                }
+            )
+        )
+        await websocket.close(code=1011, reason=str(err.detail)[:120])
+        return
+    target_url = _build_preview_target_ws_url(
+        container=container,
+        port=payload.port,
+        path=payload.path,
+        query_string=payload.query_string,
+    )
+    request_headers = _filter_proxy_request_headers(payload.headers)
+
+    try:
+        if payload.subprotocol:
+            upstream_connection = websocket_connect(
+                target_url,
+                additional_headers=request_headers,
+                subprotocols=[cast("Subprotocol", payload.subprotocol)],
+            )
+        elif request_headers:
+            upstream_connection = websocket_connect(
+                target_url,
+                additional_headers=request_headers,
+            )
+        else:
+            upstream_connection = websocket_connect(target_url)
+
+        async with upstream_connection as upstream:
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "ready",
+                        "accepted_subprotocol": upstream.subprotocol,
+                    }
+                )
+            )
+            client_to_upstream = create_task(
+                _forward_browser_messages(websocket=websocket, upstream=upstream)
+            )
+            upstream_to_client = create_task(
+                _forward_upstream_ws_messages(websocket=websocket, upstream=upstream)
+            )
+            done, pending = await wait(
+                {client_to_upstream, upstream_to_client},
+                return_when=FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
+    except ConnectionClosed:
+        await websocket.close()
+    except OSError as err:
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "error",
+                    "detail": _build_preview_unreachable_detail(
+                        port=payload.port,
+                        reason=err,
+                    ),
+                }
+            )
+        )
+        await websocket.close(
+            code=1011,
+            reason="Sandbox preview websocket target is unreachable.",
+        )
