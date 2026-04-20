@@ -16,9 +16,6 @@ if str(SERVER_ROOT) not in sys.path:
 import_module("app.models")
 
 Agent = import_module("app.models.agent").Agent
-Scene = import_module("app.models.agent").Scene
-Subscene = import_module("app.models.agent").Subscene
-Connection = import_module("app.models.agent").Connection
 AgentChannelBinding = import_module("app.models.channel").AgentChannelBinding
 AgentWebSearchBinding = import_module("app.models.web_search").AgentWebSearchBinding
 AgentSnapshotService = import_module(
@@ -46,38 +43,6 @@ class AgentSnapshotServiceTestCase(unittest.TestCase):
         self.session.add(self.agent)
         self.session.commit()
         self.session.refresh(self.agent)
-
-        scene = Scene(
-            name="triage",
-            description="Initial routing scene",
-            agent_id=self.agent.id,
-        )
-        self.session.add(scene)
-        self.session.commit()
-        self.session.refresh(scene)
-
-        subscene = Subscene(
-            name="start",
-            type="start",
-            state="inactive",
-            description="Entry node",
-            mandatory=True,
-            objective="Collect the issue",
-            scene_id=scene.id,
-        )
-        self.session.add(subscene)
-        self.session.commit()
-        self.session.refresh(subscene)
-
-        connection = Connection(
-            name="loop",
-            condition="need_more_info",
-            from_subscene="start",
-            to_subscene="start",
-            scene_id=scene.id,
-        )
-        self.session.add(connection)
-        self.session.commit()
 
     def tearDown(self) -> None:
         """Close the database session after each test."""

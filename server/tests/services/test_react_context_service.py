@@ -77,7 +77,7 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
                 '"max_iteration":30,'
                 '"tool_ids":null,'
                 '"skill_ids":null},'
-                '"scenes":[],"channel_bindings":[],"web_search_bindings":[]}'
+                '"channel_bindings":[],"web_search_bindings":[]}'
             ),
             snapshot_hash="release-hash",
             change_summary_json="[]",
@@ -200,7 +200,6 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
                     "tool_ids": ["web_search"],
                     "skill_ids": None,
                 },
-                "scenes": [],
             },
             draft_message="Preview my unsaved test session.",
         )

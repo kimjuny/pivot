@@ -540,7 +540,7 @@ function AgentList() {
       <ConfirmationModal
         isOpen={deleteConfirmation.isOpen}
         title="Delete Agent"
-        message={`Are you sure you want to delete "${deleteConfirmation.agent?.name}"? This will also delete all associated scenes, subscenes, connections, and chat history.`}
+        message={`Are you sure you want to delete "${deleteConfirmation.agent?.name}"? This will also delete all associated chat history and agent configuration.`}
         confirmText="Delete"
         cancelText="Cancel"
         onConfirm={() => void confirmDeleteAgent()}

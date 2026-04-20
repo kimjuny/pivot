@@ -8,38 +8,6 @@ from app.schemas.task_attachment import TaskAttachmentListItem
 from pydantic import Field
 
 
-class StudioTestSnapshotConnectionPayload(AppBaseModel):
-    """Normalized connection payload accepted for Studio test snapshots."""
-
-    id: int | str | None = None
-    name: str
-    condition: str | None = None
-    from_subscene: str
-    to_subscene: str
-
-
-class StudioTestSnapshotSubscenePayload(AppBaseModel):
-    """Normalized subscene payload accepted for Studio test snapshots."""
-
-    id: int | str | None = None
-    name: str
-    type: str = "normal"
-    state: str = "inactive"
-    description: str | None = None
-    mandatory: bool = False
-    objective: str | None = None
-    connections: list[StudioTestSnapshotConnectionPayload] = Field(default_factory=list)
-
-
-class StudioTestSnapshotScenePayload(AppBaseModel):
-    """Normalized scene payload accepted for Studio test snapshots."""
-
-    id: int | str | None = None
-    name: str
-    description: str | None = None
-    subscenes: list[StudioTestSnapshotSubscenePayload] = Field(default_factory=list)
-
-
 class StudioTestSnapshotAgentPayload(AppBaseModel):
     """Runtime-facing agent payload accepted for Studio test snapshots."""
 
@@ -60,7 +28,6 @@ class StudioTestSnapshotPayload(AppBaseModel):
 
     schema_version: int = 1
     agent: StudioTestSnapshotAgentPayload
-    scenes: list[StudioTestSnapshotScenePayload] = Field(default_factory=list)
 
 
 class SessionCreate(AppBaseModel):

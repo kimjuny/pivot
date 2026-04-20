@@ -22,6 +22,7 @@ from app.models.image_generation import (
     ImageGenerationUsageLog,
 )
 from app.schemas.image_generation import ImageProviderBindingResponse
+from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.provider_registry_service import ProviderRegistryService
 from sqlmodel import Session, col, select
@@ -81,12 +82,37 @@ class ImageGenerationService:
             provider_key
         )
 
-    def list_catalog(self) -> list[dict[str, Any]]:
-        """Return all installed image-generation provider manifests."""
-        return [
-            {"manifest": provider.manifest.model_dump()}
-            for provider in self._list_image_generation_providers()
-        ]
+    def _is_provider_available_to_agent(
+        self,
+        *,
+        agent_id: int,
+        provider: Any,
+        enabled_only: bool = True,
+    ) -> bool:
+        """Return whether one image provider is available to an agent."""
+        extension_package_id = provider.manifest.extension_name
+        if not extension_package_id:
+            return True
+        return ExtensionService(self.db).is_agent_extension_package_bound(
+            agent_id=agent_id,
+            package_id=extension_package_id,
+            enabled_only=enabled_only,
+        )
+
+    def list_catalog(self, agent_id: int | None = None) -> list[dict[str, Any]]:
+        """Return installed image-generation providers visible to the agent."""
+        providers = self._list_image_generation_providers()
+        if agent_id is not None:
+            providers = [
+                provider
+                for provider in providers
+                if self._is_provider_available_to_agent(
+                    agent_id=agent_id,
+                    provider=provider,
+                    enabled_only=True,
+                )
+            ]
+        return [{"manifest": provider.manifest.model_dump()} for provider in providers]
 
     def _serialize_binding(
         self,
@@ -94,12 +120,20 @@ class ImageGenerationService:
     ) -> ImageProviderBindingResponse:
         """Render one binding with provider manifest metadata."""
         provider = self._get_image_generation_provider(binding.provider_key)
+        effective_available, disabled_reason = ExtensionService(
+            self.db
+        ).get_agent_child_availability(
+            agent_id=binding.agent_id,
+            package_id=provider.manifest.extension_name,
+        )
         auth_config = _load_json_object(binding.auth_config)
         return ImageProviderBindingResponse(
             id=binding.id or 0,
             agent_id=binding.agent_id,
             provider_key=binding.provider_key,
             enabled=binding.enabled,
+            effective_enabled=binding.enabled and effective_available,
+            disabled_reason=disabled_reason,
             auth_config={key: str(value) for key, value in auth_config.items()},
             runtime_config=_load_json_object(binding.runtime_config),
             manifest=provider.manifest.model_dump(),
@@ -147,6 +181,14 @@ class ImageGenerationService:
     ) -> ImageProviderBindingResponse:
         """Create a new agent image-provider binding after validation."""
         provider = self._get_image_generation_provider(provider_key)
+        if not self._is_provider_available_to_agent(
+            agent_id=agent_id,
+            provider=provider,
+            enabled_only=False,
+        ):
+            raise ValueError(
+                "Install the owning extension on this agent before configuring this provider."
+            )
         provider.validate_config(auth_config, runtime_config)
 
         existing = self.db.exec(
@@ -272,8 +314,17 @@ class ImageGenerationService:
                 AgentImageProviderBinding.provider_key == provider_key
             )
         bindings = self.db.exec(statement).all()
+        available_bindings = [
+            binding
+            for binding in bindings
+            if self._is_provider_available_to_agent(
+                agent_id=agent_id,
+                provider=self._get_image_generation_provider(binding.provider_key),
+                enabled_only=True,
+            )
+        ]
         if provider_key is not None:
-            binding = bindings[0] if bindings else None
+            binding = available_bindings[0] if available_bindings else None
             if binding is None:
                 raise ValueError(
                     f"Enabled image provider '{provider_key}' is not configured "
@@ -281,19 +332,19 @@ class ImageGenerationService:
                 )
             return binding
 
-        if not bindings:
+        if not available_bindings:
             raise ValueError(
                 "This agent has no enabled image-generation providers configured."
             )
-        if len(bindings) > 1:
+        if len(available_bindings) > 1:
             provider_names = ", ".join(
-                sorted(binding.provider_key for binding in bindings)
+                sorted(binding.provider_key for binding in available_bindings)
             )
             raise ValueError(
                 "Multiple enabled image-generation providers are configured for "
                 f"this agent. Select one explicitly: {provider_names}."
             )
-        return bindings[0]
+        return available_bindings[0]
 
     def execute_request(
         self,

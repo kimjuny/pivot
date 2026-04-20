@@ -2,9 +2,9 @@ import { create } from 'zustand';
 
 /**
  * Represents a tab in the agent detail page.
- * Each tab can display different content types: scenes, tools, or skills.
+ * Each tab can display different content types: tools, skills, or functions.
  */
-export type AgentTabType = 'scene' | 'tool' | 'skill' | 'function';
+export type AgentTabType = 'tool' | 'skill' | 'function';
 
 /**
  * Optional metadata attached to tool/skill tabs.
@@ -20,7 +20,7 @@ export interface AgentTab {
     id: string;
     type: AgentTabType;
     name: string;
-    /** ID of the resource being displayed (scene ID, function ID, etc.) */
+    /** ID of the resource being displayed. */
     resourceId: number | string;
     /** Optional per-resource metadata for editor rendering. */
     meta?: AgentTabMeta;
@@ -40,7 +40,7 @@ interface AgentTabStore {
     setActiveTab: (id: string) => void;
     /** Close all tabs */
     closeAllTabs: () => void;
-    /** Replace a tab's resource ID (e.g. after a new scene is saved and gets a real ID) */
+    /** Replace a tab's resource ID. */
     replaceTabResource: (oldResourceId: number | string, newResourceId: number | string, type: AgentTabType) => void;
 }
 

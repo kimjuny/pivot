@@ -100,18 +100,49 @@ class ChannelService:
         """Resolve one channel provider from the unified provider registry."""
         return ProviderRegistryService(self.db).get_channel_provider(channel_key)
 
-    def list_catalog(self) -> list[dict[str, Any]]:
-        """Return all installed channel manifests."""
-        return [
-            {"manifest": provider.manifest.model_dump()}
-            for provider in self._list_channel_providers()
-        ]
+    def _is_provider_available_to_agent(
+        self,
+        *,
+        agent_id: int,
+        provider: ChannelProvider,
+        enabled_only: bool = True,
+    ) -> bool:
+        """Return whether one channel provider is available to an agent."""
+        extension_package_id = provider.manifest.extension_name
+        if not extension_package_id:
+            return True
+        return ExtensionService(self.db).is_agent_extension_package_bound(
+            agent_id=agent_id,
+            package_id=extension_package_id,
+            enabled_only=enabled_only,
+        )
+
+    def list_catalog(self, agent_id: int | None = None) -> list[dict[str, Any]]:
+        """Return installed channel providers visible to the current agent."""
+        providers = self._list_channel_providers()
+        if agent_id is not None:
+            providers = [
+                provider
+                for provider in providers
+                if self._is_provider_available_to_agent(
+                    agent_id=agent_id,
+                    provider=provider,
+                    enabled_only=True,
+                )
+            ]
+        return [{"manifest": provider.manifest.model_dump()} for provider in providers]
 
     def _serialize_binding(
         self, binding: AgentChannelBinding
     ) -> ChannelBindingResponse:
         """Render one binding with manifest metadata and generated endpoints."""
         provider = self._get_channel_provider(binding.channel_key)
+        effective_available, disabled_reason = ExtensionService(
+            self.db
+        ).get_agent_child_availability(
+            agent_id=binding.agent_id,
+            package_id=provider.manifest.extension_name,
+        )
         auth_config = _load_json_object(binding.auth_config)
         return ChannelBindingResponse(
             id=binding.id or 0,
@@ -119,6 +150,8 @@ class ChannelService:
             channel_key=binding.channel_key,
             name=binding.name,
             enabled=binding.enabled,
+            effective_enabled=binding.enabled and effective_available,
+            disabled_reason=disabled_reason,
             auth_config={key: str(value) for key, value in auth_config.items()},
             runtime_config=_load_json_object(binding.runtime_config),
             manifest=provider.manifest.model_dump(),
@@ -159,6 +192,14 @@ class ChannelService:
     ) -> ChannelBindingResponse:
         """Create a new agent channel binding after provider validation."""
         provider = self._get_channel_provider(channel_key)
+        if not self._is_provider_available_to_agent(
+            agent_id=agent_id,
+            provider=provider,
+            enabled_only=False,
+        ):
+            raise ValueError(
+                "Install and enable the owning extension on this agent before creating this channel."
+            )
         provider.validate_config(auth_config, runtime_config)
         binding = AgentChannelBinding(
             agent_id=agent_id,

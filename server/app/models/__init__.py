@@ -1,4 +1,4 @@
-from app.models.agent import Agent, Connection, Scene, Subscene
+from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import (
     AgentChannelBinding,
@@ -47,7 +47,6 @@ __all__ = [
     "ChannelEventLog",
     "ChannelLinkToken",
     "ChannelSession",
-    "Connection",
     "ExtensionHookExecution",
     "ExtensionInstallation",
     "ExternalIdentityBinding",
@@ -59,11 +58,9 @@ __all__ = [
     "ReactRecursionState",
     "ReactTask",
     "ReactTaskEvent",
-    "Scene",
     "Session",
     "Skill",
     "SkillChangeSubmission",
-    "Subscene",
     "TaskAttachment",
     "User",
     "UserLogin",

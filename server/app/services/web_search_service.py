@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from app.models.web_search import AgentWebSearchBinding
 from app.orchestration.web_search.types import WebSearchProviderBinding
 from app.schemas.web_search import WebSearchBindingResponse
+from app.services.extension_service import ExtensionService
 from app.services.provider_registry_service import ProviderRegistryService
 from sqlmodel import Session, col, select
 
@@ -51,24 +52,57 @@ class WebSearchService:
         """Resolve one provider from the unified provider registry."""
         return ProviderRegistryService(self.db).get_web_search_provider(provider_key)
 
-    def list_catalog(self) -> list[dict[str, Any]]:
-        """Return all installed web-search provider manifests."""
-        return [
-            {"manifest": provider.manifest.model_dump()}
-            for provider in self._list_web_search_providers()
-        ]
+    def _is_provider_available_to_agent(
+        self,
+        *,
+        agent_id: int,
+        provider: WebSearchProvider,
+        enabled_only: bool = True,
+    ) -> bool:
+        """Return whether one provider is available to an agent."""
+        extension_package_id = provider.manifest.extension_name
+        if not extension_package_id:
+            return True
+        return ExtensionService(self.db).is_agent_extension_package_bound(
+            agent_id=agent_id,
+            package_id=extension_package_id,
+            enabled_only=enabled_only,
+        )
+
+    def list_catalog(self, agent_id: int | None = None) -> list[dict[str, Any]]:
+        """Return installed web-search providers visible to the current agent."""
+        providers = self._list_web_search_providers()
+        if agent_id is not None:
+            providers = [
+                provider
+                for provider in providers
+                if self._is_provider_available_to_agent(
+                    agent_id=agent_id,
+                    provider=provider,
+                    enabled_only=True,
+                )
+            ]
+        return [{"manifest": provider.manifest.model_dump()} for provider in providers]
 
     def _serialize_binding(
         self, binding: AgentWebSearchBinding
     ) -> WebSearchBindingResponse:
         """Render one binding with provider manifest metadata."""
         provider = self._get_web_search_provider(binding.provider_key)
+        effective_available, disabled_reason = ExtensionService(
+            self.db
+        ).get_agent_child_availability(
+            agent_id=binding.agent_id,
+            package_id=provider.manifest.extension_name,
+        )
         auth_config = _load_json_object(binding.auth_config)
         return WebSearchBindingResponse(
             id=binding.id or 0,
             agent_id=binding.agent_id,
             provider_key=binding.provider_key,
             enabled=binding.enabled,
+            effective_enabled=binding.enabled and effective_available,
+            disabled_reason=disabled_reason,
             auth_config={key: str(value) for key, value in auth_config.items()},
             runtime_config=_load_json_object(binding.runtime_config),
             manifest=provider.manifest.model_dump(),
@@ -115,6 +149,14 @@ class WebSearchService:
     ) -> WebSearchBindingResponse:
         """Create a new agent web-search binding after provider validation."""
         provider = self._get_web_search_provider(provider_key)
+        if not self._is_provider_available_to_agent(
+            agent_id=agent_id,
+            provider=provider,
+            enabled_only=False,
+        ):
+            raise ValueError(
+                "Install the owning extension on this agent before configuring this provider."
+            )
         provider.validate_config(auth_config, runtime_config)
 
         existing = self.db.exec(
@@ -240,8 +282,17 @@ class WebSearchService:
                 AgentWebSearchBinding.provider_key == provider_key
             )
         bindings = self.db.exec(statement).all()
+        available_bindings = [
+            binding
+            for binding in bindings
+            if self._is_provider_available_to_agent(
+                agent_id=agent_id,
+                provider=self._get_web_search_provider(binding.provider_key),
+                enabled_only=True,
+            )
+        ]
         if provider_key is not None:
-            binding = bindings[0] if bindings else None
+            binding = available_bindings[0] if available_bindings else None
             if binding is None:
                 raise ValueError(
                     f"Enabled web search provider '{provider_key}' is not configured "
@@ -249,19 +300,19 @@ class WebSearchService:
                 )
             return binding
 
-        if not bindings:
+        if not available_bindings:
             raise ValueError(
                 "This agent has no enabled web search providers configured."
             )
-        if len(bindings) > 1:
+        if len(available_bindings) > 1:
             provider_names = ", ".join(
-                sorted(binding.provider_key for binding in bindings)
+                sorted(binding.provider_key for binding in available_bindings)
             )
             raise ValueError(
                 "Multiple web search providers are enabled for this agent. "
                 f"Specify provider explicitly. Available providers: {provider_names}."
             )
-        return bindings[0]
+        return available_bindings[0]
 
     def execute_search(
         self,

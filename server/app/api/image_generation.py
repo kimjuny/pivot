@@ -27,12 +27,13 @@ router = APIRouter()
     response_model=list[ImageProviderCatalogItemResponse],
 )
 async def list_image_generation_providers(
+    agent_id: int | None = None,
     db=Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> list[dict[str, object]]:
     """List all installed image-generation provider manifests."""
     del current_user
-    return ImageGenerationService(db).list_catalog()
+    return ImageGenerationService(db).list_catalog(agent_id)
 
 
 @router.get(

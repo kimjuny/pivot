@@ -51,6 +51,8 @@ class WebSearchBindingResponse(AppBaseModel):
     agent_id: int
     provider_key: str
     enabled: bool
+    effective_enabled: bool = True
+    disabled_reason: str | None = None
     auth_config: dict[str, Any]
     runtime_config: dict[str, Any]
     manifest: dict[str, Any]

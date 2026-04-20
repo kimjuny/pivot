@@ -12,11 +12,14 @@ vi.mock("sonner", () => ({
 vi.mock("@/utils/api", () => ({
   deleteAgentChannel: vi.fn(),
   deleteAgentExtensionBinding: vi.fn(),
+  deleteAgentImageProviderBinding: vi.fn(),
   deleteAgentWebSearchBinding: vi.fn(),
   getAgentChannels: vi.fn(),
   getAgentExtensionPackages: vi.fn(),
+  getAgentImageProviderBindings: vi.fn(),
   getAgentWebSearchBindings: vi.fn(),
   getChannels: vi.fn(),
+  getImageGenerationProviders: vi.fn(),
   getPrivateSkills: vi.fn(),
   getPrivateTools: vi.fn(),
   getSharedSkills: vi.fn(),
@@ -48,13 +51,19 @@ vi.mock("./WebSearchBindingDialog", () => ({
   default: () => null,
 }));
 
+vi.mock("./ImageGenerationBindingDialog", () => ({
+  default: () => null,
+}));
+
 import { SidebarProvider } from "@/components/ui/sidebar";
 import {
   deleteAgentExtensionBinding,
   getAgentChannels,
   getAgentExtensionPackages,
+  getAgentImageProviderBindings,
   getAgentWebSearchBindings,
   getChannels,
+  getImageGenerationProviders,
   getPrivateSkills,
   getPrivateTools,
   getSharedSkills,
@@ -62,9 +71,12 @@ import {
   getWebSearchProviders,
 } from "@/utils/api";
 
-import type { Agent, Scene } from "../types";
+import type { Agent } from "../types";
 
 import AgentDetailSidebar from "./AgentDetailSidebar";
+
+const LOGO_DATA_URL =
+  "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=";
 
 const baseAgent: Agent = {
   id: 2,
@@ -84,7 +96,6 @@ const baseAgent: Agent = {
   skill_ids: null,
   created_at: "2026-04-03T00:00:00+00:00",
   updated_at: "2026-04-03T00:00:00+00:00",
-  scenes: [],
 };
 
 /**
@@ -113,6 +124,8 @@ describe("AgentDetailSidebar", () => {
     vi.mocked(getPrivateSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
+    vi.mocked(getImageGenerationProviders).mockResolvedValue([]);
+    vi.mocked(getAgentImageProviderBindings).mockResolvedValue([]);
     vi.mocked(getWebSearchProviders).mockResolvedValue([]);
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(deleteAgentExtensionBinding).mockResolvedValue(undefined);
@@ -174,10 +187,12 @@ describe("AgentDetailSidebar", () => {
               },
               contribution_summary: {
                 channel_providers: [],
+                image_providers: [],
                 web_search_providers: [],
                 hooks: [],
                 tools: [],
                 skills: [],
+                chat_surfaces: [],
               },
               contribution_items: [],
             },
@@ -207,11 +222,6 @@ describe("AgentDetailSidebar", () => {
       <SidebarProvider defaultOpen={true}>
         <AgentDetailSidebar
           agent={baseAgent}
-          scenes={[] as Scene[]}
-          selectedScene={null}
-          onSceneSelect={vi.fn()}
-          onCreateScene={vi.fn()}
-          onDeleteScene={vi.fn()}
           onExtensionBindingsChanged={onExtensionBindingsChanged}
         />
       </SidebarProvider>,
@@ -224,6 +234,7 @@ describe("AgentDetailSidebar", () => {
     await user.click(screen.getAllByText("Extensions")[1]);
 
     await user.click(screen.getByRole("button", { name: "Delete extension" }));
+    await user.click(screen.getByRole("button", { name: "Remove" }));
 
     await waitFor(() => {
       expect(deleteAgentExtensionBinding).toHaveBeenCalledWith(2, 11);
@@ -238,6 +249,59 @@ describe("AgentDetailSidebar", () => {
     vi.mocked(getPrivateSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
+    vi.mocked(getImageGenerationProviders).mockResolvedValue([
+      {
+        manifest: {
+          key: "wasp@image",
+          name: "Wasp Image",
+          description: "Wasp image provider",
+          docs_url: "https://example.com/wasp-image",
+          visibility: "extension",
+          status: "active",
+          extension_name: "@wasp/plugin",
+          extension_display_name: "Wasp Plugin",
+          extension_version: "0.1.0",
+          auth_schema: [],
+          config_schema: [],
+          setup_steps: [],
+          supported_operations: [],
+          supported_parameters: [],
+          capability_flags: {},
+        },
+      },
+    ]);
+    vi.mocked(getAgentImageProviderBindings).mockResolvedValue([
+      {
+        id: 17,
+        agent_id: 2,
+        provider_key: "wasp@image",
+        enabled: true,
+        auth_config: {},
+        runtime_config: {},
+        last_health_status: "healthy",
+        last_health_message: "ok",
+        last_health_check_at: "2026-04-03T00:00:00+00:00",
+        created_at: "2026-04-03T00:00:00+00:00",
+        updated_at: "2026-04-03T00:00:00+00:00",
+        manifest: {
+          key: "wasp@image",
+          name: "Wasp Image",
+          description: "Wasp image provider",
+          docs_url: "https://example.com/wasp-image",
+          visibility: "extension",
+          status: "active",
+          extension_name: "@wasp/plugin",
+          extension_display_name: "Wasp Plugin",
+          extension_version: "0.1.0",
+          auth_schema: [],
+          config_schema: [],
+          setup_steps: [],
+          supported_operations: [],
+          supported_parameters: [],
+          capability_flags: {},
+        },
+      },
+    ]);
     vi.mocked(getWebSearchProviders).mockResolvedValue([]);
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(getAgentExtensionPackages).mockResolvedValue([
@@ -247,7 +311,7 @@ describe("AgentDetailSidebar", () => {
         package_id: "@wasp/plugin",
         display_name: "Wasp Plugin",
         description: "Wasp framework skills",
-        logo_url: "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
+        logo_url: LOGO_DATA_URL,
         active_version_count: 1,
         disabled_version_count: 0,
         has_update_available: false,
@@ -268,7 +332,7 @@ describe("AgentDetailSidebar", () => {
             version: "0.1.0",
             display_name: "Wasp Plugin",
             description: "Wasp framework skills",
-            logo_url: "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
+            logo_url: LOGO_DATA_URL,
             manifest_hash: "hash",
             artifact_storage_backend: "local_fs",
             artifact_key: "extensions/wasp/plugin/0.1.0/hash.tar.gz",
@@ -297,10 +361,12 @@ describe("AgentDetailSidebar", () => {
             },
             contribution_summary: {
               channel_providers: [],
+              image_providers: [],
               web_search_providers: [],
               hooks: [],
               tools: [],
               skills: [],
+              chat_surfaces: [],
             },
             contribution_items: [],
           },
@@ -314,11 +380,6 @@ describe("AgentDetailSidebar", () => {
       <SidebarProvider defaultOpen={true}>
         <AgentDetailSidebar
           agent={baseAgent}
-          scenes={[] as Scene[]}
-          selectedScene={null}
-          onSceneSelect={vi.fn()}
-          onCreateScene={vi.fn()}
-          onDeleteScene={vi.fn()}
         />
       </SidebarProvider>,
     );
@@ -331,7 +392,14 @@ describe("AgentDetailSidebar", () => {
 
     expect(screen.getByAltText("Wasp Plugin logo")).toHaveAttribute(
       "src",
-      "http://localhost:8000/api/extensions/installations/7/logo?v=digest",
+      LOGO_DATA_URL,
+    );
+
+    await userEvent.setup().click(screen.getAllByText("Image Providers")[1]);
+
+    expect(screen.getAllByAltText("Wasp Image logo")[0]).toHaveAttribute(
+      "src",
+      LOGO_DATA_URL,
     );
   });
 
@@ -350,6 +418,8 @@ describe("AgentDetailSidebar", () => {
     vi.mocked(getPrivateSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
+    vi.mocked(getImageGenerationProviders).mockResolvedValue([]);
+    vi.mocked(getAgentImageProviderBindings).mockResolvedValue([]);
     vi.mocked(getWebSearchProviders).mockResolvedValue([]);
     vi.mocked(getAgentExtensionPackages).mockResolvedValue([]);
     vi.mocked(getAgentWebSearchBindings)
@@ -395,11 +465,6 @@ describe("AgentDetailSidebar", () => {
       <SidebarProvider defaultOpen={true}>
         <AgentDetailSidebar
           agent={baseAgent}
-          scenes={[] as Scene[]}
-          selectedScene={null}
-          onSceneSelect={vi.fn()}
-          onCreateScene={vi.fn()}
-          onDeleteScene={vi.fn()}
         />
       </SidebarProvider>,
     );
@@ -412,11 +477,6 @@ describe("AgentDetailSidebar", () => {
       <SidebarProvider defaultOpen={true}>
         <AgentDetailSidebar
           agent={nextAgent}
-          scenes={[] as Scene[]}
-          selectedScene={null}
-          onSceneSelect={vi.fn()}
-          onCreateScene={vi.fn()}
-          onDeleteScene={vi.fn()}
         />
       </SidebarProvider>,
     );

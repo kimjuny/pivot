@@ -46,6 +46,8 @@ class ImageProviderBindingResponse(AppBaseModel):
     agent_id: int
     provider_key: str
     enabled: bool
+    effective_enabled: bool = True
+    disabled_reason: str | None = None
     auth_config: dict[str, str] = Field(default_factory=dict)
     runtime_config: dict[str, Any] = Field(default_factory=dict)
     manifest: ImageGenerationProviderManifest

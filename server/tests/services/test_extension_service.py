@@ -10,7 +10,7 @@ from importlib import import_module
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
@@ -21,6 +21,7 @@ Agent = import_module("app.models.agent").Agent
 AgentRelease = import_module("app.models.agent_release").AgentRelease
 AgentSavedDraft = import_module("app.models.agent_release").AgentSavedDraft
 AgentTestSnapshot = import_module("app.models.agent_release").AgentTestSnapshot
+AgentWebSearchBinding = import_module("app.models.web_search").AgentWebSearchBinding
 AgentExtensionBinding = import_module("app.models.extension").AgentExtensionBinding
 ExtensionHookExecution = import_module("app.models.extension").ExtensionHookExecution
 User = import_module("app.models.user").User
@@ -578,7 +579,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
     def test_extension_tools_remain_available_under_legacy_tool_allowlist(
         self,
     ) -> None:
-        """Bound extension tools should stay visible even with restrictive tool_ids."""
+        """Bound extension tools and skills should ignore legacy allowlists."""
         extension_root = self._write_extension(
             tool_name="seedream_generate_image",
             skill_name="seedream_skill",
@@ -604,8 +605,20 @@ class ExtensionServiceTestCase(unittest.TestCase):
             raw_tool_ids=json.dumps(["read_file"]),
             extension_bundle=runtime_config.extension_bundle,
         )
+        extension_skills = service.build_bundle_skill_payloads(
+            runtime_config.extension_bundle
+        )
+        visible_skills = skill_service.list_allowed_visible_skills(
+            self.session,
+            "alice",
+            raw_skill_ids=json.dumps(["research"]),
+            extra_skills=extension_skills,
+        )
 
         self.assertIsNotNone(tool_manager.get_tool("seedream_generate_image"))
+        self.assertTrue(
+            any(skill["name"] == "seedream_skill" for skill in visible_skills)
+        )
 
     def test_installation_configuration_defaults_are_persisted(self) -> None:
         """Installations should resolve manifest defaults for setup fields."""
@@ -2169,10 +2182,10 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 trust_confirmed=True,
             )
 
-    def test_extension_provider_catalogs_and_bindings_work_without_agent_extension_binding(
+    def test_agent_scoped_provider_catalogs_require_the_extension_binding(
         self,
     ) -> None:
-        """Installed provider packages should flow into channel and search catalogs."""
+        """Agent-scoped catalogs should only expose providers from bound extensions."""
         extension_root = self._write_extension(
             package_name="acme.providers",
             version="1.0.0",
@@ -2209,6 +2222,58 @@ class ExtensionServiceTestCase(unittest.TestCase):
             )
         )
 
+        self.assertFalse(
+            any(
+                item["manifest"]["key"] == "acme@chat"
+                for item in ChannelService(self.session).list_catalog(self.agent.id or 0)
+            )
+        )
+        self.assertFalse(
+            any(
+                item["manifest"]["key"] == "acme@search"
+                for item in WebSearchService(self.session).list_catalog(self.agent.id or 0)
+            )
+        )
+
+        ExtensionService(self.session).upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+            enabled=True,
+        )
+
+        self.assertTrue(
+            any(
+                item["manifest"]["key"] == "acme@chat"
+                for item in ChannelService(self.session).list_catalog(self.agent.id or 0)
+            )
+        )
+        self.assertTrue(
+            any(
+                item["manifest"]["key"] == "acme@search"
+                for item in WebSearchService(self.session).list_catalog(self.agent.id or 0)
+            )
+        )
+
+        web_search_bindings = WebSearchService(self.session).list_agent_bindings(
+            self.agent.id or 0
+        )
+        self.assertEqual(len(web_search_bindings), 1)
+        self.assertEqual(web_search_bindings[0].provider_key, "acme@search")
+        self.assertFalse(web_search_bindings[0].enabled)
+        self.assertFalse(web_search_bindings[0].effective_enabled)
+        seeded_binding = self.session.exec(
+            select(AgentWebSearchBinding).where(
+                AgentWebSearchBinding.agent_id == (self.agent.id or 0),
+                AgentWebSearchBinding.provider_key == "acme@search",
+            )
+        ).first()
+        self.assertIsNotNone(seeded_binding)
+        if seeded_binding is None:
+            self.fail("Expected seeded web-search binding to exist.")
+        seeded_binding.enabled = True
+        self.session.add(seeded_binding)
+        self.session.commit()
+
         channel_binding = ChannelService(self.session).create_binding(
             agent_id=self.agent.id or 0,
             channel_key="acme@chat",
@@ -2222,26 +2287,69 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(channel_binding.manifest["extension_name"], "@acme/providers")
         self.assertEqual(channel_binding.manifest["extension_version"], "1.0.0")
 
-        web_search_binding = WebSearchService(self.session).create_binding(
-            agent_id=self.agent.id or 0,
-            provider_key="acme@search",
-            enabled=True,
-            auth_config={},
-            runtime_config={},
-        )
-        self.assertEqual(web_search_binding.provider_key, "acme@search")
-        self.assertEqual(web_search_binding.manifest["visibility"], "extension")
-        self.assertEqual(
-            web_search_binding.manifest["extension_name"], "@acme/providers"
-        )
-        self.assertEqual(web_search_binding.manifest["extension_version"], "1.0.0")
-
         result = WebSearchService(self.session).execute_search(
             agent_id=self.agent.id or 0,
             request=WebSearchQueryRequest(query="pivot", provider="acme@search"),
         )
         self.assertEqual(result.provider["key"], "acme@search")
         self.assertEqual(result.query, "pivot")
+
+    def test_deleting_agent_extension_binding_cascades_agent_contributions(self) -> None:
+        """Removing an extension binding should remove its child agent bindings."""
+        extension_root = self._write_extension(
+            package_name="acme.providers",
+            version="1.0.0",
+            channel_provider_key="acme@chat",
+            web_search_provider_key="acme@search",
+        )
+        service = ExtensionService(self.session)
+        installation = service.install_from_path(
+            source_dir=extension_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+            enabled=True,
+        )
+
+        seeded_binding = self.session.exec(
+            select(AgentWebSearchBinding).where(
+                AgentWebSearchBinding.agent_id == (self.agent.id or 0),
+                AgentWebSearchBinding.provider_key == "acme@search",
+            )
+        ).first()
+        self.assertIsNotNone(seeded_binding)
+        if seeded_binding is None:
+            self.fail("Expected seeded web-search binding to exist.")
+        seeded_binding.enabled = True
+        self.session.add(seeded_binding)
+        self.session.commit()
+
+        channel_binding = ChannelService(self.session).create_binding(
+            agent_id=self.agent.id or 0,
+            channel_key="acme@chat",
+            name="Demo Chat",
+            enabled=True,
+            auth_config={},
+            runtime_config={},
+        )
+        self.assertEqual(channel_binding.channel_key, "acme@chat")
+
+        service.delete_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=installation.id or 0,
+        )
+
+        self.assertEqual(
+            WebSearchService(self.session).list_agent_bindings(self.agent.id or 0),
+            [],
+        )
+        self.assertEqual(
+            ChannelService(self.session).list_agent_bindings(self.agent.id or 0),
+            [],
+        )
 
     def test_provider_keys_must_use_the_extension_scope_prefix(self) -> None:
         """Extension providers should follow the documented scope@name identity."""

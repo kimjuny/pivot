@@ -764,8 +764,6 @@ def list_allowed_visible_skills(
             or not isinstance(skill_location, str)
         ):
             continue
-        if allowed_names is not None and skill_name not in allowed_names:
-            continue
         if skill_name in seen_names:
             continue
         seen_names.add(skill_name)

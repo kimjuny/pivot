@@ -22,7 +22,6 @@ function groupReleaseSummary(summary: string[]): SummarySection[] {
   const sections: SummarySection[] = [
     { key: 'basics', label: 'Basics', items: [] },
     { key: 'runtime', label: 'Runtime', items: [] },
-    { key: 'workflow', label: 'Workflow', items: [] },
     { key: 'capabilities', label: 'Capabilities', items: [] },
     { key: 'connections', label: 'Connections', items: [] },
     { key: 'general', label: 'General', items: [] },
@@ -35,16 +34,13 @@ function groupReleaseSummary(summary: string[]): SummarySection[] {
     if (item.startsWith('Runtime settings')) {
       return sections[1];
     }
-    if (item.startsWith('Scenes ') || item.startsWith('Scene ')) {
-      return sections[2];
-    }
     if (
       item.startsWith('Tools ') ||
       item.startsWith('Tool ') ||
       item.startsWith('Skills ') ||
       item.startsWith('Skill ')
     ) {
-      return sections[3];
+      return sections[2];
     }
     if (
       item.startsWith('Channel bindings ') ||
@@ -52,9 +48,9 @@ function groupReleaseSummary(summary: string[]): SummarySection[] {
       item.startsWith('Web search providers ') ||
       item.startsWith('Web search provider ')
     ) {
-      return sections[4];
+      return sections[3];
     }
-    return sections[5];
+    return sections[4];
   };
 
   for (const item of summary) {

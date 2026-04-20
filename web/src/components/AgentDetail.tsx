@@ -1,31 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ReactFlow,
-  MiniMap,
-  Controls,
-  Background,
-  useNodesState,
-  useEdgesState,
-  MarkerType,
-  BezierEdge,
-  Node,
-  Edge,
-  Connection,
-  ReactFlowInstance
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { X, Layers, Wrench, Zap } from "@/lib/lucide";
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { X, Wrench, Zap } from "@/lib/lucide";
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import DraggableDialog from './DraggableDialog';
 import ReactChatInterface from '@/components/ReactChatInterface';
-import EditPanel from './EditPanel';
-import SceneModal from './SceneModal';
-import SubsceneModal from './SubsceneModal';
-import ConnectionModal from './ConnectionModal';
-import SubsceneNode from './SubsceneNode';
 import AgentDetailSidebar, {
   type SidebarChannel,
   type SidebarImageProviderBinding,
@@ -34,12 +14,10 @@ import AgentDetailSidebar, {
 import AgentWorkspaceToolbar from './AgentWorkspaceToolbar';
 import PublishReleaseDrawer from './PublishReleaseDrawer';
 import ReleaseHistoryDialog from './ReleaseHistoryDialog';
-import SceneContextMenu, { ContextMenuContext } from './SceneContextMenu';
 import ToolEditor from './ToolEditor';
 import SkillEditor from './SkillEditor';
 import {
   updateAgent,
-  updateAgentScenes,
   getAgentDraftState,
   getPrivateToolSource,
   publishAgentRelease,
@@ -57,35 +35,15 @@ import {
   computeStudioTestWorkspaceHash,
   type StudioTestSnapshotPayload,
 } from '@/utils/agentTestSnapshot';
-import { compareSceneGraphs, deepCopyAgent, deepCopySceneGraph } from '../utils/compare';
+import { deepCopyAgent } from '../utils/compare';
 import { toast } from 'sonner';
-import type { Agent, Scene, SceneGraph, SceneNode } from '../types';
+import type { Agent } from '../types';
 import type { AgentTab } from '../store/agentTabStore';
-
-const nodeTypes = {
-  subscene: SubsceneNode,
-};
-
-const edgeTypes = {
-  bezier: BezierEdge,
-};
-
-interface SelectedElement {
-  type: 'node' | 'edge';
-  id: string;
-  data: Record<string, unknown>;
-  label?: string;
-  clickPosition?: { x: number; y: number };
-}
 
 interface AgentDetailProps {
   agent: Agent | null;
-  scenes: Scene[];
-  selectedScene: Scene | null;
   agentId: number;
-  onResetSceneGraph: () => Promise<void>;
-  onSceneSelect: (scene: Scene) => void;
-  onRefreshScenes: () => Promise<void>;
+  onRefreshAgent: () => Promise<Agent | null>;
 }
 
 interface ToolTabDescriptor {
@@ -140,7 +98,6 @@ function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
 /**
  * Parse skill tab metadata/resourceId into a normalized descriptor.
  * Falls back to shared/manual read-only for legacy tabs without metadata.
- * Current tabs should always pass explicit readOnly metadata from the API.
  */
 function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
   const rawResourceId = String(tab.resourceId);
@@ -180,8 +137,6 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
 
 /**
  * Build a compact module-level summary for pending draft changes.
- * Why: hover cards should explain what is about to be saved or published
- * without overwhelming users with raw field-level diffs.
  */
 function buildDraftChangeSummary(
   originalAgent: Agent | null,
@@ -221,73 +176,24 @@ function buildDraftChangeSummary(
     changes.push('Skill access updated');
   }
 
-  const originalScenes = originalAgent.scenes ?? [];
-  const workspaceScenes = workspaceAgent.scenes ?? [];
-  const originalSceneNames = new Set(originalScenes.map((scene) => scene.name ?? ''));
-  const workspaceSceneNames = new Set(workspaceScenes.map((scene) => scene.name ?? ''));
-  const addedScenes = workspaceScenes.filter(
-    (scene) => !originalSceneNames.has(scene.name ?? '')
-  ).length;
-  const removedScenes = originalScenes.filter(
-    (scene) => !workspaceSceneNames.has(scene.name ?? '')
-  ).length;
-  let updatedScenes = 0;
-
-  for (const scene of workspaceScenes) {
-    const sceneName = scene.name ?? '';
-    const originalScene = originalScenes.find((item) => (item.name ?? '') === sceneName);
-    if (!originalScene) {
-      continue;
-    }
-    if (compareSceneGraphs(originalScene, scene)) {
-      updatedScenes += 1;
-    }
-  }
-
-  if (addedScenes > 0) {
-    changes.push(`${addedScenes} scene${addedScenes > 1 ? 's' : ''} added`);
-  }
-  if (removedScenes > 0) {
-    changes.push(`${removedScenes} scene${removedScenes > 1 ? 's' : ''} removed`);
-  }
-  if (updatedScenes > 0) {
-    changes.push(`${updatedScenes} scene${updatedScenes > 1 ? 's' : ''} updated`);
-  }
-
   return changes;
 }
 
-function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onRefreshScenes }: AgentDetailProps) {
+function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
   const {
     originalAgent,
     workspaceAgent,
-    currentSceneId,
     hasUnsavedChanges,
     isSubmitting,
     initialize,
     setWorkspaceAgent,
-    updateSceneInWorkspace,
-    setCurrentSceneId,
     discardChanges,
     markAsCommitted,
     setSubmitting,
-    reset
   } = useAgentWorkStore();
-  const { tabs, activeTabId, setActiveTab, closeTab, replaceTabResource } = useAgentTabStore();
+  const { tabs, activeTabId, setActiveTab, closeTab } = useAgentTabStore();
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [isReactChatOpen, setIsReactChatOpen] = useState<boolean>(false);
-  const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
-  const [isCreateSceneModalOpen, setIsCreateSceneModalOpen] = useState<boolean>(false);
-  const [isEditSceneModalOpen, setIsEditSceneModalOpen] = useState<boolean>(false);
-  const [isAddSubsceneModalOpen, setIsAddSubsceneModalOpen] = useState<boolean>(false);
-  const [isAddConnectionModalOpen, setIsAddConnectionModalOpen] = useState<boolean>(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [contextMenuContext, setContextMenuContext] = useState<ContextMenuContext>('pane');
-  const [contextMenuElement, setContextMenuElement] = useState<{ id: string; data?: Record<string, unknown> } | null>(null);
-  const [pendingConnection, setPendingConnection] = useState<{ from: string; to: string } | null>(null);
-  const [newSubscenePosition, setNewSubscenePosition] = useState<{ x: number; y: number } | null>(null);
   const [toolEditors, setToolEditors] = useState<Record<string, TabEditorState>>({});
   const [skillEditors, setSkillEditors] = useState<Record<string, TabEditorState>>({});
   const [isPublishDrawerOpen, setIsPublishDrawerOpen] = useState(false);
@@ -297,13 +203,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
   const [isPublishingRelease, setIsPublishingRelease] = useState(false);
   const [releaseNote, setReleaseNote] = useState('');
   const [studioTestSnapshotHash, setStudioTestSnapshotHash] = useState<string | null>(null);
-  const reactFlowInstanceRef = useRef<ReactFlowInstance<Node, Edge> | null>(null);
 
-  const workingScenes = useMemo(
-    () => ((workspaceAgent?.scenes ?? []) as unknown as Scene[]),
-    [workspaceAgent?.scenes]
-  );
-  const workingSceneGraph = workspaceAgent?.scenes?.find(s => s.id === currentSceneId) || null;
   const saveSummary = useMemo(
     () => buildDraftChangeSummary(originalAgent, workspaceAgent),
     [originalAgent, workspaceAgent]
@@ -334,21 +234,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       return null;
     }
 
-    return buildStudioTestSnapshotPayload(
-      effectiveAgent,
-      workingScenes,
-    );
-  }, [effectiveAgent, workingScenes]);
-
-  // Detect current theme for graph styling
-  const [isDarkMode, setIsDarkMode] = useState(() =>
-    document.documentElement.classList.contains('dark')
-  );
+    return buildStudioTestSnapshotPayload(effectiveAgent);
+  }, [effectiveAgent]);
 
   /**
    * Stage agent-level draft fields that should participate in Save / Publish.
-   * Why: some sidebar modules are being migrated away from immediate persistence
-   * so the top toolbar can represent one coherent draft workflow.
    */
   const handleAgentDraftUpdate = useCallback((nextAgent: Agent) => {
     const currentAgent = workspaceAgent ?? agent;
@@ -359,14 +249,11 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     setWorkspaceAgent({
       ...currentAgent,
       ...nextAgent,
-      scenes: workspaceAgent?.scenes ?? currentAgent.scenes,
     });
   }, [agent, setWorkspaceAgent, workspaceAgent]);
 
   /**
    * Reload persisted draft/release state from the backend baseline.
-   * Why: publish audit must survive page reloads instead of depending on the
-   * current browser session still remembering what changed.
    */
   const refreshDraftState = useCallback(async () => {
     setIsLoadingDraftState(true);
@@ -382,7 +269,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     }
   }, [agentId]);
 
-  // Initialize store with agent data
   useEffect(() => {
     if (agent) {
       initialize(agent);
@@ -423,26 +309,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     };
   }, [studioTestSnapshot]);
 
-  // Sync selectedScene with store
-  useEffect(() => {
-    if (selectedScene) {
-      setCurrentSceneId(selectedScene.id);
-    }
-  }, [selectedScene, setCurrentSceneId]);
-
-  // Sync activeTabId with currentSceneId when a scene tab is activated
-  useEffect(() => {
-    if (activeTabId) {
-      const activeTab = tabs.find(tab => tab.id === activeTabId);
-      if (activeTab && activeTab.type === 'scene' && activeTab.resourceId !== currentSceneId) {
-        setCurrentSceneId(activeTab.resourceId as number);
-      }
-    }
-  }, [activeTabId, tabs, currentSceneId, setCurrentSceneId]);
-
   /**
    * Keep only editor states for currently open tabs.
-   * Why: avoids stale memory when users close many tool/skill tabs.
    */
   useEffect(() => {
     const openTabIds = new Set(tabs.map((tab) => tab.id));
@@ -679,515 +547,8 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     }
   }, []);
 
-  // Monitor theme changes
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains('dark'));
-    });
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class']
-    });
-
-    return () => observer.disconnect();
-  }, []);
-
-  const handleCreateSceneModalOpen = () => {
-    setIsCreateSceneModalOpen(true);
-  };
-
-  const handleCreateScene = async (sceneData: {
-    name: string;
-    description?: string;
-  }) => {
-    if (!workspaceAgent) return;
-
-    const newSceneId = -Date.now();
-    const newScene: SceneGraph = {
-      id: newSceneId,
-      name: sceneData.name,
-      description: sceneData.description || '',
-      agent_id: agentId,
-      subscenes: [],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    const newAgent = deepCopyAgent(workspaceAgent);
-    if (newAgent) {
-      newAgent.scenes = [...(newAgent.scenes || []), newScene];
-      setWorkspaceAgent(newAgent);
-    }
-
-    setIsCreateSceneModalOpen(false);
-    onSceneSelect(newScene as unknown as Scene);
-    await Promise.resolve();
-  };
-
-  const handleEditScene = async (sceneData: {
-    name: string;
-    description?: string;
-  }) => {
-    if (!workspaceAgent || !selectedScene) return;
-
-    const newAgent = deepCopyAgent(workspaceAgent);
-    if (newAgent && newAgent.scenes) {
-      const sceneIndex = newAgent.scenes.findIndex(s => s.id === selectedScene.id);
-      if (sceneIndex !== -1) {
-        const scene = newAgent.scenes[sceneIndex] as unknown as SceneGraph;
-        scene.name = sceneData.name;
-        scene.description = sceneData.description || '';
-        scene.updated_at = new Date().toISOString();
-        setWorkspaceAgent(newAgent);
-      }
-    }
-
-    setIsEditSceneModalOpen(false);
-    await Promise.resolve();
-  };
-
-  const handleDeleteScene = (sceneToDelete: Scene) => {
-    if (!workspaceAgent) return;
-
-    const newAgent = deepCopyAgent(workspaceAgent);
-    if (newAgent && newAgent.scenes) {
-      newAgent.scenes = newAgent.scenes.filter(s => s.id !== sceneToDelete.id);
-      setWorkspaceAgent(newAgent);
-
-      // If the deleted scene was selected, clear selection
-      if (currentSceneId === sceneToDelete.id) {
-        const remainingScenes = newAgent.scenes;
-        if (remainingScenes.length > 0) {
-          onSceneSelect(remainingScenes[0] as unknown as Scene);
-        } else {
-          // Handle no scenes left
-          setCurrentSceneId(null);
-        }
-      }
-    }
-  };
-
-  const handleAddSubscene = (formData: { name: string; type: 'start' | 'normal' | 'end'; mandatory: boolean; objective: string }) => {
-    setIsAddSubsceneModalOpen(false);
-    setContextMenu(null);
-    if (workingSceneGraph && currentSceneId) {
-      const newGraph = deepCopySceneGraph(workingSceneGraph);
-      if (!newGraph) return;
-
-      const newSubsceneName = formData.name || `subscene-${Date.now()}`;
-      const newSubsceneData = {
-        id: newSubsceneName, // Frontend uses name as ID often, or string ID
-        name: formData.name,
-        type: formData.type,
-        state: 'inactive' as const,
-        position: { x: 300, y: 100 },
-        data: {
-          label: formData.name,
-          type: formData.type,
-          state: 'inactive',
-          description: '',
-          mandatory: formData.mandatory,
-          objective: formData.objective
-        },
-        connections: [],
-        subscenes: []
-      };
-
-      // Push directly to subscenes array (flattened structure)
-      newGraph.subscenes.push(newSubsceneData as unknown as SceneNode);
-
-      updateSceneInWorkspace(currentSceneId, newGraph);
-    }
-  };
-
-  const handleAddConnection = (formData: { name: string; condition: string; from_subscene: string; to_subscene: string }) => {
-    setIsAddConnectionModalOpen(false);
-    setPendingConnection(null);
-    if (workingSceneGraph && pendingConnection && currentSceneId) {
-      const newGraph = deepCopySceneGraph(workingSceneGraph);
-      if (!newGraph) return;
-
-      const fromSubscene = newGraph.subscenes.find(s => s.name === pendingConnection.from);
-      if (!fromSubscene) return;
-
-      const newConnection = {
-        id: Date.now(),
-        name: formData.name,
-        condition: formData.condition,
-        from_subscene: pendingConnection.from,
-        to_subscene: pendingConnection.to,
-        scene_id: currentSceneId,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      fromSubscene.connections = fromSubscene.connections || [];
-      fromSubscene.connections.push(newConnection);
-
-      updateSceneInWorkspace(currentSceneId, newGraph);
-    }
-  };
-
-  const handleContextMenu = (event: React.MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!currentSceneId) {
-      return;
-    }
-    try {
-      const reactFlowBounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      const flowPosition = {
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top
-      };
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY
-      });
-      setNewSubscenePosition({ x: flowPosition.x, y: flowPosition.y });
-      setContextMenuContext('pane');
-      setContextMenuElement(null);
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      console.error('Failed to calculate position:', error);
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY
-      });
-      setNewSubscenePosition({ x: 0, y: 0 });
-      setContextMenuContext('pane');
-      setContextMenuElement(null);
-    }
-  };
-
-  const handleNodeContextMenu = (event: React.MouseEvent, node: Node) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY
-    });
-    setContextMenuContext('node');
-    setContextMenuElement({ id: node.id, data: node.data });
-  };
-
-  const handleEdgeContextMenu = (event: React.MouseEvent, edge: Edge) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setContextMenu({
-      x: event.clientX,
-      y: event.clientY
-    });
-    setContextMenuContext('edge');
-    setContextMenuElement({ id: edge.id, data: edge.data });
-  };
-
-  const handleContextMenuClose = () => {
-    setContextMenu(null);
-  };
-
-  const handleAddSubsceneFromMenu = () => {
-    setContextMenu(null);
-    setIsAddSubsceneModalOpen(true);
-  };
-
-  const handleRemoveNode = (nodeId: string) => {
-    if (!workingSceneGraph || !currentSceneId) return;
-
-    const newGraph = deepCopySceneGraph(workingSceneGraph);
-    if (!newGraph) return;
-
-    const subsceneName = nodeId.replace('subscene-', '');
-
-    // Remove subscene from subscenes array
-    newGraph.subscenes = newGraph.subscenes.filter(s => s.name !== subsceneName);
-
-    // Remove all connections pointing to/from this subscene
-    newGraph.subscenes.forEach(subscene => {
-      if (subscene.connections) {
-        subscene.connections = subscene.connections.filter(c =>
-          c.to_subscene !== subsceneName && c.from_subscene !== subsceneName
-        );
-      }
-    });
-
-    updateSceneInWorkspace(currentSceneId, newGraph);
-    setContextMenu(null);
-  };
-
-  const handleRemoveEdge = (edgeId: string) => {
-    if (!workingSceneGraph || !currentSceneId) return;
-
-    const newGraph = deepCopySceneGraph(workingSceneGraph);
-    if (!newGraph) return;
-
-    const edgeData = contextMenuElement?.data;
-    if (!edgeData) return;
-
-    const fromSubsceneName = edgeData.from_subscene;
-    const toSubsceneName = edgeData.to_subscene;
-
-    const fromSubscene = newGraph.subscenes.find(s => s.name === fromSubsceneName);
-    if (fromSubscene && fromSubscene.connections) {
-      fromSubscene.connections = fromSubscene.connections.filter(c =>
-        c.to_subscene !== toSubsceneName
-      );
-    }
-
-    updateSceneInWorkspace(currentSceneId, newGraph);
-    setContextMenu(null);
-  };
-
-  useEffect(() => {
-    const handleClickOutside = () => {
-      if (contextMenu) {
-        setContextMenu(null);
-      }
-    };
-
-    if (contextMenu) {
-      document.addEventListener('click', handleClickOutside);
-      return () => {
-        document.removeEventListener('click', handleClickOutside);
-      };
-    }
-  }, [contextMenu]);
-
-  const currentSceneGraphData = workingSceneGraph;
-
-  const handleElementClick = (event: React.MouseEvent, element: Node | Edge) => {
-    event.stopPropagation();
-    const clickPosition = { x: event.clientX, y: event.clientY };
-    if (element.id.startsWith('edge-')) {
-      setSelectedElement({ type: 'edge', id: element.id, data: (element.data as Record<string, unknown>) || {}, label: (element.data as { label?: string }).label, clickPosition });
-    } else {
-      setSelectedElement({ type: 'node', id: element.id, data: (element.data as Record<string, unknown>) || {}, clickPosition });
-    }
-  };
-
-  const handleNodeUpdate = (nodeId: string, formData: { name: string; type: 'start' | 'normal' | 'end'; mandatory: boolean; objective: string }) => {
-    if (!workingSceneGraph || !currentSceneId) return;
-
-    const newGraph = deepCopySceneGraph(workingSceneGraph);
-    if (!newGraph) return;
-
-    const subsceneName = nodeId.replace('subscene-', '');
-    const subscene = newGraph.subscenes.find(s => s.name === subsceneName);
-
-    if (subscene) {
-      subscene.name = formData.name;
-      subscene.type = formData.type;
-      subscene.mandatory = formData.mandatory;
-      subscene.objective = formData.objective;
-
-      updateSceneInWorkspace(currentSceneId, newGraph);
-    }
-
-    setNodes((nodes) => nodes.map((node) =>
-      node.id === nodeId ? { ...node, data: { ...node.data, label: formData.name, type: formData.type, mandatory: formData.mandatory, objective: formData.objective } } : node
-    ));
-  };
-
-  const handleEdgeUpdate = (edgeId: string, formData: { name: string; condition: string; from_subscene: string; to_subscene: string }) => {
-    if (!workingSceneGraph || !currentSceneId) return;
-
-    const newGraph = deepCopySceneGraph(workingSceneGraph);
-    if (!newGraph) return;
-
-    const fromSubsceneName = formData.from_subscene;
-    const toSubsceneName = formData.to_subscene;
-
-    const fromSubscene = newGraph.subscenes.find(s => s.name === fromSubsceneName);
-    if (fromSubscene && fromSubscene.connections) {
-      const connection = fromSubscene.connections.find(c => c.to_subscene === toSubsceneName);
-      if (connection) {
-        connection.name = formData.name;
-        connection.condition = formData.condition;
-
-        updateSceneInWorkspace(currentSceneId, newGraph);
-      }
-    }
-
-    setEdges((edges) => edges.map((edge) => {
-      const edgeData = edge.data;
-      return edge.id === edgeId ? { ...edge, data: { ...(edgeData || {}), label: formData.name, condition: formData.condition } } : edge;
-    }));
-  };
-
-  const convertToFlowElements = useCallback((sceneGraphData: SceneGraph | null) => {
-    // Cast to any to handle potential legacy/agent structure during transition
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-    const data = sceneGraphData as any;
-    if (!data) {
-      return { nodes: [], edges: [] };
-    }
-
-    let subscenes: SceneNode[] = [];
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    if (data.subscenes && data.subscenes.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      subscenes = data.subscenes;
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    } else if (data.scenes && data.scenes.length > 0) {
-      // Handle Agent structure (list of scenes)
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      if (data.scenes[0].subscenes) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        subscenes = data.scenes[0].subscenes;
-      } else {
-        // Handle legacy where scenes = subscenes
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        subscenes = data.scenes;
-      }
-    }
-
-    if (!subscenes || subscenes.length === 0) {
-      return { nodes: [], edges: [] };
-    }
-
-    const nodes: Node[] = [];
-    const edges: Edge[] = [];
-    let edgeId = 1;
-
-    const subsceneNameToId: Record<string, string> = {};
-
-    const startSubscenes: typeof subscenes = [];
-    const normalSubscenes: typeof subscenes = [];
-    const endSubscenes: typeof subscenes = [];
-
-    subscenes.forEach((subscene) => {
-      if (subscene.type === 'start') {
-        startSubscenes.push(subscene);
-      } else if (subscene.type === 'end') {
-        endSubscenes.push(subscene);
-      } else {
-        normalSubscenes.push(subscene);
-      }
-    });
-
-    const yPosition = 100;
-    const nodeSpacing = 150;
-    const xOffsets = {
-      start: 100,
-      normal: 300,
-      end: 500
-    };
-
-    const processSubscene = (subscene: typeof subscenes[0], index: number, offset: number) => {
-      const subsceneNodeId = `subscene-${subscene.name}`;
-      nodes.push({
-        id: subsceneNodeId,
-        type: 'subscene',
-        position: {
-          x: offset,
-          y: yPosition + index * nodeSpacing
-        },
-        data: {
-          label: subscene.name || '',
-          type: subscene.type,
-          state: subscene.state,
-          mandatory: subscene.mandatory || false,
-          objective: subscene.objective || ''
-        }
-      });
-      subsceneNameToId[subscene.name || ''] = subsceneNodeId;
-    };
-
-    startSubscenes.forEach((s, i) => processSubscene(s, i, xOffsets.start));
-    normalSubscenes.forEach((s, i) => processSubscene(s, i, xOffsets.normal));
-    endSubscenes.forEach((s, i) => processSubscene(s, i, xOffsets.end));
-
-    subscenes.forEach((subscene) => {
-      const subsceneNodeId = subsceneNameToId[subscene.name || ''];
-
-      if (subscene.connections) {
-        subscene.connections.forEach((connection, connIndex) => {
-          const targetNodeId = subsceneNameToId[connection.to_subscene || ''];
-
-          if (targetNodeId) {
-            edges.push({
-              id: `edge-${edgeId++}`,
-              source: subsceneNodeId,
-              target: targetNodeId,
-              sourceHandle: 'right',
-              targetHandle: 'left',
-              label: connection.name,
-              animated: true,
-              markerEnd: { type: MarkerType.ArrowClosed },
-              style: {
-                stroke: isDarkMode ? '#6366f1' : '#818cf8',
-                strokeWidth: 2,
-                strokeOpacity: isDarkMode ? 0.8 : 0.6,
-                strokeLinecap: 'round'
-              },
-              type: 'bezier',
-              labelBgPadding: [8, 5],
-              labelBgBorderRadius: 4,
-              labelBgStyle: {
-                fill: isDarkMode ? 'rgba(30, 30, 30, 0.85)' : 'rgba(255, 255, 255, 0.9)',
-                stroke: isDarkMode ? 'rgba(24, 91, 233, 0.3)' : 'rgba(99, 102, 241, 0.3)',
-                strokeWidth: 1,
-                boxShadow: isDarkMode ? '0 2px 8px rgba(0, 0, 0, 0.3)' : '0 2px 8px rgba(0, 0, 0, 0.1)'
-              },
-              labelStyle: {
-                fontSize: 11,
-                fontWeight: 500,
-                fill: isDarkMode ? '#f1f5f9' : '#1e293b',
-                whiteSpace: 'nowrap'
-              },
-              className: 'hover:stroke-opacity-100 hover:stroke-width-3 transition-all duration-200',
-              data: {
-                offset: connIndex * 20,
-                from_subscene: subscene.name,
-                to_subscene: connection.to_subscene,
-                condition: connection.condition || '',
-                label: connection.name
-              }
-            });
-          }
-        });
-      }
-    });
-
-    return { nodes, edges };
-  }, [isDarkMode]);
-
-  useEffect(() => {
-    if (currentSceneGraphData) {
-      const { nodes: newNodes, edges: newEdges } = convertToFlowElements(currentSceneGraphData);
-      setNodes(newNodes);
-      setEdges(newEdges);
-    } else {
-      setNodes([]);
-      setEdges([]);
-    }
-  }, [currentSceneGraphData, convertToFlowElements, setNodes, setEdges]);
-
-  const onConnect = useCallback((params: Connection) => {
-    const fromSubscene = params.source.replace('subscene-', '');
-    const toSubscene = params.target.replace('subscene-', '');
-
-    if (params.sourceHandle === 'right' && params.targetHandle === 'left') {
-      setPendingConnection({ from: fromSubscene, to: toSubscene });
-      setIsAddConnectionModalOpen(true);
-    } else {
-      console.warn('Invalid connection: Only right-handle to left-handle connections are allowed');
-    }
-  }, []);
-
-  const onPaneClick = useCallback(() => {
-    if (selectedElement) {
-      setSelectedElement(null);
-    }
-    if (contextMenu) {
-      setContextMenu(null);
-    }
-  }, [selectedElement, contextMenu]);
-
   const handleSubmit = useCallback(async (options?: { silent?: boolean }): Promise<boolean> => {
-    if (!workspaceAgent || !workspaceAgent.scenes) {
+    if (!workspaceAgent) {
       return false;
     }
     setSubmitting(true);
@@ -1206,59 +567,15 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         skill_ids: workspaceAgent.skill_ids ?? null,
       });
 
-      // Construct payload for all scenes
-      const scenesPayload = workspaceAgent.scenes.map(scene => {
-        return {
-          name: scene.name || '',
-          description: scene.description || undefined,
-          graph: scene.subscenes.map((subscene) => ({
-            name: subscene.name || subscene.data?.label || '',
-            type: subscene.type || subscene.data?.type || 'normal',
-            state: subscene.state || subscene.data?.state || 'inactive',
-            description: subscene.data?.description || '',
-            mandatory: subscene.mandatory ?? subscene.data?.mandatory ?? false,
-            objective: subscene.objective ?? subscene.data?.objective ?? '',
-            connections: subscene.connections?.map((conn) => ({
-              name: conn.name || '',
-              condition: conn.condition,
-              to_subscene: conn.to_subscene
-            })) || []
-          }))
-        };
-      });
-
-      // 1. Single API Call to sync everything
-      const updatedScenes = await updateAgentScenes(agentId, scenesPayload);
       const nextDraftState = await saveAgentDraft(agentId);
-
-      // Diff and update tabs for any scenes that had temporary IDs
-      if (workspaceAgent.scenes) {
-        workspaceAgent.scenes.forEach(scene => {
-          if (scene.id && scene.id < 0) {
-            const updatedScene = updatedScenes.find(s => s.name === scene.name);
-            if (updatedScene) {
-              replaceTabResource(scene.id, updatedScene.id, 'scene');
-            }
-          }
-        });
-      }
-
-      // 2. Mark everything as committed (update Original to match Workspace)
-      // Ideally we should update originalAgent with the response from server (updatedScenes).
-      // But updateAgentScenes only returns Scene[] (with updated IDs).
-      // We might need to fetch full agent again to be perfectly safe, or just merge IDs.
-      // For now, let's fetch full agent to be safe.
-
-      // Notify parent to refresh
-      await onRefreshScenes(); // This now fetches full agent in App.tsx
+      const refreshedAgent = await onRefreshAgent();
 
       setDraftState(nextDraftState);
-      markAsCommitted();
+      markAsCommitted(refreshedAgent ?? workspaceAgent);
       if (!options?.silent) {
         toast.success('Draft saved');
       }
       return true;
-
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       console.error('Failed to submit changes:', error);
@@ -1267,7 +584,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     } finally {
       setSubmitting(false);
     }
-  }, [agentId, markAsCommitted, onRefreshScenes, replaceTabResource, setSubmitting, workspaceAgent]);
+  }, [agentId, markAsCommitted, onRefreshAgent, setSubmitting, workspaceAgent]);
 
   const handleDiscard = () => {
     discardChanges();
@@ -1296,7 +613,10 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       }
       const nextDraftState = await publishAgentRelease(agentId, releaseNote);
       setDraftState(nextDraftState);
-      await onRefreshScenes();
+      const refreshedAgent = await onRefreshAgent();
+      if (refreshedAgent) {
+        markAsCommitted(refreshedAgent);
+      }
       setIsPublishDrawerOpen(false);
       setReleaseNote('');
       toast.success('Release published and activated for new sessions');
@@ -1307,7 +627,7 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     } finally {
       setIsPublishingRelease(false);
     }
-  }, [agentId, handleSubmit, hasUnsavedChanges, onRefreshScenes, releaseNote]);
+  }, [agentId, handleSubmit, hasUnsavedChanges, markAsCommitted, onRefreshAgent, releaseNote]);
 
   const handleChannelBindingsLoaded = useCallback((_bindings: SidebarChannel[]) => {
     void refreshDraftState();
@@ -1323,10 +643,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
 
   /**
    * Persist sidebar-managed binding changes into the saved draft baseline.
-   * Why: extensions, channel bindings, image-provider bindings, and web-search
-   * bindings are edited via immediate backend mutations, so Publish must
-   * refresh the saved draft rather than relying on the local scene/agent
-   * workstore dirty flag.
    */
   const handlePersistedBindingDraftChanged = useCallback(async () => {
     try {
@@ -1343,11 +659,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
     <SidebarProvider defaultOpen={true}>
       <AgentDetailSidebar
         agent={workspaceAgent ?? agent}
-        scenes={workingScenes}
-        selectedScene={selectedScene}
-        onSceneSelect={onSceneSelect}
-        onCreateScene={handleCreateSceneModalOpen}
-        onDeleteScene={handleDeleteScene}
         onAgentDraftUpdate={handleAgentDraftUpdate}
         onChannelBindingsLoaded={handleChannelBindingsLoaded}
         onImageProviderBindingsLoaded={handleImageProviderBindingsLoaded}
@@ -1359,7 +670,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
       />
 
       <SidebarInset className="flex flex-col bg-background overflow-hidden">
-        {/* Main Content Area */}
         <div className="flex-1 relative overflow-hidden flex flex-col">
           <div className="pointer-events-none absolute right-4 top-3 z-20 flex justify-end">
             <AgentWorkspaceToolbar
@@ -1377,38 +687,35 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
             />
           </div>
 
-          {/* Tabs System */}
           {tabs.length > 0 ? (
             <Tabs
               value={activeTabId || undefined}
               onValueChange={setActiveTab}
               className="flex-1 flex flex-col overflow-hidden"
             >
-              {/* Tabs List */}
               <div className="bg-muted border-b border-border px-2 pr-72 pt-1.5 lg:pr-[27rem]">
                 <TabsList className="h-auto bg-transparent p-0 gap-1 w-full justify-start items-end -mb-px">
                   {tabs.map((tab) => {
-                    // Get icon based on tab type (matching sidebar icons)
-                    const TabIcon = tab.type === 'scene' ? Layers
-                      : tab.type === 'tool' || tab.type === 'function' ? Wrench
-                        : Zap;
+                    const TabIcon = tab.type === 'tool' || tab.type === 'function'
+                      ? Wrench
+                      : Zap;
 
                     return (
                       <div key={tab.id} className="relative group">
                         <TabsTrigger
                           value={tab.id}
                           className="
-                            relative 
-                            rounded-t-md rounded-b-none 
-                            border-t border-x border-transparent 
-                            px-3 py-2 pr-7 
-                            text-xs font-medium 
+                            relative
+                            rounded-t-md rounded-b-none
+                            border-t border-x border-transparent
+                            px-3 py-2 pr-7
+                            text-xs font-medium
                             text-muted-foreground
-                            transition-all 
+                            transition-all
                             hover:text-foreground hover:bg-background/40
-                            data-[state=active]:bg-background 
-                            data-[state=active]:text-foreground 
-                            data-[state=active]:border-border 
+                            data-[state=active]:bg-background
+                            data-[state=active]:text-foreground
+                            data-[state=active]:border-border
                             data-[state=active]:shadow-none
                             data-[state=active]:z-10
                             data-[state=active]:font-semibold
@@ -1433,54 +740,13 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                 </TabsList>
               </div>
 
-              {/* Tab Content Areas */}
               {tabs.map((tab) => (
                 <TabsContent
                   key={tab.id}
                   value={tab.id}
                   className="flex-1 m-0 relative overflow-hidden data-[state=inactive]:hidden"
                 >
-                  {tab.type === 'scene' ? (
-                    // Scene content with ReactFlow graph
-                    <div className="absolute inset-0">
-                      <ReactFlow
-                        nodes={nodes}
-                        edges={edges}
-                        onNodesChange={onNodesChange}
-                        onEdgesChange={onEdgesChange}
-                        onConnect={onConnect}
-                        onPaneClick={onPaneClick}
-                        onNodeClick={(event, node) => handleElementClick(event, node)}
-                        onEdgeClick={(event, edge) => handleElementClick(event, edge)}
-                        onContextMenu={handleContextMenu}
-                        onNodeContextMenu={handleNodeContextMenu}
-                        onEdgeContextMenu={handleEdgeContextMenu}
-                        nodeTypes={nodeTypes}
-                        edgeTypes={edgeTypes}
-                        fitView
-                        fitViewOptions={{ padding: 0.2, maxZoom: 0.9 }}
-                        onInit={(instance) => {
-                          reactFlowInstanceRef.current = instance;
-                        }}
-                      >
-                        <Controls />
-                        <MiniMap />
-                        <Background />
-                      </ReactFlow>
-
-                      {selectedElement && (
-                        <EditPanel
-                          key={`${selectedElement.type}-${selectedElement.id}`}
-                          element={selectedElement}
-                          sceneId={currentSceneId}
-                          onClose={() => setSelectedElement(null)}
-                          onNodeUpdate={handleNodeUpdate}
-                          onEdgeUpdate={handleEdgeUpdate}
-                        />
-                      )}
-                    </div>
-                  ) : tab.type === 'tool' || tab.type === 'function' ? (
-                    // Tool Monaco editor
+                  {tab.type === 'tool' || tab.type === 'function' ? (
                     <div className="relative h-full">
                       <div className="h-full">
                         {(() => {
@@ -1529,7 +795,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
                       </div>
                     </div>
                   ) : tab.type === 'skill' ? (
-                    // Skill Monaco editor
                     <div className="relative h-full">
                       <div className="h-full">
                         {(() => {
@@ -1582,28 +847,16 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
               ))}
             </Tabs>
           ) : (
-            // Empty state when no tabs are open
             <div className="flex-1 relative flex items-center justify-center text-muted-foreground">
               <div className="text-center space-y-2">
                 <p className="text-lg font-medium">No Tab Open</p>
-                <p className="text-sm">Select a scene, tool, or skill from the sidebar to get started</p>
+                <p className="text-sm">Select a tool or skill from the sidebar to get started</p>
               </div>
             </div>
           )}
-
-          {/* Context Menu */}
-          <SceneContextMenu
-            position={contextMenu}
-            context={contextMenuContext}
-            element={contextMenuElement || undefined}
-            onAddSubscene={handleAddSubsceneFromMenu}
-            onRemoveNode={handleRemoveNode}
-            onRemoveEdge={handleRemoveEdge}
-          />
         </div>
       </SidebarInset>
 
-      {/* ReAct Chat Draggable Dialog */}
       <DraggableDialog
         open={isReactChatOpen}
         onOpenChange={setIsReactChatOpen}
@@ -1640,36 +893,6 @@ function AgentDetail({ agent, scenes, selectedScene, agentId, onSceneSelect, onR
         onOpenChange={setIsReleaseHistoryOpen}
         releaseHistory={draftState?.release_history ?? []}
         activeReleaseId={effectiveAgent?.active_release_id ?? null}
-      />
-
-      {/* Scene Modal */}
-      <SceneModal
-        isOpen={isCreateSceneModalOpen}
-        mode="create"
-        onClose={() => setIsCreateSceneModalOpen(false)}
-        onSave={handleCreateScene}
-      />
-
-      {/* Subscene Modal */}
-      <SubsceneModal
-        isOpen={isAddSubsceneModalOpen}
-        mode="add"
-        sceneId={currentSceneId}
-        onClose={() => setIsAddSubsceneModalOpen(false)}
-        onSave={handleAddSubscene}
-      />
-
-      {/* Connection Modal */}
-      <ConnectionModal
-        isOpen={isAddConnectionModalOpen}
-        mode="add"
-        sceneId={currentSceneId}
-        initialData={pendingConnection ? {
-          from_subscene: pendingConnection.from,
-          to_subscene: pendingConnection.to
-        } : undefined}
-        onClose={() => setIsAddConnectionModalOpen(false)}
-        onSave={handleAddConnection}
       />
     </SidebarProvider>
   );

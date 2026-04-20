@@ -7,7 +7,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from app.models.agent import Agent, Connection, Scene, Subscene
+from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import AgentChannelBinding
 from app.models.image_generation import AgentImageProviderBinding
@@ -103,52 +103,6 @@ class AgentSnapshotService:
             raise ValueError("Agent not found.")
         return agent
 
-    def _normalize_scene_snapshot(self, scene: Scene) -> dict[str, Any]:
-        """Build one canonical scene snapshot with nested graph data."""
-        subscenes = self.db.exec(
-            select(Subscene)
-            .where(Subscene.scene_id == scene.id)
-            .order_by(col(Subscene.id))
-        ).all()
-        connections = self.db.exec(
-            select(Connection)
-            .where(Connection.scene_id == scene.id)
-            .order_by(col(Connection.id))
-        ).all()
-        connections_by_source: dict[str, list[Connection]] = {}
-        for connection in connections:
-            connections_by_source.setdefault(connection.from_subscene, []).append(
-                connection
-            )
-
-        return {
-            "id": scene.id,
-            "name": scene.name,
-            "description": scene.description,
-            "subscenes": [
-                {
-                    "id": subscene.id,
-                    "name": subscene.name,
-                    "type": subscene.type,
-                    "state": subscene.state,
-                    "description": subscene.description,
-                    "mandatory": subscene.mandatory,
-                    "objective": subscene.objective,
-                    "connections": [
-                        {
-                            "id": connection.id,
-                            "name": connection.name,
-                            "condition": connection.condition,
-                            "from_subscene": connection.from_subscene,
-                            "to_subscene": connection.to_subscene,
-                        }
-                        for connection in connections_by_source.get(subscene.name, [])
-                    ],
-                }
-                for subscene in subscenes
-            ],
-        }
-
     def _normalize_channel_binding(
         self, binding: AgentChannelBinding
     ) -> dict[str, Any]:
@@ -212,9 +166,6 @@ class AgentSnapshotService:
             ValueError: If the agent does not exist.
         """
         agent = self._get_agent_or_raise(agent_id)
-        scenes = self.db.exec(
-            select(Scene).where(Scene.agent_id == agent_id).order_by(col(Scene.id))
-        ).all()
         channel_bindings = self.db.exec(
             select(AgentChannelBinding)
             .where(AgentChannelBinding.agent_id == agent_id)
@@ -246,7 +197,6 @@ class AgentSnapshotService:
                 "tool_ids": _load_json_array(agent.tool_ids),
                 "skill_ids": _load_json_array(agent.skill_ids),
             },
-            "scenes": [self._normalize_scene_snapshot(scene) for scene in scenes],
             "channel_bindings": [
                 self._normalize_channel_binding(binding) for binding in channel_bindings
             ],
@@ -286,11 +236,8 @@ class AgentSnapshotService:
 
         base_snapshot = self.build_current_snapshot(agent_id)
         raw_agent_payload = working_copy_snapshot.get("agent")
-        raw_scenes_payload = working_copy_snapshot.get("scenes", [])
         if not isinstance(raw_agent_payload, dict):
             raise ValueError("Studio test snapshot is missing agent data.")
-        if not isinstance(raw_scenes_payload, list):
-            raise ValueError("Studio test snapshot scenes must be a JSON array.")
 
         base_agent_payload = base_snapshot["agent"]
         normalized_agent = {
@@ -339,87 +286,9 @@ class AgentSnapshotService:
             ),
         }
 
-        normalized_scenes: list[dict[str, Any]] = []
-        for raw_scene in raw_scenes_payload:
-            if not isinstance(raw_scene, dict):
-                raise ValueError("Studio test snapshot scenes must contain objects.")
-            raw_subscenes = raw_scene.get("subscenes", [])
-            if not isinstance(raw_subscenes, list):
-                raise ValueError(
-                    "Studio test snapshot scene subscenes must be a JSON array."
-                )
-
-            normalized_subscenes: list[dict[str, Any]] = []
-            for raw_subscene in raw_subscenes:
-                if not isinstance(raw_subscene, dict):
-                    raise ValueError(
-                        "Studio test snapshot subscenes must contain objects."
-                    )
-                raw_connections = raw_subscene.get("connections", [])
-                if not isinstance(raw_connections, list):
-                    raise ValueError(
-                        "Studio test snapshot connections must be a JSON array."
-                    )
-                normalized_connections: list[dict[str, Any]] = []
-                for raw_connection in raw_connections:
-                    if not isinstance(raw_connection, dict):
-                        raise ValueError(
-                            "Studio test snapshot connections must contain objects."
-                        )
-                    normalized_connections.append(
-                        {
-                            "id": raw_connection.get("id"),
-                            "name": str(raw_connection.get("name") or ""),
-                            "condition": (
-                                str(raw_connection["condition"])
-                                if isinstance(raw_connection.get("condition"), str)
-                                else None
-                            ),
-                            "from_subscene": str(
-                                raw_connection.get("from_subscene") or ""
-                            ),
-                            "to_subscene": str(raw_connection.get("to_subscene") or ""),
-                        }
-                    )
-
-                normalized_subscenes.append(
-                    {
-                        "id": raw_subscene.get("id"),
-                        "name": str(raw_subscene.get("name") or ""),
-                        "type": str(raw_subscene.get("type") or "normal"),
-                        "state": str(raw_subscene.get("state") or "inactive"),
-                        "description": (
-                            str(raw_subscene["description"])
-                            if isinstance(raw_subscene.get("description"), str)
-                            else None
-                        ),
-                        "mandatory": bool(raw_subscene.get("mandatory", False)),
-                        "objective": (
-                            str(raw_subscene["objective"])
-                            if isinstance(raw_subscene.get("objective"), str)
-                            else None
-                        ),
-                        "connections": normalized_connections,
-                    }
-                )
-
-            normalized_scenes.append(
-                {
-                    "id": raw_scene.get("id"),
-                    "name": str(raw_scene.get("name") or ""),
-                    "description": (
-                        str(raw_scene["description"])
-                        if isinstance(raw_scene.get("description"), str)
-                        else None
-                    ),
-                    "subscenes": normalized_subscenes,
-                }
-            )
-
         return {
             "schema_version": 1,
             "agent": normalized_agent,
-            "scenes": normalized_scenes,
             "channel_bindings": base_snapshot["channel_bindings"],
             "image_provider_bindings": base_snapshot["image_provider_bindings"],
             "web_search_bindings": base_snapshot["web_search_bindings"],
@@ -440,7 +309,6 @@ class AgentSnapshotService:
         return {
             "schema_version": 1,
             "agent": normalized_snapshot["agent"],
-            "scenes": normalized_snapshot["scenes"],
             "extensions": normalized_snapshot["extensions"],
         }
 
@@ -529,13 +397,6 @@ class AgentSnapshotService:
                 )
             else:
                 changes.append("Skill access restricted to no skills")
-        scenes = snapshot["scenes"]
-        if scenes:
-            scene_names = [scene["name"] for scene in scenes if scene["name"]]
-            if scene_names:
-                changes.append(
-                    _format_name_list(scene_names, noun="Scenes", verb="configured")
-                )
         channel_bindings = snapshot["channel_bindings"]
         if channel_bindings:
             channel_names = [
@@ -669,15 +530,6 @@ class AgentSnapshotService:
             else:
                 changes.append("Skill access restricted to no skills")
 
-        changes.extend(
-            self._compare_named_collection(
-                before_snapshot["scenes"],
-                after_snapshot["scenes"],
-                key_field="id",
-                label_field="name",
-                noun="Scenes",
-            )
-        )
         changes.extend(
             self._compare_named_collection(
                 before_snapshot["channel_bindings"],

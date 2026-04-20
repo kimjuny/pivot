@@ -47,12 +47,13 @@ async def get_web_search_provider_logo(
 
 @router.get("/web-search/providers", response_model=list[WebSearchCatalogItemResponse])
 async def list_web_search_providers(
+    agent_id: int | None = None,
     db=Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> list[dict[str, object]]:
     """List all installed built-in web-search provider manifests."""
     del current_user
-    return WebSearchService(db).list_catalog()
+    return WebSearchService(db).list_catalog(agent_id)
 
 
 @router.get(

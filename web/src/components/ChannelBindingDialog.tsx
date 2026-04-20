@@ -85,6 +85,7 @@ function ChannelBindingDialog({
     ),
     [manifest],
   );
+  const disabledReason = initialBinding?.disabled_reason ?? null;
 
   useEffect(() => {
     if (!open) {
@@ -303,6 +304,12 @@ function ChannelBindingDialog({
                 </div>
                 <Switch checked={enabled} onCheckedChange={setEnabled} />
               </div>
+
+              {disabledReason ? (
+                <div className="rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
+                  {disabledReason}
+                </div>
+              ) : null}
 
               <ConfigFieldGroup
                 title="Credentials"

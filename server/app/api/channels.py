@@ -31,12 +31,13 @@ router = APIRouter()
 
 @router.get("/channels", response_model=list[ChannelCatalogItemResponse])
 async def list_channels(
+    agent_id: int | None = None,
     db=Depends(get_db),
     current_user=Depends(get_current_user),
 ) -> list[dict[str, object]]:
     """List all installed built-in channel manifests."""
     del current_user
-    return ChannelService(db).list_catalog()
+    return ChannelService(db).list_catalog(agent_id)
 
 
 @router.get("/channels/{channel_key}", response_model=ChannelCatalogItemResponse)

@@ -1,4 +1,4 @@
-import type { Agent, Scene, SceneGraph, LLM } from '../types';
+import type { Agent, LLM } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import type {
   ChatSessionType,
@@ -336,207 +336,6 @@ export const getAgentById = async (agentId: number): Promise<Agent> => {
 };
 
 /**
- * Fetch all scenes from server.
- * 
- * @param agentId - Optional agent ID to filter scenes
- * @returns Promise resolving to array of Scene objects
- */
-export const getScenes = async (agentId?: number): Promise<Scene[]> => {
-  const queryParams = agentId ? `?agent_id=${agentId}` : '';
-  return apiRequest(`/scenes${queryParams}`) as Promise<Scene[]>;
-};
-
-/**
- * Create a new scene.
- * 
- * @param sceneData - Scene creation data
- * @returns Promise resolving to created Scene object
- */
-export const createScene = async (sceneData: {
-  name: string;
-  description?: string;
-  agent_id: number;
-}): Promise<Scene> => {
-  return apiRequest('/scenes', {
-    method: 'POST',
-    body: JSON.stringify(sceneData),
-  }) as Promise<Scene>;
-};
-
-/**
- * Fetch scene graph for a specific scene.
- * 
- * @param sceneId - Unique identifier of the scene
- * @returns Promise resolving to scene graph data
- */
-export const getSceneGraph = async (sceneId: number): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/graph`);
-};
-
-/**
- * Update a subscene.
- * 
- * @param sceneId - Unique identifier of the scene
- * @param subsceneName - Name of the subscene to update
- * @param subsceneData - Subscene update data
- * @returns Promise resolving to updated subscene data
- */
-export const updateSubscene = async (
-  sceneId: number,
-  subsceneName: string,
-  subsceneData: {
-    name?: string;
-    type?: string;
-    mandatory?: boolean;
-    objective?: string;
-  }
-): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/subscenes/${subsceneName}`, {
-    method: 'PUT',
-    body: JSON.stringify(subsceneData),
-  });
-};
-
-/**
- * Update a connection.
- *
- * @param sceneId - Unique identifier of the scene
- * @param fromSubscene - Name of the source subscene
- * @param toSubscene - Name of the target subscene
- * @param connectionData - Connection update data
- * @returns Promise resolving to updated connection data
- */
-export const updateConnection = async (
-  sceneId: number,
-  fromSubscene: string,
-  toSubscene: string,
-  connectionData: {
-    name?: string;
-    condition?: string;
-  }
-): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/connections`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      from_subscene: fromSubscene,
-      to_subscene: toSubscene,
-      ...connectionData,
-    }),
-  });
-};
-
-/**
- * Create a new subscene.
- *
- * @param sceneId - Unique identifier of the scene
- * @param subsceneData - Subscene creation data
- * @returns Promise resolving to created subscene data
- */
-export const createSubscene = async (
-  sceneId: number,
-  subsceneData: {
-    name: string;
-    type?: string;
-    mandatory?: boolean;
-    objective?: string;
-    description?: string;
-  }
-): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/subscenes`, {
-    method: 'POST',
-    body: JSON.stringify(subsceneData),
-  });
-};
-
-/**
- * Create a new connection.
- *
- * @param sceneId - Unique identifier of the scene
- * @param connectionData - Connection creation data
- * @returns Promise resolving to created connection data
- */
-export const createConnection = async (
-  sceneId: number,
-  connectionData: {
-    name: string;
-    from_subscene: string;
-    to_subscene: string;
-    condition?: string;
-  }
-): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/connections`, {
-    method: 'POST',
-    body: JSON.stringify(connectionData),
-  });
-};
-
-/**
- * Bulk update scene graph with all subscenes and connections.
- * This replaces the entire scene graph with the provided data.
- *
- * @param sceneId - Unique identifier of the scene
- * @param graphData - Complete scene graph data with all subscenes and connections
- * @returns Promise resolving to updated scene graph data
- */
-export const updateSceneGraph = async (
-  sceneId: number,
-  graphData: {
-    scenes: Array<{
-      name: string;
-      type?: string;
-      state?: string;
-      description?: string;
-      mandatory?: boolean;
-      objective?: string;
-      connections?: Array<{
-        name?: string;
-        condition?: string;
-        to_subscene: string;
-      }>;
-    }>;
-    agent_id?: number;
-  }
-): Promise<unknown> => {
-  return apiRequest(`/scenes/${sceneId}/graph`, {
-    method: 'PUT',
-    body: JSON.stringify(graphData),
-  });
-};
-
-/**
- * Bulk update agent scenes list.
- * 
- * @param agentId - Unique identifier of the agent
- * @param scenes - List of scenes to sync
- * @returns Promise resolving to updated list of Scene objects
- */
-export const updateAgentScenes = async (
-  agentId: number,
-  scenes: Array<{
-    name: string;
-    description?: string;
-    graph?: Array<{
-      name: string;
-      type?: string;
-      state?: string;
-      description?: string;
-      mandatory?: boolean;
-      objective?: string;
-      connections?: Array<{
-        name?: string;
-        condition?: string;
-        to_subscene: string;
-      }>;
-    }>;
-  }>
-): Promise<Scene[]> => {
-  return apiRequest(`/agents/${agentId}/scenes`, {
-    method: 'PUT',
-    body: JSON.stringify({ scenes }),
-  }) as Promise<Scene[]>;
-};
-
-/**
  * Delete an agent by ID.
  * 
  * @param agentId - Unique identifier of agent to delete
@@ -716,6 +515,8 @@ export interface ChannelBinding {
   channel_key: string;
   name: string;
   enabled: boolean;
+  effective_enabled?: boolean;
+  disabled_reason?: string | null;
   auth_config: Record<string, string>;
   runtime_config: Record<string, unknown>;
   manifest: ChannelManifest;
@@ -745,8 +546,9 @@ export interface ChannelLinkStatus {
 /**
  * Fetch the built-in channel catalog.
  */
-export const getChannels = async (): Promise<ChannelCatalogItem[]> => {
-  return apiRequest('/channels') as Promise<ChannelCatalogItem[]>;
+export const getChannels = async (agentId?: number): Promise<ChannelCatalogItem[]> => {
+  const query = typeof agentId === 'number' ? `?agent_id=${agentId}` : '';
+  return apiRequest(`/channels${query}`) as Promise<ChannelCatalogItem[]>;
 };
 
 /**
@@ -921,6 +723,8 @@ export interface WebSearchBinding {
   agent_id: number;
   provider_key: string;
   enabled: boolean;
+  effective_enabled?: boolean;
+  disabled_reason?: string | null;
   auth_config: Record<string, string>;
   runtime_config: Record<string, unknown>;
   manifest: WebSearchProviderManifest;
@@ -979,6 +783,8 @@ export interface ImageProviderBinding {
   agent_id: number;
   provider_key: string;
   enabled: boolean;
+  effective_enabled?: boolean;
+  disabled_reason?: string | null;
   auth_config: Record<string, string>;
   runtime_config: Record<string, unknown>;
   manifest: ImageProviderManifest;
@@ -992,8 +798,9 @@ export interface ImageProviderBinding {
 /**
  * Fetch the built-in web-search provider catalog.
  */
-export const getWebSearchProviders = async (): Promise<WebSearchCatalogItem[]> => {
-  return apiRequest('/web-search/providers') as Promise<WebSearchCatalogItem[]>;
+export const getWebSearchProviders = async (agentId?: number): Promise<WebSearchCatalogItem[]> => {
+  const query = typeof agentId === 'number' ? `?agent_id=${agentId}` : '';
+  return apiRequest(`/web-search/providers${query}`) as Promise<WebSearchCatalogItem[]>;
 };
 
 /**
@@ -1077,8 +884,9 @@ export const testWebSearchProviderDraft = async (
 /**
  * Fetch the installed image-generation provider catalog.
  */
-export const getImageGenerationProviders = async (): Promise<ImageProviderCatalogItem[]> => {
-  return apiRequest('/image-generation/providers') as Promise<ImageProviderCatalogItem[]>;
+export const getImageGenerationProviders = async (agentId?: number): Promise<ImageProviderCatalogItem[]> => {
+  const query = typeof agentId === 'number' ? `?agent_id=${agentId}` : '';
+  return apiRequest(`/image-generation/providers${query}`) as Promise<ImageProviderCatalogItem[]>;
 };
 
 /**

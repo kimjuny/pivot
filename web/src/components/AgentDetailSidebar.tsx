@@ -47,6 +47,7 @@ import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
 import ImageGenerationBindingDialog from './ImageGenerationBindingDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
+import ConfirmationModal from './ConfirmationModal';
 import { ExtensionLogoAvatar } from './ExtensionLogoAvatar';
 import { ImageProviderBadge } from './ImageProviderBadge';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
@@ -55,7 +56,7 @@ import {
     formatProviderExtensionLabel,
     formatProviderVisibilityLabel,
 } from '@/utils/providerMetadata';
-import type { Agent, Scene } from '../types';
+import type { Agent } from '../types';
 import {
     getSharedTools,
     getPrivateTools,
@@ -93,7 +94,8 @@ interface SidebarTool {
     name: string;
     description: string;
     kind: 'shared' | 'private';
-    source: 'builtin' | 'user';
+    source: 'builtin' | 'user' | 'extension';
+    extensionLabel?: string | null;
     readOnly: boolean;
 }
 
@@ -102,7 +104,8 @@ interface SidebarSkill {
     name: string;
     description: string;
     kind: 'shared' | 'private';
-    source: SkillSource;
+    source: SkillSource | 'extension';
+    extensionLabel?: string | null;
     creator: string | null;
     readOnly: boolean;
 }
@@ -118,6 +121,8 @@ export interface SidebarChannel {
     providerVisibility: string;
     providerExtensionLabel: string | null;
     enabled: boolean;
+    effectiveEnabled: boolean;
+    disabledReason: string | null;
     transportMode: 'webhook' | 'websocket' | 'polling';
     lastHealthStatus: string | null;
 }
@@ -132,6 +137,8 @@ export interface SidebarWebSearchBinding {
     providerVisibility: string;
     providerExtensionLabel: string | null;
     enabled: boolean;
+    effectiveEnabled: boolean;
+    disabledReason: string | null;
     lastHealthStatus: string | null;
 }
 
@@ -145,6 +152,8 @@ export interface SidebarImageProviderBinding {
     providerVisibility: string;
     providerExtensionLabel: string | null;
     enabled: boolean;
+    effectiveEnabled: boolean;
+    disabledReason: string | null;
     lastHealthStatus: string | null;
 }
 
@@ -231,13 +240,36 @@ function parseSkillIds(skillIds: string | null | undefined): Set<string> | null 
     }
 }
 
+/**
+ * Summarize extension contributions that will disappear with one binding.
+ */
+function formatExtensionRemovalMessage(pkg: AgentExtensionPackage | null): string {
+    const installation = pkg?.selected_binding?.installation;
+    if (!installation) {
+        return 'Removing this extension will also remove its agent-scoped contributions.';
+    }
+
+    const summary = installation.contribution_summary;
+    const counts = [
+        { label: 'tools', count: summary.tools?.length ?? 0 },
+        { label: 'skills', count: summary.skills?.length ?? 0 },
+        { label: 'channel providers', count: summary.channel_providers?.length ?? 0 },
+        { label: 'image providers', count: summary.image_providers?.length ?? 0 },
+        { label: 'web search providers', count: summary.web_search_providers?.length ?? 0 },
+        { label: 'hooks', count: summary.hooks?.length ?? 0 },
+        { label: 'chat surfaces', count: summary.chat_surfaces?.length ?? 0 },
+    ].filter((item) => item.count > 0);
+
+    if (counts.length === 0) {
+        return `Remove ${pkg.display_name} from this agent?`;
+    }
+
+    const detail = counts.map((item) => `${item.count} ${item.label}`).join(', ');
+    return `Removing ${pkg.display_name} will also unload ${detail} from this agent.`;
+}
+
 interface AgentDetailSidebarProps {
     agent: Agent | null;
-    scenes: Scene[];
-    selectedScene: Scene | null;
-    onSceneSelect: (scene: Scene) => void;
-    onCreateScene: () => void;
-    onDeleteScene: (scene: Scene) => void;
     onAgentDraftUpdate?: (agent: Agent) => void;
     onChannelBindingsLoaded?: (bindings: SidebarChannel[]) => void;
     onImageProviderBindingsLoaded?: (bindings: SidebarImageProviderBinding[]) => void;
@@ -250,16 +282,11 @@ interface AgentDetailSidebarProps {
 
 /**
  * Sidebar for agent detail page.
- * Shows agent info, scenes list, tools, and skills.
+ * Shows agent info, tools, skills, and binding state.
  * Uses shadcn sidebar components for consistent styling.
  */
 function AgentDetailSidebar({
     agent,
-    scenes,
-    selectedScene,
-    onSceneSelect,
-    onCreateScene,
-    onDeleteScene,
     onAgentDraftUpdate,
     onChannelBindingsLoaded,
     onImageProviderBindingsLoaded,
@@ -270,8 +297,7 @@ function AgentDetailSidebar({
     onWebSearchBindingsChanged,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
-    const [isScenesOpen, setIsScenesOpen] = useState(true);
-    const [isToolsOpen, setIsToolsOpen] = useState(false);
+    const [isToolsOpen, setIsToolsOpen] = useState(true);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isChannelsOpen, setIsChannelsOpen] = useState(false);
     const [isImageProvidersOpen, setIsImageProvidersOpen] = useState(false);
@@ -284,10 +310,12 @@ function AgentDetailSidebar({
     const [isImageProviderDialogOpen, setIsImageProviderDialogOpen] = useState(false);
     const [isWebSearchDialogOpen, setIsWebSearchDialogOpen] = useState(false);
     const [isExtensionDialogOpen, setIsExtensionDialogOpen] = useState(false);
+    const [isDeleteExtensionDialogOpen, setIsDeleteExtensionDialogOpen] = useState(false);
     const [editingChannel, setEditingChannel] = useState<ChannelBinding | null>(null);
     const [editingImageProviderBinding, setEditingImageProviderBinding] = useState<ImageProviderBinding | null>(null);
     const [editingWebSearchBinding, setEditingWebSearchBinding] = useState<WebSearchBinding | null>(null);
     const [editingExtensionPackage, setEditingExtensionPackage] = useState<AgentExtensionPackage | null>(null);
+    const [deletingExtensionPackage, setDeletingExtensionPackage] = useState<AgentExtensionPackage | null>(null);
     const [tools, setTools] = useState<SidebarTool[]>([]);
     const [skills, setSkills] = useState<SidebarSkill[]>([]);
     const [channels, setChannels] = useState<SidebarChannel[]>([]);
@@ -309,9 +337,6 @@ function AgentDetailSidebar({
     const [localSkillIds, setLocalSkillIds] = useState<string | null | undefined>(agent?.skill_ids);
     const hasFetchedToolsRef = useRef(false);
     const hasFetchedSkillsRef = useRef(false);
-    const hasFetchedChannelsCatalogRef = useRef(false);
-    const hasFetchedImageProviderCatalogRef = useRef(false);
-    const hasFetchedWebSearchCatalogRef = useRef(false);
     const latestAgentIdRef = useRef<number | null>(agent?.id ?? null);
     const { openTab, activeTabId } = useAgentTabStore();
 
@@ -333,14 +358,19 @@ function AgentDetailSidebar({
     useEffect(() => {
         latestAgentIdRef.current = agent?.id ?? null;
         setChannels([]);
+        setImageProviderBindings([]);
         setWebSearchBindings([]);
         setExtensionPackages([]);
         setEditingChannel(null);
+        setEditingImageProviderBinding(null);
         setEditingWebSearchBinding(null);
         setEditingExtensionPackage(null);
+        setDeletingExtensionPackage(null);
         setIsChannelDialogOpen(false);
+        setIsImageProviderDialogOpen(false);
         setIsWebSearchDialogOpen(false);
         setIsExtensionDialogOpen(false);
+        setIsDeleteExtensionDialogOpen(false);
     }, [agent?.id]);
 
     /**
@@ -356,51 +386,86 @@ function AgentDetailSidebar({
         [localSkillIds]
     );
 
+    /**
+     * Extension tools and skills are inherited from enabled extension bindings
+     * instead of being controlled by the legacy allowlists.
+     */
+    const extensionTools = useMemo<SidebarTool[]>(
+        () => extensionPackages.flatMap((pkg) => {
+            if (!pkg.selected_binding?.enabled) {
+                return [];
+            }
+            return pkg.selected_binding.installation.contribution_items
+                .filter((item) => item.type === 'tool')
+                .map((item) => ({
+                    name: item.name,
+                    description: item.description,
+                    kind: 'shared' as const,
+                    source: 'extension' as const,
+                    extensionLabel: pkg.display_name,
+                    readOnly: true,
+                }));
+        }),
+        [extensionPackages]
+    );
+
+    const extensionSkills = useMemo<SidebarSkill[]>(
+        () => extensionPackages.flatMap((pkg) => {
+            if (!pkg.selected_binding?.enabled) {
+                return [];
+            }
+            return pkg.selected_binding.installation.contribution_items
+                .filter((item) => item.type === 'skill')
+                .map((item) => ({
+                    name: item.name,
+                    description: item.description,
+                    kind: 'shared' as const,
+                    source: 'extension' as const,
+                    extensionLabel: pkg.display_name,
+                    creator: null,
+                    readOnly: true,
+                }));
+        }),
+        [extensionPackages]
+    );
+
     const displayedTools = useMemo(() => {
+        const baseTools = enabledToolNameSet === null
+            ? tools
+            : tools.filter((tool) => enabledToolNameSet.has(tool.name));
         if (enabledToolNameSet === null) {
-            return tools;
+            return [...baseTools, ...extensionTools];
         }
-        return tools.filter((tool) => enabledToolNameSet.has(tool.name));
-    }, [tools, enabledToolNameSet]);
+        return [...baseTools, ...extensionTools];
+    }, [tools, extensionTools, enabledToolNameSet]);
 
     const enabledCount = useMemo(() => {
         if (enabledToolNameSet === null) {
-            return tools.length;
+            return tools.length + extensionTools.length;
         }
         return displayedTools.length;
-    }, [tools.length, displayedTools.length, enabledToolNameSet]);
+    }, [tools.length, extensionTools.length, displayedTools.length, enabledToolNameSet]);
 
     /**
      * Sidebar should display skills that are currently configured for this
      * agent, instead of the global skill catalog.
      */
     const displayedSkills = useMemo(() => {
+        const baseSkills = enabledSkillNameSet === null
+            ? skills
+            : skills.filter((skill) => enabledSkillNameSet.has(skill.name));
         if (enabledSkillNameSet === null) {
-            return skills;
+            return [...baseSkills, ...extensionSkills];
         }
-        return skills.filter((skill) => enabledSkillNameSet.has(skill.name));
-    }, [skills, enabledSkillNameSet]);
+        return [...baseSkills, ...extensionSkills];
+    }, [skills, extensionSkills, enabledSkillNameSet]);
 
     const enabledSkillCount = useMemo(() => {
         if (enabledSkillNameSet === null) {
-            return skills.length;
+            return skills.length + extensionSkills.length;
         }
         return displayedSkills.length;
-    }, [skills.length, displayedSkills.length, enabledSkillNameSet]);
-
-    /**
-     * Sidebar rows only carry compact provider metadata, so keep a local lookup
-     * of catalog logos to avoid refetching richer binding payloads just for icons.
-     */
-    const webSearchLogoUrlByKey = useMemo<Record<string, string | null>>(
-        () => Object.fromEntries(
-            webSearchCatalog.map((item) => [
-                item.manifest.key,
-                item.manifest.logo_url ?? null,
-            ])
-        ),
-        [webSearchCatalog]
-    );
+    }, [skills.length, extensionSkills.length, displayedSkills.length, enabledSkillNameSet]);
 
     /**
      * Prefer installation-backed branding because one package card may point at
@@ -414,6 +479,71 @@ function AgentDetailSidebar({
             ?? null
         ),
         []
+    );
+
+    const webSearchLogoUrlByKey = useMemo<Record<string, string | null>>(
+        () => Object.fromEntries(
+            webSearchCatalog.map((item) => [
+                item.manifest.key,
+                item.manifest.logo_url ?? null,
+            ])
+        ),
+        [webSearchCatalog]
+    );
+
+    /**
+     * Resolve one extension-backed provider logo from the matching installed
+     * package version whenever the manifest references an extension package.
+     */
+    const getProviderExtensionLogoUrl = useCallback(
+        (
+            extensionPackageId: string | null | undefined,
+            extensionVersion: string | null | undefined,
+        ): string | null => {
+            if (!extensionPackageId) {
+                return null;
+            }
+
+            const pkg = extensionPackages.find(
+                (item) => item.package_id === extensionPackageId
+            );
+            if (!pkg) {
+                return null;
+            }
+
+            if (extensionVersion) {
+                const matchingVersion = pkg.versions.find(
+                    (installation) => installation.version === extensionVersion
+                );
+                if (matchingVersion?.logo_url) {
+                    return matchingVersion.logo_url;
+                }
+
+                if (pkg.selected_binding?.installation.version === extensionVersion) {
+                    return getExtensionLogoUrl(pkg);
+                }
+            }
+
+            return getExtensionLogoUrl(pkg);
+        },
+        [extensionPackages, getExtensionLogoUrl]
+    );
+
+    /**
+     * Image providers do not ship dedicated provider logos today, so reuse the
+     * owning extension package logo when the provider comes from an extension.
+     */
+    const imageProviderLogoUrlByKey = useMemo<Record<string, string | null>>(
+        () => Object.fromEntries(
+            imageProviderCatalog.map((item) => [
+                item.manifest.key,
+                getProviderExtensionLogoUrl(
+                    item.manifest.extension_name,
+                    item.manifest.extension_version,
+                ),
+            ])
+        ),
+        [imageProviderCatalog, getProviderExtensionLogoUrl]
     );
 
     /**
@@ -507,70 +637,65 @@ function AgentDetailSidebar({
     }, []);
 
     /**
-     * Load the built-in channel catalog once because the binding dialog reuses it
-     * for schema-driven provider forms.
+     * Agent-scoped provider catalogs depend on which extensions are installed
+     * and enabled for the current agent, so reload them with the agent context.
      */
-    useEffect(() => {
-        if (hasFetchedChannelsCatalogRef.current) return;
-
-        const fetchChannelCatalog = async () => {
-            hasFetchedChannelsCatalogRef.current = true;
-            try {
-                const catalog = await getChannels();
-                setChannelCatalog(catalog);
-            } catch (err) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                console.error('Failed to fetch channel catalog:', error);
-                toast.error('Failed to load channels');
+    const loadChannelCatalog = useCallback(async () => {
+        const requestedAgentId = agent?.id;
+        try {
+            const catalog = await getChannels(requestedAgentId);
+            if (latestAgentIdRef.current !== (requestedAgentId ?? null)) {
+                return;
             }
-        };
+            setChannelCatalog(catalog);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch channel catalog:', error);
+            toast.error('Failed to load channels');
+        }
+    }, [agent?.id]);
 
-        void fetchChannelCatalog();
-    }, []);
-
-    /**
-     * Load the installed image-generation provider catalog once because the
-     * binding dialog reuses it for schema-driven provider forms.
-     */
-    useEffect(() => {
-        if (hasFetchedImageProviderCatalogRef.current) return;
-
-        const fetchImageProviderCatalog = async () => {
-            hasFetchedImageProviderCatalogRef.current = true;
-            try {
-                const catalog = await getImageGenerationProviders();
-                setImageProviderCatalog(catalog);
-            } catch (err) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                console.error('Failed to fetch image provider catalog:', error);
-                toast.error('Failed to load image providers');
+    const loadImageProviderCatalog = useCallback(async () => {
+        const requestedAgentId = agent?.id;
+        try {
+            const catalog = await getImageGenerationProviders(requestedAgentId);
+            if (latestAgentIdRef.current !== (requestedAgentId ?? null)) {
+                return;
             }
-        };
+            setImageProviderCatalog(catalog);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch image provider catalog:', error);
+            toast.error('Failed to load image providers');
+        }
+    }, [agent?.id]);
 
-        void fetchImageProviderCatalog();
-    }, []);
-
-    /**
-     * Load the built-in web-search provider catalog once because the binding
-     * dialog reuses it for schema-driven provider forms.
-     */
-    useEffect(() => {
-        if (hasFetchedWebSearchCatalogRef.current) return;
-
-        const fetchWebSearchCatalog = async () => {
-            hasFetchedWebSearchCatalogRef.current = true;
-            try {
-                const catalog = await getWebSearchProviders();
-                setWebSearchCatalog(catalog);
-            } catch (err) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                console.error('Failed to fetch web search catalog:', error);
-                toast.error('Failed to load web search providers');
+    const loadWebSearchCatalog = useCallback(async () => {
+        const requestedAgentId = agent?.id;
+        try {
+            const catalog = await getWebSearchProviders(requestedAgentId);
+            if (latestAgentIdRef.current !== (requestedAgentId ?? null)) {
+                return;
             }
-        };
+            setWebSearchCatalog(catalog);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch web search catalog:', error);
+            toast.error('Failed to load web search providers');
+        }
+    }, [agent?.id]);
 
-        void fetchWebSearchCatalog();
-    }, []);
+    useEffect(() => {
+        void loadChannelCatalog();
+    }, [loadChannelCatalog]);
+
+    useEffect(() => {
+        void loadImageProviderCatalog();
+    }, [loadImageProviderCatalog]);
+
+    useEffect(() => {
+        void loadWebSearchCatalog();
+    }, [loadWebSearchCatalog]);
 
     /**
      * Channel bindings are agent-specific, so reload them whenever the current
@@ -601,6 +726,8 @@ function AgentDetailSidebar({
                     binding.manifest.extension_version,
                 ),
                 enabled: binding.enabled,
+                effectiveEnabled: binding.effective_enabled ?? binding.enabled,
+                disabledReason: binding.disabled_reason ?? null,
                 transportMode: binding.manifest.transport_mode,
                 lastHealthStatus: binding.last_health_status,
             }));
@@ -649,6 +776,8 @@ function AgentDetailSidebar({
                     binding.manifest.extension_version,
                 ),
                 enabled: binding.enabled,
+                effectiveEnabled: binding.effective_enabled ?? binding.enabled,
+                disabledReason: binding.disabled_reason ?? null,
                 lastHealthStatus: binding.last_health_status,
             }));
             setImageProviderBindings(nextBindings);
@@ -696,6 +825,8 @@ function AgentDetailSidebar({
                     binding.manifest.extension_version,
                 ),
                 enabled: binding.enabled,
+                effectiveEnabled: binding.effective_enabled ?? binding.enabled,
+                disabledReason: binding.disabled_reason ?? null,
                 lastHealthStatus: binding.last_health_status,
             }));
             setWebSearchBindings(nextBindings);
@@ -737,13 +868,12 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'scenes' | 'tools' | 'skills' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
+    const handleSectionClick = (section: 'tools' | 'skills' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
             // Delay section state update to ensure sidebar expansion completes
             setTimeout(() => {
-                setIsScenesOpen(section === 'scenes');
                 setIsToolsOpen(section === 'tools');
                 setIsSkillsOpen(section === 'skills');
                 setIsExtensionsOpen(section === 'extensions');
@@ -753,7 +883,6 @@ function AgentDetailSidebar({
             }, 100);
         } else {
             // In expanded mode, toggle section immediately
-            setIsScenesOpen(section === 'scenes');
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
             setIsExtensionsOpen(section === 'extensions');
@@ -764,26 +893,13 @@ function AgentDetailSidebar({
     };
 
     /**
-     * Handle scene item click.
-     * Opens a new tab for the scene and maintains backward compatibility.
-     */
-    const handleSceneClick = (scene: Scene) => {
-        // Open tab for this scene
-        openTab({
-            type: 'scene',
-            name: scene.name,
-            resourceId: scene.id,
-        });
-
-        // Keep backward compatibility with existing logic
-        onSceneSelect(scene);
-    };
-
-    /**
      * Handle tool item click.
      * Opens Monaco tool tab and carries permission metadata.
      */
     const handleToolClick = (tool: SidebarTool) => {
+        if (tool.source === 'extension') {
+            return;
+        }
         openTab({
             type: 'tool',
             name: tool.name,
@@ -801,6 +917,9 @@ function AgentDetailSidebar({
      * Opens Monaco skill tab and carries permission metadata.
      */
     const handleSkillClick = (skill: SidebarSkill) => {
+        if (skill.source === 'extension') {
+            return;
+        }
         openTab({
             type: 'skill',
             name: skill.name,
@@ -984,16 +1103,41 @@ function AgentDetailSidebar({
     };
 
     /**
-     * Delete one extension binding from the current agent.
+     * Open the destructive confirmation flow for one extension binding.
      */
-    const handleDeleteExtension = async (extensionInstallationId: number) => {
+    const handleRequestDeleteExtension = (pkg: AgentExtensionPackage) => {
+        setDeletingExtensionPackage(pkg);
+        setIsDeleteExtensionDialogOpen(true);
+    };
+
+    /**
+     * Delete one extension binding from the current agent and reload children.
+     */
+    const handleConfirmDeleteExtension = async () => {
+        const extensionInstallationId =
+            deletingExtensionPackage?.selected_binding?.extension_installation_id ?? null;
         if (!agent?.id) {
+            return;
+        }
+        if (!extensionInstallationId) {
+            setIsDeleteExtensionDialogOpen(false);
+            setDeletingExtensionPackage(null);
             return;
         }
         try {
             await deleteAgentExtensionBinding(agent.id, extensionInstallationId);
             toast.success('Extension removed');
+            setIsDeleteExtensionDialogOpen(false);
+            setDeletingExtensionPackage(null);
             await loadExtensionPackages();
+            await Promise.all([
+                loadChannelCatalog(),
+                loadImageProviderCatalog(),
+                loadWebSearchCatalog(),
+                loadChannels(),
+                loadImageProviderBindings(),
+                loadWebSearchBindings(),
+            ]);
             await onExtensionBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
@@ -1092,106 +1236,6 @@ function AgentDetailSidebar({
                 <SidebarSeparator />
 
                 <SidebarContent className="gap-0.5 pt-2">
-                    <SidebarGroup className="py-0 pb-1">
-                        <SidebarGroupLabel className="h-6 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">
-                            Workflow
-                        </SidebarGroupLabel>
-                    </SidebarGroup>
-
-                    {/* Scenes Section */}
-                    <Collapsible
-                        open={isScenesOpen}
-                        onOpenChange={setIsScenesOpen}
-                        className="group/collapsible"
-                    >
-                        <SidebarGroup className="py-0">
-                            {/* Icon button for collapsed mode */}
-                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton
-                                        onClick={() => handleSectionClick('scenes')}
-                                        tooltip="Scenes"
-                                        isActive={isScenesOpen}
-                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
-                                    >
-                                        <Layers className="size-4" />
-                                        <span>Scenes</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                            </SidebarMenu>
-
-                            {/* Full header for expanded mode */}
-                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
-                                <CollapsibleTrigger
-                                    onClick={() => handleSectionClick('scenes')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
-                                >
-                                    <Layers className="size-4" />
-                                    <span className="flex-1 text-left">Scenes</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {scenes.length}
-                                    </span>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <div
-                                                role="button"
-                                                tabIndex={0}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onCreateScene();
-                                                }}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' || e.key === ' ') {
-                                                        e.stopPropagation();
-                                                        onCreateScene();
-                                                    }
-                                                }}
-                                                className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
-                                                aria-label="Add scene"
-                                            >
-                                                <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
-                                            </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="right">Add scene</TooltipContent>
-                                    </Tooltip>
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
-                                </CollapsibleTrigger>
-                            </SidebarGroupLabel>
-                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
-                                <SidebarGroupContent>
-                                    <SidebarMenu>
-                                        {scenes.map((scene) => (
-                                            <SidebarMenuItem key={scene.id} className="group/item">
-                                                <SidebarMenuButton
-                                                    isActive={selectedScene?.id === scene.id}
-                                                    onClick={() => handleSceneClick(scene)}
-                                                    tooltip={scene.name}
-                                                    size="sm"
-                                                    className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
-                                                >
-                                                    {/* Reserved icon slot */}
-                                                    <span className="w-4 shrink-0" />
-                                                    <span className="truncate">{scene.name}</span>
-                                                </SidebarMenuButton>
-                                                <SidebarMenuAction
-                                                    showOnHover
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onDeleteScene(scene);
-                                                    }}
-                                                    className="hover:bg-destructive/10 hover:text-destructive"
-                                                >
-                                                    <X className="size-3.5" />
-                                                    <span className="sr-only">Delete scene</span>
-                                                </SidebarMenuAction>
-                                            </SidebarMenuItem>
-                                        ))}
-                                    </SidebarMenu>
-                                </SidebarGroupContent>
-                            </CollapsibleContent>
-                        </SidebarGroup>
-                    </Collapsible>
-
                     <SidebarGroup className="py-0 pb-1 pt-2">
                         <SidebarGroupLabel className="h-6 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">
                             Capabilities
@@ -1232,7 +1276,7 @@ function AgentDetailSidebar({
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
                                         {toolsLoading ? '…' : enabledCount}
                                         {' / '}
-                                        {toolsLoading ? '…' : tools.length}
+                                        {toolsLoading ? '…' : tools.length + extensionTools.length}
                                     </span>
                                     {/* Configure button */}
                                     {agent?.id && (
@@ -1261,7 +1305,7 @@ function AgentDetailSidebar({
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading tools…
                                         </div>
-                                    ) : tools.length === 0 ? (
+                                    ) : tools.length + extensionTools.length === 0 ? (
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             No tools available
                                         </div>
@@ -1287,10 +1331,14 @@ function AgentDetailSidebar({
                                                                 {/* Reserved icon slot */}
                                                                 <span className="w-4 shrink-0" />
                                                                 <span className="truncate flex-1">{t.name}</span>
-                                                                {/* Private badge */}
                                                                 {t.kind === 'private' && (
                                                                     <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                         me
+                                                                    </span>
+                                                                )}
+                                                                {t.source === 'extension' && (
+                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                        ext
                                                                     </span>
                                                                 )}
                                                             </SidebarMenuButton>
@@ -1300,7 +1348,11 @@ function AgentDetailSidebar({
                                                                 <div className="flex items-center gap-1.5">
                                                                     <p className="font-semibold">{t.name}</p>
                                                                     <span className="text-[10px] text-muted-foreground">
-                                                                        {t.kind === 'shared' ? '· shared' : '· private'}
+                                                                        {t.source === 'extension'
+                                                                            ? `· extension · ${t.extensionLabel ?? 'unknown'}`
+                                                                            : t.kind === 'shared'
+                                                                              ? '· shared'
+                                                                              : '· private'}
                                                                     </span>
                                                                 </div>
                                                                 {t.description && (
@@ -1354,7 +1406,7 @@ function AgentDetailSidebar({
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
                                         {skillsLoading ? '…' : enabledSkillCount}
                                         {' / '}
-                                        {skillsLoading ? '…' : skills.length}
+                                        {skillsLoading ? '…' : skills.length + extensionSkills.length}
                                     </span>
                                     {agent?.id && (
                                         <Tooltip>
@@ -1382,7 +1434,7 @@ function AgentDetailSidebar({
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading skills…
                                         </div>
-                                    ) : skills.length === 0 ? (
+                                    ) : skills.length + extensionSkills.length === 0 ? (
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             No skills available
                                         </div>
@@ -1412,6 +1464,11 @@ function AgentDetailSidebar({
                                                                         me
                                                                     </span>
                                                                 )}
+                                                                {s.source === 'extension' && (
+                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                        ext
+                                                                    </span>
+                                                                )}
                                                                 {s.kind === 'shared' && !s.readOnly && (
                                                                     <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                         you
@@ -1424,7 +1481,9 @@ function AgentDetailSidebar({
                                                                 <div className="flex items-center gap-1.5">
                                                                     <p className="font-semibold">{s.name}</p>
                                                                     <span className="text-[10px] text-muted-foreground">
-                                                                        {s.kind === 'shared'
+                                                                        {s.source === 'extension'
+                                                                            ? `· extension · ${s.extensionLabel ?? 'unknown'}`
+                                                                            : s.kind === 'shared'
                                                                             ? s.readOnly
                                                                               ? `· shared · ${s.creator ?? 'unknown'}`
                                                                               : '· shared · you'
@@ -1567,9 +1626,7 @@ function AgentDetailSidebar({
                                                                 showOnHover
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
-                                                                    void handleDeleteExtension(
-                                                                        pkg.selected_binding?.extension_installation_id ?? 0,
-                                                                    );
+                                                                    handleRequestDeleteExtension(pkg);
                                                                 }}
                                                                 className="hover:bg-destructive/10 hover:text-destructive"
                                                             >
@@ -1668,7 +1725,7 @@ function AgentDetailSidebar({
                                                                     {channel.providerVisibility === 'extension' ? 'ext' : 'core'}
                                                                 </span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                    {channel.enabled ? 'on' : 'off'}
+                                                                    {channel.effectiveEnabled ? 'on' : 'off'}
                                                                 </span>
                                                             </SidebarMenuButton>
                                                         </TooltipTrigger>
@@ -1681,6 +1738,11 @@ function AgentDetailSidebar({
                                                                 {channel.providerExtensionLabel ? (
                                                                     <p className="text-xs text-muted-foreground">
                                                                         {channel.providerExtensionLabel}
+                                                                    </p>
+                                                                ) : null}
+                                                                {channel.disabledReason ? (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {channel.disabledReason}
                                                                     </p>
                                                                 ) : null}
                                                             </div>
@@ -1780,6 +1842,7 @@ function AgentDetailSidebar({
                                                             >
                                                                 <ImageProviderBadge
                                                                     name={binding.providerName}
+                                                                    logoUrl={imageProviderLogoUrlByKey[binding.providerKey] ?? null}
                                                                     className="w-4 shrink-0 justify-center"
                                                                     textClassName="hidden"
                                                                 />
@@ -1788,7 +1851,7 @@ function AgentDetailSidebar({
                                                                     {binding.providerVisibility === 'extension' ? 'ext' : 'core'}
                                                                 </span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                    {binding.enabled ? 'on' : 'off'}
+                                                                    {binding.effectiveEnabled ? 'on' : 'off'}
                                                                 </span>
                                                             </SidebarMenuButton>
                                                         </TooltipTrigger>
@@ -1801,6 +1864,11 @@ function AgentDetailSidebar({
                                                                 {binding.providerExtensionLabel ? (
                                                                     <p className="text-xs text-muted-foreground">
                                                                         {binding.providerExtensionLabel}
+                                                                    </p>
+                                                                ) : null}
+                                                                {binding.disabledReason ? (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {binding.disabledReason}
                                                                     </p>
                                                                 ) : null}
                                                             </div>
@@ -1909,7 +1977,7 @@ function AgentDetailSidebar({
                                                                     {binding.providerVisibility === 'extension' ? 'ext' : 'core'}
                                                                 </span>
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                    {binding.enabled ? 'on' : 'off'}
+                                                                    {binding.effectiveEnabled ? 'on' : 'off'}
                                                                 </span>
                                                             </SidebarMenuButton>
                                                         </TooltipTrigger>
@@ -1922,6 +1990,11 @@ function AgentDetailSidebar({
                                                                 {binding.providerExtensionLabel ? (
                                                                     <p className="text-xs text-muted-foreground">
                                                                         {binding.providerExtensionLabel}
+                                                                    </p>
+                                                                ) : null}
+                                                                {binding.disabledReason ? (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {binding.disabledReason}
                                                                     </p>
                                                                 ) : null}
                                                             </div>
@@ -2018,6 +2091,14 @@ function AgentDetailSidebar({
                     initialPackage={editingExtensionPackage}
                     onSaved={async () => {
                         await loadExtensionPackages();
+                        await Promise.all([
+                            loadChannelCatalog(),
+                            loadImageProviderCatalog(),
+                            loadWebSearchCatalog(),
+                            loadChannels(),
+                            loadImageProviderBindings(),
+                            loadWebSearchBindings(),
+                        ]);
                         await onExtensionBindingsChanged?.();
                     }}
                 />
@@ -2067,6 +2148,22 @@ function AgentDetailSidebar({
                     }}
                 />
             )}
+
+            <ConfirmationModal
+                isOpen={isDeleteExtensionDialogOpen}
+                title="Remove Extension?"
+                message={formatExtensionRemovalMessage(deletingExtensionPackage)}
+                confirmText="Remove"
+                cancelText="Cancel"
+                onConfirm={() => {
+                    void handleConfirmDeleteExtension();
+                }}
+                onCancel={() => {
+                    setIsDeleteExtensionDialogOpen(false);
+                    setDeletingExtensionPackage(null);
+                }}
+                variant="danger"
+            />
         </>
     );
 }

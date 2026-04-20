@@ -1,4 +1,4 @@
-from app.models.agent import Agent, Connection, Scene, Subscene
+from app.models.agent import Agent
 from app.models.extension import (
     AgentExtensionBinding,
     ExtensionHookExecution,
@@ -11,7 +11,6 @@ from app.models.user import User
 __all__ = [
     "Agent",
     "AgentExtensionBinding",
-    "Connection",
     "ExtensionHookExecution",
     "ExtensionInstallation",
     "FileAsset",
@@ -19,7 +18,5 @@ __all__ = [
     "ReactRecursion",
     "ReactTask",
     "ReactTaskEvent",
-    "Scene",
-    "Subscene",
     "User",
 ]

@@ -1,61 +1,9 @@
-import type { Agent, Scene, SceneGraph } from "@/types";
+import type { Agent } from "@/types";
 
 /**
  * Session namespaces supported by the shared chat surface.
  */
 export type ChatSessionType = "consumer" | "studio_test";
-
-/**
- * One normalized connection frozen into a Studio test snapshot.
- */
-export interface StudioTestSnapshotConnection {
-  /** Stable persisted or temporary identifier. */
-  id?: number | string;
-  /** User-facing connection label. */
-  name: string;
-  /** Optional transition condition. */
-  condition?: string | null;
-  /** Source subscene name. */
-  from_subscene: string;
-  /** Target subscene name. */
-  to_subscene: string;
-}
-
-/**
- * One normalized subscene frozen into a Studio test snapshot.
- */
-export interface StudioTestSnapshotSubscene {
-  /** Stable persisted or temporary identifier. */
-  id?: number | string;
-  /** User-facing subscene label. */
-  name: string;
-  /** Runtime subscene type. */
-  type: string;
-  /** Runtime subscene state. */
-  state: string;
-  /** Optional human-readable description. */
-  description?: string | null;
-  /** Whether the subscene is mandatory. */
-  mandatory: boolean;
-  /** Optional objective shown in Studio. */
-  objective?: string | null;
-  /** Outgoing transitions frozen for this test. */
-  connections: StudioTestSnapshotConnection[];
-}
-
-/**
- * One normalized scene frozen into a Studio test snapshot.
- */
-export interface StudioTestSnapshotScene {
-  /** Stable persisted or temporary identifier. */
-  id?: number | string;
-  /** User-facing scene label. */
-  name: string;
-  /** Optional scene description. */
-  description?: string | null;
-  /** Ordered scene graph content. */
-  subscenes: StudioTestSnapshotSubscene[];
-}
 
 /**
  * Runtime-facing agent payload frozen into a Studio test snapshot.
@@ -91,8 +39,6 @@ export interface StudioTestSnapshotPayload {
   schema_version: 1;
   /** Runtime-facing agent settings. */
   agent: StudioTestSnapshotAgent;
-  /** Ordered scene graph state. */
-  scenes: StudioTestSnapshotScene[];
 }
 
 function normalizeAllowlist(rawValue: string | null | undefined): string[] | null {
@@ -142,7 +88,6 @@ function toCanonicalJson(value: unknown): string {
  */
 export function buildStudioTestSnapshotPayload(
   agent: Agent,
-  scenes: Scene[],
 ): StudioTestSnapshotPayload {
   return {
     schema_version: 1,
@@ -158,33 +103,6 @@ export function buildStudioTestSnapshotPayload(
       tool_ids: normalizeAllowlist(agent.tool_ids),
       skill_ids: normalizeAllowlist(agent.skill_ids),
     },
-    scenes: scenes.map((scene) => {
-      const sceneGraph = scene as unknown as SceneGraph;
-      return {
-        id: sceneGraph.id,
-        name: sceneGraph.name ?? scene.name ?? "",
-        description: sceneGraph.description ?? scene.description ?? null,
-        subscenes: (sceneGraph.subscenes ?? []).map(
-          (subscene) => ({
-            id: subscene.id,
-            name: subscene.name ?? subscene.data?.label ?? "",
-            type: subscene.type ?? subscene.data?.type ?? "normal",
-            state: subscene.state ?? subscene.data?.state ?? "inactive",
-            description: subscene.data?.description ?? null,
-            mandatory:
-              subscene.mandatory ?? subscene.data?.mandatory ?? false,
-            objective: subscene.objective ?? subscene.data?.objective ?? null,
-            connections: (subscene.connections ?? []).map((connection) => ({
-              id: connection.id,
-              name: connection.name,
-              condition: connection.condition ?? null,
-              from_subscene: connection.from_subscene,
-              to_subscene: connection.to_subscene,
-            })),
-          }),
-        ),
-      };
-    }),
   };
 }
 

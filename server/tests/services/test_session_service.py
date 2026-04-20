@@ -559,7 +559,6 @@ class SessionServiceTestCase(unittest.TestCase):
                     "tool_ids": None,
                     "skill_ids": None,
                 },
-                "scenes": [],
             },
             created_by="alice",
         )
@@ -681,7 +680,6 @@ class SessionServiceTestCase(unittest.TestCase):
                     "tool_ids": None,
                     "skill_ids": None,
                 },
-                "scenes": [],
             },
             created_by="alice",
         )

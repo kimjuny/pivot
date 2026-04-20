@@ -367,8 +367,16 @@ class ChannelRuntimeManager:
                     AgentChannelBinding.channel_key == "work_wechat",
                 )
             ).all()
+            channel_service = ChannelService(session)
 
         for row in rows:
+            provider = channel_service._get_channel_provider(row.channel_key)
+            if not channel_service._is_provider_available_to_agent(
+                agent_id=row.agent_id,
+                provider=provider,
+                enabled_only=True,
+            ):
+                continue
             binding_id = row.id
             if binding_id is None:
                 continue

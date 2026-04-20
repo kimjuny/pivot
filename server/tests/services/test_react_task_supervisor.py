@@ -101,7 +101,6 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                         "tool_ids": ["release_tool"],
                         "skill_ids": ["release_skill"],
                     },
-                    "scenes": [],
                     "channel_bindings": [],
                     "web_search_bindings": [],
                 },

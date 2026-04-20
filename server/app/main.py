@@ -30,7 +30,6 @@ from app.api.models import router as models_router  # noqa: E402
 from app.api.operations import router as operations_router  # noqa: E402
 from app.api.projects import router as projects_router  # noqa: E402
 from app.api.react import router as react_router  # noqa: E402
-from app.api.scenes import router as scenes_router  # noqa: E402
 from app.api.session import router as session_router  # noqa: E402
 from app.api.skills import router as skills_router  # noqa: E402
 from app.api.storage import router as storage_router  # noqa: E402
@@ -101,7 +100,6 @@ app.add_middleware(TimingMiddleware)
 
 # Include API routes
 app.include_router(agents_router, prefix="/api")
-app.include_router(scenes_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")

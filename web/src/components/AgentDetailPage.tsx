@@ -4,8 +4,7 @@ import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator'
 import AgentDetail from './AgentDetail';
 import Navigation from './Navigation';
 import { getAgentById, AuthError } from '../utils/api';
-import type { Agent, Scene } from '../types';
-import { useSceneGraphStore } from '../store/sceneGraphStore';
+import type { Agent } from '../types';
 import { useAgentTabStore } from '../store/agentTabStore';
 import { isTokenValid } from '../contexts/auth-core';
 
@@ -18,14 +17,12 @@ function AgentDetailPage() {
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [scenes, setScenes] = useState<Scene[]>([]);
-  const [selectedScene, setSelectedScene] = useState<Scene | null>(null);
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const isLoadingAgentDetailsRef = useRef<boolean>(false);
 
   /**
-   * Load agent details and associated scenes from server.
+   * Load agent details from server.
    */
   const loadAgentDetails = useCallback(async () => {
     if (!agentId) return;
@@ -46,23 +43,10 @@ function AgentDetailPage() {
     setError(null);
 
     setAgent(null);
-    setScenes([]);
-    setSelectedScene(null);
-
-    useSceneGraphStore.getState().updateSceneGraph(null);
 
     try {
       const agentData = await getAgentById(parseInt(agentId));
       setAgent(agentData);
-
-      // Use scenes directly from agent data
-      const agentScenes = (agentData.scenes || []) as unknown as Scene[];
-      setScenes(agentScenes);
-
-      if (agentScenes && agentScenes.length > 0) {
-        const firstScene = agentScenes[0];
-        setSelectedScene(firstScene);
-      }
     } catch (err) {
       // Redirect to login for auth errors
       if (err instanceof AuthError) {
@@ -94,32 +78,19 @@ function AgentDetailPage() {
   }, [agentId]);
 
   /**
-   * Open a tab for the first scene when the page loads with scenes available.
-   * This ensures users see content immediately instead of an empty state.
+   * Refresh agent detail from server.
    */
-  useEffect(() => {
-    if (selectedScene && !isInitializing) {
-      useAgentTabStore.getState().openTab({
-        type: 'scene',
-        name: selectedScene.name,
-        resourceId: selectedScene.id,
-      });
-    }
-  }, [selectedScene, isInitializing]);
-
-  /**
-   * Refresh scenes list from server.
-   */
-  const handleRefreshScenes = async () => {
-    if (!agentId) return;
+  const handleRefreshAgent = async (): Promise<Agent | null> => {
+    if (!agentId) return null;
     try {
       const agentData = await getAgentById(parseInt(agentId));
       setAgent(agentData);
-      setScenes((agentData.scenes || []) as unknown as Scene[]);
+      return agentData;
     } catch (err) {
       if (!(err instanceof AuthError)) {
-        setError((err as Error).message || 'Failed to refresh scenes');
+        setError((err as Error).message || 'Failed to refresh agent');
       }
+      return null;
     }
   };
 
@@ -175,12 +146,8 @@ function AgentDetailPage() {
       <div className="flex-1 min-h-0 bg-background overflow-hidden">
         <AgentDetail
           agent={agent}
-          scenes={scenes}
-          selectedScene={selectedScene}
           agentId={parseInt(agentId!)}
-          onResetSceneGraph={async () => {}}
-          onSceneSelect={setSelectedScene}
-          onRefreshScenes={handleRefreshScenes}
+          onRefreshAgent={handleRefreshAgent}
         />
       </div>
     </div>

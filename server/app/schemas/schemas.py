@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 from app.schemas.base import AppBaseModel
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
 
 def _normalize_extra_config(extra_config: str | None) -> str | None:
@@ -103,129 +103,6 @@ class AgentResponse(AppBaseModel):
     updated_at: datetime
 
 
-class SceneCreate(AppBaseModel):
-    name: str = Field(..., description="Scene name")
-    description: str | None = Field(None, description="Scene description")
-    agent_id: int | None = Field(None, description="Agent ID")
-
-
-class SceneUpdate(AppBaseModel):
-    name: str | None = None
-    description: str | None = None
-    agent_id: int | None = None
-
-
-class SceneResponse(AppBaseModel):
-    id: int
-    name: str
-    description: str | None
-    agent_id: int | None
-    created_at: datetime
-    updated_at: datetime
-
-
-class SubsceneCreate(AppBaseModel):
-    name: str = Field(..., description="Subscene name")
-    type: str = Field(default="normal", description="Subscene type: start, normal, end")
-    state: str = Field(
-        default="inactive", description="Subscene state: active, inactive"
-    )
-    description: str | None = Field(None, description="Subscene description")
-    mandatory: bool = Field(default=False, description="Whether subscene is mandatory")
-    objective: str | None = Field(None, description="Subscene objective")
-
-
-class SubsceneUpdate(AppBaseModel):
-    name: str | None = None
-    type: str | None = None
-    state: str | None = None
-    description: str | None = None
-    mandatory: bool | None = None
-    objective: str | None = None
-
-
-class SubsceneResponse(AppBaseModel):
-    id: int
-    name: str
-    type: str
-    state: str
-    description: str | None
-    mandatory: bool
-    objective: str | None
-    scene_id: int
-    created_at: datetime
-    updated_at: datetime
-
-
-class ConnectionCreate(AppBaseModel):
-    name: str = Field(..., description="Connection name")
-    condition: str | None = Field(None, description="Connection condition")
-    from_subscene: str = Field(..., description="Source subscene name")
-    to_subscene: str = Field(..., description="Target subscene name")
-    from_subscene_id: int | None = Field(None, description="Source subscene ID")
-    to_subscene_id: int | None = Field(None, description="Target subscene ID")
-    scene_id: int | None = Field(None, description="Scene ID")
-
-
-class ConnectionUpdate(AppBaseModel):
-    name: str | None = None
-    condition: str | None = None
-    from_subscene: str | None = None
-    to_subscene: str | None = None
-    from_subscene_id: int | None = None
-    to_subscene_id: int | None = None
-    scene_id: int | None = None
-
-
-class ConnectionResponse(AppBaseModel):
-    id: int | str
-    name: str
-    condition: str | None
-    from_subscene: str
-    to_subscene: str
-    from_subscene_id: int | str | None
-    to_subscene_id: int | str | None
-    scene_id: int | str | None
-    created_at: datetime
-    updated_at: datetime
-
-
-class SubsceneWithConnectionsResponse(AppBaseModel):
-    id: int | str | None
-    name: str
-    type: str
-    state: str
-    description: str | None
-    mandatory: bool
-    objective: str | None
-    scene_id: int | str | None
-    connections: list[ConnectionResponse]
-    created_at: datetime
-    updated_at: datetime
-
-
-class SceneGraphResponse(AppBaseModel):
-    id: int | str
-    name: str
-    description: str | None
-    state: str
-    agent_id: int | str
-    subscenes: list[SubsceneWithConnectionsResponse]
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(
-        from_attributes=True,
-        populate_by_name=True,
-    )
-
-
-class AgentDetailResponse(AgentResponse):
-    """Agent response with full details including scenes and their graphs."""
-
-    scenes: list[SceneGraphResponse] = Field(default_factory=list)
-
-
 class AgentReleaseResponse(AppBaseModel):
     """Published immutable release metadata for one agent."""
 
@@ -259,56 +136,6 @@ class AgentPublishRequest(AppBaseModel):
     """Payload for publishing the current saved draft as a release."""
 
     release_note: str | None = Field(default=None, max_length=4000)
-
-
-class SceneGraphUpdate(AppBaseModel):
-    """Schema for bulk updating scene graph data."""
-
-    subscenes: list[dict] = Field(
-        ..., description="List of subscenes with their connections"
-    )
-    agent_id: int | None = Field(None, description="Agent ID")
-
-
-class ConnectionGraphItem(AppBaseModel):
-    """Schema for a connection within a subscene update."""
-
-    name: str = Field(default="", description="Connection name")
-    condition: str | None = Field(None, description="Condition for transition")
-    to_subscene: str = Field(..., description="Target subscene name")
-
-
-class SubsceneGraphItem(AppBaseModel):
-    """Schema for a subscene within a graph update."""
-
-    name: str = Field(..., description="Subscene name")
-    type: str = Field(default="normal", description="Type: start, normal, end")
-    state: str = Field(default="inactive", description="State: active, inactive")
-    description: str | None = Field(None, description="Description of the subscene")
-    mandatory: bool = Field(default=False, description="Is completion mandatory")
-    objective: str | None = Field(None, description="Objective of the subscene")
-    connections: list[ConnectionGraphItem] = Field(
-        default_factory=list,
-        description="Outbound connections",
-    )
-
-
-class SceneWithGraphUpdate(AppBaseModel):
-    """Schema for scene update including nested graph."""
-
-    name: str = Field(..., description="Scene name")
-    description: str | None = Field(None, description="Scene description")
-    graph: list[SubsceneGraphItem] | None = Field(
-        None, description="Scene graph data (subscenes and connections)"
-    )
-
-
-class AgentSceneListUpdate(AppBaseModel):
-    """Schema for bulk updating agent scenes list with optional graph content."""
-
-    scenes: list[SceneWithGraphUpdate] = Field(
-        ..., description="List of scenes to update"
-    )
 
 
 class LLMCreate(AppBaseModel):

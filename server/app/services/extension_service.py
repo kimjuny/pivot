@@ -19,9 +19,18 @@ from typing import Any
 from app.channels.types import ChannelManifest
 from app.config import get_settings
 from app.image_generation.types import ImageGenerationProviderManifest
+from app.models.channel import (
+    AgentChannelBinding,
+    ChannelEventLog,
+    ChannelLinkToken,
+    ChannelSession,
+    ExternalIdentityBinding,
+)
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
+from app.models.image_generation import AgentImageProviderBinding
 from app.models.skill import Skill
+from app.models.web_search import AgentWebSearchBinding
 from app.orchestration.skills.skill_files import parse_front_matter
 from app.orchestration.tool import ToolManager, get_tool_manager
 from app.orchestration.tool.builtin.programmatic_tool_call import (
@@ -32,6 +41,7 @@ from app.orchestration.web_search.types import WebSearchProviderManifest
 from app.services.artifact_storage_service import ExtensionArtifactStorageService
 from app.services.provider_registry_service import (
     ProviderRegistryService,
+    extract_provider_keys_from_manifest,
     load_channel_provider_from_file,
     load_image_generation_provider_from_file,
     load_web_search_provider_from_file,
@@ -1927,6 +1937,7 @@ class ExtensionService:
         )
         binding = self.db.exec(statement).first()
         now = datetime.now(UTC)
+        is_new_binding = binding is None
         if binding is None:
             binding = AgentExtensionBinding(
                 agent_id=agent_id,
@@ -1945,6 +1956,12 @@ class ExtensionService:
 
         self.db.add(binding)
         self.db.flush()
+        if is_new_binding:
+            self._seed_agent_provider_bindings(
+                agent_id=agent_id,
+                installation=installation,
+                now=now,
+            )
         try:
             self.validate_agent_bindings(agent_id=agent_id)
         except Exception:
@@ -1979,6 +1996,7 @@ class ExtensionService:
         }
         requested_ids: set[int] = set()
         requested_package_names: set[str] = set()
+        requested_installations: dict[int, ExtensionInstallation] = {}
         now = datetime.now(UTC)
         try:
             for item in bindings:
@@ -2012,6 +2030,7 @@ class ExtensionService:
                         "Each extension package may appear only once in bindings."
                     )
                 requested_package_names.add(installation.package_id)
+                requested_installations[installation_id] = installation
                 normalized_config = _normalize_config_payload(
                     schema_section=self._get_configuration_schema_section(
                         manifest=manifest,
@@ -2034,9 +2053,23 @@ class ExtensionService:
                 binding.config_json = _dump_json(normalized_config)
                 binding.updated_at = now
                 self.db.add(binding)
+                self._seed_agent_provider_bindings(
+                    agent_id=agent_id,
+                    installation=installation,
+                    now=now,
+                )
 
+            preserved_provider_keys = self._build_provider_key_sets(
+                requested_installations.values()
+            )
             for installation_id, binding in existing_bindings.items():
                 if installation_id not in requested_ids:
+                    installation = self._get_installation_or_raise(installation_id)
+                    self._delete_agent_contributions_for_installation(
+                        agent_id=agent_id,
+                        installation=installation,
+                        preserve_provider_keys=preserved_provider_keys,
+                    )
                     self.db.delete(binding)
 
             self.db.flush()
@@ -2072,6 +2105,11 @@ class ExtensionService:
         if binding is None:
             raise ValueError("Agent extension binding not found.")
 
+        installation = self._get_installation_or_raise(extension_installation_id)
+        self._delete_agent_contributions_for_installation(
+            agent_id=agent_id,
+            installation=installation,
+        )
         self.db.delete(binding)
         self.db.commit()
 
@@ -2264,6 +2302,68 @@ class ExtensionService:
                 )
             )
         return bundle
+
+    def list_agent_bound_extension_package_ids(
+        self,
+        *,
+        agent_id: int,
+        enabled_only: bool = False,
+    ) -> set[str]:
+        """Return package ids bound to one agent, optionally only enabled ones."""
+        statement = (
+            select(AgentExtensionBinding, ExtensionInstallation)
+            .join(
+                ExtensionInstallation,
+                col(AgentExtensionBinding.extension_installation_id)
+                == col(ExtensionInstallation.id),
+            )
+            .where(AgentExtensionBinding.agent_id == agent_id)
+        )
+        if enabled_only:
+            statement = statement.where(col(AgentExtensionBinding.enabled) == True)  # noqa: E712
+            statement = statement.where(col(ExtensionInstallation.status) == "active")
+
+        package_ids: set[str] = set()
+        for binding, installation in self.db.exec(statement).all():
+            del binding
+            package_ids.add(installation.package_id)
+        return package_ids
+
+    def is_agent_extension_package_bound(
+        self,
+        *,
+        agent_id: int,
+        package_id: str,
+        enabled_only: bool = False,
+    ) -> bool:
+        """Return whether one extension package is currently bound to an agent."""
+        return package_id in self.list_agent_bound_extension_package_ids(
+            agent_id=agent_id,
+            enabled_only=enabled_only,
+        )
+
+    def get_agent_child_availability(
+        self,
+        *,
+        agent_id: int,
+        package_id: str | None,
+    ) -> tuple[bool, str | None]:
+        """Resolve whether one extension child contribution is effectively usable."""
+        if not package_id:
+            return True, None
+        if self.is_agent_extension_package_bound(
+            agent_id=agent_id,
+            package_id=package_id,
+            enabled_only=True,
+        ):
+            return True, None
+        if self.is_agent_extension_package_bound(
+            agent_id=agent_id,
+            package_id=package_id,
+            enabled_only=False,
+        ):
+            return False, "Disabled because its extension is off."
+        return False, "Unavailable because its extension is not installed on this agent."
 
     def build_installation_runtime_entry(
         self,
@@ -2684,6 +2784,176 @@ class ExtensionService:
                 raise ValueError(
                     "Agent bindings may include only one version per extension package."
                 )
+
+    def _seed_agent_provider_bindings(
+        self,
+        *,
+        agent_id: int,
+        installation: ExtensionInstallation,
+        now: datetime,
+    ) -> None:
+        """Create default disabled provider bindings for one bound extension."""
+        manifest = self._load_manifest_from_installation(installation)
+        contributions = manifest.get("contributions", {})
+        if not isinstance(contributions, dict):
+            return
+
+        for item in contributions.get("image_providers", []):
+            if not isinstance(item, dict):
+                continue
+            provider_key = item.get("key")
+            if not isinstance(provider_key, str) or not provider_key.strip():
+                continue
+            normalized_key = provider_key.strip()
+            existing_image_binding = self.db.exec(
+                select(AgentImageProviderBinding).where(
+                    AgentImageProviderBinding.agent_id == agent_id,
+                    AgentImageProviderBinding.provider_key == normalized_key,
+                )
+            ).first()
+            if existing_image_binding is not None:
+                continue
+            self.db.add(
+                AgentImageProviderBinding(
+                    agent_id=agent_id,
+                    provider_key=normalized_key,
+                    enabled=False,
+                    auth_config="{}",
+                    runtime_config="{}",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        for item in contributions.get("web_search_providers", []):
+            if not isinstance(item, dict):
+                continue
+            provider_key = item.get("key")
+            if not isinstance(provider_key, str) or not provider_key.strip():
+                continue
+            normalized_key = provider_key.strip()
+            existing_web_search_binding = self.db.exec(
+                select(AgentWebSearchBinding).where(
+                    AgentWebSearchBinding.agent_id == agent_id,
+                    AgentWebSearchBinding.provider_key == normalized_key,
+                )
+            ).first()
+            if existing_web_search_binding is not None:
+                continue
+            self.db.add(
+                AgentWebSearchBinding(
+                    agent_id=agent_id,
+                    provider_key=normalized_key,
+                    enabled=False,
+                    auth_config="{}",
+                    runtime_config="{}",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    @staticmethod
+    def _build_provider_key_sets(
+        installations: list[ExtensionInstallation] | Any,
+    ) -> dict[str, set[str]]:
+        """Collect provider keys contributed by a set of installations."""
+        keys = {
+            "channel": set(),
+            "image": set(),
+            "web_search": set(),
+        }
+        for installation in installations:
+            if not isinstance(installation, ExtensionInstallation):
+                continue
+            provider_keys = extract_provider_keys_from_manifest(
+                json.loads(installation.manifest_json)
+            )
+            keys["channel"].update(provider_keys["channel"])
+            keys["image"].update(provider_keys["image"])
+            keys["web_search"].update(provider_keys["web_search"])
+        return keys
+
+    def _delete_agent_contributions_for_installation(
+        self,
+        *,
+        agent_id: int,
+        installation: ExtensionInstallation,
+        preserve_provider_keys: dict[str, set[str]] | None = None,
+    ) -> None:
+        """Delete agent-scoped child contributions tied to one extension."""
+        preserve_provider_keys = preserve_provider_keys or {
+            "channel": set(),
+            "image": set(),
+            "web_search": set(),
+        }
+        provider_keys = extract_provider_keys_from_manifest(
+            self._load_manifest_from_installation(installation)
+        )
+
+        removable_channel_keys = provider_keys["channel"] - preserve_provider_keys["channel"]
+        if removable_channel_keys:
+            channel_binding_rows = self.db.exec(
+                select(AgentChannelBinding).where(
+                    AgentChannelBinding.agent_id == agent_id,
+                    col(AgentChannelBinding.channel_key).in_(removable_channel_keys),
+                )
+            ).all()
+            channel_binding_ids = [
+                binding.id for binding in channel_binding_rows if binding.id is not None
+            ]
+            if channel_binding_ids:
+                for token_row in self.db.exec(
+                    select(ChannelLinkToken).where(
+                        col(ChannelLinkToken.channel_binding_id).in_(channel_binding_ids)
+                    )
+                ).all():
+                    self.db.delete(token_row)
+                for identity_row in self.db.exec(
+                    select(ExternalIdentityBinding).where(
+                        col(ExternalIdentityBinding.channel_binding_id).in_(
+                            channel_binding_ids
+                        )
+                    )
+                ).all():
+                    self.db.delete(identity_row)
+                for session_row in self.db.exec(
+                    select(ChannelSession).where(
+                        col(ChannelSession.channel_binding_id).in_(channel_binding_ids)
+                    )
+                ).all():
+                    self.db.delete(session_row)
+                for event_row in self.db.exec(
+                    select(ChannelEventLog).where(
+                        col(ChannelEventLog.channel_binding_id).in_(channel_binding_ids)
+                    )
+                ).all():
+                    self.db.delete(event_row)
+            for binding in channel_binding_rows:
+                self.db.delete(binding)
+
+        removable_image_keys = provider_keys["image"] - preserve_provider_keys["image"]
+        if removable_image_keys:
+            for binding in self.db.exec(
+                select(AgentImageProviderBinding).where(
+                    AgentImageProviderBinding.agent_id == agent_id,
+                    col(AgentImageProviderBinding.provider_key).in_(removable_image_keys),
+                )
+            ).all():
+                self.db.delete(binding)
+
+        removable_web_search_keys = (
+            provider_keys["web_search"] - preserve_provider_keys["web_search"]
+        )
+        if removable_web_search_keys:
+            for binding in self.db.exec(
+                select(AgentWebSearchBinding).where(
+                    AgentWebSearchBinding.agent_id == agent_id,
+                    col(AgentWebSearchBinding.provider_key).in_(
+                        removable_web_search_keys
+                    ),
+                )
+            ).all():
+                self.db.delete(binding)
 
     @staticmethod
     def _snapshot_references_installation(
