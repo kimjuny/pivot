@@ -138,6 +138,11 @@ function buildContributionGroups(
       tone: 'provider',
     },
     {
+      label: 'Chat Surfaces',
+      values: summary.chat_surfaces ?? [],
+      tone: 'runtime',
+    },
+    {
       label: 'Lifecycle Hooks',
       values: summary.hooks,
       tone: 'runtime',
@@ -278,6 +283,7 @@ function ExtensionsPage() {
       const contributionText = pkg.versions
         .flatMap((version) => [
           ...version.contribution_summary.channel_providers,
+          ...(version.contribution_summary.chat_surfaces ?? []),
           ...(version.contribution_summary.image_providers ?? []),
           ...version.contribution_summary.web_search_providers,
           ...version.contribution_summary.hooks,

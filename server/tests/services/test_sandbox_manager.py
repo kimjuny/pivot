@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from http.client import RemoteDisconnected
 from importlib import import_module
 from pathlib import Path
 from typing import Any, cast
@@ -244,6 +245,83 @@ class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
             module._ensure_workspace_dir("/app/server/workspace/alice")
 
 
+class SandboxManagerBackendContainerSelectionTestCase(unittest.TestCase):
+    """Validate backend container discovery ignores stale run containers."""
+
+    def test_backend_container_prefers_exact_running_name(self) -> None:
+        """Sandbox-manager should not pick exited pivot-backend-run containers."""
+        module = cast(Any, sandbox_manager)
+        exited_run_container = type(
+            "Container",
+            (),
+            {
+                "name": "pivot-backend-run-deadbeef",
+                "status": "exited",
+                "attrs": {"Name": "/pivot-backend-run-deadbeef"},
+            },
+        )()
+        running_backend = type(
+            "Container",
+            (),
+            {
+                "name": "pivot-backend",
+                "status": "running",
+                "attrs": {"Name": "/pivot-backend"},
+            },
+        )()
+        client = type(
+            "Client",
+            (),
+            {
+                "containers": type(
+                    "Containers",
+                    (),
+                    {
+                        "list": lambda self, **kwargs: [
+                            exited_run_container,
+                            running_backend,
+                        ]
+                    },
+                )()
+            },
+        )()
+
+        with (
+            patch.object(module, "get_client", return_value=client),
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BACKEND_CONTAINER_NAME": "pivot-backend",
+                    },
+                )(),
+            ),
+        ):
+            resolved = module._backend_container()
+
+        self.assertIs(resolved, running_backend)
+
+    def test_container_status_falls_back_when_property_accessor_breaks(self) -> None:
+        """Status lookup should survive Podman objects whose status property raises."""
+        module = cast(Any, sandbox_manager)
+
+        class _BrokenStatusContainer:
+            def __init__(self) -> None:
+                self.attrs = {"State": {"Status": "running"}}
+
+            @property
+            def status(self) -> str:
+                raise TypeError("string indices must be integers, not 'str'")
+
+        self.assertEqual(
+            module._container_status(_BrokenStatusContainer()),
+            "running",
+        )
+
+
 class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
     """Validate preview-specific error guidance for sandbox-manager."""
 
@@ -258,6 +336,18 @@ class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
 
         self.assertIn("0.0.0.0:8080", detail)
         self.assertIn("localhost/127.0.0.1", detail)
+
+    def test_preview_disconnected_detail_mentions_http_response(self) -> None:
+        """Early upstream disconnects should explain that HTTP never arrived."""
+        module = cast(Any, sandbox_manager)
+
+        detail = module._build_preview_disconnected_detail(
+            port=8080,
+            reason="Remote end closed connection without response",
+        )
+
+        self.assertIn("before sending an HTTP response", detail)
+        self.assertIn("0.0.0.0:8080", detail)
 
     def test_ensure_workspace_dir_accepts_external_posix_root(self) -> None:
         """External POSIX roots should be treated as valid workspace parents."""
@@ -319,6 +409,48 @@ class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
         self.assertEqual(
             resolved,
             "/tmp/pivot-seaweedfs-posix/users/alice/agents/7/sessions/s1/workspace",
+        )
+
+
+class SandboxManagerHttpProxyTestCase(unittest.TestCase):
+    """Validate sandbox preview HTTP proxy error normalization."""
+
+    def test_http_proxy_translates_remote_disconnect_into_502(self) -> None:
+        """Upstream preview disconnects should become user-facing 502 errors."""
+        module = cast(Any, sandbox_manager)
+        payload = module.SandboxHttpProxyRequest(
+            username="default",
+            workspace_id="workspace-1",
+            workspace_backend_path="/app/server/workspace/default/workspace-1",
+            skills=[],
+            port=8080,
+            path="/",
+            method="GET",
+        )
+
+        with (
+            patch.object(module, "_ensure_sandbox", return_value=object()),
+            patch.object(
+                module,
+                "_build_preview_target_url",
+                return_value="http://10.0.0.10:8080/",
+            ),
+            patch.object(module, "_decode_proxy_body", return_value=None),
+            patch.object(
+                module,
+                "urlopen",
+                side_effect=RemoteDisconnected(
+                    "Remote end closed connection without response"
+                ),
+            ),
+        ):
+            with self.assertRaises(module.HTTPException) as exc_info:
+                module.proxy_http_in_sandbox(payload)
+
+        self.assertEqual(exc_info.exception.status_code, 502)
+        self.assertIn(
+            "closed the connection before sending an HTTP response",
+            exc_info.exception.detail,
         )
 
 

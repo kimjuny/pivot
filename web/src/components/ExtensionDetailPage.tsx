@@ -115,6 +115,11 @@ function buildContributionGroups(summary: ExtensionContributionSummary): Contrib
       tone: "provider",
     },
     {
+      label: "Chat Surfaces",
+      values: summary.chat_surfaces ?? [],
+      tone: "runtime",
+    },
+    {
       label: "Lifecycle Hooks",
       values: summary.hooks,
       tone: "runtime",
@@ -473,6 +478,9 @@ export default function ExtensionDetailPage() {
     const merged = {
       channel_providers: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.channel_providers)),
+      ),
+      chat_surfaces: Array.from(
+        new Set(pkg.versions.flatMap((version) => version.contribution_summary.chat_surfaces ?? [])),
       ),
       image_providers: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.image_providers ?? [])),

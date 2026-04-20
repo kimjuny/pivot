@@ -217,7 +217,13 @@ def create_preview_endpoint(
             session_id=request.session_id,
             port=request.port,
             path=request.path,
-            title=request.title,
+            title=request.preview_name,
+            cwd=request.cwd,
+            start_server=request.start_server,
+        )
+        record = service.connect_preview_endpoint(
+            preview_id=record.preview_id,
+            username=current_user.username,
         )
     except PreviewEndpointNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -235,6 +241,47 @@ def create_preview_endpoint(
         workspace_logical_root=WorkspaceService(db).get_workspace_logical_root(workspace),
         service=service,
     )
+
+
+@router.get(
+    "/chat-previews",
+    response_model=list[PreviewEndpointResponse],
+)
+def list_preview_endpoints(
+    session_id: str,
+    db: DBSession = Depends(get_db),
+    current_user: Any = Depends(get_current_user),
+) -> list[PreviewEndpointResponse]:
+    """List all session-scoped preview endpoints for one owned chat session."""
+    service = PreviewEndpointService(db)
+    try:
+        records = service.list_preview_endpoints(
+            username=current_user.username,
+            session_id=session_id,
+        )
+    except PreviewEndpointNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except PreviewEndpointPermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+
+    workspace_service = WorkspaceService(db)
+    serialized_records: list[PreviewEndpointResponse] = []
+    for record in records:
+        workspace = workspace_service.get_workspace(record.workspace_id)
+        workspace_logical_root = (
+            workspace_service.get_workspace_logical_root(workspace)
+            if workspace is not None
+            else "/workspace"
+        )
+        serialized_records.append(
+            _serialize_preview_record(
+                record=record,
+                workspace_logical_root=workspace_logical_root,
+                service=service,
+            )
+        )
+
+    return serialized_records
 
 
 @router.post(
@@ -1386,7 +1433,7 @@ def _build_proxy_target_url(
     Why:
         Development runtimes may expose either a server root such as
         ``http://127.0.0.1:5173`` or a concrete entry HTML path such as
-        ``http://127.0.0.1:4173/extensions/workspace-editor/index.html``.
+        ``http://127.0.0.1:4173/index.html``.
         Keeping the original base URL intact ensures sibling assets resolve
         correctly for entry-page URLs instead of being forced under an
         artificial trailing slash.

@@ -128,7 +128,13 @@ def parse_payload_blocks(payload_section: str) -> dict[str, str]:
         if end_match is None:
             raise ValueError(f"Missing END marker for payload: {payload_name}")
 
-        payloads[payload_name] = text[content_start : end_match.start()]
+        content_end = end_match.start()
+        if content_end > content_start and text[content_end - 1] == "\n":
+            content_end -= 1
+            if content_end > content_start and text[content_end - 1] == "\r":
+                content_end -= 1
+
+        payloads[payload_name] = text[content_start:content_end]
         cursor = end_match.end()
 
     return payloads

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   cancelReactTask,
-  createPreviewEndpoint,
   createProject,
   createDevSurfaceSession,
   createInstalledSurfaceSession,
@@ -12,6 +11,7 @@ import {
   getAgentWebSearchBindings,
   getAgentExtensionPackages,
   getFullSessionHistory,
+  getPreviewEndpoints,
   getReactContextUsage,
   getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
@@ -98,8 +98,6 @@ const DOCK_TRANSITION_MS = 200;
 const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
 const OFFICIAL_SAMPLE_RUNTIME_URL = "http://127.0.0.1:4173";
 const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
-const DEFAULT_PREVIEW_PORT = "3000";
-const DEFAULT_PREVIEW_PATH = "/";
 
 /**
  * Parse the serialized tool allowlist and determine whether ``web_search`` is
@@ -590,19 +588,11 @@ function ChatContainer({
   const [surfaceRuntimeUrlInput, setSurfaceRuntimeUrlInput] = useState(
     OFFICIAL_SAMPLE_RUNTIME_URL,
   );
-  const [previewPortInput, setPreviewPortInput] = useState(DEFAULT_PREVIEW_PORT);
-  const [previewPathInput, setPreviewPathInput] = useState(DEFAULT_PREVIEW_PATH);
-  const [previewTitleInput, setPreviewTitleInput] = useState("App Preview");
   const [isCreatingSurfaceSession, setIsCreatingSurfaceSession] =
-    useState(false);
-  const [isCreatingPreviewEndpoint, setIsCreatingPreviewEndpoint] =
     useState(false);
   const [surfaceCreationError, setSurfaceCreationError] = useState<
     string | null
   >(null);
-  const [previewCreationError, setPreviewCreationError] = useState<string | null>(
-    null,
-  );
   const [installedChatSurfaces, setInstalledChatSurfaces] = useState<
     InstalledChatSurfaceDescriptor[]
   >([]);
@@ -721,7 +711,6 @@ function ChatContainer({
     setPreviewEndpoints([]);
     setActivePreviewEndpoint(null);
     setSurfaceCreationError(null);
-    setPreviewCreationError(null);
     setIsExtensionDockOpen(false);
     setIsExtensionDockMounted(false);
     setRenderedDockPanelSize(0);
@@ -1896,6 +1885,38 @@ function ChatContainer({
   }, [currentSessionId]);
 
   useEffect(() => {
+    if (!currentSessionId) {
+      setPreviewEndpoints([]);
+      setActivePreviewEndpoint(null);
+      return;
+    }
+
+    let isCancelled = false;
+    void getPreviewEndpoints(currentSessionId)
+      .then((nextPreviews) => {
+        if (isCancelled) {
+          return;
+        }
+        setPreviewEndpoints(nextPreviews);
+        setActivePreviewEndpoint(
+          nextPreviews.length > 0 ? nextPreviews[nextPreviews.length - 1] : null,
+        );
+      })
+      .catch((previewError) => {
+        console.error("Failed to load preview registry:", previewError);
+        if (isCancelled) {
+          return;
+        }
+        setPreviewEndpoints([]);
+        setActivePreviewEndpoint(null);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentSessionId]);
+
+  useEffect(() => {
     void loadSessionRuntimeDebug(currentSessionId);
   }, [currentSessionId, loadSessionRuntimeDebug]);
 
@@ -2884,58 +2905,6 @@ function ChatContainer({
   );
 
   /**
-   * Create one session-scoped preview endpoint so workspace-editor can switch
-   * into its web view without depending on an imported extension tool first.
-   */
-  const handleCreatePreviewEndpoint = useCallback(async () => {
-    if (!currentSessionId || isCreatingPreviewEndpoint) {
-      return;
-    }
-
-    const parsedPort = Number.parseInt(previewPortInput.trim(), 10);
-    if (!Number.isFinite(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-      setPreviewCreationError("Preview port must be between 1 and 65535.");
-      return;
-    }
-
-    setIsCreatingPreviewEndpoint(true);
-    setPreviewCreationError(null);
-
-    try {
-      const nextPreviewEndpoint = await createPreviewEndpoint({
-        sessionId: currentSessionId,
-        port: parsedPort,
-        path: previewPathInput.trim() || "/",
-        title: previewTitleInput.trim() || "App Preview",
-      });
-      setPreviewEndpoints((previous) =>
-        upsertPreviewEndpointList(previous, nextPreviewEndpoint),
-      );
-      setActivePreviewEndpoint(nextPreviewEndpoint);
-      if (activeSurfaceSession || activeInstalledSurfaceSession) {
-        handleExtensionDockOpenChange(true);
-      }
-    } catch (error) {
-      setPreviewCreationError(
-        error instanceof Error
-          ? error.message
-          : "Failed to create preview endpoint.",
-      );
-    } finally {
-      setIsCreatingPreviewEndpoint(false);
-    }
-  }, [
-    activeInstalledSurfaceSession,
-    activeSurfaceSession,
-    currentSessionId,
-    handleExtensionDockOpenChange,
-    isCreatingPreviewEndpoint,
-    previewPathInput,
-    previewPortInput,
-    previewTitleInput,
-  ]);
-
-  /**
    * Opens one installed surface through the same shared dock host used by dev
    * sessions so product and debug entry points stay behaviorally aligned.
    */
@@ -3214,94 +3183,7 @@ function ChatContainer({
     surfaceRuntimeUrlInput,
   ]);
 
-  const previewDevDebugSection = useMemo(() => {
-    return {
-      key: "preview-dev",
-      title: "Preview Dev",
-      description:
-        "Create one session-scoped preview endpoint and route it into workspace-editor web view.",
-      content: (
-        <div className="space-y-3">
-          <label className="block">
-            <div className="mb-1 text-xs font-medium text-muted-foreground">
-              Port
-            </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              value={previewPortInput}
-              onChange={(event) => setPreviewPortInput(event.target.value)}
-              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
-            />
-          </label>
-
-          <label className="block">
-            <div className="mb-1 text-xs font-medium text-muted-foreground">
-              Path
-            </div>
-            <input
-              type="text"
-              value={previewPathInput}
-              onChange={(event) => setPreviewPathInput(event.target.value)}
-              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
-            />
-          </label>
-
-          <label className="block">
-            <div className="mb-1 text-xs font-medium text-muted-foreground">
-              Title
-            </div>
-            <input
-              type="text"
-              value={previewTitleInput}
-              onChange={(event) => setPreviewTitleInput(event.target.value)}
-              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
-            />
-          </label>
-
-          <button
-            type="button"
-            onClick={() => {
-              void handleCreatePreviewEndpoint();
-            }}
-            disabled={!currentSessionId || isCreatingPreviewEndpoint}
-            className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-foreground px-3 text-sm font-medium text-background transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isCreatingPreviewEndpoint ? "Creating..." : "Create Preview Endpoint"}
-          </button>
-
-          {previewCreationError ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {previewCreationError}
-            </div>
-          ) : null}
-
-          {activePreviewEndpoint ? (
-            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
-              <div className="font-semibold text-foreground">
-                {activePreviewEndpoint.title}
-              </div>
-              <div className="mt-2 break-all font-mono text-[11px] text-foreground/80">
-                {activePreviewEndpoint.proxy_url}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ),
-    };
-  }, [
-    activePreviewEndpoint,
-    currentSessionId,
-    handleCreatePreviewEndpoint,
-    isCreatingPreviewEndpoint,
-    previewCreationError,
-    previewPathInput,
-    previewPortInput,
-    previewTitleInput,
-  ]);
-
   useRegisterChatDebugPanelSection(surfaceDevDebugSection);
-  useRegisterChatDebugPanelSection(previewDevDebugSection);
 
   const headerSurfaceButtons = useMemo(() => {
     if (isExtensionDockOpen) {

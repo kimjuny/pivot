@@ -47,14 +47,24 @@ class CreatePreviewEndpointRequest(AppBaseModel):
     """Request payload for creating one session-scoped web preview endpoint."""
 
     session_id: str = Field(..., description="Owning chat session identifier.")
+    preview_name: str = Field(
+        ...,
+        description="Operator-facing preview label shown in the preview picker.",
+    )
+    start_server: str = Field(
+        ...,
+        description=(
+            "Idempotent shell command that ensures the preview server is running."
+        ),
+    )
     port: int = Field(..., description="Sandbox-local HTTP port to expose.")
     path: str | None = Field(
         default="/",
         description="Optional initial HTTP path served from the preview port.",
     )
-    title: str | None = Field(
-        default=None,
-        description="Optional operator-facing title shown by the preview surface.",
+    cwd: str | None = Field(
+        default=".",
+        description="Workspace-relative or absolute /workspace directory for start_server.",
     )
 
 

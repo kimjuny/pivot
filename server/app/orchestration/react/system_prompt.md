@@ -12,11 +12,6 @@
 - 选择 一个 action_type
 - 只能通过 Action Schema 影响系统（不直接执行函数）
 
-## 2. ReAct范式
-- Observe：观察当前状态、所处第几轮recursion、历史进展、有哪些plan的step已经done了，还有哪些步骤需要执行
-- Reason：基于整体的Plan（包括Steps）、上一轮的执行情况信息，判断哪些步骤实际已经完成需要更新，这一轮具体要做什么的决策
-- Action：选择一个action_type，严格遵从Schema
-
 ## 3. 你的返回格式
 **IMPORTANT:** 你要根据情况选择本轮recursion要采取哪个action，输出格式遵守：
 - 第一段必须是一个完整且可解析的JSON对象（就是下方Schema）
@@ -26,8 +21,8 @@
 ```json
 {
   "trace_id": "本轮recursion的id，user这一轮如何传给你的你就要如何返回",
-  "observe": "...",
-  "reason": "...",
+  "observe": "选填，观察当前状态、所处第几轮recursion、历史进展、有哪些plan的step已经done了，还有哪些步骤需要执行", // 选填
+  "reason": "选填，基于整体的Plan（包括Steps）、上一轮的执行情况信息，判断哪些步骤实际已经完成需要更新，这一轮具体要做什么的决策", // 选填
   "iteration": 3, // 基于之前的历史判断当前我们到底处于第几轮iteration
   "action": {
     "action_type": "CALL_TOOL | RE_PLAN | REFLECT | CLARIFY | ANSWER",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useTheme } from "@/lib/use-theme";
 import {
@@ -82,37 +82,6 @@ export function ExtensionDock({
   }
 
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const iframeWindow = previewIframeRef.current?.contentWindow;
-      if (
-        event.origin !== window.location.origin ||
-        event.source !== iframeWindow ||
-        !event.data ||
-        typeof event.data !== "object"
-      ) {
-        return;
-      }
-
-      const message = event.data as Record<string, unknown>;
-      if (
-        message.source !== "pivot-surface" ||
-        typeof message.type !== "string"
-      ) {
-        return;
-      }
-
-      if (message.type === "pivot.surface.close") {
-        onOpenChange(false);
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => {
-      window.removeEventListener("message", handleMessage);
-    };
-  }, [onOpenChange]);
-
-  useEffect(() => {
     setIsIframeLoaded(false);
   }, [
     activeInstalledSurfaceSession?.runtime_url,
@@ -165,7 +134,7 @@ export function ExtensionDock({
     activeSurfaceSession,
   ]);
 
-  useEffect(() => {
+  const postThemeChanged = useCallback(() => {
     if (!isOpen || !isIframeLoaded || runtime === null) {
       return;
     }
@@ -183,7 +152,7 @@ export function ExtensionDock({
     );
   }, [isIframeLoaded, isOpen, resolvedTheme, runtime, theme]);
 
-  useEffect(() => {
+  const postPreviewChanged = useCallback(() => {
     if (!isOpen || !isIframeLoaded || runtime === null || activePreviewEndpoint === null) {
       return;
     }
@@ -198,7 +167,7 @@ export function ExtensionDock({
     );
   }, [activePreviewEndpoint, isIframeLoaded, isOpen, runtime]);
 
-  useEffect(() => {
+  const postPreviewRegistryChanged = useCallback(() => {
     if (!isOpen || !isIframeLoaded || runtime === null) {
       return;
     }
@@ -221,6 +190,61 @@ export function ExtensionDock({
     previewEndpoints,
     runtime,
   ]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      const iframeWindow = previewIframeRef.current?.contentWindow;
+      if (
+        event.origin !== window.location.origin ||
+        event.source !== iframeWindow ||
+        !event.data ||
+        typeof event.data !== "object"
+      ) {
+        return;
+      }
+
+      const message = event.data as Record<string, unknown>;
+      if (
+        message.source !== "pivot-surface" ||
+        typeof message.type !== "string"
+      ) {
+        return;
+      }
+
+      if (message.type === "pivot.surface.close") {
+        onOpenChange(false);
+        return;
+      }
+
+      if (message.type === "pivot.surface.ready") {
+        postThemeChanged();
+        postPreviewChanged();
+        postPreviewRegistryChanged();
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [
+    onOpenChange,
+    postPreviewChanged,
+    postPreviewRegistryChanged,
+    postThemeChanged,
+  ]);
+
+  useEffect(() => {
+    postThemeChanged();
+  }, [postThemeChanged]);
+
+  useEffect(() => {
+    postPreviewChanged();
+  }, [postPreviewChanged]);
+
+  useEffect(() => {
+    postPreviewRegistryChanged();
+  }, [postPreviewRegistryChanged]);
 
   if (!isOpen) {
     return null;

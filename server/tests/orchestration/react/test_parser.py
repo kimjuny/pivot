@@ -158,6 +158,65 @@ class ReactParserTestCase(unittest.TestCase):
         ):
             parse_react_output(content)
 
+    def test_parse_missing_observe_and_reason_as_empty_strings(self) -> None:
+        """Missing observe/reason should stay parseable and normalize to empty strings."""
+        content = """
+{
+  "summary": "Proceeding without extra trace text",
+  "action": {
+    "action_type": "REFLECT",
+    "output": {}
+  }
+}
+""".strip()
+
+        decision = parse_react_output(content)
+
+        self.assertEqual(decision.observe, "")
+        self.assertEqual(decision.reason, "")
+        self.assertEqual(decision.summary, "Proceeding without extra trace text")
+        self.assertEqual(decision.action.action_type, "REFLECT")
+
+    def test_raw_string_payload_strips_block_terminator_newline(self) -> None:
+        """Raw string payloads should not inherit the formatting newline before END."""
+        content = """
+{
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "edit_file",
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"},
+            "old_string": {"$payload_ref": "old_payload"},
+            "new_string": {"$payload_ref": "new_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+"/workspace/example.txt"
+<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
+<<<PIVOT_PAYLOAD:old_payload:BEGIN_6F2D9C1A>>>
+export default App;
+<<<PIVOT_PAYLOAD:old_payload:END_6F2D9C1A>>>
+<<<PIVOT_PAYLOAD:new_payload:BEGIN_6F2D9C1A>>>
+
+<<<PIVOT_PAYLOAD:new_payload:END_6F2D9C1A>>>
+""".strip()
+
+        decision = parse_react_output(content)
+
+        self.assertEqual(
+            decision.action.tool_calls[0].arguments["old_string"],
+            "export default App;",
+        )
+        self.assertEqual(decision.action.tool_calls[0].arguments["new_string"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

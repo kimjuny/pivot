@@ -3254,19 +3254,38 @@ export const createInstalledSurfaceSession = async (payload: {
  */
 export const createPreviewEndpoint = async (payload: {
   sessionId: string;
+  previewName: string;
+  startServer: string;
   port: number;
   path?: string | null;
-  title?: string | null;
+  cwd?: string | null;
 }): Promise<PreviewEndpointResponse> => {
   return apiRequest('/chat-previews', {
     method: 'POST',
     body: JSON.stringify({
       session_id: payload.sessionId,
+      preview_name: payload.previewName,
+      start_server: payload.startServer,
       port: payload.port,
       path: payload.path ?? '/',
-      title: payload.title ?? null,
+      cwd: payload.cwd ?? '.',
     }),
   }) as Promise<PreviewEndpointResponse>;
+};
+
+/**
+ * Fetch the current preview registry for one chat session.
+ *
+ * @param sessionId - Owning chat session identifier
+ * @returns Promise resolving to all preview endpoints visible to the caller
+ */
+export const getPreviewEndpoints = async (
+  sessionId: string,
+): Promise<PreviewEndpointResponse[]> => {
+  const encodedSessionId = encodeURIComponent(sessionId);
+  return apiRequest(
+    `/chat-previews?session_id=${encodedSessionId}`,
+  ) as Promise<PreviewEndpointResponse[]>;
 };
 
 /**

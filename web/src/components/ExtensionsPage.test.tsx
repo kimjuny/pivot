@@ -255,6 +255,7 @@ describe("ExtensionsPage", () => {
       manifest_hash: "hash-preview",
       contribution_summary: {
         channel_providers: ["acme@chat"],
+        chat_surfaces: ["workspace-editor"],
         web_search_providers: ["acme@search"],
         hooks: [],
         tools: [],
@@ -334,6 +335,8 @@ describe("ExtensionsPage", () => {
       expect(screen.getByText("Trust Extension")).toBeInTheDocument();
     });
     expect(screen.getByText("@acme/providers")).toBeInTheDocument();
+    expect(screen.getByText("Chat Surfaces")).toBeInTheDocument();
+    expect(screen.getByText("workspace-editor")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Trust and Install" }));
 

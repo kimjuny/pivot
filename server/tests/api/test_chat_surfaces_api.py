@@ -158,15 +158,24 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
 
     def test_create_preview_endpoint_returns_proxy_url(self) -> None:
         """Preview creation should return a stable session-scoped proxy URL."""
-        response = self.client.post(
-            "/api/chat-previews",
-            json={
-                "session_id": "session-1",
-                "port": 3000,
-                "path": "/app",
-                "title": "App Preview",
-            },
-        )
+        with patch.object(
+            chat_surfaces_api_module.PreviewEndpointService,
+            "connect_preview_endpoint",
+            side_effect=lambda *, preview_id, username: PreviewEndpointService(
+                self.session
+            ).get_preview_endpoint(preview_id=preview_id, username=username),
+        ):
+            response = self.client.post(
+                "/api/chat-previews",
+                json={
+                    "session_id": "session-1",
+                    "preview_name": "App Preview",
+                    "start_server": "bash /workspace/.pivot/previews/app-preview.sh",
+                    "cwd": "/workspace/apps/site",
+                    "port": 3000,
+                    "path": "/app",
+                },
+            )
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
@@ -174,12 +183,50 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["port"], 3000)
         self.assertEqual(payload["path"], "/app")
         self.assertEqual(payload["title"], "App Preview")
-        self.assertFalse(payload["has_launch_recipe"])
+        self.assertTrue(payload["has_launch_recipe"])
         self.assertEqual(
             payload["proxy_url"],
             f"/api/chat-previews/{payload['preview_id']}/proxy/app",
         )
         self.assertIn("users/alice/agents/7", payload["workspace_logical_root"])
+
+    def test_list_preview_endpoints_returns_session_registry(self) -> None:
+        """Listing previews should return the current session registry in creation order."""
+        service = PreviewEndpointService(self.session)
+        first = service.create_preview_endpoint(
+            username="alice",
+            session_id="session-1",
+            port=3000,
+            path="/",
+            title="First Preview",
+            cwd="/workspace/apps/first",
+            start_server="bash /workspace/.pivot/previews/first.sh",
+        )
+        second = service.create_preview_endpoint(
+            username="alice",
+            session_id="session-1",
+            port=3001,
+            path="/docs",
+            title="Second Preview",
+            cwd="/workspace/apps/second",
+            start_server="bash /workspace/.pivot/previews/second.sh",
+        )
+
+        response = self.client.get(
+            "/api/chat-previews",
+            params={"session_id": "session-1"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item["preview_id"] for item in payload],
+            [first.preview_id, second.preview_id],
+        )
+        self.assertEqual(payload[0]["title"], "First Preview")
+        self.assertEqual(payload[1]["title"], "Second Preview")
+        self.assertTrue(payload[0]["has_launch_recipe"])
+        self.assertTrue(payload[1]["has_launch_recipe"])
 
     def test_reconnect_surface_preview_returns_registry_payload(self) -> None:
         """Surface reconnect should return the refreshed preview plus registry."""
@@ -469,15 +516,24 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(create_surface_response.status_code, 201)
         surface_payload = create_surface_response.json()
 
-        create_preview_response = self.client.post(
-            "/api/chat-previews",
-            json={
-                "session_id": "session-1",
-                "port": 3000,
-                "path": "/",
-                "title": "App Preview",
-            },
-        )
+        with patch.object(
+            chat_surfaces_api_module.PreviewEndpointService,
+            "connect_preview_endpoint",
+            side_effect=lambda *, preview_id, username: PreviewEndpointService(
+                self.session
+            ).get_preview_endpoint(preview_id=preview_id, username=username),
+        ):
+            create_preview_response = self.client.post(
+                "/api/chat-previews",
+                json={
+                    "session_id": "session-1",
+                    "preview_name": "App Preview",
+                    "start_server": "bash /workspace/.pivot/previews/app-preview.sh",
+                    "cwd": "/workspace/apps/site",
+                    "port": 3000,
+                    "path": "/",
+                },
+            )
         self.assertEqual(create_preview_response.status_code, 201)
         preview_payload = create_preview_response.json()
         preview_id = preview_payload["preview_id"]
@@ -568,15 +624,24 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(create_surface_response.status_code, 201)
         surface_payload = create_surface_response.json()
 
-        create_preview_response = self.client.post(
-            "/api/chat-previews",
-            json={
-                "session_id": "session-1",
-                "port": 3000,
-                "path": "/socket",
-                "title": "Socket Preview",
-            },
-        )
+        with patch.object(
+            chat_surfaces_api_module.PreviewEndpointService,
+            "connect_preview_endpoint",
+            side_effect=lambda *, preview_id, username: PreviewEndpointService(
+                self.session
+            ).get_preview_endpoint(preview_id=preview_id, username=username),
+        ):
+            create_preview_response = self.client.post(
+                "/api/chat-previews",
+                json={
+                    "session_id": "session-1",
+                    "preview_name": "Socket Preview",
+                    "start_server": "bash /workspace/.pivot/previews/socket-preview.sh",
+                    "cwd": "/workspace/apps/site",
+                    "port": 3000,
+                    "path": "/socket",
+                },
+            )
         self.assertEqual(create_preview_response.status_code, 201)
         preview_payload = create_preview_response.json()
         preview_id = preview_payload["preview_id"]

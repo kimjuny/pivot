@@ -16,6 +16,7 @@ import time
 from asyncio import FIRST_COMPLETED, create_task, wait
 from contextlib import suppress
 from functools import lru_cache
+from http.client import BadStatusLine, RemoteDisconnected
 from typing import TYPE_CHECKING, Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
@@ -163,7 +164,12 @@ def _backend_container() -> Any:
         all=True,
         filters={"name": settings.SANDBOX_BACKEND_CONTAINER_NAME},
     )
-    if not containers:
+    exact_matches = [
+        container
+        for container in containers
+        if _container_has_exact_name(container, settings.SANDBOX_BACKEND_CONTAINER_NAME)
+    ]
+    if not exact_matches:
         raise HTTPException(
             status_code=500,
             detail=(
@@ -171,7 +177,18 @@ def _backend_container() -> Any:
                 f"{settings.SANDBOX_BACKEND_CONTAINER_NAME}"
             ),
         )
-    return containers[0]
+
+    for container in exact_matches:
+        if _container_status(container) == "running":
+            return container
+
+    raise HTTPException(
+        status_code=500,
+        detail=(
+            "Backend container is not running for sandbox-manager: "
+            f"{settings.SANDBOX_BACKEND_CONTAINER_NAME}"
+        ),
+    )
 
 
 def _self_container() -> Any | None:
@@ -181,6 +198,52 @@ def _self_container() -> Any | None:
         return None
     containers = get_client().containers.list(all=True, filters={"name": hostname})
     return containers[0] if containers else None
+
+
+def _container_has_exact_name(container: Any, expected_name: str) -> bool:
+    """Return whether one container resolves to the exact expected name."""
+    container_name = getattr(container, "name", None)
+    if isinstance(container_name, str) and container_name == expected_name:
+        return True
+
+    attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        raw_name = attrs.get("Name")
+        if isinstance(raw_name, str) and raw_name.lstrip("/") == expected_name:
+            return True
+
+    return False
+
+
+def _container_status(container: Any) -> str | None:
+    """Return the current container state string when available."""
+    with suppress(Exception):
+        status = getattr(container, "status", None)
+        if isinstance(status, str):
+            return status
+
+    attrs = None
+    with suppress(Exception):
+        attrs = getattr(container, "attrs", None)
+    if isinstance(attrs, dict):
+        state = attrs.get("State")
+        if isinstance(state, dict):
+            state_status = state.get("Status")
+            if isinstance(state_status, str):
+                return state_status
+
+    inspect_func = getattr(container, "inspect", None)
+    if callable(inspect_func):
+        with suppress(Exception):
+            inspected = inspect_func()
+            if isinstance(inspected, dict):
+                state = inspected.get("State")
+                if isinstance(state, dict):
+                    state_status = state.get("Status")
+                    if isinstance(state_status, str):
+                        return state_status
+
+    return None
 
 
 def _get_container_mounts(container: Any) -> list[dict[str, Any]]:
@@ -1252,6 +1315,16 @@ def _build_preview_unreachable_detail(*, port: int, reason: object) -> str:
     )
 
 
+def _build_preview_disconnected_detail(*, port: int, reason: object) -> str:
+    """Explain when one preview target accepts a connection then closes early."""
+    return (
+        "Sandbox preview target closed the connection before sending an HTTP "
+        f"response: {reason}. Ensure the preview server is still running, "
+        f"serving HTTP traffic, and listening on 0.0.0.0:{port} inside the "
+        "sandbox."
+    )
+
+
 async def _forward_browser_messages(*, websocket: WebSocket, upstream: Any) -> None:
     """Forward backend websocket frames into the upstream preview socket."""
     try:
@@ -1498,6 +1571,14 @@ def proxy_http_in_sandbox(payload: SandboxHttpProxyRequest) -> Response:
             detail=_build_preview_unreachable_detail(
                 port=payload.port,
                 reason=err.reason,
+            ),
+        ) from err
+    except (BadStatusLine, RemoteDisconnected) as err:
+        raise HTTPException(
+            status_code=502,
+            detail=_build_preview_disconnected_detail(
+                port=payload.port,
+                reason=err,
             ),
         ) from err
 
