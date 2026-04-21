@@ -129,7 +129,7 @@ function buildContributionGroups(
     },
     {
       label: 'Image Providers',
-      values: summary.image_providers ?? [],
+      values: summary.media_providers ?? [],
       tone: 'provider',
     },
     {
@@ -284,7 +284,7 @@ function ExtensionsPage() {
         .flatMap((version) => [
           ...version.contribution_summary.channel_providers,
           ...(version.contribution_summary.chat_surfaces ?? []),
-          ...(version.contribution_summary.image_providers ?? []),
+          ...(version.contribution_summary.media_providers ?? []),
           ...version.contribution_summary.web_search_providers,
           ...version.contribution_summary.hooks,
           ...version.contribution_summary.tools,
@@ -619,7 +619,7 @@ function ExtensionsPage() {
                 `${pendingUninstall.installation.display_name} ${pendingUninstall.installation.version}`,
                 `Extension bindings: ${pendingUninstall.references.extension_binding_count}`,
                 `Channel bindings: ${pendingUninstall.references.channel_binding_count}`,
-                `Image bindings: ${pendingUninstall.references.image_provider_binding_count ?? 0}`,
+                `Image bindings: ${pendingUninstall.references.media_provider_binding_count ?? 0}`,
                 `Web-search bindings: ${pendingUninstall.references.web_search_binding_count}`,
                 `Total bindings: ${pendingUninstall.references.binding_count}`,
                 `Releases: ${pendingUninstall.references.release_count}`,

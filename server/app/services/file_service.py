@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import mimetypes
 import tempfile
 import uuid
 from dataclasses import dataclass
@@ -31,6 +32,13 @@ _ALLOWED_IMAGE_FORMATS: dict[str, tuple[str, str]] = {
     "JPEG": ("jpg", "image/jpeg"),
     "PNG": ("png", "image/png"),
     "WEBP": ("webp", "image/webp"),
+}
+
+_ALLOWED_VIDEO_FORMATS: dict[str, tuple[str, str]] = {
+    "mp4": ("MP4", "video/mp4"),
+    "m4v": ("M4V", "video/mp4"),
+    "mov": ("MOV", "video/quicktime"),
+    "webm": ("WEBM", "video/webm"),
 }
 
 _ALLOWED_DOCUMENT_TYPES: dict[str, tuple[str, str]] = {
@@ -88,6 +96,17 @@ class VerifiedDocumentUpload:
     suspected_scanned: bool
     text_encoding: str | None
     markdown_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedVideoUpload:
+    """Validated video metadata derived from filename and MIME inspection."""
+
+    file_bytes: bytes
+    format: str
+    extension: str
+    mime_type: str
+    size_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +231,61 @@ class FileService:
             size_bytes=size_bytes,
             width=width,
             height=height,
+        )
+
+    def verify_video_upload(
+        self,
+        filename: str,
+        file_bytes: bytes,
+        *,
+        mime_type_hint: str | None = None,
+    ) -> VerifiedVideoUpload:
+        """Validate one generated video payload using extension and MIME checks."""
+        size_bytes = len(file_bytes)
+        if size_bytes == 0:
+            raise ValueError("Uploaded video is empty.")
+
+        max_file_size = int(self.settings.MAX_FILE_SIZE)
+        if size_bytes > max_file_size:
+            raise ValueError(
+                f"Video exceeds the {max_file_size // (1024 * 1024)}MB upload limit."
+            )
+
+        normalized_name = filename.strip() or "generated-video.mp4"
+        guessed_mime_type, _ = mimetypes.guess_type(normalized_name)
+        mime_type = (
+            str(mime_type_hint).strip()
+            if isinstance(mime_type_hint, str) and mime_type_hint.strip()
+            else guessed_mime_type
+        ) or "application/octet-stream"
+
+        extension = Path(normalized_name).suffix.lower().removeprefix(".")
+        if not extension:
+            extension = next(
+                (
+                    candidate_extension
+                    for candidate_extension, (_, candidate_mime_type) in _ALLOWED_VIDEO_FORMATS.items()
+                    if candidate_mime_type == mime_type
+                ),
+                "",
+            )
+
+        if extension not in _ALLOWED_VIDEO_FORMATS:
+            allowed = ", ".join(sorted(_ALLOWED_VIDEO_FORMATS))
+            raise ValueError(f"Unsupported video format. Allowed formats: {allowed}.")
+
+        format_name, normalized_mime_type = _ALLOWED_VIDEO_FORMATS[extension]
+        if mime_type != "application/octet-stream" and mime_type != normalized_mime_type:
+            raise ValueError(
+                f"Video MIME type '{mime_type}' does not match the '{extension}' extension."
+            )
+
+        return VerifiedVideoUpload(
+            file_bytes=file_bytes,
+            format=format_name,
+            extension=extension,
+            mime_type=normalized_mime_type,
+            size_bytes=size_bytes,
         )
 
     def verify_document_upload(

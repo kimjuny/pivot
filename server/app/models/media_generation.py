@@ -1,4 +1,4 @@
-"""Database models for image-generation provider bindings and usage logs."""
+"""Database models for media-generation provider bindings and usage logs."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
-class AgentImageProviderBinding(SQLModel, table=True):
-    """One configured image-generation provider attached to a specific agent.
+class AgentMediaProviderBinding(SQLModel, table=True):
+    """One configured media-generation provider attached to a specific agent.
 
     Attributes:
         id: Primary key of the binding.
@@ -41,8 +41,8 @@ class AgentImageProviderBinding(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class ImageGenerationUsageLog(SQLModel, table=True):
-    """Append-only execution log for one image-generation invocation."""
+class MediaGenerationUsageLog(SQLModel, table=True):
+    """Append-only execution log for one media-generation invocation."""
 
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int = Field(foreign_key="agent.id", index=True)
@@ -53,7 +53,7 @@ class ImageGenerationUsageLog(SQLModel, table=True):
     status: str = Field(index=True, max_length=32)
     request_id: str | None = Field(default=None, index=True, max_length=255)
     provider_task_id: str | None = Field(default=None, index=True, max_length=255)
-    image_count: int = Field(default=0)
+    artifact_count: int = Field(default=0)
     output_paths_json: str = Field(default="[]")
     usage_json: str = Field(default="{}")
     provider_payload_json: str = Field(default="{}")

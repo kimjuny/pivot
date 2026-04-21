@@ -1,4 +1,4 @@
-"""Shared manifest and execution types for image-generation providers."""
+"""Shared manifest and execution types for media-generation providers."""
 
 from __future__ import annotations
 
@@ -9,10 +9,12 @@ from app.schemas.base import AppBaseModel
 from pydantic import Field, field_validator
 
 FieldType = Literal["text", "number", "secret", "textarea", "boolean"]
-ImageProviderJobStatus = Literal["pending", "running", "succeeded", "failed"]
+MediaType = Literal["image", "video"]
+MediaInputRole = Literal["first_frame", "last_frame", "reference"]
+MediaProviderJobStatus = Literal["pending", "running", "succeeded", "failed"]
 
 
-class ImageProviderConfigField(AppBaseModel):
+class MediaProviderConfigField(AppBaseModel):
     """Schema-driven field used by the frontend to render config forms."""
 
     key: str
@@ -23,11 +25,12 @@ class ImageProviderConfigField(AppBaseModel):
     description: str | None = None
 
 
-class ImageGenerationProviderManifest(AppBaseModel):
-    """Declarative metadata for one installed image-generation provider."""
+class MediaGenerationProviderManifest(AppBaseModel):
+    """Declarative metadata for one installed media-generation provider."""
 
     key: str
     name: str
+    media_type: MediaType
     description: str
     docs_url: str
     visibility: str = "builtin"
@@ -35,8 +38,8 @@ class ImageGenerationProviderManifest(AppBaseModel):
     extension_name: str | None = None
     extension_version: str | None = None
     extension_display_name: str | None = None
-    auth_schema: list[ImageProviderConfigField]
-    config_schema: list[ImageProviderConfigField]
+    auth_schema: list[MediaProviderConfigField]
+    config_schema: list[MediaProviderConfigField]
     setup_steps: list[str]
     supported_operations: list[str]
     supported_parameters: list[str]
@@ -44,7 +47,7 @@ class ImageGenerationProviderManifest(AppBaseModel):
 
 
 @dataclass(frozen=True)
-class ImageGenerationProviderBinding:
+class MediaGenerationProviderBinding:
     """Resolved provider binding payload passed from the service layer."""
 
     provider_key: str
@@ -53,14 +56,59 @@ class ImageGenerationProviderBinding:
     runtime_config: dict[str, Any]
 
 
-class ImageGenerationRequest(AppBaseModel):
+class MediaGenerationInput(AppBaseModel):
+    """Provider-neutral media input attached to one generation request."""
+
+    media_type: MediaType
+    role: MediaInputRole
+    source_path: str | None = None
+    base64_data: str | None = None
+    mime_type: str | None = None
+    file_name: str | None = None
+
+    @field_validator("source_path", mode="before")
+    @classmethod
+    def _normalize_source_path(cls, value: Any) -> str | None:
+        """Normalize one optional workspace source path."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("source_path must be a string when provided.")
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("base64_data", mode="before")
+    @classmethod
+    def _normalize_base64_data(cls, value: Any) -> str | None:
+        """Normalize one optional base64 payload."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("base64_data must be a string when provided.")
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("file_name", mode="before")
+    @classmethod
+    def _normalize_file_name(cls, value: Any) -> str | None:
+        """Normalize one optional input filename."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("file_name must be a string when provided.")
+        normalized = value.strip()
+        return normalized or None
+
+
+class MediaGenerationRequest(AppBaseModel):
     """Provider-neutral request shape passed into one provider invocation."""
 
     operation: str = Field(default="generate", min_length=1)
     prompt: str | None = None
-    output_path: str = "/workspace/.pivot/generated/images/output.png"
+    output_path: str = "/workspace/.pivot/generated/media/output"
     poll_timeout_seconds: int = Field(default=90, ge=1, le=900)
     poll_interval_seconds: int = Field(default=3, ge=1, le=60)
+    inputs: list[MediaGenerationInput] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("operation", mode="before")
@@ -90,6 +138,16 @@ class ImageGenerationRequest(AppBaseModel):
             raise ValueError("output_path must be a non-empty string.")
         return value.strip()
 
+    @field_validator("inputs", mode="before")
+    @classmethod
+    def _normalize_inputs(cls, value: Any) -> list[MediaGenerationInput]:
+        """Normalize provider input media into a typed list."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise ValueError("inputs must be an array.")
+        return value
+
     @field_validator("parameters", mode="before")
     @classmethod
     def _normalize_parameters(cls, value: Any) -> dict[str, Any]:
@@ -102,39 +160,40 @@ class ImageGenerationRequest(AppBaseModel):
 
 
 @dataclass(slots=True)
-class ImageGenerationJobHandle:
+class MediaGenerationJobHandle:
     """Provider-owned job handle returned by ``start``."""
 
     provider_key: str
     operation: str
-    status: ImageProviderJobStatus
+    status: MediaProviderJobStatus
     request_id: str | None = None
     provider_task_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
-class ImageGenerationJobState:
+class MediaGenerationJobState:
     """Current state observed by one service-level poll iteration."""
 
-    status: ImageProviderJobStatus
+    status: MediaProviderJobStatus
     request_id: str | None = None
     payload: dict[str, Any] | None = None
     error_message: str | None = None
 
 
 @dataclass(slots=True)
-class ImageGenerationArtifact:
-    """One provider-returned image artifact before workspace persistence."""
+class MediaGenerationArtifact:
+    """One provider-returned media artifact before workspace persistence."""
 
+    media_type: MediaType
     url: str | None = None
     base64_data: str | None = None
     mime_type: str | None = None
     suggested_name: str | None = None
 
 
-class ImageGenerationExecutionResult(AppBaseModel):
-    """Structured result returned to image-generation tools."""
+class MediaGenerationExecutionResult(AppBaseModel):
+    """Structured result returned to media-generation tools."""
 
     provider: dict[str, str]
     operation: str
@@ -147,7 +206,7 @@ class ImageGenerationExecutionResult(AppBaseModel):
     provider_payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class ImageGenerationTestResult(AppBaseModel):
+class MediaGenerationTestResult(AppBaseModel):
     """Connectivity or configuration validation result returned by providers."""
 
     ok: bool
@@ -156,24 +215,24 @@ class ImageGenerationTestResult(AppBaseModel):
 
 
 @dataclass(slots=True)
-class ImageGenerationCollectResult:
+class MediaGenerationCollectResult:
     """Final provider result before the service persists artifacts."""
 
     provider_key: str
     operation: str
-    status: ImageProviderJobStatus
+    status: MediaProviderJobStatus
     request_id: str | None
     provider_task_id: str | None
-    artifacts: list[ImageGenerationArtifact] = field(default_factory=list)
+    artifacts: list[MediaGenerationArtifact] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
     raw_payload: dict[str, Any] = field(default_factory=dict)
 
 
 @runtime_checkable
-class ImageGenerationProvider(Protocol):
-    """Runtime contract implemented by each image-generation adapter."""
+class MediaGenerationProvider(Protocol):
+    """Runtime contract implemented by each media-generation adapter."""
 
-    manifest: ImageGenerationProviderManifest
+    manifest: MediaGenerationProviderManifest
 
     def validate_config(
         self,
@@ -188,33 +247,33 @@ class ImageGenerationProvider(Protocol):
         *,
         auth_config: dict[str, Any],
         runtime_config: dict[str, Any],
-    ) -> ImageGenerationTestResult:
+    ) -> MediaGenerationTestResult:
         """Execute a lightweight connectivity or config validation check."""
         ...
 
     def start(
         self,
         *,
-        binding: ImageGenerationProviderBinding,
-        request: ImageGenerationRequest,
-    ) -> ImageGenerationJobHandle:
-        """Start one image-generation provider job."""
+        binding: MediaGenerationProviderBinding,
+        request: MediaGenerationRequest,
+    ) -> MediaGenerationJobHandle:
+        """Start one media-generation provider job."""
         ...
 
     def poll(
         self,
         *,
-        binding: ImageGenerationProviderBinding,
-        handle: ImageGenerationJobHandle,
-    ) -> ImageGenerationJobState:
+        binding: MediaGenerationProviderBinding,
+        handle: MediaGenerationJobHandle,
+    ) -> MediaGenerationJobState:
         """Poll one provider job handle for its latest status."""
         ...
 
     def collect(
         self,
         *,
-        binding: ImageGenerationProviderBinding,
-        handle: ImageGenerationJobHandle,
-    ) -> ImageGenerationCollectResult:
+        binding: MediaGenerationProviderBinding,
+        handle: MediaGenerationJobHandle,
+    ) -> MediaGenerationCollectResult:
         """Collect the final payload for one completed provider job."""
         ...

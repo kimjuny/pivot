@@ -49,10 +49,10 @@ class Settings(BaseSettings):
 
     # File uploads
     MAX_IMAGE_SIZE: int = Field(
-        default=10 * 1024 * 1024,
+        default=100 * 1024 * 1024,
         validation_alias=AliasChoices("MAX_IMAGE_SIZE", "MAX_FILESIZE"),
     )
-    MAX_FILE_SIZE: int = 20 * 1024 * 1024
+    MAX_FILE_SIZE: int = 100 * 1024 * 1024
     SKILL_IMPORT_MULTIPART_MAX_FILES: int = 10_000
     SKILL_IMPORT_MULTIPART_MAX_FIELDS: int = 10_000
     FILE_EXPIRE_MINUTES: int = 120

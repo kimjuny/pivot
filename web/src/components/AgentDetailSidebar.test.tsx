@@ -12,14 +12,14 @@ vi.mock("sonner", () => ({
 vi.mock("@/utils/api", () => ({
   deleteAgentChannel: vi.fn(),
   deleteAgentExtensionBinding: vi.fn(),
-  deleteAgentImageProviderBinding: vi.fn(),
+  deleteAgentMediaProviderBinding: vi.fn(),
   deleteAgentWebSearchBinding: vi.fn(),
   getAgentChannels: vi.fn(),
   getAgentExtensionPackages: vi.fn(),
-  getAgentImageProviderBindings: vi.fn(),
+  getAgentMediaProviderBindings: vi.fn(),
   getAgentWebSearchBindings: vi.fn(),
   getChannels: vi.fn(),
-  getImageGenerationProviders: vi.fn(),
+  getMediaGenerationProviders: vi.fn(),
   getPrivateSkills: vi.fn(),
   getPrivateTools: vi.fn(),
   getSharedSkills: vi.fn(),
@@ -51,7 +51,7 @@ vi.mock("./WebSearchBindingDialog", () => ({
   default: () => null,
 }));
 
-vi.mock("./ImageGenerationBindingDialog", () => ({
+vi.mock("./MediaGenerationBindingDialog", () => ({
   default: () => null,
 }));
 
@@ -60,10 +60,10 @@ import {
   deleteAgentExtensionBinding,
   getAgentChannels,
   getAgentExtensionPackages,
-  getAgentImageProviderBindings,
+  getAgentMediaProviderBindings,
   getAgentWebSearchBindings,
   getChannels,
-  getImageGenerationProviders,
+  getMediaGenerationProviders,
   getPrivateSkills,
   getPrivateTools,
   getSharedSkills,
@@ -124,8 +124,8 @@ describe("AgentDetailSidebar", () => {
     vi.mocked(getPrivateSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
-    vi.mocked(getImageGenerationProviders).mockResolvedValue([]);
-    vi.mocked(getAgentImageProviderBindings).mockResolvedValue([]);
+    vi.mocked(getMediaGenerationProviders).mockResolvedValue([]);
+    vi.mocked(getAgentMediaProviderBindings).mockResolvedValue([]);
     vi.mocked(getWebSearchProviders).mockResolvedValue([]);
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(deleteAgentExtensionBinding).mockResolvedValue(undefined);
@@ -187,7 +187,7 @@ describe("AgentDetailSidebar", () => {
               },
               contribution_summary: {
                 channel_providers: [],
-                image_providers: [],
+                media_providers: [],
                 web_search_providers: [],
                 hooks: [],
                 tools: [],
@@ -249,12 +249,13 @@ describe("AgentDetailSidebar", () => {
     vi.mocked(getPrivateSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
-    vi.mocked(getImageGenerationProviders).mockResolvedValue([
+    vi.mocked(getMediaGenerationProviders).mockResolvedValue([
       {
         manifest: {
           key: "wasp@image",
           name: "Wasp Image",
-          description: "Wasp image provider",
+          media_type: "image",
+          description: "Wasp media provider",
           docs_url: "https://example.com/wasp-image",
           visibility: "extension",
           status: "active",
@@ -270,7 +271,7 @@ describe("AgentDetailSidebar", () => {
         },
       },
     ]);
-    vi.mocked(getAgentImageProviderBindings).mockResolvedValue([
+    vi.mocked(getAgentMediaProviderBindings).mockResolvedValue([
       {
         id: 17,
         agent_id: 2,
@@ -286,7 +287,8 @@ describe("AgentDetailSidebar", () => {
         manifest: {
           key: "wasp@image",
           name: "Wasp Image",
-          description: "Wasp image provider",
+          media_type: "image",
+          description: "Wasp media provider",
           docs_url: "https://example.com/wasp-image",
           visibility: "extension",
           status: "active",
@@ -361,7 +363,7 @@ describe("AgentDetailSidebar", () => {
             },
             contribution_summary: {
               channel_providers: [],
-              image_providers: [],
+              media_providers: [],
               web_search_providers: [],
               hooks: [],
               tools: [],
@@ -418,8 +420,8 @@ describe("AgentDetailSidebar", () => {
     vi.mocked(getPrivateSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
-    vi.mocked(getImageGenerationProviders).mockResolvedValue([]);
-    vi.mocked(getAgentImageProviderBindings).mockResolvedValue([]);
+    vi.mocked(getMediaGenerationProviders).mockResolvedValue([]);
+    vi.mocked(getAgentMediaProviderBindings).mockResolvedValue([]);
     vi.mocked(getWebSearchProviders).mockResolvedValue([]);
     vi.mocked(getAgentExtensionPackages).mockResolvedValue([]);
     vi.mocked(getAgentWebSearchBindings)

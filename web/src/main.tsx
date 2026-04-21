@@ -8,7 +8,7 @@ import LLMList from './components/LLMList'
 import ToolsPage from './components/ToolsPage'
 import SkillsPage from './components/SkillsPage'
 import ChannelsPage from './components/ChannelsPage'
-import ImageGenerationProvidersPage from './components/ImageGenerationProvidersPage'
+import MediaGenerationProvidersPage from './components/MediaGenerationProvidersPage'
 import WebSearchProvidersPage from './components/WebSearchProvidersPage'
 import ExtensionsPage from './components/ExtensionsPage'
 import ExtensionDetailPage from './components/ExtensionDetailPage'
@@ -123,10 +123,10 @@ export function ExtensionsListPage() {
 /**
  * Image-generation providers page with layout.
  */
-export function ImageGenerationProvidersListPage() {
+export function MediaGenerationProvidersListPage() {
   return (
     <AuthenticatedLayout>
-      <ImageGenerationProvidersPage />
+      <MediaGenerationProvidersPage />
     </AuthenticatedLayout>
   );
 }
@@ -214,7 +214,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/studio/assets/extensions/:scope/:name" element={<ExtensionDetailRoute />} />
             <Route path="/studio/connections" element={<Navigate to="/studio/connections/channels" replace />} />
             <Route path="/studio/connections/channels" element={<ChannelsListPage />} />
-            <Route path="/studio/connections/image-generation" element={<ImageGenerationProvidersListPage />} />
+            <Route path="/studio/connections/media-generation" element={<MediaGenerationProvidersListPage />} />
             <Route path="/studio/connections/web-search" element={<WebSearchProvidersListPage />} />
             <Route path="/studio/operations" element={<Navigate to="/studio/operations/sessions" replace />} />
             <Route path="/studio/operations/sessions" element={<AuthenticatedLayout><SessionHistoryPage /></AuthenticatedLayout>} />
@@ -228,7 +228,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/extensions" element={<ExtensionsListPage />} />
             <Route path="/extensions/:scope/:name" element={<ExtensionDetailRoute />} />
             <Route path="/channels" element={<ChannelsListPage />} />
-            <Route path="/image-providers" element={<ImageGenerationProvidersListPage />} />
+            <Route path="/media-providers" element={<MediaGenerationProvidersListPage />} />
             <Route path="/web-search-providers" element={<WebSearchProvidersListPage />} />
             <Route path="/channel-link/:token" element={<ChannelLinkPage />} />
 

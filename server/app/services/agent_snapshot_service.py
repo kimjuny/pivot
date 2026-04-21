@@ -10,7 +10,7 @@ from typing import Any
 from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import AgentChannelBinding
-from app.models.image_generation import AgentImageProviderBinding
+from app.models.media_generation import AgentMediaProviderBinding
 from app.models.web_search import AgentWebSearchBinding
 from app.services.agent_service import AgentService
 from app.services.extension_service import ExtensionService
@@ -138,10 +138,10 @@ class AgentSnapshotService:
             "runtime_config": runtime_config,
         }
 
-    def _normalize_image_provider_binding(
-        self, binding: AgentImageProviderBinding
+    def _normalize_media_provider_binding(
+        self, binding: AgentMediaProviderBinding
     ) -> dict[str, Any]:
-        """Build one canonical image-provider binding snapshot."""
+        """Build one canonical media-provider binding snapshot."""
         auth_config = _load_json_object(binding.auth_config)
         runtime_config = _load_json_object(binding.runtime_config)
         return {
@@ -176,10 +176,10 @@ class AgentSnapshotService:
             .where(AgentWebSearchBinding.agent_id == agent_id)
             .order_by(col(AgentWebSearchBinding.id))
         ).all()
-        image_provider_bindings = self.db.exec(
-            select(AgentImageProviderBinding)
-            .where(AgentImageProviderBinding.agent_id == agent_id)
-            .order_by(col(AgentImageProviderBinding.id))
+        media_provider_bindings = self.db.exec(
+            select(AgentMediaProviderBinding)
+            .where(AgentMediaProviderBinding.agent_id == agent_id)
+            .order_by(col(AgentMediaProviderBinding.id))
         ).all()
 
         return {
@@ -204,9 +204,9 @@ class AgentSnapshotService:
                 self._normalize_web_search_binding(binding)
                 for binding in web_search_bindings
             ],
-            "image_provider_bindings": [
-                self._normalize_image_provider_binding(binding)
-                for binding in image_provider_bindings
+            "media_provider_bindings": [
+                self._normalize_media_provider_binding(binding)
+                for binding in media_provider_bindings
             ],
             "extensions": ExtensionService(self.db).build_agent_extension_snapshot(
                 agent_id
@@ -290,7 +290,7 @@ class AgentSnapshotService:
             "schema_version": 1,
             "agent": normalized_agent,
             "channel_bindings": base_snapshot["channel_bindings"],
-            "image_provider_bindings": base_snapshot["image_provider_bindings"],
+            "media_provider_bindings": base_snapshot["media_provider_bindings"],
             "web_search_bindings": base_snapshot["web_search_bindings"],
             "extensions": base_snapshot["extensions"],
         }
@@ -416,14 +416,14 @@ class AgentSnapshotService:
                     provider_keys, noun="Web search providers", verb="configured"
                 )
             )
-        image_provider_bindings = snapshot.get("image_provider_bindings", [])
-        if image_provider_bindings:
+        media_provider_bindings = snapshot.get("media_provider_bindings", [])
+        if media_provider_bindings:
             provider_keys = [
-                binding["provider_key"] for binding in image_provider_bindings
+                binding["provider_key"] for binding in media_provider_bindings
             ]
             changes.append(
                 _format_name_list(
-                    provider_keys, noun="Image providers", verb="configured"
+                    provider_keys, noun="Media providers", verb="configured"
                 )
             )
         return changes
@@ -550,11 +550,11 @@ class AgentSnapshotService:
         )
         changes.extend(
             self._compare_named_collection(
-                before_snapshot.get("image_provider_bindings", []),
-                after_snapshot.get("image_provider_bindings", []),
+                before_snapshot.get("media_provider_bindings", []),
+                after_snapshot.get("media_provider_bindings", []),
                 key_field="id",
                 label_field="provider_key",
-                noun="Image providers",
+                noun="Media providers",
             )
         )
         changes.extend(

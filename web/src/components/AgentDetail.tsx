@@ -8,7 +8,7 @@ import DraggableDialog from './DraggableDialog';
 import ReactChatInterface from '@/components/ReactChatInterface';
 import AgentDetailSidebar, {
   type SidebarChannel,
-  type SidebarImageProviderBinding,
+  type SidebarMediaProviderBinding,
   type SidebarWebSearchBinding,
 } from './AgentDetailSidebar';
 import AgentWorkspaceToolbar from './AgentWorkspaceToolbar';
@@ -637,7 +637,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
     void refreshDraftState();
   }, [refreshDraftState]);
 
-  const handleImageProviderBindingsLoaded = useCallback((_bindings: SidebarImageProviderBinding[]) => {
+  const handleMediaProviderBindingsLoaded = useCallback((_bindings: SidebarMediaProviderBinding[]) => {
     void refreshDraftState();
   }, [refreshDraftState]);
 
@@ -661,11 +661,11 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
         agent={workspaceAgent ?? agent}
         onAgentDraftUpdate={handleAgentDraftUpdate}
         onChannelBindingsLoaded={handleChannelBindingsLoaded}
-        onImageProviderBindingsLoaded={handleImageProviderBindingsLoaded}
+        onMediaProviderBindingsLoaded={handleMediaProviderBindingsLoaded}
         onWebSearchBindingsLoaded={handleWebSearchBindingsLoaded}
         onExtensionBindingsChanged={handlePersistedBindingDraftChanged}
         onChannelBindingsChanged={handlePersistedBindingDraftChanged}
-        onImageProviderBindingsChanged={handlePersistedBindingDraftChanged}
+        onMediaProviderBindingsChanged={handlePersistedBindingDraftChanged}
         onWebSearchBindingsChanged={handlePersistedBindingDraftChanged}
       />
 

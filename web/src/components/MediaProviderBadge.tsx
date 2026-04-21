@@ -2,7 +2,7 @@ import { Layers } from "@/lib/lucide";
 
 import { cn } from "@/lib/utils";
 
-interface ImageProviderBadgeProps {
+interface MediaProviderBadgeProps {
   name: string;
   logoUrl?: string | null;
   className?: string;
@@ -11,15 +11,15 @@ interface ImageProviderBadgeProps {
 }
 
 /**
- * Renders one image-generation provider mark with a stable icon treatment.
+ * Renders one media-generation provider mark with a stable icon treatment.
  */
-export function ImageProviderBadge({
+export function MediaProviderBadge({
   name,
   logoUrl = null,
   className,
   iconClassName,
   textClassName,
-}: ImageProviderBadgeProps) {
+}: MediaProviderBadgeProps) {
   return (
     <span className={cn("flex min-w-0 items-center gap-1.5", className)}>
       {logoUrl ? (

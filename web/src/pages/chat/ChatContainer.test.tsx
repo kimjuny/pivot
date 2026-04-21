@@ -469,7 +469,7 @@ describe("ChatContainer session rollover", () => {
               hooks: [],
               chat_surfaces: ["workspace-editor"],
               channel_providers: [],
-              image_providers: [],
+              media_providers: [],
               web_search_providers: [],
             },
             contribution_items: [

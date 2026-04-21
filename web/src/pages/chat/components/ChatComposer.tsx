@@ -674,7 +674,7 @@ export function ChatComposer({
                 onOpenAutoFocus={(event) => event.preventDefault()}
                 onCloseAutoFocus={(event) => event.preventDefault()}
                 onInteractOutside={dismissActiveMandatorySkillMention}
-                className="w-[min(16rem,calc((100vw-3rem)*0.67))] overflow-hidden rounded-2xl p-0"
+                className="z-[2147483647] w-[min(16rem,calc((100vw-3rem)*0.67))] overflow-hidden rounded-2xl p-0"
               >
                 <Command
                   shouldFilter={false}

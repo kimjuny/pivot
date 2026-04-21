@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, Search, X } from "@/lib/lucide";
 import { toast } from "sonner";
 
-import { ImageProviderBadge } from "@/components/ImageProviderBadge";
+import { MediaProviderBadge } from "@/components/MediaProviderBadge";
 import { ProviderMetadataBadges } from "@/components/ProviderMetadataBadges";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,9 +19,9 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import {
-  getImageGenerationProviders,
-  type ImageProviderCatalogItem,
-  type ImageProviderManifest,
+  getMediaGenerationProviders,
+  type MediaProviderCatalogItem,
+  type MediaProviderManifest,
 } from "@/utils/api";
 import { formatProviderExtensionLabel } from "@/utils/providerMetadata";
 
@@ -53,10 +53,10 @@ function buildPageList(current: number, total: number): (number | "ellipsis")[] 
 }
 
 /**
- * Workspace-level catalog for image-generation providers.
+ * Workspace-level catalog for media-generation providers.
  */
-function ImageGenerationProvidersPage() {
-  const [providers, setProviders] = useState<ImageProviderCatalogItem[]>([]);
+function MediaGenerationProvidersPage() {
+  const [providers, setProviders] = useState<MediaProviderCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
@@ -65,10 +65,10 @@ function ImageGenerationProvidersPage() {
   const loadProviders = useCallback(async () => {
     setIsLoading(true);
     try {
-      const nextProviders = await getImageGenerationProviders();
+      const nextProviders = await getMediaGenerationProviders();
       setProviders(nextProviders);
     } catch {
-      toast.error("Failed to load image providers");
+      toast.error("Failed to load media providers");
     } finally {
       setIsLoading(false);
     }
@@ -98,6 +98,7 @@ function ImageGenerationProvidersPage() {
         || manifest.supported_operations.some((item) => item.toLowerCase().includes(query))
         || manifest.supported_parameters.some((item) => item.toLowerCase().includes(query))
         || manifest.visibility.toLowerCase().includes(query)
+        || manifest.media_type.toLowerCase().includes(query)
       );
     });
   }, [manifests, searchQuery, sourceFilter]);
@@ -126,9 +127,9 @@ function ImageGenerationProvidersPage() {
     <div className="max-w-5xl mx-auto px-6 py-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Image Providers</h1>
+          <h1 className="text-xl font-semibold text-foreground">Media Providers</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Review installed image-generation providers before binding them to specific agents.
+            Review installed media-generation providers before binding them to specific agents.
           </p>
         </div>
       </div>
@@ -177,13 +178,13 @@ function ImageGenerationProvidersPage() {
               placeholder="Search by provider, operation, or parameter…"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Search image providers"
+              aria-label="Search media providers"
               autoComplete="off"
             />
             <Button
               variant="outline"
               size="sm"
-              aria-label="Search image providers"
+              aria-label="Search media providers"
               tabIndex={-1}
             >
               <Search className="w-4 h-4" />
@@ -195,21 +196,21 @@ function ImageGenerationProvidersPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
-          Loading image providers…
+          Loading media providers…
         </div>
       ) : filteredProviders.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
           <p className="text-sm">
             {manifests.length === 0
-              ? "No image providers found."
-              : "No image providers match your search."}
+              ? "No media providers found."
+              : "No media providers match your search."}
           </p>
         </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {pagedProviders.map((manifest) => (
-              <ImageProviderCard key={manifest.key} manifest={manifest} />
+              <MediaProviderCard key={manifest.key} manifest={manifest} />
             ))}
           </div>
 
@@ -277,14 +278,14 @@ function ImageGenerationProvidersPage() {
   );
 }
 
-interface ImageProviderCardProps {
-  manifest: ImageProviderManifest;
+interface MediaProviderCardProps {
+  manifest: MediaProviderManifest;
 }
 
 /**
- * Presentation card for one image-generation provider manifest.
+ * Presentation card for one media-generation provider manifest.
  */
-function ImageProviderCard({ manifest }: ImageProviderCardProps) {
+function MediaProviderCard({ manifest }: MediaProviderCardProps) {
   const extensionLabel = formatProviderExtensionLabel(
     manifest.extension_display_name,
     manifest.extension_name,
@@ -297,7 +298,7 @@ function ImageProviderCard({ manifest }: ImageProviderCardProps) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <CardTitle className="text-base">
-              <ImageProviderBadge name={manifest.name} />
+              <MediaProviderBadge name={manifest.name} />
             </CardTitle>
             <CardDescription className="mt-1">
               {manifest.description}
@@ -314,6 +315,7 @@ function ImageProviderCard({ manifest }: ImageProviderCardProps) {
           </a>
         </div>
         <ProviderMetadataBadges
+          mediaType={manifest.media_type}
           visibility={manifest.visibility}
           status={manifest.status}
         />
@@ -355,4 +357,4 @@ function ImageProviderCard({ manifest }: ImageProviderCardProps) {
   );
 }
 
-export default ImageGenerationProvidersPage;
+export default MediaGenerationProvidersPage;

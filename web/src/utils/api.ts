@@ -736,9 +736,9 @@ export interface WebSearchBinding {
 }
 
 /**
- * One schema-driven field used by the image-generation provider binding form.
+ * One schema-driven field used by the media-generation provider binding form.
  */
-export interface ImageProviderConfigField {
+export interface MediaProviderConfigField {
   key: string;
   label: string;
   type: 'text' | 'number' | 'secret' | 'textarea' | 'boolean';
@@ -748,11 +748,12 @@ export interface ImageProviderConfigField {
 }
 
 /**
- * Declarative manifest for one image-generation provider.
+ * Declarative manifest for one media-generation provider.
  */
-export interface ImageProviderManifest {
+export interface MediaProviderManifest {
   key: string;
   name: string;
+  media_type: 'image' | 'video';
   description: string;
   docs_url: string;
   visibility: string;
@@ -760,8 +761,8 @@ export interface ImageProviderManifest {
   extension_name?: string | null;
   extension_version?: string | null;
   extension_display_name?: string | null;
-  auth_schema: ImageProviderConfigField[];
-  config_schema: ImageProviderConfigField[];
+  auth_schema: MediaProviderConfigField[];
+  config_schema: MediaProviderConfigField[];
   setup_steps: string[];
   supported_operations: string[];
   supported_parameters: string[];
@@ -769,16 +770,16 @@ export interface ImageProviderManifest {
 }
 
 /**
- * Image-generation provider catalog row returned by the backend.
+ * Media-generation provider catalog row returned by the backend.
  */
-export interface ImageProviderCatalogItem {
-  manifest: ImageProviderManifest;
+export interface MediaProviderCatalogItem {
+  manifest: MediaProviderManifest;
 }
 
 /**
- * Configured image-generation provider binding returned for an agent.
+ * Configured media-generation provider binding returned for an agent.
  */
-export interface ImageProviderBinding {
+export interface MediaProviderBinding {
   id: number;
   agent_id: number;
   provider_key: string;
@@ -787,7 +788,7 @@ export interface ImageProviderBinding {
   disabled_reason?: string | null;
   auth_config: Record<string, string>;
   runtime_config: Record<string, unknown>;
-  manifest: ImageProviderManifest;
+  manifest: MediaProviderManifest;
   last_health_status: string | null;
   last_health_message: string | null;
   last_health_check_at: string | null;
@@ -882,24 +883,24 @@ export const testWebSearchProviderDraft = async (
 };
 
 /**
- * Fetch the installed image-generation provider catalog.
+ * Fetch the installed media-generation provider catalog.
  */
-export const getImageGenerationProviders = async (agentId?: number): Promise<ImageProviderCatalogItem[]> => {
+export const getMediaGenerationProviders = async (agentId?: number): Promise<MediaProviderCatalogItem[]> => {
   const query = typeof agentId === 'number' ? `?agent_id=${agentId}` : '';
-  return apiRequest(`/image-generation/providers${query}`) as Promise<ImageProviderCatalogItem[]>;
+  return apiRequest(`/media-generation/providers${query}`) as Promise<MediaProviderCatalogItem[]>;
 };
 
 /**
- * Fetch all image-generation provider bindings configured for one agent.
+ * Fetch all media-generation provider bindings configured for one agent.
  */
-export const getAgentImageProviderBindings = async (agentId: number): Promise<ImageProviderBinding[]> => {
-  return apiRequest(`/agents/${agentId}/image-providers`) as Promise<ImageProviderBinding[]>;
+export const getAgentMediaProviderBindings = async (agentId: number): Promise<MediaProviderBinding[]> => {
+  return apiRequest(`/agents/${agentId}/media-providers`) as Promise<MediaProviderBinding[]>;
 };
 
 /**
- * Create a new image-generation provider binding for an agent.
+ * Create a new media-generation provider binding for an agent.
  */
-export const createAgentImageProviderBinding = async (
+export const createAgentMediaProviderBinding = async (
   agentId: number,
   payload: {
     provider_key: string;
@@ -907,61 +908,61 @@ export const createAgentImageProviderBinding = async (
     auth_config: Record<string, unknown>;
     runtime_config: Record<string, unknown>;
   }
-): Promise<ImageProviderBinding> => {
-  return apiRequest(`/agents/${agentId}/image-providers`, {
+): Promise<MediaProviderBinding> => {
+  return apiRequest(`/agents/${agentId}/media-providers`, {
     method: 'POST',
     body: JSON.stringify(payload),
-  }) as Promise<ImageProviderBinding>;
+  }) as Promise<MediaProviderBinding>;
 };
 
 /**
- * Update one configured image-generation provider binding.
+ * Update one configured media-generation provider binding.
  */
-export const updateAgentImageProviderBinding = async (
+export const updateAgentMediaProviderBinding = async (
   bindingId: number,
   payload: {
     enabled?: boolean;
     auth_config?: Record<string, unknown>;
     runtime_config?: Record<string, unknown>;
   }
-): Promise<ImageProviderBinding> => {
-  return apiRequest(`/agent-image-providers/${bindingId}`, {
+): Promise<MediaProviderBinding> => {
+  return apiRequest(`/agent-media-providers/${bindingId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
-  }) as Promise<ImageProviderBinding>;
+  }) as Promise<MediaProviderBinding>;
 };
 
 /**
- * Delete one configured image-generation provider binding.
+ * Delete one configured media-generation provider binding.
  */
-export const deleteAgentImageProviderBinding = async (bindingId: number): Promise<void> => {
-  await apiRequest(`/agent-image-providers/${bindingId}`, {
+export const deleteAgentMediaProviderBinding = async (bindingId: number): Promise<void> => {
+  await apiRequest(`/agent-media-providers/${bindingId}`, {
     method: 'DELETE',
   });
 };
 
 /**
- * Run one saved image-generation provider health check.
+ * Run one saved media-generation provider health check.
  */
-export const testAgentImageProviderBinding = async (
+export const testAgentMediaProviderBinding = async (
   bindingId: number
 ): Promise<{ result: { ok: boolean; status: string; message: string } }> => {
-  return apiRequest(`/agent-image-providers/${bindingId}/test`, {
+  return apiRequest(`/agent-media-providers/${bindingId}/test`, {
     method: 'POST',
   }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
 };
 
 /**
- * Run one provider health check against unsaved image-provider form values.
+ * Run one provider health check against unsaved media-provider form values.
  */
-export const testImageProviderDraft = async (
+export const testMediaProviderDraft = async (
   providerKey: string,
   payload: {
     auth_config: Record<string, unknown>;
     runtime_config: Record<string, unknown>;
   }
 ): Promise<{ result: { ok: boolean; status: string; message: string } }> => {
-  return apiRequest(`/image-generation/providers/${encodeURIComponent(providerKey)}/test`, {
+  return apiRequest(`/media-generation/providers/${encodeURIComponent(providerKey)}/test`, {
     method: 'POST',
     body: JSON.stringify(payload),
   }) as Promise<{ result: { ok: boolean; status: string; message: string } }>;
@@ -1048,7 +1049,7 @@ export interface ExtensionContributionSummary {
   /** Channel provider keys contributed by this version. */
   channel_providers: string[];
   /** Image-generation provider keys contributed by this version. */
-  image_providers?: string[];
+  media_providers?: string[];
   /** Web-search provider keys contributed by this version. */
   web_search_providers: string[];
 }
@@ -1143,8 +1144,8 @@ export interface ExtensionReferenceSummary {
   extension_binding_count: number;
   /** Agent channel bindings using providers from this installation. */
   channel_binding_count: number;
-  /** Agent image-provider bindings using providers from this installation. */
-  image_provider_binding_count?: number;
+  /** Agent media-provider bindings using providers from this installation. */
+  media_provider_binding_count?: number;
   /** Agent web-search bindings using providers from this installation. */
   web_search_binding_count: number;
   /** Agent binding rows referencing this installation. */

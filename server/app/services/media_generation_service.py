@@ -1,4 +1,4 @@
-"""Services for image-generation provider catalog, bindings, and execution."""
+"""Services for media-generation provider catalog, bindings, and execution."""
 
 from __future__ import annotations
 
@@ -11,17 +11,19 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib import request as urllib_request
 
-from app.image_generation.types import (
-    ImageGenerationArtifact,
-    ImageGenerationExecutionResult,
-    ImageGenerationProviderBinding,
-    ImageGenerationRequest,
+from app.media_generation.types import (
+    MediaGenerationArtifact,
+    MediaGenerationCollectResult,
+    MediaGenerationExecutionResult,
+    MediaGenerationInput,
+    MediaGenerationProviderBinding,
+    MediaGenerationRequest,
 )
-from app.models.image_generation import (
-    AgentImageProviderBinding,
-    ImageGenerationUsageLog,
+from app.models.media_generation import (
+    AgentMediaProviderBinding,
+    MediaGenerationUsageLog,
 )
-from app.schemas.image_generation import ImageProviderBindingResponse
+from app.schemas.media_generation import MediaProviderBindingResponse
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.provider_registry_service import ProviderRegistryService
@@ -65,20 +67,31 @@ def _workspace_path(path: str) -> str:
     raise ValueError("Path must stay within /workspace.")
 
 
-class ImageGenerationService:
-    """Application service for image-generation bindings and execution."""
+def _host_path_for_workspace_file(
+    *,
+    workspace_backend_path: str,
+    sandbox_path: str,
+) -> Path:
+    """Resolve one sandbox workspace path to its host-side path."""
+    normalized_path = _workspace_path(sandbox_path)
+    relative_path = normalized_path.removeprefix("/workspace/") or "."
+    return Path(workspace_backend_path).joinpath(*PurePosixPath(relative_path).parts)
+
+
+class MediaGenerationService:
+    """Application service for media-generation bindings and execution."""
 
     def __init__(self, db: Session) -> None:
-        """Store the active database session for image-generation operations."""
+        """Store the active database session for media-generation operations."""
         self.db = db
 
-    def _list_image_generation_providers(self) -> list[Any]:
-        """Return built-in and extension-backed image-generation providers."""
-        return ProviderRegistryService(self.db).list_image_generation_providers()
+    def _list_media_generation_providers(self) -> list[Any]:
+        """Return built-in and extension-backed media-generation providers."""
+        return ProviderRegistryService(self.db).list_media_generation_providers()
 
-    def _get_image_generation_provider(self, provider_key: str) -> Any:
-        """Resolve one image-generation provider from the unified registry."""
-        return ProviderRegistryService(self.db).get_image_generation_provider(
+    def _get_media_generation_provider(self, provider_key: str) -> Any:
+        """Resolve one media-generation provider from the unified registry."""
+        return ProviderRegistryService(self.db).get_media_generation_provider(
             provider_key
         )
 
@@ -89,7 +102,7 @@ class ImageGenerationService:
         provider: Any,
         enabled_only: bool = True,
     ) -> bool:
-        """Return whether one image provider is available to an agent."""
+        """Return whether one media provider is available to an agent."""
         extension_package_id = provider.manifest.extension_name
         if not extension_package_id:
             return True
@@ -100,8 +113,8 @@ class ImageGenerationService:
         )
 
     def list_catalog(self, agent_id: int | None = None) -> list[dict[str, Any]]:
-        """Return installed image-generation providers visible to the agent."""
-        providers = self._list_image_generation_providers()
+        """Return installed media-generation providers visible to the agent."""
+        providers = self._list_media_generation_providers()
         if agent_id is not None:
             providers = [
                 provider
@@ -116,10 +129,10 @@ class ImageGenerationService:
 
     def _serialize_binding(
         self,
-        binding: AgentImageProviderBinding,
-    ) -> ImageProviderBindingResponse:
+        binding: AgentMediaProviderBinding,
+    ) -> MediaProviderBindingResponse:
         """Render one binding with provider manifest metadata."""
-        provider = self._get_image_generation_provider(binding.provider_key)
+        provider = self._get_media_generation_provider(binding.provider_key)
         effective_available, disabled_reason = ExtensionService(
             self.db
         ).get_agent_child_availability(
@@ -127,7 +140,7 @@ class ImageGenerationService:
             package_id=provider.manifest.extension_name,
         )
         auth_config = _load_json_object(binding.auth_config)
-        return ImageProviderBindingResponse(
+        return MediaProviderBindingResponse(
             id=binding.id or 0,
             agent_id=binding.agent_id,
             provider_key=binding.provider_key,
@@ -150,22 +163,22 @@ class ImageGenerationService:
 
     def _to_provider_binding(
         self,
-        binding: AgentImageProviderBinding,
-    ) -> ImageGenerationProviderBinding:
+        binding: AgentMediaProviderBinding,
+    ) -> MediaGenerationProviderBinding:
         """Convert one ORM row into the provider-facing binding payload."""
-        return ImageGenerationProviderBinding(
+        return MediaGenerationProviderBinding(
             provider_key=binding.provider_key,
             enabled=binding.enabled,
             auth_config=_load_json_object(binding.auth_config),
             runtime_config=_load_json_object(binding.runtime_config),
         )
 
-    def list_agent_bindings(self, agent_id: int) -> list[ImageProviderBindingResponse]:
-        """List all image-generation bindings attached to one agent."""
+    def list_agent_bindings(self, agent_id: int) -> list[MediaProviderBindingResponse]:
+        """List all media-generation bindings attached to one agent."""
         statement = (
-            select(AgentImageProviderBinding)
-            .where(AgentImageProviderBinding.agent_id == agent_id)
-            .order_by(col(AgentImageProviderBinding.created_at))
+            select(AgentMediaProviderBinding)
+            .where(AgentMediaProviderBinding.agent_id == agent_id)
+            .order_by(col(AgentMediaProviderBinding.created_at))
         )
         rows = self.db.exec(statement).all()
         return [self._serialize_binding(row) for row in rows]
@@ -178,9 +191,9 @@ class ImageGenerationService:
         enabled: bool,
         auth_config: dict[str, Any],
         runtime_config: dict[str, Any],
-    ) -> ImageProviderBindingResponse:
-        """Create a new agent image-provider binding after validation."""
-        provider = self._get_image_generation_provider(provider_key)
+    ) -> MediaProviderBindingResponse:
+        """Create a new agent media-provider binding after validation."""
+        provider = self._get_media_generation_provider(provider_key)
         if not self._is_provider_available_to_agent(
             agent_id=agent_id,
             provider=provider,
@@ -192,9 +205,9 @@ class ImageGenerationService:
         provider.validate_config(auth_config, runtime_config)
 
         existing = self.db.exec(
-            select(AgentImageProviderBinding).where(
-                AgentImageProviderBinding.agent_id == agent_id,
-                AgentImageProviderBinding.provider_key == provider_key,
+            select(AgentMediaProviderBinding).where(
+                AgentMediaProviderBinding.agent_id == agent_id,
+                AgentMediaProviderBinding.provider_key == provider_key,
             )
         ).first()
         if existing is not None:
@@ -203,7 +216,7 @@ class ImageGenerationService:
             )
 
         now = datetime.now(UTC)
-        binding = AgentImageProviderBinding(
+        binding = AgentMediaProviderBinding(
             agent_id=agent_id,
             provider_key=provider_key,
             enabled=enabled,
@@ -224,13 +237,13 @@ class ImageGenerationService:
         enabled: bool | None = None,
         auth_config: dict[str, Any] | None = None,
         runtime_config: dict[str, Any] | None = None,
-    ) -> ImageProviderBindingResponse:
-        """Update one agent image-generation provider binding."""
-        binding = self.db.get(AgentImageProviderBinding, binding_id)
+    ) -> MediaProviderBindingResponse:
+        """Update one agent media-generation provider binding."""
+        binding = self.db.get(AgentMediaProviderBinding, binding_id)
         if binding is None:
-            raise ValueError("Image provider binding not found.")
+            raise ValueError("Media provider binding not found.")
 
-        provider = self._get_image_generation_provider(binding.provider_key)
+        provider = self._get_media_generation_provider(binding.provider_key)
         next_auth = (
             auth_config
             if auth_config is not None
@@ -256,20 +269,20 @@ class ImageGenerationService:
         return self._serialize_binding(binding)
 
     def delete_binding(self, binding_id: int) -> None:
-        """Delete one configured image-generation binding."""
-        binding = self.db.get(AgentImageProviderBinding, binding_id)
+        """Delete one configured media-generation binding."""
+        binding = self.db.get(AgentMediaProviderBinding, binding_id)
         if binding is None:
-            raise ValueError("Image provider binding not found.")
+            raise ValueError("Media provider binding not found.")
         self.db.delete(binding)
         self.db.commit()
 
     def test_binding(self, binding_id: int) -> dict[str, Any]:
         """Run the provider-specific health check for one saved binding."""
-        binding = self.db.get(AgentImageProviderBinding, binding_id)
+        binding = self.db.get(AgentMediaProviderBinding, binding_id)
         if binding is None:
-            raise ValueError("Image provider binding not found.")
+            raise ValueError("Media provider binding not found.")
 
-        provider = self._get_image_generation_provider(binding.provider_key)
+        provider = self._get_media_generation_provider(binding.provider_key)
         result = provider.test_connection(
             auth_config=_load_json_object(binding.auth_config),
             runtime_config=_load_json_object(binding.runtime_config),
@@ -290,7 +303,7 @@ class ImageGenerationService:
         runtime_config: dict[str, Any],
     ) -> dict[str, Any]:
         """Run a provider health check against unsaved form values."""
-        provider = self._get_image_generation_provider(provider_key)
+        provider = self._get_media_generation_provider(provider_key)
         provider.validate_config(auth_config, runtime_config)
         result = provider.test_connection(
             auth_config=auth_config,
@@ -303,15 +316,15 @@ class ImageGenerationService:
         *,
         agent_id: int,
         provider_key: str | None,
-    ) -> AgentImageProviderBinding:
+    ) -> AgentMediaProviderBinding:
         """Resolve the binding the current tool invocation should use."""
-        statement = select(AgentImageProviderBinding).where(
-            AgentImageProviderBinding.agent_id == agent_id,
-            col(AgentImageProviderBinding.enabled).is_(True),
+        statement = select(AgentMediaProviderBinding).where(
+            AgentMediaProviderBinding.agent_id == agent_id,
+            col(AgentMediaProviderBinding.enabled).is_(True),
         )
         if provider_key is not None:
             statement = statement.where(
-                AgentImageProviderBinding.provider_key == provider_key
+                AgentMediaProviderBinding.provider_key == provider_key
             )
         bindings = self.db.exec(statement).all()
         available_bindings = [
@@ -319,7 +332,7 @@ class ImageGenerationService:
             for binding in bindings
             if self._is_provider_available_to_agent(
                 agent_id=agent_id,
-                provider=self._get_image_generation_provider(binding.provider_key),
+                provider=self._get_media_generation_provider(binding.provider_key),
                 enabled_only=True,
             )
         ]
@@ -327,21 +340,21 @@ class ImageGenerationService:
             binding = available_bindings[0] if available_bindings else None
             if binding is None:
                 raise ValueError(
-                    f"Enabled image provider '{provider_key}' is not configured "
+                    f"Enabled media provider '{provider_key}' is not configured "
                     f"for agent {agent_id}."
                 )
             return binding
 
         if not available_bindings:
             raise ValueError(
-                "This agent has no enabled image-generation providers configured."
+                "This agent has no enabled media-generation providers configured."
             )
         if len(available_bindings) > 1:
             provider_names = ", ".join(
                 sorted(binding.provider_key for binding in available_bindings)
             )
             raise ValueError(
-                "Multiple enabled image-generation providers are configured for "
+                "Multiple enabled media-generation providers are configured for "
                 f"this agent. Select one explicitly: {provider_names}."
             )
         return available_bindings[0]
@@ -353,34 +366,38 @@ class ImageGenerationService:
         username: str,
         workspace_id: str,
         workspace_backend_path: str,
-        request: ImageGenerationRequest,
+        request: MediaGenerationRequest,
         provider_key: str | None = None,
-    ) -> ImageGenerationExecutionResult:
-        """Execute one provider-backed image-generation request."""
+    ) -> MediaGenerationExecutionResult:
+        """Execute one provider-backed media-generation request."""
         binding_row = self.resolve_binding(agent_id=agent_id, provider_key=provider_key)
         binding = self._to_provider_binding(binding_row)
-        provider = self._get_image_generation_provider(binding.provider_key)
+        provider = self._get_media_generation_provider(binding.provider_key)
         provider.validate_config(binding.auth_config, binding.runtime_config)
+        prepared_request = self._prepare_request(
+            request=request,
+            workspace_backend_path=workspace_backend_path,
+        )
 
         usage_log = self._create_usage_log(
             agent_id=agent_id,
             workspace_id=workspace_id,
             username=username,
             provider_key=binding.provider_key,
-            operation=request.operation,
+            operation=prepared_request.operation,
         )
 
-        result: ImageGenerationCollectResult | None = None
+        result: MediaGenerationCollectResult | None = None
 
         try:
-            handle = provider.start(binding=binding, request=request)
+            handle = provider.start(binding=binding, request=prepared_request)
             usage_log.request_id = handle.request_id
             usage_log.provider_task_id = handle.provider_task_id
             usage_log.updated_at = datetime.now(UTC)
             self.db.add(usage_log)
             self.db.commit()
 
-            deadline = time.monotonic() + float(request.poll_timeout_seconds)
+            deadline = time.monotonic() + float(prepared_request.poll_timeout_seconds)
             while True:
                 state = provider.poll(binding=binding, handle=handle)
                 handle.status = state.status
@@ -389,18 +406,22 @@ class ImageGenerationService:
                     usage_log.request_id = state.request_id
                 if state.status == "failed":
                     raise RuntimeError(
-                        state.error_message or "Image generation provider failed."
+                        state.error_message or "Media generation provider failed."
                     )
                 if state.status == "succeeded":
                     break
                 if time.monotonic() >= deadline:
                     raise TimeoutError(
-                        "Image generation timed out while waiting for the provider "
+                        "Media generation timed out while waiting for the provider "
                         "to finish."
                     )
-                time.sleep(request.poll_interval_seconds)
+                time.sleep(prepared_request.poll_interval_seconds)
 
             result = provider.collect(binding=binding, handle=handle)
+            if result is None:
+                raise RuntimeError(
+                    "Media generation completed without a collected result."
+                )
             output_paths = self._persist_artifacts(
                 workspace_backend_path=workspace_backend_path,
                 output_path=request.output_path,
@@ -409,7 +430,7 @@ class ImageGenerationService:
             usage_log.status = "succeeded"
             usage_log.request_id = result.request_id
             usage_log.provider_task_id = result.provider_task_id
-            usage_log.image_count = len(output_paths)
+            usage_log.artifact_count = len(output_paths)
             usage_log.output_paths_json = _dump_json_array(output_paths)
             usage_log.usage_json = _dump_json_object(result.usage)
             usage_log.provider_payload_json = _dump_json_object(result.raw_payload)
@@ -417,12 +438,12 @@ class ImageGenerationService:
             usage_log.finished_at = datetime.now(UTC)
             self.db.add(usage_log)
             self.db.commit()
-            return ImageGenerationExecutionResult(
+            return MediaGenerationExecutionResult(
                 provider={
                     "key": provider.manifest.key,
                     "name": provider.manifest.name,
                 },
-                operation=request.operation,
+                operation=prepared_request.operation,
                 output_paths=output_paths,
                 primary_output_path=output_paths[0] if output_paths else None,
                 provider_task_id=result.provider_task_id,
@@ -445,6 +466,68 @@ class ImageGenerationService:
             self.db.commit()
             raise
 
+    def _prepare_request(
+        self,
+        *,
+        request: MediaGenerationRequest,
+        workspace_backend_path: str,
+    ) -> MediaGenerationRequest:
+        """Resolve workspace-backed media inputs into provider-ready payloads."""
+        if not request.inputs:
+            return request
+
+        resolved_inputs = [
+            self._resolve_input_media(
+                item=input_item,
+                workspace_backend_path=workspace_backend_path,
+            )
+            for input_item in request.inputs
+        ]
+        return request.model_copy(update={"inputs": resolved_inputs})
+
+    def _resolve_input_media(
+        self,
+        *,
+        item: MediaGenerationInput,
+        workspace_backend_path: str,
+    ) -> MediaGenerationInput:
+        """Resolve one input media item into validated bytes and base64."""
+        if item.base64_data:
+            return item
+
+        if not item.source_path:
+            raise ValueError(
+                f"Media input '{item.role}' requires source_path or base64_data."
+            )
+
+        host_path = _host_path_for_workspace_file(
+            workspace_backend_path=workspace_backend_path,
+            sandbox_path=item.source_path,
+        )
+        if not host_path.exists():
+            raise ValueError(
+                f"Media input path does not exist: {item.source_path}"
+            )
+        if not host_path.is_file():
+            raise ValueError(
+                f"Media input path must be a file: {item.source_path}"
+            )
+
+        file_bytes = host_path.read_bytes()
+        file_service = FileService(self.db)
+        if item.media_type == "image":
+            verified = file_service.verify_image_upload(host_path.name, file_bytes)
+            return item.model_copy(
+                update={
+                    "base64_data": base64.b64encode(verified.file_bytes).decode("ascii"),
+                    "mime_type": verified.mime_type,
+                    "file_name": host_path.name,
+                    "source_path": _workspace_path(item.source_path),
+                }
+            )
+
+        raise ValueError(f"Unsupported input media type: {item.media_type}")
+
     def _create_usage_log(
         self,
         *,
@@ -453,9 +536,9 @@ class ImageGenerationService:
         username: str,
         provider_key: str,
         operation: str,
-    ) -> ImageGenerationUsageLog:
+    ) -> MediaGenerationUsageLog:
         """Create one pending usage-log row before provider execution."""
-        row = ImageGenerationUsageLog(
+        row = MediaGenerationUsageLog(
             agent_id=agent_id,
             workspace_id=workspace_id,
             username=username,
@@ -475,11 +558,11 @@ class ImageGenerationService:
         *,
         workspace_backend_path: str,
         output_path: str,
-        artifacts: list[ImageGenerationArtifact],
+        artifacts: list[MediaGenerationArtifact],
     ) -> list[str]:
         """Persist provider-returned artifacts under the active workspace root."""
         if not artifacts:
-            raise RuntimeError("The provider completed without returning any images.")
+            raise RuntimeError("The provider completed without returning any artifacts.")
 
         normalized_output_path = _workspace_path(output_path)
         file_service = FileService(self.db)
@@ -487,9 +570,14 @@ class ImageGenerationService:
 
         for index, artifact in enumerate(artifacts, start=1):
             file_bytes = self._read_artifact_bytes(artifact)
-            verified = file_service.verify_image_upload(
-                artifact.suggested_name or "generated-image.png",
-                file_bytes,
+            suggested_name = artifact.suggested_name or self._default_artifact_name(
+                artifact
+            )
+            verified = self._verify_artifact(
+                file_service=file_service,
+                artifact=artifact,
+                file_bytes=file_bytes,
+                suggested_name=suggested_name,
             )
             target_sandbox_path = self._build_output_path(
                 base_output_path=normalized_output_path,
@@ -507,14 +595,14 @@ class ImageGenerationService:
 
         return output_paths
 
-    def _read_artifact_bytes(self, artifact: ImageGenerationArtifact) -> bytes:
-        """Materialize one provider artifact into raw image bytes."""
+    def _read_artifact_bytes(self, artifact: MediaGenerationArtifact) -> bytes:
+        """Materialize one provider artifact into raw media bytes."""
         if artifact.base64_data:
             try:
                 return base64.b64decode(artifact.base64_data, validate=True)
             except ValueError as exc:
                 raise RuntimeError(
-                    "Provider returned invalid base64 image data."
+                    "Provider returned invalid base64 media data."
                 ) from exc
 
         if artifact.url:
@@ -522,6 +610,29 @@ class ImageGenerationService:
                 return response.read()
 
         raise RuntimeError("Provider artifact is missing both URL and base64 data.")
+
+    def _default_artifact_name(self, artifact: MediaGenerationArtifact) -> str:
+        """Build a stable fallback filename for one provider artifact."""
+        if artifact.media_type == "video":
+            return "generated-video.mp4"
+        return "generated-image.png"
+
+    def _verify_artifact(
+        self,
+        *,
+        file_service: FileService,
+        artifact: MediaGenerationArtifact,
+        file_bytes: bytes,
+        suggested_name: str,
+    ) -> Any:
+        """Validate one artifact based on its declared media type."""
+        if artifact.media_type == "video":
+            return file_service.verify_video_upload(
+                suggested_name,
+                file_bytes,
+                mime_type_hint=artifact.mime_type,
+            )
+        return file_service.verify_image_upload(suggested_name, file_bytes)
 
     def _build_output_path(
         self,
@@ -531,7 +642,7 @@ class ImageGenerationService:
         artifact_index: int,
         extension: str,
     ) -> str:
-        """Return the final sandbox path for one persisted generated image."""
+        """Return the final sandbox path for one persisted generated artifact."""
         normalized_extension = extension.lstrip(".")
         path = PurePosixPath(base_output_path)
         suffix = path.suffix

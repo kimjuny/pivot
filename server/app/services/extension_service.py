@@ -18,7 +18,8 @@ from typing import Any
 
 from app.channels.types import ChannelManifest
 from app.config import get_settings
-from app.image_generation.types import ImageGenerationProviderManifest
+from app.media_generation.types import MediaGenerationProviderManifest
+from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import (
     AgentChannelBinding,
     ChannelEventLog,
@@ -26,9 +27,8 @@ from app.models.channel import (
     ChannelSession,
     ExternalIdentityBinding,
 )
-from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
-from app.models.image_generation import AgentImageProviderBinding
+from app.models.media_generation import AgentMediaProviderBinding
 from app.models.skill import Skill
 from app.models.web_search import AgentWebSearchBinding
 from app.orchestration.skills.skill_files import parse_front_matter
@@ -43,7 +43,7 @@ from app.services.provider_registry_service import (
     ProviderRegistryService,
     extract_provider_keys_from_manifest,
     load_channel_provider_from_file,
-    load_image_generation_provider_from_file,
+    load_media_generation_provider_from_file,
     load_web_search_provider_from_file,
 )
 from app.services.workspace_service import ensure_agent_workspace
@@ -65,7 +65,7 @@ _SUPPORTED_CONFIGURATION_FIELD_TYPES = frozenset(
 )
 _TOOL_ENTRY_TYPES = frozenset({"tools"})
 _ENTRYPOINT_TYPES = frozenset(
-    {"hooks", "channel_providers", "image_providers", "web_search_providers"}
+    {"hooks", "channel_providers", "media_providers", "web_search_providers"}
 )
 _VERSION_TOKEN_PATTERN = re.compile(r"\d+|[A-Za-z]+|[^A-Za-z0-9]+")
 _SUPPORTED_HOOK_EVENTS = frozenset(
@@ -123,7 +123,7 @@ class ExtensionReferenceSummary:
 
     extension_binding_count: int
     channel_binding_count: int
-    image_provider_binding_count: int
+    media_provider_binding_count: int
     web_search_binding_count: int
     release_count: int
     test_snapshot_count: int
@@ -135,7 +135,7 @@ class ExtensionReferenceSummary:
         return (
             self.extension_binding_count
             + self.channel_binding_count
-            + self.image_provider_binding_count
+            + self.media_provider_binding_count
             + self.web_search_binding_count
         )
 
@@ -154,7 +154,7 @@ class ExtensionReferenceSummary:
         return {
             "extension_binding_count": self.extension_binding_count,
             "channel_binding_count": self.channel_binding_count,
-            "image_provider_binding_count": self.image_provider_binding_count,
+            "media_provider_binding_count": self.media_provider_binding_count,
             "web_search_binding_count": self.web_search_binding_count,
             "binding_count": self.binding_count,
             "release_count": self.release_count,
@@ -278,8 +278,8 @@ def _build_contribution_summary(
             contributions.get("channel_providers"),
             field_name="key",
         ),
-        "image_providers": _extract_names(
-            contributions.get("image_providers"),
+        "media_providers": _extract_names(
+            contributions.get("media_providers"),
             field_name="key",
         ),
         "web_search_providers": _extract_names(
@@ -300,7 +300,7 @@ def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
         ("hooks", "hook"),
         ("chat_surfaces", "chat_surface"),
         ("channel_providers", "channel_provider"),
-        ("image_providers", "image_provider"),
+        ("media_providers", "media_provider"),
         ("web_search_providers", "web_search_provider"),
         ("tools", "tool"),
         ("skills", "skill"),
@@ -933,17 +933,17 @@ def _normalize_manifest(
                     )
                     continue
 
-                if key == "image_providers":
+                if key == "media_providers":
                     entrypoint = raw_item.get("entrypoint")
                     if not isinstance(entrypoint, str):
                         raise ValueError(
-                            "Image-generation provider contributions must declare "
+                            "Media-generation provider contributions must declare "
                             "an entrypoint."
                         )
                     relative_entrypoint = _safe_relative_path(
                         entrypoint,
                         field_name=(
-                            f"contributions.image_providers[{index}].entrypoint"
+                            f"contributions.media_providers[{index}].entrypoint"
                         ),
                     )
                     entrypoint_path = source_dir.joinpath(*relative_entrypoint.parts)
@@ -952,30 +952,30 @@ def _normalize_manifest(
                             f"Entrypoint '{relative_entrypoint.as_posix()}' does not exist."
                         )
 
-                    provider = load_image_generation_provider_from_file(
+                    provider = load_media_generation_provider_from_file(
                         source_path=entrypoint_path,
                         module_key=(
-                            "_pivot_extension_validate_image_"
+                            "_pivot_extension_validate_media_"
                             f"{normalized_name}_{normalized_version}_{index}"
                         ),
                     )
                     if not isinstance(
-                        provider.manifest, ImageGenerationProviderManifest
+                        provider.manifest, MediaGenerationProviderManifest
                     ):
                         raise ValueError(
-                            "Image-generation provider entrypoint must expose an "
-                            "ImageGenerationProviderManifest."
+                            "Media-generation provider entrypoint must expose a "
+                            "MediaGenerationProviderManifest."
                         )
                     provider_key = _validate_extension_provider_key(
                         provider_key=provider.manifest.key,
                         scope=normalized_scope,
                         field_name=(
-                            "contributions.image_providers" f"[{index}].manifest.key"
+                            "contributions.media_providers" f"[{index}].manifest.key"
                         ),
                     )
                     if provider_key in seen_names:
                         raise ValueError(
-                            "Duplicate image-generation provider contribution "
+                            "Duplicate media-generation provider contribution "
                             f"'{provider_key}'."
                         )
                     seen_names.add(provider_key)
@@ -2265,8 +2265,8 @@ class ExtensionService:
         return ExtensionReferenceSummary(
             extension_binding_count=extension_binding_count,
             channel_binding_count=provider_binding_summary.channel_binding_count,
-            image_provider_binding_count=(
-                provider_binding_summary.image_provider_binding_count
+            media_provider_binding_count=(
+                provider_binding_summary.media_provider_binding_count
             ),
             web_search_binding_count=provider_binding_summary.web_search_binding_count,
             release_count=release_count,
@@ -2450,7 +2450,7 @@ class ExtensionService:
                 and isinstance(hook.get("callable"), str)
                 and isinstance(hook.get("entrypoint"), str)
             ],
-            "image_providers": [
+            "media_providers": [
                 {
                     "key": provider["key"],
                     "name": provider.get("name", provider["key"]),
@@ -2463,7 +2463,7 @@ class ExtensionService:
                         ).resolve()
                     ),
                 }
-                for provider in contributions.get("image_providers", [])
+                for provider in contributions.get("media_providers", [])
                 if isinstance(provider, dict)
                 and isinstance(provider.get("entrypoint"), str)
             ],
@@ -2798,23 +2798,23 @@ class ExtensionService:
         if not isinstance(contributions, dict):
             return
 
-        for item in contributions.get("image_providers", []):
+        for item in contributions.get("media_providers", []):
             if not isinstance(item, dict):
                 continue
             provider_key = item.get("key")
             if not isinstance(provider_key, str) or not provider_key.strip():
                 continue
             normalized_key = provider_key.strip()
-            existing_image_binding = self.db.exec(
-                select(AgentImageProviderBinding).where(
-                    AgentImageProviderBinding.agent_id == agent_id,
-                    AgentImageProviderBinding.provider_key == normalized_key,
+            existing_media_binding = self.db.exec(
+                select(AgentMediaProviderBinding).where(
+                    AgentMediaProviderBinding.agent_id == agent_id,
+                    AgentMediaProviderBinding.provider_key == normalized_key,
                 )
             ).first()
-            if existing_image_binding is not None:
+            if existing_media_binding is not None:
                 continue
             self.db.add(
-                AgentImageProviderBinding(
+                AgentMediaProviderBinding(
                     agent_id=agent_id,
                     provider_key=normalized_key,
                     enabled=False,
@@ -2859,7 +2859,7 @@ class ExtensionService:
         """Collect provider keys contributed by a set of installations."""
         keys = {
             "channel": set(),
-            "image": set(),
+            "media": set(),
             "web_search": set(),
         }
         for installation in installations:
@@ -2869,7 +2869,7 @@ class ExtensionService:
                 json.loads(installation.manifest_json)
             )
             keys["channel"].update(provider_keys["channel"])
-            keys["image"].update(provider_keys["image"])
+            keys["media"].update(provider_keys["media"])
             keys["web_search"].update(provider_keys["web_search"])
         return keys
 
@@ -2883,7 +2883,7 @@ class ExtensionService:
         """Delete agent-scoped child contributions tied to one extension."""
         preserve_provider_keys = preserve_provider_keys or {
             "channel": set(),
-            "image": set(),
+            "media": set(),
             "web_search": set(),
         }
         provider_keys = extract_provider_keys_from_manifest(
@@ -2931,12 +2931,12 @@ class ExtensionService:
             for binding in channel_binding_rows:
                 self.db.delete(binding)
 
-        removable_image_keys = provider_keys["image"] - preserve_provider_keys["image"]
-        if removable_image_keys:
+        removable_media_keys = provider_keys["media"] - preserve_provider_keys["media"]
+        if removable_media_keys:
             for binding in self.db.exec(
-                select(AgentImageProviderBinding).where(
-                    AgentImageProviderBinding.agent_id == agent_id,
-                    col(AgentImageProviderBinding.provider_key).in_(removable_image_keys),
+                select(AgentMediaProviderBinding).where(
+                    AgentMediaProviderBinding.agent_id == agent_id,
+                    col(AgentMediaProviderBinding.provider_key).in_(removable_media_keys),
                 )
             ).all():
                 self.db.delete(binding)

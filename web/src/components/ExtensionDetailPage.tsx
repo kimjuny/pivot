@@ -106,7 +106,7 @@ function buildContributionGroups(summary: ExtensionContributionSummary): Contrib
     },
     {
       label: "Image Providers",
-      values: summary.image_providers ?? [],
+      values: summary.media_providers ?? [],
       tone: "provider",
     },
     {
@@ -198,10 +198,10 @@ function getContributionPresentation(
         item,
         icon: Globe2,
       };
-    case "image_provider":
+    case "media_provider":
       return {
-        id: `image_provider-${item.name}`,
-        badgeLabel: "Image",
+        id: `media_provider-${item.name}`,
+        badgeLabel: "Media",
         item,
         icon: Server,
       };
@@ -300,7 +300,7 @@ function buildReferenceBadges(installation: ExtensionInstallation): ReferenceBad
     },
     {
       label: "Image Bindings",
-      count: summary.image_provider_binding_count ?? 0,
+      count: summary.media_provider_binding_count ?? 0,
       tone: "provider",
     },
     {
@@ -482,8 +482,8 @@ export default function ExtensionDetailPage() {
       chat_surfaces: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.chat_surfaces ?? [])),
       ),
-      image_providers: Array.from(
-        new Set(pkg.versions.flatMap((version) => version.contribution_summary.image_providers ?? [])),
+      media_providers: Array.from(
+        new Set(pkg.versions.flatMap((version) => version.contribution_summary.media_providers ?? [])),
       ),
       web_search_providers: Array.from(
         new Set(pkg.versions.flatMap((version) => version.contribution_summary.web_search_providers)),

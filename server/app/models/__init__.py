@@ -13,11 +13,11 @@ from app.models.extension import (
     ExtensionInstallation,
 )
 from app.models.file import FileAsset
-from app.models.image_generation import (
-    AgentImageProviderBinding,
-    ImageGenerationUsageLog,
-)
 from app.models.llm import LLM
+from app.models.media_generation import (
+    AgentMediaProviderBinding,
+    MediaGenerationUsageLog,
+)
 from app.models.project import Project
 from app.models.react import (
     ReactPlanStep,
@@ -39,7 +39,7 @@ __all__ = [
     "Agent",
     "AgentChannelBinding",
     "AgentExtensionBinding",
-    "AgentImageProviderBinding",
+    "AgentMediaProviderBinding",
     "AgentRelease",
     "AgentSavedDraft",
     "AgentTestSnapshot",
@@ -51,7 +51,7 @@ __all__ = [
     "ExtensionInstallation",
     "ExternalIdentityBinding",
     "FileAsset",
-    "ImageGenerationUsageLog",
+    "MediaGenerationUsageLog",
     "Project",
     "ReactPlanStep",
     "ReactRecursion",

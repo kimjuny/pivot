@@ -8,17 +8,17 @@ import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import ConfigFieldGroup from './ConfigFieldGroup';
 import DraggableDialog from './DraggableDialog';
-import { ImageProviderBadge } from './ImageProviderBadge';
+import { MediaProviderBadge } from './MediaProviderBadge';
 import { ProviderMetadataBadges } from './ProviderMetadataBadges';
 import { formatProviderExtensionLabel } from '@/utils/providerMetadata';
 import {
-  createAgentImageProviderBinding,
-  testAgentImageProviderBinding,
-  testImageProviderDraft,
-  updateAgentImageProviderBinding,
-  type ImageProviderBinding,
-  type ImageProviderCatalogItem,
-  type ImageProviderManifest,
+  createAgentMediaProviderBinding,
+  testAgentMediaProviderBinding,
+  testMediaProviderDraft,
+  updateAgentMediaProviderBinding,
+  type MediaProviderBinding,
+  type MediaProviderCatalogItem,
+  type MediaProviderManifest,
 } from '@/utils/api';
 
 /**
@@ -35,20 +35,20 @@ function toFieldValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-interface ImageGenerationBindingDialogProps {
+interface MediaGenerationBindingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   agentId: number;
-  catalog: ImageProviderCatalogItem[];
+  catalog: MediaProviderCatalogItem[];
   configuredProviderKeys: string[];
-  initialBinding?: ImageProviderBinding | null;
+  initialBinding?: MediaProviderBinding | null;
   onSaved: () => Promise<void> | void;
 }
 
 /**
- * Image-generation provider editor used for both create and edit flows.
+ * Media-provider editor used for both create and edit flows.
  */
-function ImageGenerationBindingDialog({
+function MediaGenerationBindingDialog({
   open,
   onOpenChange,
   agentId,
@@ -56,7 +56,7 @@ function ImageGenerationBindingDialog({
   configuredProviderKeys,
   initialBinding,
   onSaved,
-}: ImageGenerationBindingDialogProps) {
+}: MediaGenerationBindingDialogProps) {
   const [providerKey, setProviderKey] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [authConfig, setAuthConfig] = useState<Record<string, string>>({});
@@ -65,7 +65,7 @@ function ImageGenerationBindingDialog({
   const [isTesting, setIsTesting] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
 
-  const manifest = useMemo<ImageProviderManifest | null>(() => {
+  const manifest = useMemo<MediaProviderManifest | null>(() => {
     if (!providerKey) {
       return null;
     }
@@ -132,7 +132,7 @@ function ImageGenerationBindingDialog({
 
   const handleSave = async () => {
     if (!manifest) {
-      toast.error('Please select an image provider');
+      toast.error('Please select a media provider');
       return;
     }
 
@@ -145,19 +145,19 @@ function ImageGenerationBindingDialog({
       };
 
       if (initialBinding) {
-        await updateAgentImageProviderBinding(initialBinding.id, payload);
+        await updateAgentMediaProviderBinding(initialBinding.id, payload);
       } else {
-        await createAgentImageProviderBinding(agentId, {
+        await createAgentMediaProviderBinding(agentId, {
           provider_key: manifest.key,
           ...payload,
         });
       }
 
       await onSaved();
-      toast.success(initialBinding ? 'Image provider updated' : 'Image provider created');
+      toast.success(initialBinding ? 'Media provider updated' : 'Media provider created');
       onOpenChange(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save image provider');
+      toast.error(error instanceof Error ? error.message : 'Failed to save media provider');
     } finally {
       setIsSaving(false);
     }
@@ -165,22 +165,22 @@ function ImageGenerationBindingDialog({
 
   const handleTest = async () => {
     if (!manifest) {
-      toast.error('Please select an image provider');
+      toast.error('Please select a media provider');
       return;
     }
 
     setIsTesting(true);
     try {
       const result = initialBinding
-        ? await testAgentImageProviderBinding(initialBinding.id)
-        : await testImageProviderDraft(manifest.key, {
+        ? await testAgentMediaProviderBinding(initialBinding.id)
+        : await testMediaProviderDraft(manifest.key, {
             auth_config: authConfig,
             runtime_config: runtimeConfig,
           });
       setTestMessage(result.result.message);
       toast.success(result.result.message);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to test image provider';
+      const message = error instanceof Error ? error.message : 'Failed to test media provider';
       setTestMessage(message);
       toast.error(message);
     } finally {
@@ -192,18 +192,18 @@ function ImageGenerationBindingDialog({
     <DraggableDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={initialBinding ? 'Edit Image Provider' : 'Add Image Provider'}
+      title={initialBinding ? 'Edit Media Provider' : 'Add Media Provider'}
       size="default"
     >
       <div className="flex h-full flex-col">
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {!initialBinding && (
             <div className="space-y-2">
-              <Label htmlFor="image-provider">Provider</Label>
+              <Label htmlFor="media-provider">Provider</Label>
               <Select value={providerKey} onValueChange={setProviderKey}>
-                <SelectTrigger id="image-provider">
+                <SelectTrigger id="media-provider">
                   {manifest ? (
-                    <ImageProviderBadge
+                    <MediaProviderBadge
                       name={manifest.name}
                     />
                   ) : (
@@ -213,7 +213,7 @@ function ImageGenerationBindingDialog({
                 <SelectContent>
                   {selectableCatalog.map((item) => (
                     <SelectItem key={item.manifest.key} value={item.manifest.key}>
-                      <ImageProviderBadge
+                      <MediaProviderBadge
                         name={item.manifest.name}
                       />
                     </SelectItem>
@@ -245,6 +245,7 @@ function ImageGenerationBindingDialog({
                 </div>
                 <div className="mt-3">
                   <ProviderMetadataBadges
+                    mediaType={manifest.media_type}
                     visibility={manifest.visibility}
                     status={manifest.status}
                   />
@@ -368,4 +369,4 @@ function ImageGenerationBindingDialog({
   );
 }
 
-export default ImageGenerationBindingDialog;
+export default MediaGenerationBindingDialog;

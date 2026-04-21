@@ -24,8 +24,8 @@ from app.api.chat_surfaces import router as chat_surfaces_router  # noqa: E402
 from app.api.consumer import router as consumer_router  # noqa: E402
 from app.api.extensions import router as extensions_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
-from app.api.image_generation import router as image_generation_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
+from app.api.media_generation import router as media_generation_router  # noqa: E402
 from app.api.models import router as models_router  # noqa: E402
 from app.api.operations import router as operations_router  # noqa: E402
 from app.api.projects import router as projects_router  # noqa: E402
@@ -111,7 +111,7 @@ app.include_router(channels_router, prefix="/api")
 app.include_router(chat_surfaces_router, prefix="/api")
 app.include_router(consumer_router, prefix="/api")
 app.include_router(extensions_router, prefix="/api")
-app.include_router(image_generation_router, prefix="/api")
+app.include_router(media_generation_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
 app.include_router(skills_router, prefix="/api")
 app.include_router(storage_router, prefix="/api")

@@ -7,6 +7,7 @@ import {
 interface ProviderMetadataBadgesProps {
   visibility: string;
   status: string;
+  mediaType?: "image" | "video" | null;
 }
 
 /**
@@ -15,12 +16,20 @@ interface ProviderMetadataBadgesProps {
 export function ProviderMetadataBadges({
   visibility,
   status,
+  mediaType = null,
 }: ProviderMetadataBadgesProps) {
   const visibilityLabel = formatProviderVisibilityLabel(visibility);
   const statusLabel = formatProviderStatusLabel(status);
+  const mediaTypeLabel =
+    mediaType === "image" ? "Image" : mediaType === "video" ? "Video" : null;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {mediaTypeLabel ? (
+        <Badge variant="secondary" className="text-[11px]">
+          {mediaTypeLabel}
+        </Badge>
+      ) : null}
       <Badge variant="outline" className="text-[11px]">
         {visibilityLabel}
       </Badge>

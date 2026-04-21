@@ -130,8 +130,8 @@ def _serialize_contribution_summary(
             contributions.get("channel_providers"),
             primary_field="key",
         ),
-        image_providers=_extract_manifest_names(
-            contributions.get("image_providers"),
+        media_providers=_extract_manifest_names(
+            contributions.get("media_providers"),
             primary_field="key",
         ),
         web_search_providers=_extract_manifest_names(
@@ -175,8 +175,10 @@ def _serialize_installation(
         updated_at=_serialize_utc_timestamp(installation.updated_at),
         contribution_summary=_serialize_contribution_summary(installation),
         contribution_items=[
-            ExtensionContributionItemResponse(**item)
-            for item in service.get_installation_contribution_items(installation)
+            item
+            for raw_item in service.get_installation_contribution_items(installation)
+            for item in [_serialize_contribution_item(raw_item)]
+            if item is not None
         ],
         reference_summary=_serialize_reference_summary(
             service.get_reference_summary(
@@ -235,6 +237,30 @@ def _serialize_configuration_schema(
     )
 
 
+def _serialize_contribution_item(
+    payload: object,
+) -> ExtensionContributionItemResponse | None:
+    """Normalize one extension contribution item for API responses."""
+    if not isinstance(payload, dict):
+        return None
+
+    raw_type = payload.get("type")
+    raw_name = payload.get("name")
+    if not isinstance(raw_type, str) or not isinstance(raw_name, str):
+        return None
+
+    raw_description = payload.get("description")
+    raw_key = payload.get("key")
+    raw_min_width = payload.get("min_width")
+    return ExtensionContributionItemResponse(
+        type=raw_type,
+        name=raw_name,
+        description=raw_description if isinstance(raw_description, str) else "",
+        key=raw_key if isinstance(raw_key, str) else None,
+        min_width=raw_min_width if isinstance(raw_min_width, int) else None,
+    )
+
+
 def _parse_config(raw_value: str | None) -> dict[str, object]:
     """Parse optional binding config JSON into a dictionary."""
     if not raw_value:
@@ -290,8 +316,8 @@ def _serialize_preview(
                 "channel_providers",
                 [],
             ),
-            image_providers=preview.contribution_summary.get(
-                "image_providers",
+            media_providers=preview.contribution_summary.get(
+                "media_providers",
                 [],
             ),
             web_search_providers=preview.contribution_summary.get(
@@ -300,8 +326,10 @@ def _serialize_preview(
             ),
         ),
         contribution_items=[
-            ExtensionContributionItemResponse(**item)
-            for item in preview.contribution_items
+            item
+            for raw_item in preview.contribution_items
+            for item in [_serialize_contribution_item(raw_item)]
+            if item is not None
         ],
         permissions=preview.permissions,
         existing_installation_id=preview.existing_installation_id,
