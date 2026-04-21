@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { ExtensionPackageBadge } from './ExtensionPackageBadge';
 import {
   replaceAgentExtensionBindings,
   upsertAgentExtensionBinding,
@@ -34,6 +35,13 @@ function getPreferredInstallation(
     ?? pkg.versions[0]
     ?? null
   );
+}
+
+/**
+ * Resolve one stable logo URL for a package option.
+ */
+function getPackageLogoUrl(pkg: AgentExtensionPackage): string | null {
+  return pkg.logo_url ?? pkg.versions[0]?.logo_url ?? null;
 }
 
 /**
@@ -212,9 +220,20 @@ function ExtensionBindingDialog({
   };
 
   const activeVersionOptions = selectedPackage?.versions ?? [];
-  const docsText = selectedPackage?.has_update_available
-    ? 'A newer installed version is available for this package.'
-    : 'This package is pinned at the currently selected installed version.';
+  const isLatestVersion = (version: ExtensionInstallation) => (
+    selectedPackage?.latest_version === version.version
+  );
+  const renderVersionLabel = (version: ExtensionInstallation) => (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate">{version.version}</span>
+      {isLatestVersion(version) && (
+        <span className="shrink-0 text-xs text-muted-foreground">Latest</span>
+      )}
+      {version.status === 'disabled' && (
+        <span className="shrink-0 text-xs text-muted-foreground">Disabled</span>
+      )}
+    </span>
+  );
 
   return (
     <DraggableDialog
@@ -230,12 +249,22 @@ function ExtensionBindingDialog({
               <Label htmlFor="extension-package">Package</Label>
               <Select value={packageId} onValueChange={setPackageId}>
                 <SelectTrigger id="extension-package">
-                  <SelectValue placeholder="Select an extension package" />
+                  {selectedPackage ? (
+                    <ExtensionPackageBadge
+                      name={selectedPackage.display_name}
+                      logoUrl={getPackageLogoUrl(selectedPackage)}
+                    />
+                  ) : (
+                    <SelectValue placeholder="Select an extension package" />
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   {selectablePackages.map((pkg) => (
                     <SelectItem key={pkg.package_id} value={pkg.package_id}>
-                      {pkg.display_name}
+                      <ExtensionPackageBadge
+                        name={pkg.display_name}
+                        logoUrl={getPackageLogoUrl(pkg)}
+                      />
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -247,26 +276,22 @@ function ExtensionBindingDialog({
             <>
               <div className="rounded-lg border border-border px-3 py-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-foreground">
-                      {selectedPackage.display_name}
-                    </div>
+                  <div className="min-w-0">
+                    <ExtensionPackageBadge
+                      name={selectedPackage.display_name}
+                      logoUrl={getPackageLogoUrl(selectedPackage)}
+                      textClassName="text-sm font-medium text-foreground"
+                    />
                     <div className="mt-1 text-xs text-muted-foreground">
                       {selectedPackage.description || 'No description provided.'}
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline">Latest {selectedPackage.latest_version}</Badge>
-                    {selectedPackage.has_update_available && (
-                      <Badge className="gap-1">
-                        <ArrowUp className="h-3 w-3" />
-                        Update available
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-3 text-xs text-muted-foreground">
-                  {docsText}
+                  {selectedPackage.has_update_available && (
+                    <Badge className="gap-1">
+                      <ArrowUp className="h-3 w-3" />
+                      Update available
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -274,42 +299,44 @@ function ExtensionBindingDialog({
                 <Label htmlFor="extension-version">Version</Label>
                 <Select value={installationId} onValueChange={setInstallationId}>
                   <SelectTrigger id="extension-version">
-                    <SelectValue placeholder="Select a version" />
+                    {selectedInstallation ? (
+                      renderVersionLabel(selectedInstallation)
+                    ) : (
+                      <SelectValue placeholder="Select a version" />
+                    )}
                   </SelectTrigger>
                   <SelectContent>
                     {activeVersionOptions.map((version) => (
                       <SelectItem key={version.id} value={String(version.id)}>
-                        {version.version}
-                        {version.status === 'disabled' ? ' · disabled' : ''}
+                        {renderVersionLabel(version)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-                <div className="space-y-2">
-                  <Label htmlFor="extension-priority">Priority</Label>
-                  <Input
-                    id="extension-priority"
-                    type="number"
-                    value={priority}
-                    onChange={(event) => setPriority(event.target.value)}
-                    placeholder="100"
-                  />
+              <div className="space-y-2">
+                <Label htmlFor="extension-priority">Priority</Label>
+                <Input
+                  id="extension-priority"
+                  type="number"
+                  value={priority}
+                  onChange={(event) => setPriority(event.target.value)}
+                  placeholder="100"
+                />
+                <div className="text-xs text-muted-foreground">
+                  Lower numbers resolve earlier in the extension bundle.
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border px-4 py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">Enabled</div>
                   <div className="text-xs text-muted-foreground">
-                    Lower numbers resolve earlier in the extension bundle.
+                    Disable this binding without removing it.
                   </div>
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 md:min-w-[180px]">
-                  <div>
-                    <div className="text-sm font-medium text-foreground">Enabled</div>
-                    <div className="text-xs text-muted-foreground">
-                      Disable this binding without removing it.
-                    </div>
-                  </div>
-                  <Switch checked={enabled} onCheckedChange={setEnabled} />
-                </div>
+                <Switch checked={enabled} onCheckedChange={setEnabled} />
               </div>
 
               <div className="space-y-2">
