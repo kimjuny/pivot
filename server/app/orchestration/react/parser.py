@@ -140,11 +140,17 @@ def parse_payload_blocks(payload_section: str) -> dict[str, str]:
     return payloads
 
 
-def parse_react_output(content: str) -> ParsedReactDecision:
+def parse_react_output(
+    content: str,
+    *,
+    tool_manager: Any | None = None,
+) -> ParsedReactDecision:
     """Parse and validate one strict assistant decision payload.
 
     Args:
         content: Raw assistant response text.
+        tool_manager: Optional tool registry used to decode payload blocks with
+            awareness of the target tool parameter types.
 
     Returns:
         A typed, validated decision object.
@@ -157,7 +163,11 @@ def parse_react_output(content: str) -> ParsedReactDecision:
     payloads = (
         parse_payload_blocks(payload_section) if payload_section is not None else {}
     )
-    resolved_payload = _resolve_tool_payload_references(raw_payload, payloads)
+    resolved_payload = _resolve_tool_payload_references(
+        raw_payload,
+        payloads,
+        tool_manager=tool_manager,
+    )
     action = _parse_action(resolved_payload)
 
     observe = _expect_optional_string(resolved_payload.get("observe"), "observe")
@@ -470,15 +480,65 @@ def _extract_payload_ref_name(value: Any, path: str) -> str:
     return raw_ref_name
 
 
-def _decode_payload_value(payload_text: str) -> Any:
+def _lookup_tool_argument_type(
+    *,
+    tool_manager: Any | None,
+    tool_name: str,
+    arg_name: str,
+) -> str | None:
+    """Return one declared JSON Schema type for a tool argument when available."""
+    if tool_manager is None:
+        return None
+
+    get_tool = getattr(tool_manager, "get_tool", None)
+    if not callable(get_tool):
+        return None
+
+    tool_metadata = get_tool(tool_name)
+    if tool_metadata is None:
+        return None
+
+    parameters = getattr(tool_metadata, "parameters", None)
+    if not isinstance(parameters, dict):
+        return None
+
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict):
+        return None
+
+    argument_schema = properties.get(arg_name)
+    if not isinstance(argument_schema, dict):
+        return None
+
+    schema_type = argument_schema.get("type")
+    return schema_type if isinstance(schema_type, str) else None
+
+
+def _decode_payload_value(
+    payload_text: str,
+    *,
+    expected_type: str | None = None,
+) -> Any:
     """Decode a payload block into a tool argument value.
 
     Args:
         payload_text: Raw payload body between begin and end markers.
+        expected_type: Optional JSON Schema type declared by the target tool
+            parameter.
 
     Returns:
         Parsed JSON when possible; otherwise the original payload text.
     """
+    if expected_type == "string":
+        candidate = payload_text.strip()
+        if not candidate:
+            return payload_text
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            return payload_text
+        return parsed if isinstance(parsed, str) else payload_text
+
     candidate = payload_text.strip()
     if not candidate:
         return payload_text
@@ -491,12 +551,16 @@ def _decode_payload_value(payload_text: str) -> Any:
 def _resolve_tool_payload_references(
     react_output: dict[str, Any],
     payloads: dict[str, str],
+    *,
+    tool_manager: Any | None = None,
 ) -> dict[str, Any]:
     """Resolve named payload blocks referenced by CALL_TOOL arguments.
 
     Args:
         react_output: Parsed top-level assistant payload.
         payloads: Payload block mapping extracted from the response tail.
+        tool_manager: Optional tool registry used to decode payload blocks with
+            awareness of the target tool parameter types.
 
     Returns:
         The payload with resolved tool arguments.
@@ -529,6 +593,7 @@ def _resolve_tool_payload_references(
             raise ValueError(
                 f"CALL_TOOL action.output.tool_calls[{index}] must be an object."
             )
+        tool_name = tool_call.get("name")
 
         raw_arguments = tool_call.get("arguments")
         if not isinstance(raw_arguments, dict):
@@ -549,7 +614,19 @@ def _resolve_tool_payload_references(
                 )
 
             used_payloads.add(ref_name)
-            resolved_arguments[arg_name] = _decode_payload_value(payloads[ref_name])
+            expected_type = (
+                _lookup_tool_argument_type(
+                    tool_manager=tool_manager,
+                    tool_name=tool_name,
+                    arg_name=arg_name,
+                )
+                if isinstance(tool_name, str)
+                else None
+            )
+            resolved_arguments[arg_name] = _decode_payload_value(
+                payloads[ref_name],
+                expected_type=expected_type,
+            )
 
         tool_call["arguments"] = resolved_arguments
 

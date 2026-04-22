@@ -4,6 +4,7 @@ import sys
 import unittest
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 
 # The backend code imports from the ``app`` package root. unittest discovery
 # does not add ``server/`` to sys.path automatically, so tests do it explicitly.
@@ -12,6 +13,19 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 parse_react_output = import_module("app.orchestration.react.parser").parse_react_output
+
+
+class _StubToolManager:
+    """Minimal tool manager stub for schema-aware payload decoding tests."""
+
+    def __init__(self, tool_schemas: dict[str, dict[str, object]]) -> None:
+        self._tool_schemas = tool_schemas
+
+    def get_tool(self, name: str) -> object | None:
+        parameters = self._tool_schemas.get(name)
+        if parameters is None:
+            return None
+        return SimpleNamespace(parameters=parameters)
 
 
 class ReactParserTestCase(unittest.TestCase):
@@ -216,6 +230,64 @@ export default App;
             "export default App;",
         )
         self.assertEqual(decision.action.tool_calls[0].arguments["new_string"], "")
+
+    def test_string_tool_argument_keeps_json_like_payload_as_text(self) -> None:
+        """String parameters should keep JSON-looking payloads as raw text."""
+        content = """
+{
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "write_file",
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"},
+            "content": {"$payload_ref": "content_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+"/workspace/survey-app/package.json"
+<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
+<<<PIVOT_PAYLOAD:content_payload:BEGIN_6F2D9C1A>>>
+{
+  "name": "xiangan-survey",
+  "private": true,
+  "version": "1.0.0"
+}
+<<<PIVOT_PAYLOAD:content_payload:END_6F2D9C1A>>>
+""".strip()
+        tool_manager = _StubToolManager(
+            {
+                "write_file": {
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    }
+                }
+            }
+        )
+
+        decision = parse_react_output(content, tool_manager=tool_manager)
+
+        self.assertEqual(
+            decision.action.tool_calls[0].arguments,
+            {
+                "path": "/workspace/survey-app/package.json",
+                "content": (
+                    "{\n"
+                    '  "name": "xiangan-survey",\n'
+                    '  "private": true,\n'
+                    '  "version": "1.0.0"\n'
+                    "}"
+                ),
+            },
+        )
 
 
 if __name__ == "__main__":

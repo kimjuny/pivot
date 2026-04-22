@@ -218,7 +218,7 @@ class ReactEngine:
                 continue
 
             try:
-                decision = parse_react_output(content)
+                decision = parse_react_output(content, tool_manager=self.tool_manager)
             except ValueError:
                 logger.warning(
                     "Failed to parse previous assistant payload while resolving "
@@ -781,7 +781,10 @@ class ReactEngine:
             Pretty-printed string for log output.
         """
         try:
-            parsed = parse_react_output(content).to_dict()
+            parsed = parse_react_output(
+                content,
+                tool_manager=self.tool_manager,
+            ).to_dict()
         except ValueError:
             return content
         return json.dumps(parsed, ensure_ascii=False, indent=2)
@@ -1060,7 +1063,10 @@ class ReactEngine:
                 assistant_message_raw = content
 
                 try:
-                    decision = parse_react_output(content)
+                    decision = parse_react_output(
+                        content,
+                        tool_manager=self.tool_manager,
+                    )
                     logger.debug(
                         "Successfully parsed LLM output (trace_id=%s, attempt=%s)",
                         trace_id,
