@@ -39,6 +39,8 @@ interface ExtensionDockProps {
   previewEndpoints: PreviewEndpointResponse[];
   /** Active preview endpoint routed into the current surface, if any. */
   activePreviewEndpoint: PreviewEndpointResponse | null;
+  /** Historical reconnectable preview recipe suggested for the current surface. */
+  reconnectablePreviewSuggestion: PreviewEndpointResponse | null;
 }
 
 /**
@@ -53,6 +55,7 @@ export function ExtensionDock({
   activeInstalledSurfaceSession,
   previewEndpoints,
   activePreviewEndpoint,
+  reconnectablePreviewSuggestion,
 }: ExtensionDockProps) {
   const previewIframeRef = useRef<HTMLIFrameElement | null>(null);
   const runtimeThemeRef = useRef<{
@@ -179,6 +182,7 @@ export function ExtensionDock({
         payload: {
           previews: previewEndpoints,
           active_preview_id: activePreviewEndpoint?.preview_id ?? null,
+          reconnectable_preview: reconnectablePreviewSuggestion,
         },
       },
       window.location.origin,
@@ -188,6 +192,7 @@ export function ExtensionDock({
     isIframeLoaded,
     isOpen,
     previewEndpoints,
+    reconnectablePreviewSuggestion,
     runtime,
   ]);
 

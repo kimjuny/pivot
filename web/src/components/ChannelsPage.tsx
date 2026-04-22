@@ -18,6 +18,7 @@ import {
 import {
   ProviderMetadataBadges,
 } from '@/components/ProviderMetadataBadges';
+import StaggeredFadeInList from '@/components/StaggeredFadeInList';
 import { getChannels, type ChannelCatalogItem, type ChannelManifest } from '@/utils/api';
 import {
   formatProviderExtensionLabel,
@@ -279,11 +280,13 @@ function ChannelsPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {pagedChannels.map((manifest) => (
-              <ChannelCard key={manifest.key} manifest={manifest} />
-            ))}
-          </div>
+          <StaggeredFadeInList
+            items={pagedChannels}
+            getItemKey={(manifest) => manifest.key}
+            className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+            itemClassName="h-full"
+            renderItem={(manifest) => <ChannelCard manifest={manifest} />}
+          />
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
@@ -365,7 +368,7 @@ function ChannelCard({ manifest }: ChannelCardProps) {
   );
 
   return (
-    <Card className="border-border/70">
+    <Card className="h-full border-border/70">
         <CardHeader className="space-y-3">
           <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">

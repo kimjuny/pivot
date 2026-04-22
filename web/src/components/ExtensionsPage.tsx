@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 
 import ConfirmationModal from './ConfirmationModal';
 import { ExtensionLogoAvatar } from '@/components/ExtensionLogoAvatar';
+import StaggeredFadeInList from '@/components/StaggeredFadeInList';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
@@ -128,7 +129,7 @@ function buildContributionGroups(
       tone: 'provider',
     },
     {
-      label: 'Image Providers',
+      label: 'Media Providers',
       values: summary.media_providers ?? [],
       tone: 'provider',
     },
@@ -533,10 +534,13 @@ function ExtensionsPage() {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-2">
-              {pagedPackages.map((pkg) => (
+            <StaggeredFadeInList
+              items={pagedPackages}
+              getItemKey={(pkg) => pkg.package_id}
+              className="grid gap-4 md:grid-cols-2"
+              itemClassName="h-full"
+              renderItem={(pkg) => (
                 <ExtensionPackageCard
-                  key={pkg.package_id}
                   pkg={pkg}
                   detailBasePath={detailBasePath}
                   onStatusToggle={handleStatusToggle}
@@ -545,8 +549,8 @@ function ExtensionsPage() {
                     getMostRecentInstallation(pkg)?.id ?? -1,
                   )}
                 />
-              ))}
-            </div>
+              )}
+            />
 
             {totalPages > 1 && (
               <div className="mt-4 flex items-center justify-between">
@@ -619,7 +623,7 @@ function ExtensionsPage() {
                 `${pendingUninstall.installation.display_name} ${pendingUninstall.installation.version}`,
                 `Extension bindings: ${pendingUninstall.references.extension_binding_count}`,
                 `Channel bindings: ${pendingUninstall.references.channel_binding_count}`,
-                `Image bindings: ${pendingUninstall.references.media_provider_binding_count ?? 0}`,
+                `Media bindings: ${pendingUninstall.references.media_provider_binding_count ?? 0}`,
                 `Web-search bindings: ${pendingUninstall.references.web_search_binding_count}`,
                 `Total bindings: ${pendingUninstall.references.binding_count}`,
                 `Releases: ${pendingUninstall.references.release_count}`,

@@ -397,7 +397,7 @@ describe("AgentDetailSidebar", () => {
       LOGO_DATA_URL,
     );
 
-    await userEvent.setup().click(screen.getAllByText("Image Providers")[1]);
+    await userEvent.setup().click(screen.getAllByText("Media Providers")[1]);
 
     expect(screen.getAllByAltText("Wasp Image logo")[0]).toHaveAttribute(
       "src",

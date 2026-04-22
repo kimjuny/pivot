@@ -270,6 +270,70 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["active_preview_id"], preview_record.preview_id)
         self.assertEqual(len(payload["available_previews"]), 1)
 
+    def test_reconnect_surface_preview_can_restore_recipe_from_earlier_session(self) -> None:
+        """Surface reconnect should copy a historical preview recipe into the active session."""
+        second_workspace = WorkspaceService(self.session).create_workspace(
+            agent_id=7,
+            username="alice",
+            scope="session_private",
+            session_id="session-2",
+        )
+        self.session.add(
+            SessionModel(
+                session_id="session-2",
+                agent_id=7,
+                user="alice",
+                workspace_id=second_workspace.workspace_id,
+                chat_history='{"version": 1, "messages": []}',
+                react_llm_messages="[]",
+                react_llm_cache_state="{}",
+            )
+        )
+        self.session.commit()
+
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-2",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+
+        historical_preview = PreviewEndpointService(self.session).create_preview_endpoint(
+            username="alice",
+            session_id="session-1",
+            port=3000,
+            path="/",
+            title="Historical Preview",
+            cwd="/workspace/apps/site",
+            start_server="bash /workspace/.pivot/previews/app-preview.sh",
+            skills=[{"name": "alpha", "location": "/workspace/skills/alpha"}],
+        )
+
+        with patch.object(
+            chat_surfaces_api_module.PreviewEndpointService,
+            "connect_preview_endpoint",
+            side_effect=lambda *, preview_id, username: PreviewEndpointService(
+                self.session
+            ).get_preview_endpoint(preview_id=preview_id, username=username),
+        ):
+            reconnect_response = self.client.post(
+                "/api/chat-surfaces/sessions/"
+                f"{surface_payload['surface_session_id']}/previews/{historical_preview.preview_id}/connect"
+                f"?surface_token={surface_payload['surface_token']}"
+            )
+
+        self.assertEqual(reconnect_response.status_code, 200)
+        payload = reconnect_response.json()
+        self.assertEqual(payload["preview"]["session_id"], "session-2")
+        self.assertEqual(payload["preview"]["workspace_id"], second_workspace.workspace_id)
+        self.assertTrue(payload["preview"]["has_launch_recipe"])
+        self.assertEqual(payload["active_preview_id"], payload["preview"]["preview_id"])
+        self.assertEqual(len(payload["available_previews"]), 1)
+
     def test_create_installed_surface_session_serves_packaged_runtime(self) -> None:
         """Installed surfaces should create a packaged runtime session and serve HTML."""
         extension_root = Path(self.tmpdir.name) / "installed-surface"

@@ -34,8 +34,27 @@ log() {
   printf '[fs-up] %s\n' "$*"
 }
 
-compose_service_is_running() {
-  podman compose ps --services --filter status=running 2>/dev/null | grep -qx "$1"
+compose_base() {
+  (
+    cd "$ROOT_DIR"
+    podman compose -f compose.yaml "$@"
+  )
+}
+
+compose_with_seaweedfs() {
+  (
+    cd "$ROOT_DIR"
+    podman compose -f compose.yaml --profile seaweedfs "$@"
+  )
+}
+
+container_is_running() {
+  local container_name="$1"
+  podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$container_name"
+}
+
+container_status() {
+  podman inspect --format '{{.State.Status}}' "$1" 2>/dev/null || true
 }
 
 require_command() {
@@ -51,41 +70,70 @@ refresh_runtime_services() {
   local backend_running=false
   local sandbox_manager_running=false
 
-  (
-    cd "$ROOT_DIR"
-    if compose_service_is_running backend; then
-      backend_running=true
-    fi
-    if compose_service_is_running sandbox-manager; then
-      sandbox_manager_running=true
-    fi
+  if container_is_running pivot-backend; then
+    backend_running=true
+  fi
+  if container_is_running pivot-sandbox-manager; then
+    sandbox_manager_running=true
+  fi
 
-    if [ "$backend_running" = false ] && [ "$sandbox_manager_running" = false ]; then
-      log "Backend and sandbox-manager are not running; no runtime refresh is needed"
-      exit 0
-    fi
+  if [ "$backend_running" = false ] && [ "$sandbox_manager_running" = false ]; then
+    log "Backend and sandbox-manager are not running; no runtime refresh is needed"
+    return 0
+  fi
 
-    log "Refreshing backend and sandbox-manager so they observe the same POSIX bridge"
+  log "Refreshing backend and sandbox-manager so they observe the same POSIX bridge"
 
-    local sandbox_ids
-    sandbox_ids="$(podman ps -aq --filter label=pivot.sandbox.workspace_id)"
-    if [ -n "$sandbox_ids" ]; then
-      log "Removing workspace sandboxes so they reconnect to the refreshed bridge"
-      # shellcheck disable=SC2086
-      podman rm -f $sandbox_ids >/dev/null
-    fi
+  local sandbox_ids
+  sandbox_ids="$(podman ps -aq --filter label=pivot.sandbox.workspace_id)"
+  if [ -n "$sandbox_ids" ]; then
+    log "Removing workspace sandboxes so they reconnect to the refreshed bridge"
+    # shellcheck disable=SC2086
+    podman rm -f $sandbox_ids >/dev/null
+  fi
 
-    podman compose stop backend sandbox-manager >/dev/null 2>&1 || true
-    podman compose up -d backend sandbox-manager >/dev/null
-  )
+  compose_base stop backend sandbox-manager >/dev/null 2>&1 || true
+  compose_base up -d backend sandbox-manager >/dev/null
 }
 
-ensure_seaweedfs_service() {
+remove_container_if_present() {
+  local container_name="$1"
+  if [ -n "$(container_status "$container_name")" ]; then
+    log "Removing stale container $container_name"
+    podman rm -f "$container_name" >/dev/null 2>&1 || true
+  fi
+}
+
+repair_poisoned_runtime_state() {
+  require_command podman
+
+  local repaired=false
+  local container_name
+  local status
+
+  for container_name in pivot-seaweedfs pivot-backend pivot-sandbox-manager pivot-frontend; do
+    status="$(container_status "$container_name")"
+    case "$status" in
+      created|configured|exited|stopping)
+        remove_container_if_present "$container_name"
+        repaired=true
+        ;;
+    esac
+  done
+
+  if [ "$repaired" = true ]; then
+    log "Cleared stale SeaweedFS compose containers before bridge repair"
+  fi
+}
+
+start_seaweedfs_service() {
   log "Starting SeaweedFS service"
-  (
-    cd "$ROOT_DIR"
-    podman compose --profile seaweedfs up -d seaweedfs
-  )
+  compose_with_seaweedfs up -d seaweedfs >/dev/null
+}
+
+recreate_seaweedfs_service() {
+  remove_container_if_present pivot-seaweedfs
+  start_seaweedfs_service
 }
 
 derive_filer_grpc_endpoint() {
@@ -119,8 +167,7 @@ wait_for_filer() {
     index=$((index + 1))
   done
 
-  printf '[fs-up] SeaweedFS filer did not become ready at %s\n' "$health_url" >&2
-  exit 1
+  return 1
 }
 
 wait_for_filer_grpc() {
@@ -161,7 +208,29 @@ PY
     index=$((index + 1))
   done
 
-  printf '[fs-up] SeaweedFS filer gRPC did not become ready at %s\n' "$grpc_endpoint" >&2
+  return 1
+}
+
+ensure_seaweedfs_service_ready() {
+  local attempts=2
+  local index=1
+
+  while [ "$index" -le "$attempts" ]; do
+    if [ "$index" -gt 1 ]; then
+      log "SeaweedFS service looked unhealthy; recreating it"
+      recreate_seaweedfs_service
+    else
+      start_seaweedfs_service
+    fi
+
+    if wait_for_filer && wait_for_filer_grpc; then
+      return 0
+    fi
+
+    index=$((index + 1))
+  done
+
+  printf '[fs-up] SeaweedFS service did not become healthy after repair attempts\n' >&2
   exit 1
 }
 
@@ -176,11 +245,14 @@ EOF
 
 unmount_snippet() {
   cat <<'EOF'
-if command -v fusermount >/dev/null 2>&1; then
-  fusermount -u "$1"
-else
-  umount "$1"
+if command -v fusermount3 >/dev/null 2>&1; then
+  fusermount3 -u "$1" && exit 0
 fi
+if command -v fusermount >/dev/null 2>&1; then
+  fusermount -u "$1" && exit 0
+fi
+umount "$1" 2>/dev/null && exit 0
+umount -l "$1"
 EOF
 }
 
@@ -256,7 +328,14 @@ ensure_macos_mount() {
   require_command python3
 
   local inspect_json
-  inspect_json="$(podman machine inspect)"
+  if ! inspect_json="$(podman machine inspect 2>/dev/null)"; then
+    printf '[fs-up] unable to inspect the active Podman machine\n' >&2
+    exit 1
+  fi
+  if [ "$inspect_json" = "[]" ]; then
+    printf '[fs-up] no active Podman machine is available\n' >&2
+    exit 1
+  fi
 
   local port
   local user
@@ -324,16 +403,14 @@ main() {
 
   case "$(uname -s)" in
     Darwin)
-      ensure_seaweedfs_service
-      wait_for_filer
-      wait_for_filer_grpc
+      repair_poisoned_runtime_state
+      ensure_seaweedfs_service_ready
       ensure_macos_mount
       refresh_runtime_services
       ;;
     Linux)
-      ensure_seaweedfs_service
-      wait_for_filer
-      wait_for_filer_grpc
+      repair_poisoned_runtime_state
+      ensure_seaweedfs_service_ready
       ensure_linux_mount
       refresh_runtime_services
       ;;

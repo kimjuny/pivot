@@ -146,6 +146,42 @@ function SidebarEmptyAction({
   );
 }
 
+interface SidebarLoadingPlaceholderProps {
+  kind: "project" | "session";
+}
+
+/**
+ * Keep loading layout aligned with the empty-action rows so section labels do
+ * not jump when sidebar data resolves.
+ */
+function SidebarLoadingPlaceholder({
+  kind,
+}: SidebarLoadingPlaceholderProps) {
+  return (
+    <SidebarMenuItem
+      data-testid={`sidebar-loading-placeholder-${kind}`}
+    >
+      <div
+        className="flex h-9 w-full items-center gap-2.5 rounded-xl border border-dashed border-sidebar-border/70 px-2.5"
+        role="status"
+        aria-live="polite"
+      >
+        <span className="sr-only">
+          {kind === "project" ? "Loading projects..." : "Loading sessions..."}
+        </span>
+        <Skeleton
+          className="h-5 w-5 shrink-0 rounded-full bg-sidebar-accent"
+          aria-hidden="true"
+        />
+        <Skeleton
+          className="h-4 min-w-0 flex-1 rounded-full bg-sidebar-accent"
+          aria-hidden="true"
+        />
+      </div>
+    </SidebarMenuItem>
+  );
+}
+
 /**
  * Whether the sidebar should show a live execution indicator for this session.
  *
@@ -529,18 +565,9 @@ export function SessionSidebar({
               <SidebarGroupContent className="px-1 pt-1">
                 {projects.length === 0 ? (
                   isSessionListPending ? (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">
-                      <div className="space-y-2" role="status" aria-live="polite">
-                        <span className="sr-only">Loading projects...</span>
-                        {Array.from({ length: 2 }, (_, index) => (
-                          <Skeleton
-                            key={`project-skeleton-${index}`}
-                            className="h-9 rounded-xl bg-sidebar-accent/55"
-                            aria-hidden="true"
-                          />
-                        ))}
-                      </div>
-                    </div>
+                    <SidebarMenu>
+                      <SidebarLoadingPlaceholder kind="project" />
+                    </SidebarMenu>
                   ) : onCreateProject ? (
                     <SidebarMenu>
                       <SidebarEmptyAction
@@ -709,18 +736,9 @@ export function SessionSidebar({
             >
               {sessions.length === 0 ? (
                 isSessionListPending ? (
-                  <div className="px-3 py-4 text-sm text-muted-foreground">
-                    <div className="space-y-2" role="status" aria-live="polite">
-                      <span className="sr-only">Loading sessions...</span>
-                      {Array.from({ length: 3 }, (_, index) => (
-                        <Skeleton
-                          key={`session-skeleton-${index}`}
-                          className="h-9 rounded-xl bg-sidebar-accent/55"
-                          aria-hidden="true"
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <SidebarMenu>
+                    <SidebarLoadingPlaceholder kind="session" />
+                  </SidebarMenu>
                 ) : (
                   <SidebarMenu>
                     <SidebarEmptyAction

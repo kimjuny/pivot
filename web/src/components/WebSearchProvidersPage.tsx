@@ -3,6 +3,7 @@ import { ExternalLink, Search, X } from "@/lib/lucide";
 import { toast } from "sonner";
 
 import { ProviderMetadataBadges } from "@/components/ProviderMetadataBadges";
+import StaggeredFadeInList from "@/components/StaggeredFadeInList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -206,11 +207,13 @@ function WebSearchProvidersPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {pagedProviders.map((manifest) => (
-              <WebSearchProviderCard key={manifest.key} manifest={manifest} />
-            ))}
-          </div>
+          <StaggeredFadeInList
+            items={pagedProviders}
+            getItemKey={(manifest) => manifest.key}
+            className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+            itemClassName="h-full"
+            renderItem={(manifest) => <WebSearchProviderCard manifest={manifest} />}
+          />
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">
@@ -291,7 +294,7 @@ function WebSearchProviderCard({ manifest }: WebSearchProviderCardProps) {
   );
 
   return (
-    <Card className="border-border/70">
+    <Card className="h-full border-border/70">
       <CardHeader className="space-y-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-2">

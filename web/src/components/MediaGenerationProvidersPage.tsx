@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { MediaProviderBadge } from "@/components/MediaProviderBadge";
 import { ProviderMetadataBadges } from "@/components/ProviderMetadataBadges";
+import StaggeredFadeInList from "@/components/StaggeredFadeInList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
@@ -208,11 +209,13 @@ function MediaGenerationProvidersPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {pagedProviders.map((manifest) => (
-              <MediaProviderCard key={manifest.key} manifest={manifest} />
-            ))}
-          </div>
+          <StaggeredFadeInList
+            items={pagedProviders}
+            getItemKey={(manifest) => manifest.key}
+            className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
+            itemClassName="h-full"
+            renderItem={(manifest) => <MediaProviderCard manifest={manifest} />}
+          />
 
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-between">

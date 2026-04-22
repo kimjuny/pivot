@@ -607,6 +607,8 @@ function ChatContainer({
   >([]);
   const [activePreviewEndpoint, setActivePreviewEndpoint] =
     useState<PreviewEndpointResponse | null>(null);
+  const [reconnectablePreviewSuggestion, setReconnectablePreviewSuggestion] =
+    useState<PreviewEndpointResponse | null>(null);
   const [activeContextTaskId, setActiveContextTaskId] = useState<string | null>(
     null,
   );
@@ -710,6 +712,7 @@ function ChatContainer({
     setActiveInstalledSurfaceSession(null);
     setPreviewEndpoints([]);
     setActivePreviewEndpoint(null);
+    setReconnectablePreviewSuggestion(null);
     setSurfaceCreationError(null);
     setIsExtensionDockOpen(false);
     setIsExtensionDockMounted(false);
@@ -1888,12 +1891,14 @@ function ChatContainer({
     if (!currentSessionId) {
       setPreviewEndpoints([]);
       setActivePreviewEndpoint(null);
+      setReconnectablePreviewSuggestion(null);
       return;
     }
 
     let isCancelled = false;
-    void getPreviewEndpoints(currentSessionId)
-      .then((nextPreviews) => {
+    const loadPreviewRegistry = async () => {
+      try {
+        const nextPreviews = await getPreviewEndpoints(currentSessionId);
         if (isCancelled) {
           return;
         }
@@ -1901,20 +1906,59 @@ function ChatContainer({
         setActivePreviewEndpoint(
           nextPreviews.length > 0 ? nextPreviews[nextPreviews.length - 1] : null,
         );
-      })
-      .catch((previewError) => {
+        if (
+          nextPreviews.length > 0 ||
+          currentSessionIdRef.current !== currentSessionId ||
+          sessionType !== "studio_test" ||
+          !testSnapshotHash
+        ) {
+          setReconnectablePreviewSuggestion(null);
+          return;
+        }
+
+        const historicalStudioSessions = [...sessions]
+          .filter(
+            (session) =>
+              session.session_id !== currentSessionId &&
+              session.test_workspace_hash === testSnapshotHash,
+          )
+          .sort(
+            (left, right) =>
+              Date.parse(right.updated_at) - Date.parse(left.updated_at),
+          );
+
+        for (const session of historicalStudioSessions) {
+          const historicalPreviews = await getPreviewEndpoints(session.session_id);
+          if (isCancelled) {
+            return;
+          }
+          const reconnectablePreview = [...historicalPreviews]
+            .reverse()
+            .find((preview) => preview.has_launch_recipe);
+          if (reconnectablePreview) {
+            setReconnectablePreviewSuggestion(reconnectablePreview);
+            return;
+          }
+        }
+
+        setReconnectablePreviewSuggestion(null);
+      } catch (previewError) {
         console.error("Failed to load preview registry:", previewError);
         if (isCancelled) {
           return;
         }
         setPreviewEndpoints([]);
         setActivePreviewEndpoint(null);
-      });
+        setReconnectablePreviewSuggestion(null);
+      }
+    };
+
+    void loadPreviewRegistry();
 
     return () => {
       isCancelled = true;
     };
-  }, [currentSessionId]);
+  }, [currentSessionId, sessionType, sessions, testSnapshotHash]);
 
   useEffect(() => {
     void loadSessionRuntimeDebug(currentSessionId);
@@ -3467,6 +3511,7 @@ function ChatContainer({
                 activeInstalledSurfaceSession={activeInstalledSurfaceSession}
                 previewEndpoints={previewEndpoints}
                 activePreviewEndpoint={activePreviewEndpoint}
+                reconnectablePreviewSuggestion={reconnectablePreviewSuggestion}
               />
             </ResizablePanel>
           </ResizablePanelGroup>

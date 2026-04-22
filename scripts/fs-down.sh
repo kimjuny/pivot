@@ -27,8 +27,23 @@ log() {
   printf '[fs-down] %s\n' "$*"
 }
 
-compose_service_is_running() {
-  podman compose ps --services --filter status=running 2>/dev/null | grep -qx "$1"
+compose_base() {
+  (
+    cd "$ROOT_DIR"
+    podman compose -f compose.yaml "$@"
+  )
+}
+
+compose_with_seaweedfs() {
+  (
+    cd "$ROOT_DIR"
+    podman compose -f compose.yaml --profile seaweedfs "$@"
+  )
+}
+
+container_is_running() {
+  local container_name="$1"
+  podman ps --format '{{.Names}}' 2>/dev/null | grep -qx "$container_name"
 }
 
 require_command() {
@@ -44,51 +59,48 @@ refresh_runtime_services() {
   local backend_running=false
   local sandbox_manager_running=false
 
-  (
-    cd "$ROOT_DIR"
-    if compose_service_is_running backend; then
-      backend_running=true
-    fi
-    if compose_service_is_running sandbox-manager; then
-      sandbox_manager_running=true
-    fi
+  if container_is_running pivot-backend; then
+    backend_running=true
+  fi
+  if container_is_running pivot-sandbox-manager; then
+    sandbox_manager_running=true
+  fi
 
-    if [ "$backend_running" = false ] && [ "$sandbox_manager_running" = false ]; then
-      log "Backend and sandbox-manager are not running; no runtime refresh is needed"
-      exit 0
-    fi
+  if [ "$backend_running" = false ] && [ "$sandbox_manager_running" = false ]; then
+    log "Backend and sandbox-manager are not running; no runtime refresh is needed"
+    return 0
+  fi
 
-    log "Refreshing backend and sandbox-manager so they drop the previous POSIX bridge view"
+  log "Refreshing backend and sandbox-manager so they drop the previous POSIX bridge view"
 
-    local sandbox_ids
-    sandbox_ids="$(podman ps -aq --filter label=pivot.sandbox.workspace_id)"
-    if [ -n "$sandbox_ids" ]; then
-      log "Removing workspace sandboxes so they reconnect after bridge teardown"
-      # shellcheck disable=SC2086
-      podman rm -f $sandbox_ids >/dev/null
-    fi
+  local sandbox_ids
+  sandbox_ids="$(podman ps -aq --filter label=pivot.sandbox.workspace_id)"
+  if [ -n "$sandbox_ids" ]; then
+    log "Removing workspace sandboxes so they reconnect after bridge teardown"
+    # shellcheck disable=SC2086
+    podman rm -f $sandbox_ids >/dev/null
+  fi
 
-    podman compose stop backend sandbox-manager >/dev/null 2>&1 || true
-    podman compose up -d backend sandbox-manager >/dev/null
-  )
+  compose_base stop backend sandbox-manager >/dev/null 2>&1 || true
+  compose_base up -d backend sandbox-manager >/dev/null
 }
 
 unmount_snippet() {
   cat <<'EOF'
-if command -v fusermount >/dev/null 2>&1; then
-  fusermount -u "$1"
-else
-  umount "$1"
+if command -v fusermount3 >/dev/null 2>&1; then
+  fusermount3 -u "$1" && exit 0
 fi
+if command -v fusermount >/dev/null 2>&1; then
+  fusermount -u "$1" && exit 0
+fi
+umount "$1" 2>/dev/null && exit 0
+umount -l "$1"
 EOF
 }
 
 stop_seaweedfs_service() {
   log "Stopping SeaweedFS service"
-  (
-    cd "$ROOT_DIR"
-    podman compose --profile seaweedfs stop seaweedfs
-  )
+  compose_with_seaweedfs stop seaweedfs
 }
 
 teardown_linux_mount() {
@@ -112,7 +124,14 @@ teardown_macos_mount() {
   require_command python3
 
   local inspect_json
-  inspect_json="$(podman machine inspect)"
+  if ! inspect_json="$(podman machine inspect 2>/dev/null)"; then
+    printf '[fs-down] unable to inspect the active Podman machine\n' >&2
+    exit 1
+  fi
+  if [ "$inspect_json" = "[]" ]; then
+    printf '[fs-down] no active Podman machine is available\n' >&2
+    exit 1
+  fi
 
   local port
   local user

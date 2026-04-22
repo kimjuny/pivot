@@ -38,9 +38,16 @@ scripts/fs-up.sh
 podman compose --profile seaweedfs up -d
 ```
 
-`scripts/fs-up.sh` prepares the external POSIX bridge used by the `seaweedfs`
-profile. It is needed for macOS and Linux when you want real external
-workspace storage. Windows continues to use `local_fs` by default.
+`scripts/fs-up.sh` prepares and repairs the external POSIX bridge used by the
+`seaweedfs` profile. It is needed for macOS and Linux when you want real
+external workspace storage. Windows continues to use `local_fs` by default.
+
+If a previous `podman compose --profile seaweedfs up` got stuck because the
+bridge mount went bad, rerun `scripts/fs-up.sh`. It will clear stale
+SeaweedFS-mode containers, repair the bridge, and recreate the SeaweedFS
+service if needed so the next `podman compose --profile seaweedfs up` does not
+inherit the poisoned state. It can often unblock the stuck startup indirectly,
+but the guaranteed part is repairing the environment for the next `up`.
 
 When `backend` or `sandbox-manager` are already running, `scripts/fs-up.sh`
 also refreshes them and clears warm workspace sandboxes so every runtime sees

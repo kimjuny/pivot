@@ -46,6 +46,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import StaggeredFadeInList from '@/components/StaggeredFadeInList';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -347,18 +348,21 @@ function AgentList() {
       ) : (
         <>
           {/* Agent card grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-            {pagedAgents.map(agent => {
+          <StaggeredFadeInList
+            items={pagedAgents}
+            getItemKey={(agent) => agent.id}
+            className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+            itemClassName="h-full"
+            renderItem={(agent) => {
               const isPublished = agent.active_release_id != null;
               const isServingEnabled = agent.serving_enabled !== false;
               const isServingPending = servingAgentIds.includes(agent.id);
 
               return (
                 <Card
-                  key={agent.id}
                   onClick={() => handleAgentClick(agent)}
                   onKeyDown={e => handleCardKeyDown(e, agent)}
-                  className="cursor-pointer transition-colors duration-150 hover:bg-accent/50 relative group p-3 flex flex-col min-h-[120px]"
+                  className="cursor-pointer relative group flex h-full min-h-[120px] flex-col p-3 transition-colors duration-150 hover:bg-accent/50"
                   role="button"
                   tabIndex={0}
                   aria-label={`Open agent ${agent.name}`}
@@ -463,8 +467,8 @@ function AgentList() {
                   </div>
                 </Card>
               );
-            })}
-          </div>
+            }}
+          />
 
           {/* Pagination */}
           {totalPages > 1 && (

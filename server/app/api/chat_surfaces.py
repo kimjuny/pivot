@@ -307,12 +307,18 @@ def reconnect_surface_preview(
             username=surface_record.username,
         )
         if preview_record.session_id != surface_record.session_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Preview endpoint does not belong to the active surface session.",
+            if preview_record.agent_id != surface_record.agent_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Preview endpoint does not belong to the active surface agent.",
+                )
+            preview_record = service.create_preview_endpoint_from_existing(
+                source_record=preview_record,
+                username=surface_record.username,
+                session_id=surface_record.session_id,
             )
         preview_record = service.connect_preview_endpoint(
-            preview_id=preview_id,
+            preview_id=preview_record.preview_id,
             username=surface_record.username,
         )
         preview_records = service.list_preview_endpoints(

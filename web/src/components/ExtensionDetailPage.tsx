@@ -105,7 +105,7 @@ function buildContributionGroups(summary: ExtensionContributionSummary): Contrib
       tone: "provider",
     },
     {
-      label: "Image Providers",
+      label: "Media Providers",
       values: summary.media_providers ?? [],
       tone: "provider",
     },

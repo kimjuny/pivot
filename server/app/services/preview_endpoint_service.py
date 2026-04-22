@@ -199,6 +199,30 @@ class PreviewEndpointService:
         )
         return record
 
+    def create_preview_endpoint_from_existing(
+        self,
+        *,
+        source_record: PreviewEndpointRecord,
+        username: str,
+        session_id: str,
+    ) -> PreviewEndpointRecord:
+        """Copy one reconnectable preview recipe into another owned chat session."""
+        if source_record.start_server is None or source_record.cwd is None:
+            raise PreviewEndpointValidationError(
+                "This preview cannot be reconnected because no start_server recipe was recorded."
+            )
+
+        return self.create_preview_endpoint(
+            username=username,
+            session_id=session_id,
+            port=source_record.port,
+            path=source_record.path,
+            title=source_record.title,
+            cwd=source_record.cwd,
+            start_server=source_record.start_server,
+            skills=list(source_record.allowed_skills),
+        )
+
     def get_preview_endpoint(
         self,
         *,

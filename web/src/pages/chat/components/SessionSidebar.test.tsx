@@ -23,6 +23,9 @@ function renderSessionSidebar(
   options: {
     projects?: ChatSidebarProjectItem[];
     currentSessionId?: string | null;
+    isLoadingSession?: boolean;
+    hasInitializedSessions?: boolean;
+    onCreateProject?: () => void;
   } = {},
 ) {
   return render(
@@ -31,10 +34,11 @@ function renderSessionSidebar(
         sessions={sessions}
         projects={options.projects}
         currentSessionId={options.currentSessionId ?? null}
-        isLoadingSession={false}
-        hasInitializedSessions={true}
+        isLoadingSession={options.isLoadingSession ?? false}
+        hasInitializedSessions={options.hasInitializedSessions ?? true}
         isStreaming={false}
         onNewSession={vi.fn()}
+        onCreateProject={options.onCreateProject}
         onSelectSession={vi.fn()}
         onRenameSession={vi.fn()}
         onTogglePinSession={vi.fn()}
@@ -99,5 +103,22 @@ describe("SessionSidebar", () => {
     expect(
       screen.getByRole("button", { name: "Collapse project Launch Project" }),
     ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps loading placeholders aligned with the empty-state row height", () => {
+    renderSessionSidebar([], {
+      isLoadingSession: true,
+      hasInitializedSessions: false,
+      onCreateProject: vi.fn(),
+    });
+
+    expect(
+      screen.getAllByTestId("sidebar-loading-placeholder-project"),
+    ).toHaveLength(1);
+    expect(
+      screen.getAllByTestId("sidebar-loading-placeholder-session"),
+    ).toHaveLength(1);
+    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Sessions")).toBeInTheDocument();
   });
 });

@@ -32,9 +32,6 @@ services:
       - ./pyproject.toml:/app/pyproject.toml:ro
       - ./poetry.lock:/app/poetry.lock:ro
       - ./server/data:/app/server/data:z
-      # Why: `/tmp/pivot-seaweedfs-posix` resolves inside the Podman VM on
-      # macOS and directly on the host on Linux, which gives one cleaner
-      # default bridge path than host-specific home-directory mounts.
       - ${PIVOT_EXTERNAL_POSIX_ROOT:-/tmp/pivot-seaweedfs-posix}:/app/server/external-posix:z
     environment:
       - DATABASE_URL=sqlite:////app/server/data/pivot.db
@@ -44,10 +41,10 @@ services:
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
       - SANDBOX_MANAGER_TIMEOUT_SECONDS=30
       - STORAGE_PROFILE=${STORAGE_PROFILE:-auto}
-      - LOCAL_CACHE_ROOT=${LOCAL_CACHE_ROOT:-/app/server/data/.local_cache}
       - STORAGE_SEAWEEDFS_FILER_ENDPOINT=${STORAGE_SEAWEEDFS_FILER_ENDPOINT:-http://seaweedfs:8888}
       - STORAGE_SEAWEEDFS_POSIX_ROOT=${STORAGE_SEAWEEDFS_POSIX_ROOT:-/app/server/external-posix}
       - STORAGE_SEAWEEDFS_HOST_POSIX_ROOT=${STORAGE_SEAWEEDFS_HOST_POSIX_ROOT:-/tmp/pivot-seaweedfs-posix}
+      - LOCAL_CACHE_ROOT=${LOCAL_CACHE_ROOT:-/app/server/data/.local_cache}
     depends_on:
       - sandbox-manager
     command: >
@@ -72,9 +69,6 @@ services:
       # Linux users can override with: /run/podman/podman.sock:/run/podman/podman.sock
       - /var/run/docker.sock:/run/podman/podman.sock
       - ./server:/app/server:z
-      # Why: sandbox-manager must resolve the same external POSIX bridge that
-      # backend exposes, otherwise backend-visible workspace paths cannot be
-      # translated back to one host-visible mount source for sandbox bind-mounts.
       - ${PIVOT_EXTERNAL_POSIX_ROOT:-/tmp/pivot-seaweedfs-posix}:/app/server/external-posix:z
     environment:
       - SANDBOX_MANAGER_TOKEN=dev-sandbox-token
@@ -83,7 +77,6 @@ services:
       - SANDBOX_NETWORK_MODE=bridge
       - SANDBOX_BACKEND_CONTAINER_NAME=pivot-backend
       - SANDBOX_BACKEND_WORKSPACE_ROOT=${SANDBOX_BACKEND_WORKSPACE_ROOT:-/app/server/workspace}
-      - SANDBOX_EXTERNAL_POSIX_ROOT=${SANDBOX_EXTERNAL_POSIX_ROOT:-/app/server/external-posix}
       - SANDBOX_CONTAINER_PREFIX=pivot-sandbox
       - SANDBOX_DEFAULT_TIMEOUT_SECONDS=30
       # Do not pin SANDBOX_WORKSPACE_HOST_ROOT with ${PWD}; it is shell-cwd dependent
@@ -99,6 +92,7 @@ services:
       - SANDBOX_MEMORY_LIMIT=1g
       - SANDBOX_CPU_LIMIT=1.0
       - SANDBOX_PIDS_LIMIT=256
+      - SANDBOX_EXTERNAL_POSIX_ROOT=${SANDBOX_EXTERNAL_POSIX_ROOT:-/app/server/external-posix}
     depends_on:
       sandbox-base:
         condition: service_completed_successfully
@@ -142,7 +136,6 @@ services:
       - backend
     command: npm run dev -- --host 0.0.0.0
 
-  # ---------- External SeaweedFS (optional profile) ----------
   seaweedfs:
     image: chrislusf/seaweedfs:4.06
     container_name: pivot-seaweedfs

@@ -31,6 +31,15 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+mount_probe_snippet() {
+  cat <<'EOF'
+probe_path="$1/.pivot-fs-status-probe.$$"
+printf 'pivot-fs-status\n' >"$probe_path"
+grep -q 'pivot-fs-status' "$probe_path"
+rm -f "$probe_path"
+EOF
+}
+
 compose_service_status() {
   if ! command_exists podman; then
     echo "podman-unavailable"
@@ -52,7 +61,11 @@ linux_mount_status() {
   fi
 
   if mountpoint -q "$POSIX_ROOT"; then
-    echo "mounted"
+    if bash -lc "$(mount_probe_snippet)" -- "$POSIX_ROOT" >/dev/null 2>&1; then
+      echo "mounted"
+      return 0
+    fi
+    echo "mounted-unhealthy"
     return 0
   fi
 
@@ -66,7 +79,14 @@ macos_mount_status() {
   fi
 
   local inspect_json
-  inspect_json="$(podman machine inspect)"
+  if ! inspect_json="$(podman machine inspect 2>/dev/null)"; then
+    echo "vm-check-unavailable"
+    return 0
+  fi
+  if [ "$inspect_json" = "[]" ]; then
+    echo "vm-check-unavailable"
+    return 0
+  fi
 
   local port
   local user
@@ -75,17 +95,39 @@ macos_mount_status() {
   user="$(python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["SSHConfig"]["RemoteUsername"])' <<<"$inspect_json")"
   identity="$(python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["SSHConfig"]["IdentityPath"])' <<<"$inspect_json")"
 
-  if ssh \
+  local remote_status
+  local remote_script
+  remote_script="$(cat <<EOF
+set -euo pipefail
+mount_root="$POSIX_ROOT"
+if ! mountpoint -q "\$mount_root"; then
+  printf not-mounted
+  exit 0
+fi
+probe_path="\$mount_root/.pivot-fs-status-probe.\$\$"
+printf "pivot-fs-status\n" >"\$probe_path"
+if grep -q "pivot-fs-status" "\$probe_path"; then
+  rm -f "\$probe_path"
+  printf mounted
+  exit 0
+fi
+rm -f "\$probe_path"
+printf mounted-unhealthy
+EOF
+)"
+  remote_status="$(ssh \
     -o StrictHostKeyChecking=no \
     -i "$identity" \
     -p "$port" \
     "${user}@127.0.0.1" \
-    "mountpoint -q '$POSIX_ROOT'" >/dev/null 2>&1; then
-    echo "mounted"
+    "/bin/bash -lc '$remote_script'" 2>/dev/null || printf vm-check-unavailable)"
+
+  if [ -n "$remote_status" ]; then
+    echo "$remote_status"
     return 0
   fi
 
-  echo "not-mounted"
+  echo "vm-check-unavailable"
 }
 
 posix_bridge_status() {

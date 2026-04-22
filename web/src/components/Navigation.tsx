@@ -207,7 +207,7 @@ function Navigation() {
       icon: Radio,
     },
     {
-      title: 'Image Providers',
+      title: 'Media Providers',
       description: 'Review installed media-generation providers before binding them to agents.',
       to: '/studio/connections/media-generation',
       icon: Layers,
