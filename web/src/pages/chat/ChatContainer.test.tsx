@@ -191,6 +191,12 @@ describe("ChatContainer session rollover", () => {
           "/api/chat-surfaces/installed-sessions/installed-surface-1/runtime/ui/workspace/",
         capabilities: ["workspace.read", "workspace.write"],
         files_api: {
+          directory_url:
+            "/api/chat-surfaces/installed-sessions/installed-surface-1/files/directory",
+          text_url:
+            "/api/chat-surfaces/installed-sessions/installed-surface-1/files/text",
+          blob_url:
+            "/api/chat-surfaces/installed-sessions/installed-surface-1/files/blob",
           tree_url:
             "/api/chat-surfaces/installed-sessions/installed-surface-1/files/tree",
           content_url:
@@ -352,6 +358,9 @@ describe("ChatContainer session rollover", () => {
         dev_server_url: "http://127.0.0.1:4173",
         capabilities: ["workspace.read", "workspace.write"],
         files_api: {
+          directory_url: "/directory",
+          text_url: "/text",
+          blob_url: "/blob",
           tree_url: "/tree",
           content_url: "/content",
         },
@@ -370,22 +379,26 @@ describe("ChatContainer session rollover", () => {
     );
 
     const debugButton = await screen.findByRole("button", {
-      name: "Open compact debug inspector",
+      name: "Open debug panel",
     });
-    await user.hover(debugButton);
+    await user.click(debugButton);
 
+    expect(await screen.findByRole("tab", { name: "Compact" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Surface" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Surface" }));
     expect(await screen.findByText("Surface Dev")).toBeInTheDocument();
     await waitFor(() => {
       expect(
         screen.getByRole("button", { name: "Attach Dev Surface" }),
       ).not.toBeDisabled();
     });
-    await user.click(screen.getByRole("button", { name: "Open Official Sample" }));
+    await user.click(screen.getByRole("button", { name: "Attach Dev Surface" }));
     await waitFor(() => {
       expect(createDevSurfaceSession).toHaveBeenCalledWith({
         sessionId: "session-1",
         surfaceKey: "workspace-editor",
-        devServerUrl: "http://127.0.0.1:4173",
+        devServerUrl: "http://127.0.0.1:5173",
       });
     });
 

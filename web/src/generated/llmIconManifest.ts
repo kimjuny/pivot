@@ -16,5 +16,6 @@ export const LLM_ICON_KEYS = [
   "qwen",
   "step",
   "glm",
-  "gpt"
+  "gpt",
+  "hy"
 ] as const;

@@ -26,9 +26,13 @@ from app.schemas.chat_surface import (
     ReconnectPreviewEndpointResponse,
     SurfaceFilesApiResponse,
     SurfaceThemeResponse,
+    WorkspaceBinaryFileResponse,
+    WorkspaceDirectoryEntryResponse,
+    WorkspaceDirectoryResponse,
     WorkspaceFileContentResponse,
     WorkspaceFileTreeEntryResponse,
     WorkspaceFileTreeResponse,
+    WorkspaceTextFileResponse,
     WriteWorkspaceFileRequest,
 )
 from app.services.preview_endpoint_service import (
@@ -65,10 +69,13 @@ from app.services.workspace_service import WorkspaceService
 from fastapi import (
     APIRouter,
     Depends,
+    File,
+    Form,
     HTTPException,
     Query,
     Request as FastAPIRequest,
     Response,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -409,6 +416,186 @@ def get_installed_surface_bootstrap(
 
 
 @router.get(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/directory",
+    response_model=WorkspaceDirectoryResponse,
+)
+def list_dev_surface_workspace_directory(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str | None = Query(default=None),
+    db: DBSession = Depends(get_db),
+) -> WorkspaceDirectoryResponse:
+    """List direct children visible to one owned development surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        entries = service.list_directory(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return WorkspaceDirectoryResponse(
+        root_path=path or ".",
+        entries=[_serialize_directory_entry(entry) for entry in entries],
+    )
+
+
+@router.get(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/text",
+    response_model=WorkspaceTextFileResponse,
+)
+def read_dev_surface_workspace_text_file(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str = Query(...),
+    db: DBSession = Depends(get_db),
+) -> WorkspaceTextFileResponse:
+    """Read one UTF-8 workspace file for an owned development surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        content = service.read_text_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except UnicodeDecodeError as err:
+        raise HTTPException(
+            status_code=400,
+            detail="Workspace file is not valid UTF-8 text.",
+        ) from err
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return WorkspaceTextFileResponse(path=path, content=content)
+
+
+@router.put("/chat-surfaces/dev-sessions/{surface_session_id}/files/text", status_code=204)
+def write_dev_surface_workspace_text_file(
+    surface_session_id: str,
+    request: WriteWorkspaceFileRequest,
+    http_request: FastAPIRequest,
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Persist one UTF-8 workspace file for an owned development surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=http_request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        service.write_text_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=request.path,
+            content=request.content,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(status_code=204)
+
+
+@router.get("/chat-surfaces/dev-sessions/{surface_session_id}/files/blob")
+def read_dev_surface_workspace_blob(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str = Query(...),
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Return one binary workspace file for an owned development surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        blob = service.read_binary_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(
+        content=blob.content,
+        media_type=blob.mime_type,
+        headers={"Content-Length": str(blob.size_bytes)},
+    )
+
+
+@router.post(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/blob",
+    response_model=WorkspaceBinaryFileResponse,
+    status_code=201,
+)
+async def write_dev_surface_workspace_blob(
+    surface_session_id: str,
+    http_request: FastAPIRequest,
+    path: str = Form(...),
+    file: UploadFile = File(...),
+    db: DBSession = Depends(get_db),
+) -> WorkspaceBinaryFileResponse:
+    """Persist one binary workspace file for an owned development surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=http_request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        result = service.write_binary_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+            content=await file.read(),
+            mime_type=file.content_type,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return WorkspaceBinaryFileResponse(
+        path=result.path,
+        mime_type=result.mime_type,
+        size_bytes=result.size_bytes,
+    )
+
+
+@router.get(
     "/chat-surfaces/dev-sessions/{surface_session_id}/files/tree",
     response_model=WorkspaceFileTreeResponse,
 )
@@ -512,6 +699,189 @@ def write_dev_surface_workspace_file(
         raise HTTPException(status_code=400, detail=str(err)) from err
 
     return Response(status_code=204)
+
+
+@router.get(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/files/directory",
+    response_model=WorkspaceDirectoryResponse,
+)
+def list_installed_surface_workspace_directory(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str | None = Query(default=None),
+    db: DBSession = Depends(get_db),
+) -> WorkspaceDirectoryResponse:
+    """List direct children visible to one owned installed surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        entries = service.list_directory(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return WorkspaceDirectoryResponse(
+        root_path=path or ".",
+        entries=[_serialize_directory_entry(entry) for entry in entries],
+    )
+
+
+@router.get(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/files/text",
+    response_model=WorkspaceTextFileResponse,
+)
+def read_installed_surface_workspace_text_file(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str = Query(...),
+    db: DBSession = Depends(get_db),
+) -> WorkspaceTextFileResponse:
+    """Read one UTF-8 workspace file for an owned installed surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        content = service.read_text_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except UnicodeDecodeError as err:
+        raise HTTPException(
+            status_code=400,
+            detail="Workspace file is not valid UTF-8 text.",
+        ) from err
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return WorkspaceTextFileResponse(path=path, content=content)
+
+
+@router.put(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/files/text",
+    status_code=204,
+)
+def write_installed_surface_workspace_text_file(
+    surface_session_id: str,
+    request: WriteWorkspaceFileRequest,
+    http_request: FastAPIRequest,
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Persist one UTF-8 workspace file for an owned installed surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=http_request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        service.write_text_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=request.path,
+            content=request.content,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(status_code=204)
+
+
+@router.get("/chat-surfaces/installed-sessions/{surface_session_id}/files/blob")
+def read_installed_surface_workspace_blob(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str = Query(...),
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Return one binary workspace file for an owned installed surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        blob = service.read_binary_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(
+        content=blob.content,
+        media_type=blob.mime_type,
+        headers={"Content-Length": str(blob.size_bytes)},
+    )
+
+
+@router.post(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/files/blob",
+    response_model=WorkspaceBinaryFileResponse,
+    status_code=201,
+)
+async def write_installed_surface_workspace_blob(
+    surface_session_id: str,
+    http_request: FastAPIRequest,
+    path: str = Form(...),
+    file: UploadFile = File(...),
+    db: DBSession = Depends(get_db),
+) -> WorkspaceBinaryFileResponse:
+    """Persist one binary workspace file for an owned installed surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=http_request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        result = service.write_binary_file(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+            content=await file.read(),
+            mime_type=file.content_type,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return WorkspaceBinaryFileResponse(
+        path=result.path,
+        mime_type=result.mime_type,
+        size_bytes=result.size_bytes,
+    )
 
 
 @router.get(
@@ -1358,6 +1728,11 @@ def _serialize_bootstrap(
         dev_server_url=str(payload["dev_server_url"]),
         capabilities=capabilities,
         files_api=SurfaceFilesApiResponse(
+            directory_url=(
+                str(files_api["directory_url"]) if isinstance(files_api, dict) else ""
+            ),
+            text_url=str(files_api["text_url"]) if isinstance(files_api, dict) else "",
+            blob_url=str(files_api["blob_url"]) if isinstance(files_api, dict) else "",
             tree_url=str(files_api["tree_url"]) if isinstance(files_api, dict) else "",
             content_url=(
                 str(files_api["content_url"]) if isinstance(files_api, dict) else ""
@@ -1406,6 +1781,11 @@ def _serialize_installed_bootstrap(
         runtime_url=str(payload["runtime_url"]),
         capabilities=capabilities,
         files_api=SurfaceFilesApiResponse(
+            directory_url=(
+                str(files_api["directory_url"]) if isinstance(files_api, dict) else ""
+            ),
+            text_url=str(files_api["text_url"]) if isinstance(files_api, dict) else "",
+            blob_url=str(files_api["blob_url"]) if isinstance(files_api, dict) else "",
             tree_url=str(files_api["tree_url"]) if isinstance(files_api, dict) else "",
             content_url=(
                 str(files_api["content_url"]) if isinstance(files_api, dict) else ""
@@ -1420,6 +1800,19 @@ def _serialize_tree_entry(
 ) -> WorkspaceFileTreeEntryResponse:
     """Convert one internal tree entry into its API schema."""
     return WorkspaceFileTreeEntryResponse(
+        path=entry.path,
+        name=entry.name,
+        kind="directory" if entry.kind == "directory" else "file",
+        parent_path=entry.parent_path,
+        size_bytes=entry.size_bytes,
+    )
+
+
+def _serialize_directory_entry(
+    entry: WorkspaceFileTreeEntry,
+) -> WorkspaceDirectoryEntryResponse:
+    """Convert one internal directory entry into its API schema."""
+    return WorkspaceDirectoryEntryResponse(
         path=entry.path,
         name=entry.name,
         kind="directory" if entry.kind == "directory" else "file",

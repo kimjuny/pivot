@@ -12,9 +12,8 @@ export type ThinkingProvider =
   | "auto"
   | "qwen"
   | "doubao"
-  | "glm"
+  | "completion_toggle"
   | "mimo"
-  | "kimi"
   | "chatgpt"
   | "claude";
 
@@ -44,6 +43,7 @@ export interface ThinkingEditorState {
 
 const DISABLED_THINKING_POLICIES = new Set([
   "qwen-disable-thinking",
+  "generic-completion-thinking-disabled",
   "doubao-completion-thinking-disabled",
   "glm-completion-thinking-disabled",
   "mimo-completion-thinking-disabled",
@@ -56,6 +56,8 @@ const SUPPORTED_THINKING_POLICIES = new Set([
   "auto",
   "qwen-enable-thinking",
   "qwen-disable-thinking",
+  "generic-completion-thinking-enabled",
+  "generic-completion-thinking-disabled",
   "doubao-completion-thinking-enabled",
   "doubao-completion-thinking-disabled",
   "glm-completion-thinking-enabled",
@@ -83,10 +85,10 @@ export const THINKING_PROVIDER_OPTIONS: Record<
   openai_completion_llm: [
     { value: "auto", label: "Auto" },
     { value: "qwen", label: "Qwen" },
-    { value: "doubao", label: "Doubao" },
-    { value: "glm", label: "GLM" },
-    { value: "mimo", label: "MiMo" },
-    { value: "kimi", label: "Kimi" },
+    {
+      value: "completion_toggle",
+      label: "Doubao / GLM / MiMo / Kimi / DeepSeek",
+    },
   ],
   openai_response_llm: [
     { value: "auto", label: "Auto" },
@@ -203,7 +205,17 @@ export function getThinkingEditorStateFromPolicy(
         effortValue: "",
         budgetTokens: null,
       };
+    case "generic-completion-thinking-enabled":
     case "doubao-completion-thinking-enabled":
+    case "glm-completion-thinking-enabled":
+    case "mimo-completion-thinking-enabled":
+    case "kimi-completion-thinking-enabled":
+      return {
+        provider: "completion_toggle",
+        detailValue: "enabled",
+        effortValue: "",
+        budgetTokens: null,
+      };
     case "doubao-response-thinking-enabled":
       return {
         provider: "doubao",
@@ -211,7 +223,17 @@ export function getThinkingEditorStateFromPolicy(
         effortValue: "",
         budgetTokens: null,
       };
+    case "generic-completion-thinking-disabled":
     case "doubao-completion-thinking-disabled":
+    case "glm-completion-thinking-disabled":
+    case "mimo-completion-thinking-disabled":
+    case "kimi-completion-thinking-disabled":
+      return {
+        provider: "completion_toggle",
+        detailValue: "disabled",
+        effortValue: "",
+        budgetTokens: null,
+      };
     case "doubao-response-thinking-disabled":
       return {
         provider: "doubao",
@@ -219,21 +241,6 @@ export function getThinkingEditorStateFromPolicy(
         effortValue: "",
         budgetTokens: null,
       };
-    case "glm-completion-thinking-enabled":
-      return {
-        provider: "glm",
-        detailValue: "enabled",
-        effortValue: "",
-        budgetTokens: null,
-      };
-    case "glm-completion-thinking-disabled":
-      return {
-        provider: "glm",
-        detailValue: "disabled",
-        effortValue: "",
-        budgetTokens: null,
-      };
-    case "mimo-completion-thinking-enabled":
     case "mimo-anthropic-thinking-enabled":
       return {
         provider: "mimo",
@@ -241,24 +248,9 @@ export function getThinkingEditorStateFromPolicy(
         effortValue: "",
         budgetTokens: null,
       };
-    case "mimo-completion-thinking-disabled":
     case "mimo-anthropic-thinking-disabled":
       return {
         provider: "mimo",
-        detailValue: "disabled",
-        effortValue: "",
-        budgetTokens: null,
-      };
-    case "kimi-completion-thinking-enabled":
-      return {
-        provider: "kimi",
-        detailValue: "enabled",
-        effortValue: "",
-        budgetTokens: null,
-      };
-    case "kimi-completion-thinking-disabled":
-      return {
-        provider: "kimi",
         detailValue: "disabled",
         effortValue: "",
         budgetTokens: null,
@@ -316,26 +308,11 @@ export function buildThinkingPolicyFromEditorState(
     if (provider === "qwen") {
       thinkingPolicy =
         detailValue === "false" ? "qwen-disable-thinking" : "qwen-enable-thinking";
-    } else if (provider === "doubao") {
+    } else if (provider === "completion_toggle") {
       thinkingPolicy =
         detailValue === "disabled"
-          ? "doubao-completion-thinking-disabled"
-          : "doubao-completion-thinking-enabled";
-    } else if (provider === "glm") {
-      thinkingPolicy =
-        detailValue === "disabled"
-          ? "glm-completion-thinking-disabled"
-          : "glm-completion-thinking-enabled";
-    } else if (provider === "mimo") {
-      thinkingPolicy =
-        detailValue === "disabled"
-          ? "mimo-completion-thinking-disabled"
-          : "mimo-completion-thinking-enabled";
-    } else if (provider === "kimi") {
-      thinkingPolicy =
-        detailValue === "disabled"
-          ? "kimi-completion-thinking-disabled"
-          : "kimi-completion-thinking-enabled";
+          ? "generic-completion-thinking-disabled"
+          : "generic-completion-thinking-enabled";
     }
     return {
       thinking_policy: thinkingPolicy,
@@ -391,7 +368,6 @@ export function buildThinkingPolicyFromEditorState(
         thinking_budget_tokens: null,
       };
     }
-
   }
 
   return {

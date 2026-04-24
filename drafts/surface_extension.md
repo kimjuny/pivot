@@ -542,9 +542,9 @@ const surface = await createSurface();
 
 surface.shell.setTitle("Workspace Editor");
 
-const tree = await surface.workspace.listTree(".");
-const file = await surface.workspace.readFile("src/App.tsx");
-await surface.workspace.writeFile("src/App.tsx", file.content);
+const directory = await surface.workspace.listDirectory(".");
+const file = await surface.workspace.readTextFile("src/App.tsx");
+await surface.workspace.writeTextFile("src/App.tsx", file.content);
 
 surface.events.subscribe((event) => {
   console.log(event.type, event.data);

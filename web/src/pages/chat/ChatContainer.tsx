@@ -39,6 +39,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Input } from "@/components/ui/input";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -96,7 +97,6 @@ import {
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
 const DOCK_TRANSITION_MS = 200;
 const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
-const OFFICIAL_SAMPLE_RUNTIME_URL = "http://127.0.0.1:4173";
 const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
 
 /**
@@ -582,11 +582,8 @@ function ChatContainer({
   const [isExtensionDockMounted, setIsExtensionDockMounted] = useState(false);
   const [dockPanelSize, setDockPanelSize] = useState(58);
   const [renderedDockPanelSize, setRenderedDockPanelSize] = useState(0);
-  const [surfaceKeyInput, setSurfaceKeyInput] = useState(
-    OFFICIAL_SAMPLE_SURFACE_KEY,
-  );
   const [surfaceRuntimeUrlInput, setSurfaceRuntimeUrlInput] = useState(
-    OFFICIAL_SAMPLE_RUNTIME_URL,
+    LOCAL_VITE_RUNTIME_URL,
   );
   const [isCreatingSurfaceSession, setIsCreatingSurfaceSession] =
     useState(false);
@@ -3116,27 +3113,14 @@ function ChatContainer({
         <div className="space-y-3">
           <label className="block">
             <div className="mb-1 text-xs font-medium text-muted-foreground">
-              Surface Key
-            </div>
-            <input
-              type="text"
-              value={surfaceKeyInput}
-              onChange={(event) => setSurfaceKeyInput(event.target.value)}
-              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
-            />
-          </label>
-
-          <label className="block">
-            <div className="mb-1 text-xs font-medium text-muted-foreground">
               Runtime URL
             </div>
-            <input
+            <Input
               type="url"
               value={surfaceRuntimeUrlInput}
               onChange={(event) =>
                 setSurfaceRuntimeUrlInput(event.target.value)
               }
-              className="w-full rounded-md border border-border/70 bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary"
             />
             <div className="mt-2 text-xs leading-5 text-muted-foreground">
               Accepts either a dev server root such as{" "}
@@ -3147,42 +3131,11 @@ function ChatContainer({
             </div>
           </label>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setSurfaceKeyInput(OFFICIAL_SAMPLE_SURFACE_KEY);
-                setSurfaceRuntimeUrlInput(OFFICIAL_SAMPLE_RUNTIME_URL);
-                void handleCreateSurfaceDevSession(
-                  OFFICIAL_SAMPLE_SURFACE_KEY,
-                  OFFICIAL_SAMPLE_RUNTIME_URL,
-                );
-              }}
-              className="inline-flex h-8 items-center rounded-lg border border-border/70 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              Open Official Sample
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSurfaceKeyInput(OFFICIAL_SAMPLE_SURFACE_KEY);
-                setSurfaceRuntimeUrlInput(LOCAL_VITE_RUNTIME_URL);
-                void handleCreateSurfaceDevSession(
-                  OFFICIAL_SAMPLE_SURFACE_KEY,
-                  LOCAL_VITE_RUNTIME_URL,
-                );
-              }}
-              className="inline-flex h-8 items-center rounded-lg border border-border/70 px-3 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              Open Local Vite
-            </button>
-          </div>
-
           <button
             type="button"
             onClick={() => {
               void handleCreateSurfaceDevSession(
-                surfaceKeyInput,
+                OFFICIAL_SAMPLE_SURFACE_KEY,
                 surfaceRuntimeUrlInput,
               );
             }}
@@ -3223,7 +3176,6 @@ function ChatContainer({
     handleCreateSurfaceDevSession,
     isCreatingSurfaceSession,
     surfaceCreationError,
-    surfaceKeyInput,
     surfaceRuntimeUrlInput,
   ]);
 

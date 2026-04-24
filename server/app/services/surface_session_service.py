@@ -311,6 +311,9 @@ class SurfaceSessionService:
             ).get_workspace_logical_root(workspace),
             "capabilities": list(_DEFAULT_SURFACE_CAPABILITIES),
             "files_api": {
+                "directory_url": f"{files_base_url}/directory",
+                "text_url": f"{files_base_url}/text",
+                "blob_url": f"{files_base_url}/blob",
                 "tree_url": f"{files_base_url}/tree",
                 "content_url": f"{files_base_url}/content",
             },

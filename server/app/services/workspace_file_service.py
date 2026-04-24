@@ -1,4 +1,4 @@
-"""Reusable CRUD helpers for text files under runtime workspaces."""
+"""Reusable CRUD helpers for files under runtime workspaces."""
 
 from __future__ import annotations
 
@@ -53,8 +53,26 @@ class WorkspaceFileReadResult:
     data_base64: str | None = None
 
 
+@dataclass(frozen=True)
+class WorkspaceBinaryFileReadResult:
+    """Structured binary file payload for direct download responses."""
+
+    content: bytes
+    mime_type: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class WorkspaceBinaryFileWriteResult:
+    """Binary file metadata returned after one workspace write."""
+
+    path: str
+    mime_type: str
+    size_bytes: int
+
+
 class WorkspaceFileService:
-    """CRUD-style text file access scoped to one owned runtime workspace."""
+    """CRUD-style file access scoped to one owned runtime workspace."""
 
     def __init__(self, db: DBSession) -> None:
         """Store the active database session.
@@ -111,6 +129,66 @@ class WorkspaceFileService:
             relative_path = entry_path.relative_to(workspace_root).as_posix()
             if not relative_path:
                 continue
+            parent_path = entry_path.parent.relative_to(workspace_root).as_posix()
+            if parent_path == ".":
+                parent_path = None
+            entries.append(
+                WorkspaceFileTreeEntry(
+                    path=relative_path,
+                    name=entry_path.name,
+                    kind="directory" if entry_path.is_dir() else "file",
+                    parent_path=parent_path,
+                    size_bytes=(
+                        None if entry_path.is_dir() else entry_path.stat().st_size
+                    ),
+                )
+            )
+
+        return entries
+
+    def list_directory(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        path: str | None = None,
+    ) -> list[WorkspaceFileTreeEntry]:
+        """Return direct children for one owned workspace directory.
+
+        Args:
+            workspace_id: Public workspace identifier.
+            username: Authenticated username that must own the workspace.
+            path: Optional directory path relative to the workspace root.
+
+        Returns:
+            Direct child entries sorted by kind and then name.
+
+        Raises:
+            WorkspaceFileNotFoundError: If the workspace or directory is missing.
+            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFileValidationError: If the path is unsafe or not a directory.
+        """
+        workspace = self._get_workspace_for_owner(
+            workspace_id=workspace_id,
+            username=username,
+        )
+        workspace_root = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        target_dir = self._resolve_workspace_path(
+            workspace=workspace,
+            relative_path=path,
+            allow_root=True,
+        )
+        if not target_dir.exists():
+            raise WorkspaceFileNotFoundError("Workspace path does not exist.")
+        if not target_dir.is_dir():
+            raise WorkspaceFileValidationError("Workspace directory path is invalid.")
+
+        entries: list[WorkspaceFileTreeEntry] = []
+        for entry_path in sorted(
+            target_dir.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower(), item.name),
+        ):
+            relative_path = entry_path.relative_to(workspace_root).as_posix()
             parent_path = entry_path.parent.relative_to(workspace_root).as_posix()
             if parent_path == ".":
                 parent_path = None
@@ -255,6 +333,94 @@ class WorkspaceFileService:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
 
+    def read_binary_file(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        path: str,
+    ) -> WorkspaceBinaryFileReadResult:
+        """Read one binary file inside an owned workspace.
+
+        Args:
+            workspace_id: Public workspace identifier.
+            username: Authenticated username that must own the workspace.
+            path: Workspace-relative file path.
+
+        Returns:
+            File bytes plus normalized MIME metadata.
+
+        Raises:
+            WorkspaceFileNotFoundError: If the workspace or file is missing.
+            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFileValidationError: If the path is unsafe or not a file.
+        """
+        workspace = self._get_workspace_for_owner(
+            workspace_id=workspace_id,
+            username=username,
+        )
+        target_path = self._resolve_workspace_path(
+            workspace=workspace,
+            relative_path=path,
+            allow_root=False,
+        )
+        if not target_path.exists():
+            raise WorkspaceFileNotFoundError("Workspace file does not exist.")
+        if not target_path.is_file():
+            raise WorkspaceFileValidationError("Workspace path must be a file.")
+
+        content = target_path.read_bytes()
+        mime_type = self._guess_mime_type(target_path)
+        return WorkspaceBinaryFileReadResult(
+            content=content,
+            mime_type=mime_type,
+            size_bytes=len(content),
+        )
+
+    def write_binary_file(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        path: str,
+        content: bytes,
+        mime_type: str | None = None,
+    ) -> WorkspaceBinaryFileWriteResult:
+        """Write one binary file inside an owned workspace.
+
+        Args:
+            workspace_id: Public workspace identifier.
+            username: Authenticated username that must own the workspace.
+            path: Workspace-relative file path.
+            content: Full binary payload to persist.
+            mime_type: Optional caller-provided MIME type.
+
+        Returns:
+            File metadata after the write completes.
+
+        Raises:
+            WorkspaceFileNotFoundError: If the workspace is missing.
+            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFileValidationError: If the path is unsafe.
+        """
+        workspace = self._get_workspace_for_owner(
+            workspace_id=workspace_id,
+            username=username,
+        )
+        target_path = self._resolve_workspace_path(
+            workspace=workspace,
+            relative_path=path,
+            allow_root=False,
+        )
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(content)
+        normalized_mime_type = mime_type or self._guess_mime_type(target_path)
+        return WorkspaceBinaryFileWriteResult(
+            path=path,
+            mime_type=normalized_mime_type,
+            size_bytes=len(content),
+        )
+
     def _get_workspace_for_owner(self, *, workspace_id: str, username: str) -> Workspace:
         """Return one owned workspace row.
 
@@ -355,4 +521,12 @@ class WorkspaceFileService:
             return None
         if mime_type == "image/svg+xml":
             return None
+        return mime_type
+
+    @staticmethod
+    def _guess_mime_type(target_path: Path) -> str:
+        """Return one best-effort MIME type for an arbitrary file path."""
+        mime_type, _encoding = mimetypes.guess_type(target_path.name)
+        if not isinstance(mime_type, str) or mime_type.strip() == "":
+            return "application/octet-stream"
         return mime_type

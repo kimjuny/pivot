@@ -94,6 +94,9 @@ class ReconnectPreviewEndpointResponse(AppBaseModel):
 class SurfaceFilesApiResponse(AppBaseModel):
     """Workspace file endpoints exposed to one surface runtime."""
 
+    directory_url: str
+    text_url: str
+    blob_url: str
     tree_url: str
     content_url: str
 
@@ -192,6 +195,39 @@ class WorkspaceFileTreeResponse(AppBaseModel):
 
     root_path: str = "."
     entries: list[WorkspaceFileTreeEntryResponse] = Field(default_factory=list)
+
+
+class WorkspaceDirectoryEntryResponse(AppBaseModel):
+    """One direct child returned by a workspace directory listing."""
+
+    path: str
+    name: str
+    kind: Literal["file", "directory"]
+    parent_path: str | None = None
+    size_bytes: int | None = None
+
+
+class WorkspaceDirectoryResponse(AppBaseModel):
+    """Direct file listing for one workspace-relative directory."""
+
+    root_path: str = "."
+    entries: list[WorkspaceDirectoryEntryResponse] = Field(default_factory=list)
+
+
+class WorkspaceTextFileResponse(AppBaseModel):
+    """UTF-8 text file payload returned to a surface runtime."""
+
+    path: str
+    content: str
+    encoding: Literal["utf-8"] = "utf-8"
+
+
+class WorkspaceBinaryFileResponse(AppBaseModel):
+    """Binary file metadata returned after a workspace upload."""
+
+    path: str
+    mime_type: str
+    size_bytes: int
 
 
 class WorkspaceFileContentResponse(AppBaseModel):

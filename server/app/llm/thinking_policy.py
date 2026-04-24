@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from typing import Any, Literal
 
 DEFAULT_THINKING_POLICY = "auto"
+GENERIC_COMPLETION_THINKING_ENABLED = "generic-completion-thinking-enabled"
+GENERIC_COMPLETION_THINKING_DISABLED = "generic-completion-thinking-disabled"
 DEFAULT_CLAUDE_EXTENDED_BUDGET_TOKENS = 10000
 DEFAULT_CLAUDE_ADAPTIVE_EFFORT = "high"
 DEFAULT_OPENAI_RESPONSE_REASONING_EFFORT = "medium"
@@ -15,14 +17,8 @@ PROTOCOL_THINKING_POLICIES: dict[str, tuple[str, ...]] = {
         "auto",
         "qwen-enable-thinking",
         "qwen-disable-thinking",
-        "doubao-completion-thinking-enabled",
-        "doubao-completion-thinking-disabled",
-        "glm-completion-thinking-enabled",
-        "glm-completion-thinking-disabled",
-        "mimo-completion-thinking-enabled",
-        "mimo-completion-thinking-disabled",
-        "kimi-completion-thinking-enabled",
-        "kimi-completion-thinking-disabled",
+        GENERIC_COMPLETION_THINKING_ENABLED,
+        GENERIC_COMPLETION_THINKING_DISABLED,
     ),
     "openai_response_llm": (
         "auto",
@@ -41,10 +37,7 @@ PROTOCOL_THINKING_POLICIES: dict[str, tuple[str, ...]] = {
 
 DISABLED_THINKING_POLICIES = {
     "qwen-disable-thinking",
-    "doubao-completion-thinking-disabled",
-    "glm-completion-thinking-disabled",
-    "mimo-completion-thinking-disabled",
-    "kimi-completion-thinking-disabled",
+    GENERIC_COMPLETION_THINKING_DISABLED,
     "doubao-response-thinking-disabled",
     "mimo-anthropic-thinking-disabled",
 }
@@ -54,6 +47,14 @@ LEGACY_THINKING_POLICY_ALIASES = {
     # field, so stored MiniMax thinking overrides are downgraded to ``auto``.
     "minimax-anthropic-thinking-enabled": DEFAULT_THINKING_POLICY,
     "minimax-anthropic-thinking-disabled": DEFAULT_THINKING_POLICY,
+    "doubao-completion-thinking-enabled": GENERIC_COMPLETION_THINKING_ENABLED,
+    "doubao-completion-thinking-disabled": GENERIC_COMPLETION_THINKING_DISABLED,
+    "glm-completion-thinking-enabled": GENERIC_COMPLETION_THINKING_ENABLED,
+    "glm-completion-thinking-disabled": GENERIC_COMPLETION_THINKING_DISABLED,
+    "mimo-completion-thinking-enabled": GENERIC_COMPLETION_THINKING_ENABLED,
+    "mimo-completion-thinking-disabled": GENERIC_COMPLETION_THINKING_DISABLED,
+    "kimi-completion-thinking-enabled": GENERIC_COMPLETION_THINKING_ENABLED,
+    "kimi-completion-thinking-disabled": GENERIC_COMPLETION_THINKING_DISABLED,
 }
 
 CLAUDE_ADAPTIVE_EFFORTS = {"low", "medium", "high", "max"}
@@ -291,10 +292,7 @@ def _build_thinking_kwargs(
     if thinking_policy == "qwen-enable-thinking":
         return {"enable_thinking": True}
     if thinking_policy in {
-        "doubao-completion-thinking-enabled",
-        "glm-completion-thinking-enabled",
-        "mimo-completion-thinking-enabled",
-        "kimi-completion-thinking-enabled",
+        GENERIC_COMPLETION_THINKING_ENABLED,
         "doubao-response-thinking-enabled",
         "mimo-anthropic-thinking-enabled",
     }:
@@ -323,14 +321,8 @@ def _build_fast_kwargs(thinking_policy: str) -> dict[str, Any]:
     if thinking_policy == "openai-response-reasoning-effort":
         return {"reasoning": {"effort": "none"}}
     if thinking_policy in {
-        "doubao-completion-thinking-enabled",
-        "doubao-completion-thinking-disabled",
-        "glm-completion-thinking-enabled",
-        "glm-completion-thinking-disabled",
-        "mimo-completion-thinking-enabled",
-        "mimo-completion-thinking-disabled",
-        "kimi-completion-thinking-enabled",
-        "kimi-completion-thinking-disabled",
+        GENERIC_COMPLETION_THINKING_ENABLED,
+        GENERIC_COMPLETION_THINKING_DISABLED,
         "doubao-response-thinking-enabled",
         "doubao-response-thinking-disabled",
         "mimo-anthropic-thinking-enabled",

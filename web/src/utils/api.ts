@@ -2832,6 +2832,12 @@ export const getPrivateTools = async (): Promise<PrivateTool[]> => {
  * Surface-scoped workspace file endpoint URLs exposed by the backend bootstrap.
  */
 export interface SurfaceFilesApiResponse {
+  /** Direct directory listing endpoint for workspace paths visible to the surface. */
+  directory_url: string;
+  /** UTF-8 file endpoint for the same surface session. */
+  text_url: string;
+  /** Binary file endpoint for uploads and authenticated downloads. */
+  blob_url: string;
   /** Tree listing endpoint for workspace paths visible to the surface. */
   tree_url: string;
   /** UTF-8 file content endpoint for the same surface session. */

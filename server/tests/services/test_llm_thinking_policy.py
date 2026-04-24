@@ -85,6 +85,27 @@ class ThinkingPolicyTestCase(unittest.TestCase):
         )
         self.assertEqual(kwargs, {"enable_thinking": False})
 
+    def test_generic_completion_thinking_uses_type_toggle(self) -> None:
+        """Merged completion providers should emit the shared thinking.type toggle."""
+        kwargs = thinking_policy.build_runtime_thinking_kwargs(
+            protocol="openai_completion_llm",
+            thinking_policy="generic-completion-thinking-enabled",
+            thinking_mode="thinking",
+        )
+
+        self.assertEqual(kwargs, {"thinking": {"type": "enabled"}})
+
+    def test_legacy_completion_policy_normalizes_to_generic_toggle(self) -> None:
+        """Stored legacy completion policies should normalize to the merged policy."""
+        policy, effort, budget = thinking_policy.validate_thinking_policy(
+            "openai_completion_llm",
+            "kimi-completion-thinking-disabled",
+        )
+
+        self.assertEqual(policy, "generic-completion-thinking-disabled")
+        self.assertIsNone(effort)
+        self.assertIsNone(budget)
+
     def test_openai_response_thinking_uses_reasoning_effort(self) -> None:
         """Thinking mode should preserve the configured Responses reasoning effort."""
         llm = OpenAIResponseLLM(

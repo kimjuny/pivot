@@ -152,6 +152,18 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             payload["workspace_logical_root"],
         )
         self.assertEqual(
+            payload["bootstrap"]["files_api"]["directory_url"],
+            f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/directory",
+        )
+        self.assertEqual(
+            payload["bootstrap"]["files_api"]["text_url"],
+            f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/text",
+        )
+        self.assertEqual(
+            payload["bootstrap"]["files_api"]["blob_url"],
+            f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/blob",
+        )
+        self.assertEqual(
             payload["bootstrap"]["files_api"]["tree_url"],
             f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/tree",
         )
@@ -269,6 +281,80 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertTrue(payload["preview"]["has_launch_recipe"])
         self.assertEqual(payload["active_preview_id"], preview_record.preview_id)
         self.assertEqual(len(payload["available_previews"]), 1)
+
+    def test_generic_workspace_file_contract_supports_directory_text_and_blob_flows(self) -> None:
+        """Surface sessions should expose reusable directory/text/blob file endpoints."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+        session_id = surface_payload["surface_session_id"]
+        surface_token = surface_payload["surface_token"]
+
+        write_text_response = self.client.put(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/text",
+            params={"surface_token": surface_token},
+            json={
+                "path": ".pivot/apps/canvas/scene.json",
+                "content": '{"version":1,"scene":{"nodes":[]}}',
+            },
+        )
+        self.assertEqual(write_text_response.status_code, 204)
+
+        directory_response = self.client.get(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/directory",
+            params={
+                "surface_token": surface_token,
+                "path": ".pivot/apps/canvas",
+            },
+        )
+        self.assertEqual(directory_response.status_code, 200)
+        self.assertEqual(
+            [(item["path"], item["kind"]) for item in directory_response.json()["entries"]],
+            [(".pivot/apps/canvas/scene.json", "file")],
+        )
+
+        read_text_response = self.client.get(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/text",
+            params={
+                "surface_token": surface_token,
+                "path": ".pivot/apps/canvas/scene.json",
+            },
+        )
+        self.assertEqual(read_text_response.status_code, 200)
+        self.assertEqual(
+            read_text_response.json()["content"],
+            '{"version":1,"scene":{"nodes":[]}}',
+        )
+
+        image_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7ZxV0AAAAASUVORK5CYII="
+        )
+        write_blob_response = self.client.post(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/blob",
+            params={"surface_token": surface_token},
+            data={"path": ".pivot/apps/canvas/assets/example.png"},
+            files={"file": ("example.png", image_bytes, "image/png")},
+        )
+        self.assertEqual(write_blob_response.status_code, 201)
+        self.assertEqual(write_blob_response.json()["mime_type"], "image/png")
+
+        read_blob_response = self.client.get(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/blob",
+            params={
+                "surface_token": surface_token,
+                "path": ".pivot/apps/canvas/assets/example.png",
+            },
+        )
+        self.assertEqual(read_blob_response.status_code, 200)
+        self.assertEqual(read_blob_response.content, image_bytes)
+        self.assertEqual(read_blob_response.headers["content-type"], "image/png")
 
     def test_reconnect_surface_preview_can_restore_recipe_from_earlier_session(self) -> None:
         """Surface reconnect should copy a historical preview recipe into the active session."""

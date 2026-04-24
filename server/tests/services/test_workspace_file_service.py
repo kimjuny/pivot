@@ -70,8 +70,8 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
         self.db.close()
         self.tmpdir.cleanup()
 
-    def test_write_and_list_tree_for_owned_workspace(self) -> None:
-        """Text file writes should materialize in the workspace tree listing."""
+    def test_write_and_list_directory_for_owned_workspace(self) -> None:
+        """Text file writes should materialize in direct directory listings."""
         workspace = WorkspaceService(self.db).create_workspace(
             agent_id=7,
             username="alice",
@@ -92,15 +92,24 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
             username="alice",
             path="src/App.tsx",
         )
-        entries = service.list_tree(
+        root_entries = service.list_directory(
             workspace_id=workspace.workspace_id,
             username="alice",
+        )
+        src_entries = service.list_directory(
+            workspace_id=workspace.workspace_id,
+            username="alice",
+            path="src",
         )
 
         self.assertEqual(contents, "export const App = () => null;\n")
         self.assertEqual(
-            [(entry.path, entry.kind) for entry in entries],
-            [("src", "directory"), ("src/App.tsx", "file")],
+            [(entry.path, entry.kind) for entry in root_entries],
+            [("src", "directory")],
+        )
+        self.assertEqual(
+            [(entry.path, entry.kind) for entry in src_entries],
+            [("src/App.tsx", "file")],
         )
 
     def test_rejects_paths_that_escape_workspace_root(self) -> None:
@@ -147,3 +156,36 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
         self.assertEqual(result.kind, "image")
         self.assertEqual(result.mime_type, "image/png")
         self.assertEqual(result.data_base64, base64.b64encode(image_bytes).decode("ascii"))
+
+    def test_write_and_read_binary_file(self) -> None:
+        """Binary workspace writes should preserve bytes and MIME metadata."""
+        workspace = WorkspaceService(self.db).create_workspace(
+            agent_id=7,
+            username="alice",
+            scope="session_private",
+            session_id="session-4",
+        )
+        service = WorkspaceFileService(self.db)
+        image_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7ZxV0AAAAASUVORK5CYII="
+        )
+
+        write_result = service.write_binary_file(
+            workspace_id=workspace.workspace_id,
+            username="alice",
+            path=".pivot/apps/canvas/assets/example.png",
+            content=image_bytes,
+            mime_type="image/png",
+        )
+        read_result = service.read_binary_file(
+            workspace_id=workspace.workspace_id,
+            username="alice",
+            path=".pivot/apps/canvas/assets/example.png",
+        )
+
+        self.assertEqual(write_result.path, ".pivot/apps/canvas/assets/example.png")
+        self.assertEqual(write_result.mime_type, "image/png")
+        self.assertEqual(write_result.size_bytes, len(image_bytes))
+        self.assertEqual(read_result.content, image_bytes)
+        self.assertEqual(read_result.mime_type, "image/png")
+        self.assertEqual(read_result.size_bytes, len(image_bytes))

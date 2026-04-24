@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   THINKING_PROVIDER_OPTIONS,
+  buildThinkingPolicyFromEditorState,
   formatThinkingPolicyLabel,
   getChatThinkingModes,
   getDefaultChatThinkingMode,
@@ -50,5 +51,41 @@ describe("llmThinking MiniMax fallback handling", () => {
 
     expect(getChatThinkingModes(llm)).toEqual(["auto", "fast", "thinking"]);
     expect(getDefaultChatThinkingMode(llm)).toBe("auto");
+  });
+
+  it("merges compatible completion providers into one Thinking option", () => {
+    expect(
+      THINKING_PROVIDER_OPTIONS.openai_completion_llm.map((option) => option.value),
+    ).toEqual(["auto", "qwen", "completion_toggle"]);
+  });
+
+  it("maps legacy completion thinking policies onto the merged editor state", () => {
+    expect(
+      getThinkingEditorStateFromPolicy(
+        "openai_completion_llm",
+        "glm-completion-thinking-disabled",
+      ),
+    ).toEqual({
+      provider: "completion_toggle",
+      detailValue: "disabled",
+      effortValue: "",
+      budgetTokens: null,
+    });
+  });
+
+  it("stores merged completion selections using the generic completion policy", () => {
+    expect(
+      buildThinkingPolicyFromEditorState(
+        "openai_completion_llm",
+        "completion_toggle",
+        "enabled",
+        "",
+        null,
+      ),
+    ).toEqual({
+      thinking_policy: "generic-completion-thinking-enabled",
+      thinking_effort: "",
+      thinking_budget_tokens: null,
+    });
   });
 });

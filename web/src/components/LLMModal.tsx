@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Info, Plus, Trash2 } from "@/lib/lucide";
 import {
   Dialog,
@@ -74,7 +74,7 @@ type LLMTabValue = 'general' | 'advanced';
 interface FormLabelProps {
   htmlFor?: string;
   label: string;
-  tooltip: string;
+  tooltip: ReactNode;
   required?: boolean;
 }
 
@@ -193,6 +193,50 @@ const CACHE_POLICY_OPTIONS: Record<string, { value: string; label: string }[]> =
   ],
 };
 
+function getThinkingTooltipContent(
+  protocol: string,
+  provider: ThinkingProvider,
+  detailValue: string,
+): ReactNode {
+  let payloadHint = 'Current payload: no thinking override. Pivot sends nothing for this LLM.';
+
+  if (protocol === 'openai_completion_llm') {
+    if (provider === 'qwen') {
+      payloadHint = 'Current payload: {"enable_thinking": true | false}';
+    } else if (provider === 'completion_toggle') {
+      payloadHint =
+        'Current payload: {"thinking": {"type": "enabled" | "disabled"}}';
+    }
+  } else if (protocol === 'openai_response_llm') {
+    if (provider === 'doubao') {
+      payloadHint =
+        'Current payload: {"thinking": {"type": "enabled" | "disabled"}}';
+    } else if (provider === 'chatgpt') {
+      payloadHint =
+        'Current payload: {"reasoning": {"effort": "none" | "low" | "medium" | "high" | "xhigh"}}';
+    }
+  } else if (protocol === 'anthropic_compatible') {
+    if (provider === 'mimo') {
+      payloadHint =
+        'Current payload: {"thinking": {"type": "enabled" | "disabled"}}';
+    } else if (provider === 'claude') {
+      payloadHint =
+        detailValue === 'adaptive'
+          ? 'Current payload: {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low" | "medium" | "high" | "max"}}'
+          : 'Current payload: {"thinking": {"type": "enabled", "budget_tokens": number}}';
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p>Choose a provider-specific thinking configuration. Auto means Pivot sends no thinking override for this LLM.</p>
+      <code className="block whitespace-pre-wrap break-all rounded bg-muted px-2 py-1 text-[11px]">
+        {payloadHint}
+      </code>
+    </div>
+  );
+}
+
 function FormLabel({ htmlFor, label, tooltip, required = false }: FormLabelProps) {
   return (
     <div className="flex items-center gap-1.5">
@@ -205,7 +249,7 @@ function FormLabel({ htmlFor, label, tooltip, required = false }: FormLabelProps
           <Info className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-xs">
-          <p>{tooltip}</p>
+          {typeof tooltip === 'string' ? <p>{tooltip}</p> : tooltip}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -650,7 +694,11 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                   <FormLabel
                     htmlFor="thinking_provider"
                     label="Thinking"
-                    tooltip="Choose a provider-specific thinking configuration. Auto means Pivot sends no thinking override for this LLM."
+                    tooltip={getThinkingTooltipContent(
+                      formData.protocol,
+                      currentThinkingState.provider,
+                      currentThinkingState.detailValue,
+                    )}
                   />
                   <Select
                     value={currentThinkingState.provider}
@@ -704,14 +752,14 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                       </div>
                     )}
 
-                    {['doubao', 'glm', 'mimo', 'kimi'].includes(
+                    {['completion_toggle', 'doubao', 'mimo'].includes(
                       currentThinkingState.provider,
                     ) && (
                       <div className="space-y-2">
                         <FormLabel
                           htmlFor="thinking_type"
                           label="Thinking Type"
-                          tooltip="Most provider-compatible thinking APIs use enabled or disabled as the protocol value."
+                          tooltip="Most provider-compatible thinking APIs use enabled or disabled as the protocol value, including Doubao, GLM, MiMo, Kimi, and DeepSeek on Completion."
                         />
                         <Select
                           value={currentThinkingState.detailValue}
