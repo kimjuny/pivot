@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import {
   AlertCircle,
   ExternalLink,
+  FileText,
+  FolderUp,
   Info,
   Loader2,
   Upload,
@@ -12,15 +14,20 @@ import type {
   BundleSkillImportFile,
   GitHubSkillCandidate,
   GitHubSkillProbeResponse,
+  SkillImportProgressEvent,
 } from '@/utils/api';
 import {
+  createSkillArchiveImportJob,
   importBundleSkill,
   importGitHubSkill,
+  importSkillArchive,
   probeGitHubSkills,
+  streamSkillArchiveImportJobEvents,
 } from '@/utils/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
+import { Field, FieldLabel } from '@/components/ui/field';
 import {
   Dialog,
   DialogContent,
@@ -44,6 +51,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Progress } from '@/components/ui/progress';
 
 type SkillVisibility = 'private' | 'shared';
 type GitHubRefType = 'branch' | 'tag';
@@ -62,6 +70,17 @@ interface RefOption {
 }
 
 const SKILL_ENTRY_FILENAMES = ['SKILL.md', 'skill.md', 'Skill.md'] as const;
+const MAX_DIRECTORY_BUNDLE_FILES = 100;
+
+function formatFileCount(count: number): string {
+  return count.toLocaleString();
+}
+
+function archiveSkillName(filename: string): string {
+  return sanitizeSkillName(
+    filename.replace(/\.(tar\.gz|tgz|zip|tar)$/i, '')
+  );
+}
 
 function sanitizeSkillName(raw: string): string {
   return raw
@@ -181,6 +200,8 @@ function SkillImportDialog({
   onImported,
 }: SkillImportDialogProps) {
   const bundleInputRef = useRef<HTMLInputElement | null>(null);
+  const archiveInputRef = useRef<HTMLInputElement | null>(null);
+  const archiveStreamAbortRef = useRef<AbortController | null>(null);
   const [activeTab, setActiveTab] = useState<ImportTabValue>('bundle');
 
   const [bundleName, setBundleName] = useState('');
@@ -189,6 +210,11 @@ function SkillImportDialog({
   const [bundleSkillName, setBundleSkillName] = useState('');
   const [bundleVisibility, setBundleVisibility] = useState<SkillVisibility>('private');
   const [bundleMessage, setBundleMessage] = useState<string | null>(null);
+  const [archiveFile, setArchiveFile] = useState<File | null>(null);
+  const [archiveSkillNameValue, setArchiveSkillNameValue] = useState('');
+  const [archiveVisibility, setArchiveVisibility] = useState<SkillVisibility>('private');
+  const [archiveMessage, setArchiveMessage] = useState<string | null>(null);
+  const [archiveProgress, setArchiveProgress] = useState<SkillImportProgressEvent | null>(null);
 
   const [githubUrl, setGitHubUrl] = useState('');
   const [probeResult, setProbeResult] = useState<GitHubSkillProbeResponse | null>(null);
@@ -210,13 +236,18 @@ function SkillImportDialog({
     [probeResult, selectedDirectoryName]
   );
   const trimmedBundleSkillName = bundleSkillName.trim();
+  const trimmedArchiveSkillName = archiveSkillNameValue.trim();
   const trimmedGitHubSkillName = githubSkillName.trim();
   const bundleNameConflict =
     trimmedBundleSkillName.length > 0 && existingSkillNames.has(trimmedBundleSkillName);
+  const archiveNameConflict =
+    trimmedArchiveSkillName.length > 0 && existingSkillNames.has(trimmedArchiveSkillName);
   const githubNameConflict =
     trimmedGitHubSkillName.length > 0 && existingSkillNames.has(trimmedGitHubSkillName);
 
   const resetState = useCallback(() => {
+    archiveStreamAbortRef.current?.abort();
+    archiveStreamAbortRef.current = null;
     setActiveTab('bundle');
     setBundleName('');
     setBundleFiles([]);
@@ -224,6 +255,11 @@ function SkillImportDialog({
     setBundleSkillName('');
     setBundleVisibility('private');
     setBundleMessage(null);
+    setArchiveFile(null);
+    setArchiveSkillNameValue('');
+    setArchiveVisibility('private');
+    setArchiveMessage(null);
+    setArchiveProgress(null);
     setGitHubUrl('');
     setProbeResult(null);
     setSelectedRefKey(null);
@@ -282,12 +318,21 @@ function SkillImportDialog({
     }
 
     try {
+      if (fileList.length > MAX_DIRECTORY_BUNDLE_FILES) {
+        throw new Error(
+          `This folder contains ${formatFileCount(fileList.length)} files. Compress large skills as .zip, .tar, .tar.gz, or .tgz before importing.`
+        );
+      }
       const selection = parseBundleSelection(fileList);
       setBundleName(selection.bundleName);
       setBundleFiles(selection.files);
       setBundleEntryFilename(selection.entryFilename);
       setBundleSkillName(sanitizeSkillName(selection.bundleName));
       setBundleMessage(null);
+      setArchiveFile(null);
+      setArchiveSkillNameValue('');
+      setArchiveMessage(null);
+      setArchiveProgress(null);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Failed to read the selected folder.';
@@ -300,6 +345,35 @@ function SkillImportDialog({
     } finally {
       event.target.value = '';
     }
+  }, []);
+
+  const handleArchiveSelection = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) {
+      return;
+    }
+
+    const isSupportedArchive = /\.(zip|tar|tar\.gz|tgz)$/i.test(selectedFile.name);
+    if (!isSupportedArchive) {
+      const message = 'Choose a .zip, .tar, .tar.gz, or .tgz skill archive.';
+      setArchiveFile(null);
+      setArchiveSkillNameValue('');
+      setArchiveMessage(message);
+      toast.error(message);
+      event.target.value = '';
+      return;
+    }
+
+    setArchiveFile(selectedFile);
+    setArchiveSkillNameValue(archiveSkillName(selectedFile.name));
+    setArchiveMessage(null);
+    setArchiveProgress(null);
+    setBundleName('');
+    setBundleFiles([]);
+    setBundleEntryFilename('');
+    setBundleSkillName('');
+    setBundleMessage(null);
+    event.target.value = '';
   }, []);
 
   const handleProbe = useCallback(async (refName?: string | null) => {
@@ -347,6 +421,79 @@ function SkillImportDialog({
 
   const handleImport = useCallback(async () => {
     if (activeTab === 'bundle') {
+      if (archiveFile) {
+        if (!trimmedArchiveSkillName) {
+          toast.error('Skill name is required');
+          return;
+        }
+        if (archiveNameConflict) {
+          toast.error('Skill name already exists. Choose a different name.');
+          return;
+        }
+
+        setIsImporting(true);
+        setArchiveProgress({
+          event_id: 0,
+          job_id: '',
+          stage: 'preparing',
+          label: 'Preparing archive import',
+          percent: 0,
+          status: 'running',
+          detail: null,
+          metadata: null,
+          timestamp: new Date().toISOString(),
+        });
+
+        const streamAbortController = new AbortController();
+        archiveStreamAbortRef.current = streamAbortController;
+
+        try {
+          const job = await createSkillArchiveImportJob();
+          const streamPromise = streamSkillArchiveImportJobEvents(
+            job.job_id,
+            setArchiveProgress,
+            streamAbortController.signal,
+          ).catch((error) => {
+            if (error instanceof Error && error.name === 'AbortError') {
+              return;
+            }
+            console.error('Archive import progress stream failed:', error);
+          });
+
+          await importSkillArchive({
+            jobId: job.job_id,
+            kind: archiveVisibility,
+            skillName: trimmedArchiveSkillName,
+            archive: archiveFile,
+          });
+          await streamPromise;
+          toast.success('Skill imported and available immediately.');
+          await onImported();
+          onOpenChange(false);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to import skill';
+          setArchiveProgress((current) => ({
+            event_id: current?.event_id ?? 0,
+            job_id: current?.job_id ?? '',
+            stage: 'failed',
+            label: 'Import failed',
+            percent: 100,
+            status: 'failed',
+            detail: message,
+            metadata: null,
+            timestamp: new Date().toISOString(),
+          }));
+          toast.error(message);
+        } finally {
+          streamAbortController.abort();
+          if (archiveStreamAbortRef.current === streamAbortController) {
+            archiveStreamAbortRef.current = null;
+          }
+          setIsImporting(false);
+        }
+        return;
+      }
+
       if (!bundleName || bundleFiles.length === 0 || !bundleEntryFilename) {
         toast.error('Choose a local skill folder before importing');
         return;
@@ -418,6 +565,9 @@ function SkillImportDialog({
     }
   }, [
     activeTab,
+    archiveFile,
+    archiveNameConflict,
+    archiveVisibility,
     bundleEntryFilename,
     bundleFiles,
     bundleName,
@@ -431,18 +581,23 @@ function SkillImportDialog({
     onOpenChange,
     probeResult,
     selectedCandidate,
+    trimmedArchiveSkillName,
     trimmedBundleSkillName,
     trimmedGitHubSkillName,
   ]);
 
   const importDisabled =
     activeTab === 'bundle'
-      ? isImporting ||
-        !bundleName ||
-        bundleFiles.length === 0 ||
-        !bundleEntryFilename ||
-        !trimmedBundleSkillName ||
-        bundleNameConflict
+      ? archiveFile
+        ? isImporting ||
+          !trimmedArchiveSkillName ||
+          archiveNameConflict
+        : isImporting ||
+          !bundleName ||
+          bundleFiles.length === 0 ||
+          !bundleEntryFilename ||
+          !trimmedBundleSkillName ||
+          bundleNameConflict
       : isImporting ||
         isProbing ||
         !probeResult ||
@@ -470,24 +625,122 @@ function SkillImportDialog({
             </TabsList>
 
             <TabsContent value="bundle" className="min-h-0 flex-1 space-y-4 pt-4">
-              <div className="space-y-3 rounded-lg border border-dashed border-border p-4">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">Local Skill Folder</p>
-                    <p className="text-sm text-muted-foreground">
-                      Choose one folder that already contains a top-level skill entry file.
-                    </p>
+              <div className="space-y-4 rounded-lg border border-dashed border-border p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">Local Skill Bundle</p>
+                  <p className="text-sm text-muted-foreground">
+                    Import a skill directory that contains a top-level skill entry file.
+                  </p>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => bundleInputRef.current?.click()}
+                        disabled={isImporting}
+                        className={`h-auto justify-start gap-3 whitespace-normal rounded-lg p-4 text-left ${
+                          bundleName ? 'border-primary bg-primary/5' : ''
+                        }`}
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+                          <FolderUp className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 space-y-1">
+                          <span className="block text-sm font-medium leading-none text-foreground">
+                            Choose Folder
+                          </span>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            Small skills, up to {MAX_DIRECTORY_BUNDLE_FILES} files.
+                          </span>
+                        </span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      <p>
+                        Use folder import only for small skills with {MAX_DIRECTORY_BUNDLE_FILES} files or fewer.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip delayDuration={1000}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => archiveInputRef.current?.click()}
+                        disabled={isImporting}
+                        className={`h-auto justify-start gap-3 whitespace-normal rounded-lg p-4 text-left ${
+                          archiveFile ? 'border-primary bg-primary/5' : ''
+                        }`}
+                      >
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-background">
+                          <FileText className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 space-y-1">
+                          <span className="block text-sm font-medium leading-none text-foreground">
+                            Choose Archive
+                          </span>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            .zip, .tar, .tar.gz, or .tgz.
+                          </span>
+                        </span>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      <p>
+                        Use archive import for larger skills packaged as .zip, .tar, .tar.gz, or .tgz.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+
+                {(bundleName || archiveFile) && (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-3">
+                    {bundleName ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{bundleName}</span>
+                          <Badge variant="secondary">{bundleFiles.length} files</Badge>
+                          <Badge variant="outline">{bundleEntryFilename}</Badge>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          The backend will keep the full directory tree when importing.
+                        </p>
+                      </>
+                    ) : null}
+                    {archiveFile ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{archiveFile.name}</span>
+                          <Badge variant="secondary">
+                            {Math.max(1, Math.round(archiveFile.size / 1024)).toLocaleString()} KB
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          The backend will extract the archive, validate the skill entry, and install the full tree.
+                        </p>
+                      </>
+                    ) : null}
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => bundleInputRef.current?.click()}
-                    disabled={isImporting}
-                    className="gap-1.5"
-                  >
-                    <Upload className="h-4 w-4" />
-                    Choose Folder
-                  </Button>
+                )}
+
+                <div className="grid gap-2">
+                  {bundleMessage && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{bundleMessage}</span>
+                    </div>
+                  )}
+
+                  {archiveMessage && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{archiveMessage}</span>
+                    </div>
+                  )}
                 </div>
 
                 <input
@@ -500,29 +753,16 @@ function SkillImportDialog({
                   onChange={handleBundleSelection}
                 />
 
-                {bundleName ? (
-                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{bundleName}</span>
-                      <Badge variant="secondary">{bundleFiles.length} files</Badge>
-                      <Badge variant="outline">{bundleEntryFilename}</Badge>
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      The folder name becomes the default skill name, and the backend
-                      will keep the full directory tree when importing.
-                    </p>
-                  </div>
-                ) : null}
-
-                {bundleMessage && (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{bundleMessage}</span>
-                  </div>
-                )}
+                <input
+                  ref={archiveInputRef}
+                  type="file"
+                  accept=".zip,.tar,.tar.gz,.tgz"
+                  className="hidden"
+                  onChange={handleArchiveSelection}
+                />
               </div>
 
-              {bundleName && (
+              {(bundleName || archiveFile) && (
                 <div className="grid items-start gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <div className="flex min-h-6 items-center gap-1.5">
@@ -539,8 +779,14 @@ function SkillImportDialog({
                       </Tooltip>
                     </div>
                     <Select
-                      value={bundleVisibility}
-                      onValueChange={(value) => setBundleVisibility(value as SkillVisibility)}
+                      value={archiveFile ? archiveVisibility : bundleVisibility}
+                      onValueChange={(value) => {
+                        if (archiveFile) {
+                          setArchiveVisibility(value as SkillVisibility);
+                        } else {
+                          setBundleVisibility(value as SkillVisibility);
+                        }
+                      }}
                       disabled={isImporting}
                     >
                       <SelectTrigger id="bundle-import-visibility">
@@ -559,20 +805,45 @@ function SkillImportDialog({
                     </div>
                     <Input
                       id="bundle-import-name"
-                      value={bundleSkillName}
-                      onChange={(event) => setBundleSkillName(event.target.value)}
+                      value={archiveFile ? archiveSkillNameValue : bundleSkillName}
+                      onChange={(event) => {
+                        if (archiveFile) {
+                          setArchiveSkillNameValue(event.target.value);
+                        } else {
+                          setBundleSkillName(event.target.value);
+                        }
+                      }}
                       placeholder="unique_skill_name"
                       autoComplete="off"
-                      aria-invalid={bundleNameConflict}
-                      className={bundleNameConflict ? 'border-destructive focus-visible:ring-destructive' : ''}
+                      aria-invalid={archiveFile ? archiveNameConflict : bundleNameConflict}
+                      className={
+                        (archiveFile ? archiveNameConflict : bundleNameConflict)
+                          ? 'border-destructive focus-visible:ring-destructive'
+                          : ''
+                      }
                     />
-                    {bundleNameConflict && (
+                    {(archiveFile ? archiveNameConflict : bundleNameConflict) && (
                       <p className="text-xs text-destructive">
                         This name already exists globally. Pick a different name before importing.
                       </p>
                     )}
                   </div>
                 </div>
+              )}
+
+              {archiveProgress && (
+                <Field className="rounded-lg border border-border bg-muted/30 px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <FieldLabel>{archiveProgress.label}</FieldLabel>
+                    <span className="text-sm text-muted-foreground">
+                      {Math.round(archiveProgress.percent)}%
+                    </span>
+                  </div>
+                  <Progress value={archiveProgress.percent} />
+                  {archiveProgress.detail && (
+                    <p className="text-sm text-muted-foreground">{archiveProgress.detail}</p>
+                  )}
+                </Field>
               )}
             </TabsContent>
 

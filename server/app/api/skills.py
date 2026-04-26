@@ -1,14 +1,23 @@
 """API endpoints for markdown skill management."""
 
+import asyncio
+import json
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, Literal
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.config import get_settings
+from app.db.session import managed_session
 from app.models.user import User
+from app.services.skill_import_progress_service import (
+    get_skill_import_progress_service,
+)
 from app.services.skill_service import (
     BundleImportFile,
     delete_user_skill,
+    install_archive_skill,
     install_bundle_skill,
     install_github_skill,
     list_private_skills,
@@ -19,8 +28,10 @@ from app.services.skill_service import (
     upsert_user_skill,
 )
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session
+from sqlmodel import Session, select
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 router = APIRouter()
@@ -58,6 +69,12 @@ class BundleSkillImportRequest(BaseModel):
     bundle_name: str
     kind: Literal["private", "shared"]
     skill_name: str
+
+
+class SkillArchiveImportJobResponse(BaseModel):
+    """Response returned after creating a skill archive import job."""
+
+    job_id: str
 
 
 @router.get("/skills/shared")
@@ -160,6 +177,191 @@ async def import_bundle_skill_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    return {"status": "imported", "metadata": metadata}
+
+
+@router.post(
+    "/skills/import/archive/jobs",
+    response_model=SkillArchiveImportJobResponse,
+)
+async def create_archive_import_job(
+    current_user: User = Depends(get_current_user),
+) -> SkillArchiveImportJobResponse:
+    """Create one SSE-observable archive import job."""
+    job = get_skill_import_progress_service().create_job(
+        username=current_user.username,
+    )
+    return SkillArchiveImportJobResponse(job_id=job.job_id)
+
+
+@router.get("/skills/import/archive/jobs/{job_id}/events/stream")
+async def stream_archive_import_job_events(
+    job_id: str,
+    raw_request: Request,
+    after_id: int = 0,
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream progress events for one local skill archive import job."""
+    progress_service = get_skill_import_progress_service()
+    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Skill import job not found.")
+
+    async def event_generator():
+        cursor = after_id
+        subscriber = await progress_service.subscribe(
+            job_id=job_id,
+            username=current_user.username,
+        )
+        try:
+            for payload in progress_service.list_events(
+                job_id=job_id,
+                username=current_user.username,
+                after_id=cursor,
+            ):
+                event_id = payload.get("event_id")
+                if isinstance(event_id, int):
+                    cursor = max(cursor, event_id)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                if payload.get("status") in {"complete", "failed"}:
+                    return
+
+            while True:
+                if await raw_request.is_disconnected():
+                    break
+
+                try:
+                    payload = await asyncio.wait_for(
+                        subscriber.queue.get(),
+                        timeout=15.0,
+                    )
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+
+                event_id = payload.get("event_id")
+                if isinstance(event_id, int) and event_id <= cursor:
+                    continue
+                if isinstance(event_id, int):
+                    cursor = event_id
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                if payload.get("status") in {"complete", "failed"}:
+                    break
+        finally:
+            await progress_service.unsubscribe(
+                job_id=job_id,
+                subscriber=subscriber,
+            )
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/skills/import/archive/jobs/{job_id}")
+async def import_archive_skill_endpoint(
+    job_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Install one skill archive uploaded from the local machine."""
+    progress_service = get_skill_import_progress_service()
+    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Skill import job not found.")
+    if job.completed:
+        raise HTTPException(status_code=409, detail="Skill import job is already done.")
+
+    form_data = await request.form(max_files=1, max_fields=4)
+    upload = form_data.get("archive")
+    if not isinstance(upload, StarletteUploadFile):
+        raise HTTPException(status_code=422, detail="Archive file is required.")
+
+    kind = form_data.get("kind")
+    skill_name = form_data.get("skill_name")
+    if not isinstance(kind, str) or kind not in {"private", "shared"}:
+        raise HTTPException(status_code=422, detail="Invalid archive import fields.")
+    if not isinstance(skill_name, str):
+        raise HTTPException(status_code=422, detail="Invalid archive import fields.")
+
+    archive_filename = upload.filename or "skill-archive"
+    progress_service.publish(
+        job_id,
+        stage="upload_received",
+        label="Upload received",
+        percent=8,
+    )
+
+    with NamedTemporaryFile(
+        suffix=Path(archive_filename).suffix, delete=False
+    ) as handle:
+        archive_path = Path(handle.name)
+        while chunk := await upload.read(1024 * 1024):
+            handle.write(chunk)
+    await upload.close()
+
+    def publish_progress(
+        stage: str,
+        label: str,
+        percent: int,
+        detail: str | None,
+    ) -> None:
+        progress_service.publish(
+            job_id,
+            stage=stage,
+            label=label,
+            percent=percent,
+            detail=detail,
+        )
+
+    def run_import() -> dict[str, Any]:
+        with managed_session() as worker_db:
+            worker_user = worker_db.exec(
+                select(User).where(User.username == current_user.username)
+            ).first()
+            if worker_user is None:
+                raise ValueError(f"User '{current_user.username}' not found.")
+            return install_archive_skill(
+                worker_db,
+                worker_user,
+                archive_path=archive_path,
+                archive_filename=archive_filename,
+                kind=kind,
+                skill_name=skill_name,
+                progress=publish_progress,
+            )
+
+    try:
+        metadata = await run_in_threadpool(run_import)
+    except PermissionError as exc:
+        progress_service.publish(
+            job_id,
+            stage="failed",
+            label="Import failed",
+            percent=100,
+            status="failed",
+            detail=str(exc),
+        )
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        progress_service.publish(
+            job_id,
+            stage="failed",
+            label="Import failed",
+            percent=100,
+            status="failed",
+            detail=str(exc),
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+    progress_service.publish(
+        job_id,
+        stage="complete",
+        label="Skill imported",
+        percent=100,
+        status="complete",
+        metadata=metadata,
+    )
     return {"status": "imported", "metadata": metadata}
 
 

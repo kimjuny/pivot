@@ -40,51 +40,31 @@ def create_preview_endpoint(
     path: str = "/",
     cwd: str = ".",
 ) -> dict[str, object]:
-    """Create or reconnect one web preview endpoint for the current chat session.
+    """Create/reconnect a web preview for this chat session.
 
-    This tool is intentionally stronger than a plain port registry. It records
-    a reusable launch recipe, runs that recipe now, waits for the preview to
-    become reachable, and then returns the Pivot-owned preview URL.
+    ``start_server`` is replayed now and on reconnect, so it must be idempotent,
+    start the server in the background, and return quickly. Prefer a small
+    script or detached command such as
+    ``nohup npm run dev -- --host 0.0.0.0 > /tmp/preview.log 2>&1 &``.
 
-    ``start_server`` must be safe to run more than once. The easiest pattern is
-    to write an idempotent shell script under ``/workspace`` and call it here.
-
-    The launched preview server must listen on ``0.0.0.0`` inside the sandbox.
-    Binding only to ``localhost`` or ``127.0.0.1`` is not reachable through
-    Pivot's preview proxy.
-
-    The tool does not expose raw ports to the UI. Instead it creates a
-    session-scoped preview endpoint and returns a host-facing proxy URL that
-    Pivot can open inside ``workspace-editor`` web view.
+    The preview server must bind ``0.0.0.0`` inside the sandbox; ``localhost``
+    and ``127.0.0.1`` are not reachable through the proxy.
 
     Args:
-        preview_name (required, str): Operator-facing preview label shown in the
-            surface preview picker.
-        start_server (required, str): Idempotent shell command that ensures the
-            preview server is running for this workspace.
+        preview_name (required, str): Label shown in the preview picker.
+        start_server (required, str): Idempotent detached shell command that
+            ensures the server is running and exits promptly.
         port (required, int): Sandbox-local HTTP port to expose.
-        path (optional, str): Initial HTTP path under that port. Defaults to
-            ``/``.
-        cwd (optional, str): Workspace-relative or absolute ``/workspace`` path
-            used before running ``start_server``. Defaults to ``.``.
+        path (optional, str): Initial HTTP path. Defaults to ``/``.
+        cwd (optional, str): Workspace-relative or absolute ``/workspace`` directory for
+            ``start_server``. Defaults to ``.``.
 
     Returns:
-        Structured preview metadata plus a UI intent that can open
-        ``workspace-editor`` in web view.
+        Preview metadata, proxy URL, and UI intent.
 
     Raises:
         RuntimeError: If tool execution context is missing or not session-backed.
         ValueError: If preview validation fails.
-
-    Example:
-        Use an idempotent script that can be replayed later:
-
-        ``create_preview_endpoint(
-            preview_name="Landing Page",
-            start_server="bash /workspace/.pivot/previews/landing-page.sh",
-            port=3000,
-            cwd="apps/landing-page",
-        )``
     """
     context = get_current_tool_execution_context()
     if context is None:

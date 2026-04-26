@@ -2585,6 +2585,21 @@ export interface BundleSkillImportFile {
 }
 
 /**
+ * Progress event emitted by a skill archive import job.
+ */
+export interface SkillImportProgressEvent {
+  event_id: number;
+  job_id: string;
+  stage: string;
+  label: string;
+  percent: number;
+  status: 'running' | 'complete' | 'failed';
+  detail: string | null;
+  metadata: (SharedSkill | UserSkill) | null;
+  timestamp: string;
+}
+
+/**
  * Shared skill metadata returned by the server.
  */
 export interface SharedSkill {
@@ -2808,6 +2823,122 @@ export const importBundleSkill = async (payload: {
     console.error(`Bundle import failed for ${payload.bundleName}:`, error);
     throw error;
   }
+};
+
+/**
+ * Create one observable archive import job.
+ */
+export const createSkillArchiveImportJob = async (): Promise<{ job_id: string }> => {
+  return apiRequest('/skills/import/archive/jobs', {
+    method: 'POST',
+  }) as Promise<{ job_id: string }>;
+};
+
+function parseSkillImportProgressEvent(value: unknown): SkillImportProgressEvent | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const event = value as Partial<SkillImportProgressEvent>;
+  if (
+    typeof event.event_id !== 'number' ||
+    typeof event.job_id !== 'string' ||
+    typeof event.stage !== 'string' ||
+    typeof event.label !== 'string' ||
+    typeof event.percent !== 'number' ||
+    typeof event.status !== 'string'
+  ) {
+    return null;
+  }
+  if (!['running', 'complete', 'failed'].includes(event.status)) {
+    return null;
+  }
+  return event as SkillImportProgressEvent;
+}
+
+/**
+ * Stream progress events for one archive import job.
+ */
+export const streamSkillArchiveImportJobEvents = async (
+  jobId: string,
+  onEvent: (event: SkillImportProgressEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> => {
+  const response = await httpClient(
+    `${getApiBaseUrl()}/skills/import/archive/jobs/${jobId}/events/stream`,
+    {
+      headers: getAuthorizedHeaders(),
+      signal,
+    },
+  );
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
+  if (!response.ok || !response.body) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim() || line.startsWith(':') || !line.startsWith('data: ')) {
+        continue;
+      }
+      const parsed = JSON.parse(line.slice(6).trim()) as unknown;
+      const event = parseSkillImportProgressEvent(parsed);
+      if (event) {
+        onEvent(event);
+      }
+    }
+  }
+};
+
+/**
+ * Upload one compressed skill archive into an existing import job.
+ */
+export const importSkillArchive = async (payload: {
+  jobId: string;
+  kind: 'private' | 'shared';
+  skillName: string;
+  archive: File;
+}): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
+  const formData = new FormData();
+  formData.append('archive', payload.archive);
+  formData.append('kind', payload.kind);
+  formData.append('skill_name', payload.skillName);
+
+  const response = await httpClient(
+    `${getApiBaseUrl()}/skills/import/archive/jobs/${payload.jobId}`,
+    {
+      method: 'POST',
+      headers: getAuthorizedHeaders(),
+      body: formData,
+    },
+  );
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
+  if (!response.ok) {
+    const errorData = await response.json() as { detail?: string };
+    throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+  }
+
+  return await response.json() as { status: string; metadata: SharedSkill | UserSkill };
 };
 
 /**

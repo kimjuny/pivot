@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 import shutil
+import tarfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
@@ -31,6 +33,7 @@ from app.services.skill_artifact_storage_service import (
 )
 from app.services.workspace_service import workspace_root
 from app.utils.logging_config import get_logger
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 if TYPE_CHECKING:
@@ -59,6 +62,9 @@ class BundleImportFile:
 
     relative_path: str
     content: bytes
+
+
+ImportProgressCallback = Callable[[str, str, int, str | None], None]
 
 
 @dataclass(frozen=True)
@@ -277,6 +283,19 @@ def _detect_skill_entry_filename(skill_dir: Path, *, label: str) -> str:
 
     expected_names = ", ".join(SKILL_MARKDOWN_FILENAMES)
     raise ValueError(f"{label} must contain one of {expected_names} at its top level.")
+
+
+def _emit_import_progress(
+    progress: ImportProgressCallback | None,
+    *,
+    stage: str,
+    label: str,
+    percent: int,
+    detail: str | None = None,
+) -> None:
+    """Send one optional import progress update."""
+    if progress is not None:
+        progress(stage, label, percent, detail)
 
 
 def _replace_directory_contents(source_dir: Path, target_dir: Path) -> None:
@@ -1221,6 +1240,76 @@ def install_bundle_skill(
     return metadata
 
 
+def install_archive_skill(
+    session: Session,
+    current_user: User,
+    *,
+    archive_path: Path,
+    archive_filename: str,
+    kind: str,
+    skill_name: str,
+    progress: ImportProgressCallback | None = None,
+) -> dict[str, Any]:
+    """Install one skill from an uploaded zip or tar archive."""
+    _emit_import_progress(
+        progress,
+        stage="validating",
+        label="Validating archive",
+        percent=12,
+    )
+    _validate_skill_name(skill_name)
+    if kind not in _ALLOWED_KINDS:
+        raise ValueError(f"Invalid skill kind: {kind}")
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before importing skills.")
+
+    sync_skill_registry(session)
+    existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if existing is not None:
+        raise ValueError(f"Skill name '{skill_name}' already exists.")
+
+    with TemporaryDirectory(prefix="pivot-skill-archive-") as tmp_root:
+        unpacked_dir = Path(tmp_root) / "archive"
+        _emit_import_progress(
+            progress,
+            stage="extracting",
+            label="Extracting archive",
+            percent=28,
+        )
+        matched_files = _extract_uploaded_skill_archive(
+            archive_path=archive_path,
+            archive_filename=archive_filename,
+            destination=unpacked_dir,
+        )
+        _emit_import_progress(
+            progress,
+            stage="locating_entry",
+            label="Locating skill entry",
+            percent=45,
+            detail=f"{matched_files} files extracted",
+        )
+        extracted_dir, entry_filename = _archived_skill_root(unpacked_dir)
+        metadata = _install_skill_from_directory(
+            session,
+            current_user,
+            kind=kind,
+            skill_name=skill_name,
+            source="bundle",
+            extracted_dir=extracted_dir,
+            entry_filename=entry_filename,
+            progress=progress,
+        )
+
+    logger.info(
+        "Imported %s skill '%s' from local archive '%s' for user '%s'",
+        kind,
+        skill_name,
+        archive_filename,
+        current_user.username,
+    )
+    return metadata
+
+
 def _extract_skill_directory_from_archive(
     *,
     archive_bytes: bytes,
@@ -1264,6 +1353,119 @@ def _extract_skill_directory_from_archive(
         raise ValueError(
             f"Repository archive does not contain skills/{remote_directory_name}/."
         )
+
+
+def _safe_archive_parts(raw_name: str) -> tuple[str, ...]:
+    """Return safe archive path parts or raise for traversal attempts."""
+    normalized = raw_name.strip().replace("\\", "/")
+    parts = PurePosixPath(normalized).parts
+    if not parts:
+        raise ValueError("Archive contains a file with an empty path.")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("Archive contains an unsafe file path.")
+    if normalized.startswith("/"):
+        raise ValueError("Archive contains an absolute file path.")
+    return tuple(parts)
+
+
+def _extract_uploaded_zip_archive(*, archive_path: Path, destination: Path) -> int:
+    """Extract a user-uploaded zip archive into a destination directory."""
+    matched_files = 0
+    with ZipFile(archive_path) as archive:
+        for member in archive.infolist():
+            parts = _safe_archive_parts(member.filename)
+            target_path = destination.joinpath(*parts)
+            if member.is_dir():
+                target_path.mkdir(parents=True, exist_ok=True)
+                continue
+
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target_path.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            matched_files += 1
+    return matched_files
+
+
+def _extract_uploaded_tar_archive(*, archive_path: Path, destination: Path) -> int:
+    """Extract a user-uploaded tar archive into a destination directory."""
+    matched_files = 0
+    with tarfile.open(archive_path) as archive:
+        for member in archive.getmembers():
+            parts = _safe_archive_parts(member.name)
+            target_path = destination.joinpath(*parts)
+            if member.isdir():
+                target_path.mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                raise ValueError("Archive contains unsupported link or special file.")
+
+            source = archive.extractfile(member)
+            if source is None:
+                raise ValueError("Archive contains an unreadable file.")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with source, target_path.open("wb") as output:
+                shutil.copyfileobj(source, output)
+            matched_files += 1
+    return matched_files
+
+
+def _extract_uploaded_skill_archive(
+    *,
+    archive_path: Path,
+    archive_filename: str,
+    destination: Path,
+) -> int:
+    """Extract one uploaded skill archive into a temporary directory."""
+    filename = archive_filename.lower()
+    destination.mkdir(parents=True, exist_ok=True)
+    if filename.endswith(".zip"):
+        matched_files = _extract_uploaded_zip_archive(
+            archive_path=archive_path,
+            destination=destination,
+        )
+    elif filename.endswith((".tar", ".tar.gz", ".tgz")):
+        matched_files = _extract_uploaded_tar_archive(
+            archive_path=archive_path,
+            destination=destination,
+        )
+    else:
+        raise ValueError("Skill archive must be a .zip, .tar, .tar.gz, or .tgz file.")
+
+    if matched_files == 0:
+        raise ValueError("Skill archive does not contain any files.")
+    return matched_files
+
+
+def _archived_skill_root(unpacked_dir: Path) -> tuple[Path, str]:
+    """Find the skill directory inside an extracted user archive."""
+    try:
+        entry_filename = _detect_skill_entry_filename(
+            unpacked_dir,
+            label="Skill archive",
+        )
+        return unpacked_dir, entry_filename
+    except ValueError:
+        pass
+
+    candidates: list[tuple[Path, str]] = []
+    for item in sorted(unpacked_dir.iterdir()):
+        if not item.is_dir() or item.name in {"__MACOSX"} or item.name.startswith("."):
+            continue
+        try:
+            entry_filename = _detect_skill_entry_filename(
+                item,
+                label=f"Archive folder '{item.name}'",
+            )
+        except ValueError:
+            continue
+        candidates.append((item, entry_filename))
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        expected_names = ", ".join(SKILL_MARKDOWN_FILENAMES)
+        raise ValueError(f"Skill archive must contain {expected_names} at its root.")
+    raise ValueError("Skill archive contains multiple top-level skill folders.")
 
 
 def _extract_bundle_skill_directory(
@@ -1364,6 +1566,38 @@ def _create_skill_row(
     )
 
 
+def _update_skill_row_from_discovery(
+    row: Skill,
+    *,
+    discovered: _DiscoveredSkill,
+    source: str,
+    stored_artifact: StoredSkillArtifact,
+    github_repo_url: str | None = None,
+    github_ref: str | None = None,
+    github_ref_type: str | None = None,
+    github_skill_path: str | None = None,
+) -> Skill:
+    """Update an existing row from a newly installed skill directory."""
+    row.name = discovered.name
+    row.description = discovered.description
+    row.kind = discovered.kind
+    row.source = source
+    row.creator_id = discovered.creator_id
+    row.location = discovered.location
+    row.artifact_storage_backend = stored_artifact.storage_backend
+    row.artifact_key = stored_artifact.artifact_key
+    row.artifact_digest = stored_artifact.artifact_digest
+    row.artifact_size_bytes = stored_artifact.size_bytes
+    row.filename = discovered.filename
+    row.md5 = discovered.md5
+    row.github_repo_url = github_repo_url
+    row.github_ref = github_ref
+    row.github_ref_type = github_ref_type
+    row.github_skill_path = github_skill_path
+    row.updated_at = datetime.now(UTC)
+    return row
+
+
 def _install_skill_from_directory(
     session: Session,
     current_user: User,
@@ -1377,6 +1611,7 @@ def _install_skill_from_directory(
     github_ref: str | None = None,
     github_ref_type: str | None = None,
     github_skill_path: str | None = None,
+    progress: ImportProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Install a prepared skill directory into the user's workspace."""
     if current_user.id is None:
@@ -1395,14 +1630,38 @@ def _install_skill_from_directory(
         skill_markdown_path.read_text(encoding="utf-8"),
         skill_name,
     )
+    _emit_import_progress(
+        progress,
+        stage="rewriting",
+        label="Normalizing skill metadata",
+        percent=58,
+    )
     skill_markdown_path.write_text(rewritten_source, encoding="utf-8")
+    _emit_import_progress(
+        progress,
+        stage="copying",
+        label="Writing skill directory",
+        percent=68,
+    )
     shutil.copytree(extracted_dir, target_dir)
+    _emit_import_progress(
+        progress,
+        stage="saving_artifact",
+        label="Saving skill artifact",
+        percent=82,
+    )
     stored_artifact = SkillArtifactStorageService().store_directory(
         source_dir=target_dir,
         username=current_user.username,
         skill_name=skill_name,
     )
 
+    _emit_import_progress(
+        progress,
+        stage="registering",
+        label="Registering skill",
+        percent=94,
+    )
     discovered = _discover_skill(
         base_dir=base_dir,
         skill_path=target_dir / entry_filename,
@@ -1411,19 +1670,40 @@ def _install_skill_from_directory(
         creator=current_user,
     )
     timestamp = datetime.now(UTC)
-    row = _create_skill_row(
-        discovered=discovered,
-        creator_id=current_user.id,
-        source=source,
-        created_at=timestamp,
-        stored_artifact=stored_artifact,
-        github_repo_url=github_repo_url,
-        github_ref=github_ref,
-        github_ref_type=github_ref_type,
-        github_skill_path=github_skill_path,
-    )
+    row = session.exec(select(Skill).where(Skill.name == discovered.name)).first()
+    if row is not None:
+        if row.creator_id != current_user.id:
+            shutil.rmtree(target_dir, ignore_errors=True)
+            raise ValueError(f"Skill name '{discovered.name}' already exists.")
+        _update_skill_row_from_discovery(
+            row,
+            discovered=discovered,
+            source=source,
+            stored_artifact=stored_artifact,
+            github_repo_url=github_repo_url,
+            github_ref=github_ref,
+            github_ref_type=github_ref_type,
+            github_skill_path=github_skill_path,
+        )
+    else:
+        row = _create_skill_row(
+            discovered=discovered,
+            creator_id=current_user.id,
+            source=source,
+            created_at=timestamp,
+            stored_artifact=stored_artifact,
+            github_repo_url=github_repo_url,
+            github_ref=github_ref,
+            github_ref_type=github_ref_type,
+            github_skill_path=github_skill_path,
+        )
     session.add(row)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        shutil.rmtree(target_dir, ignore_errors=True)
+        raise ValueError(f"Skill name '{discovered.name}' already exists.") from exc
     session.refresh(row)
 
     creator_lookup = _creator_name_map(session)
