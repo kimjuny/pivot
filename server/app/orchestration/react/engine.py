@@ -40,6 +40,8 @@ from .context import ReactContext
 from .parser import (
     PARSE_RETRY_INSTRUCTION,
     PARSE_RETRY_LIMIT,
+    PAYLOAD_BEGIN_RE,
+    parse_react_control_section,
     parse_react_output,
     safe_load_json,
 )
@@ -575,6 +577,7 @@ class ReactEngine:
         # Random fallback IDs would poison ``previous_response_id`` chaining.
         response_id = ""
         response_model = getattr(self.llm, "model", "")
+        emitted_control_preview = False
 
         stream_started_at = perf_counter()
         last_report_at = stream_started_at
@@ -615,6 +618,41 @@ class ReactEngine:
                 if isinstance(content_delta, str) and content_delta:
                     content_parts.append(content_delta)
                     estimated_completion_tokens += estimate_text_tokens(content_delta)
+                    if (
+                        token_meter_queue is not None
+                        and not emitted_control_preview
+                    ):
+                        partial_content = "".join(content_parts)
+                        if PAYLOAD_BEGIN_RE.search(partial_content) is not None:
+                            try:
+                                preview_decision = parse_react_control_section(
+                                    partial_content
+                                )
+                            except ValueError:
+                                logger.debug(
+                                    "Skipping early ReAct control preview; "
+                                    "JSON section is not parseable yet.",
+                                    exc_info=True,
+                                )
+                            else:
+                                emitted_control_preview = True
+                                await token_meter_queue.put(
+                                    {
+                                        "type": "react_control",
+                                        "observe": preview_decision.observe,
+                                        "reason": preview_decision.reason,
+                                        "summary": preview_decision.summary,
+                                        "action_type": (
+                                            preview_decision.action.action_type
+                                        ),
+                                        "tool_calls": [
+                                            tool_call.to_dict()
+                                            for tool_call in (
+                                                preview_decision.action.tool_calls
+                                            )
+                                        ],
+                                    }
+                                )
 
             if token_meter_queue is not None:
                 now = perf_counter()
@@ -1153,6 +1191,24 @@ class ReactEngine:
             reconstructed_tool_calls: list[dict[str, Any]] = []
 
             if action_type == "CALL_TOOL":
+                reconstructed_tool_calls = [
+                    tool_call.to_dict() for tool_call in action.tool_calls
+                ]
+                if token_meter_queue is not None:
+                    await token_meter_queue.put(
+                        {
+                            "type": "action",
+                            "action_type": action_type,
+                        }
+                    )
+                    await token_meter_queue.put(
+                        {
+                            "type": "tool_call",
+                            "tool_calls": reconstructed_tool_calls,
+                            "tool_results": [],
+                        }
+                    )
+
                 for tool_call in action.tool_calls:
                     try:
                         # Execute tool asynchronously via thread pool
@@ -1172,9 +1228,6 @@ class ReactEngine:
                                 "success": True,
                             }
                         )
-
-                        # Keep tool_call in reconstructed format for event data
-                        reconstructed_tool_calls.append(tool_call.to_dict())
 
                     except Exception as e:
                         logger.error("Tool %s execution failed: %s", tool_call.name, e)
@@ -1197,10 +1250,14 @@ class ReactEngine:
                                 "success": False,
                             }
                         )
-                        # Always record the call attempt so the frontend knows
-                        # which function was invoked and with what arguments,
-                        # regardless of whether execution succeeded or failed.
-                        reconstructed_tool_calls.append(tool_call.to_dict())
+                    finally:
+                        if token_meter_queue is not None and tool_results:
+                            await token_meter_queue.put(
+                                {
+                                    "type": "tool_result",
+                                    "tool_results": [tool_results[-1]],
+                                }
+                            )
 
             # Validate optional step status updates requested by the LLM.
             step_status_updates_validated = [
@@ -1514,6 +1571,9 @@ class ReactEngine:
                 cancelled_during_recursion = False
                 last_meter_emit_at = perf_counter()
                 last_estimated_completion_tokens = 0
+                streamed_action = False
+                streamed_resolved_tool_call = False
+                streamed_tool_results = False
                 while True:
                     if self.cancelled or task.status == "cancelled":
                         recursion_task.cancel()
@@ -1569,6 +1629,139 @@ class ReactEngine:
                                 "trace_id": trace_id,
                                 "iteration": task.iteration,
                                 "delta": reasoning_delta,
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        continue
+
+                    if meter_type == "react_control":
+                        preview_action_type = meter_data.get("action_type")
+                        if not isinstance(preview_action_type, str):
+                            preview_action_type = ""
+                        preview_timestamp = datetime.now(UTC).isoformat()
+                        preview_trace_id = trace_id
+
+                        preview_observe = meter_data.get("observe")
+                        if isinstance(preview_observe, str) and preview_observe:
+                            yield {
+                                "type": "observe",
+                                "task_id": task.task_id,
+                                "trace_id": preview_trace_id,
+                                "iteration": task.iteration,
+                                "delta": preview_observe,
+                                "timestamp": preview_timestamp,
+                            }
+
+                        preview_reason = meter_data.get("reason")
+                        if isinstance(preview_reason, str) and preview_reason:
+                            yield {
+                                "type": "reason",
+                                "task_id": task.task_id,
+                                "trace_id": preview_trace_id,
+                                "iteration": task.iteration,
+                                "delta": preview_reason,
+                                "timestamp": preview_timestamp,
+                            }
+
+                        preview_summary = meter_data.get("summary")
+                        if isinstance(preview_summary, str) and preview_summary:
+                            yield {
+                                "type": "summary",
+                                "task_id": task.task_id,
+                                "trace_id": preview_trace_id,
+                                "iteration": task.iteration,
+                                "delta": preview_summary,
+                                "timestamp": preview_timestamp,
+                                "data": {
+                                    "current_plan": self._build_current_plan_payload(
+                                        context
+                                    ),
+                                    "session_title": "",
+                                },
+                            }
+
+                        if preview_action_type:
+                            streamed_action = True
+                            yield {
+                                "type": "action",
+                                "task_id": task.task_id,
+                                "trace_id": preview_trace_id,
+                                "iteration": task.iteration,
+                                "delta": preview_action_type,
+                                "timestamp": preview_timestamp,
+                            }
+
+                        preview_tool_calls = meter_data.get("tool_calls")
+                        if (
+                            preview_action_type == "CALL_TOOL"
+                            and isinstance(preview_tool_calls, list)
+                            and preview_tool_calls
+                        ):
+                            yield {
+                                "type": "tool_call",
+                                "task_id": task.task_id,
+                                "trace_id": preview_trace_id,
+                                "iteration": task.iteration,
+                                "data": {
+                                    "tool_calls": preview_tool_calls,
+                                    "tool_results": [],
+                                    "pending_arguments": True,
+                                },
+                                "timestamp": preview_timestamp,
+                            }
+                        continue
+
+                    if meter_type == "action":
+                        action_type_data = meter_data.get("action_type")
+                        if (
+                            isinstance(action_type_data, str)
+                            and action_type_data
+                            and not streamed_action
+                        ):
+                            streamed_action = True
+                            yield {
+                                "type": "action",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "delta": action_type_data,
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        continue
+
+                    if meter_type == "tool_call":
+                        tool_calls_data = meter_data.get("tool_calls")
+                        tool_results_data = meter_data.get("tool_results", [])
+                        if isinstance(tool_calls_data, list):
+                            streamed_resolved_tool_call = True
+                            yield {
+                                "type": "tool_call",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "data": {
+                                    "tool_calls": tool_calls_data,
+                                    "tool_results": (
+                                        tool_results_data
+                                        if isinstance(tool_results_data, list)
+                                        else []
+                                    ),
+                                },
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        continue
+
+                    if meter_type == "tool_result":
+                        tool_results_data = meter_data.get("tool_results")
+                        if isinstance(tool_results_data, list):
+                            streamed_tool_results = True
+                            yield {
+                                "type": "tool_result",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "data": {
+                                    "tool_results": tool_results_data,
+                                },
                                 "timestamp": datetime.now(UTC).isoformat(),
                             }
                         continue
@@ -1731,18 +1924,20 @@ class ReactEngine:
                         },
                     }
 
-                # Yield action event with type and token info
-                yield {
-                    "type": "action",
-                    "task_id": task.task_id,
-                    "trace_id": event_data.get("trace_id"),
-                    "iteration": task.iteration,
-                    "delta": action_type,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                    "created_at": recursion.created_at.isoformat(),
-                    "updated_at": recursion.updated_at.isoformat(),
-                    "tokens": event_data.get("tokens"),
-                }
+                # Yield action event with type and token info. CALL_TOOL actions
+                # may already have been emitted before live tool lifecycle events.
+                if not streamed_action:
+                    yield {
+                        "type": "action",
+                        "task_id": task.task_id,
+                        "trace_id": event_data.get("trace_id"),
+                        "iteration": task.iteration,
+                        "delta": action_type,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                        "created_at": recursion.created_at.isoformat(),
+                        "updated_at": recursion.updated_at.isoformat(),
+                        "tokens": event_data.get("tokens"),
+                    }
 
                 # Yield recursion events
                 if action_type == "CALL_TOOL":
@@ -1750,27 +1945,29 @@ class ReactEngine:
                     tool_calls_data = event_data.get("tool_calls", [])
                     tool_results_data = event_data.get("tool_results", [])
 
-                    yield {
-                        "type": "tool_call",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "data": {
-                            "tool_calls": tool_calls_data,
-                            "tool_results": tool_results_data,
-                        },
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
-                    yield {
-                        "type": "tool_result",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "data": {
-                            "tool_results": tool_results_data,
-                        },
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
+                    if not streamed_resolved_tool_call:
+                        yield {
+                            "type": "tool_call",
+                            "task_id": task.task_id,
+                            "trace_id": event_data.get("trace_id"),
+                            "iteration": task.iteration,
+                            "data": {
+                                "tool_calls": tool_calls_data,
+                                "tool_results": tool_results_data,
+                            },
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+                    if not streamed_tool_results:
+                        yield {
+                            "type": "tool_result",
+                            "task_id": task.task_id,
+                            "trace_id": event_data.get("trace_id"),
+                            "iteration": task.iteration,
+                            "data": {
+                                "tool_results": tool_results_data,
+                            },
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
                     if isinstance(pending_user_action, dict):
                         approval_request = pending_user_action.get("approval_request")
                         question = (

@@ -260,6 +260,58 @@ function extractWorkspacePreviewIntent(
   return null;
 }
 
+function getToolEventPayload(
+  event: ReactStreamEvent,
+): { tool_calls?: unknown; tool_results?: unknown } | null {
+  if (
+    (event.type !== "tool_call" && event.type !== "tool_result") ||
+    !event.data ||
+    typeof event.data !== "object" ||
+    Array.isArray(event.data)
+  ) {
+    return null;
+  }
+  return event.data as { tool_calls?: unknown; tool_results?: unknown };
+}
+
+function hasPendingToolExecutions(events: ReactStreamEvent[]): boolean {
+  const toolCallIds = new Set<string>();
+  const toolResultIds = new Set<string>();
+
+  for (const event of events) {
+    const payload = getToolEventPayload(event);
+    if (!payload) {
+      continue;
+    }
+
+    if (Array.isArray(payload.tool_calls)) {
+      for (const item of payload.tool_calls) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+        const id = (item as { id?: unknown }).id;
+        if (typeof id === "string" && id.length > 0) {
+          toolCallIds.add(id);
+        }
+      }
+    }
+
+    if (Array.isArray(payload.tool_results)) {
+      for (const item of payload.tool_results) {
+        if (!item || typeof item !== "object") {
+          continue;
+        }
+        const id = (item as { tool_call_id?: unknown }).tool_call_id;
+        if (typeof id === "string" && id.length > 0) {
+          toolResultIds.add(id);
+        }
+      }
+    }
+  }
+
+  return toolCallIds.size > 0 && toolResultIds.size < toolCallIds.size;
+}
+
 function normalizePreviewEndpoint(
   preview: unknown,
 ): PreviewEndpointResponse | null {
@@ -1528,8 +1580,16 @@ function ChatContainer({
         return;
       }
 
-      const canAppendToCompletedRecursion =
-        event.type === "tool_call" || event.type === "tool_result";
+      const canAppendToCompletedRecursion = Boolean(
+        matchingRecursionFromMessage &&
+          (event.type === "tool_call" ||
+            event.type === "tool_result" ||
+            ((event.type === "observe" ||
+              event.type === "reason" ||
+              event.type === "summary" ||
+              event.type === "action") &&
+              event.tokens)),
+      );
       const currentRecursion =
         (currentRecursionFromRefs?.status === "running"
           ? currentRecursionFromRefs
@@ -1623,10 +1683,11 @@ function ChatContainer({
           tokens: event.tokens ?? currentRecursion.tokens,
         };
       } else if (event.type === "tool_call" || event.type === "tool_result") {
+        const hasPendingTools = hasPendingToolExecutions(updatedEvents);
         nextRecursion = {
           ...nextRecursion,
-          status: "completed",
-          endTime: event.timestamp,
+          status: hasPendingTools ? "running" : "completed",
+          endTime: hasPendingTools ? undefined : event.timestamp,
         };
       }
 

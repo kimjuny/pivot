@@ -230,6 +230,107 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
             },
         )
 
+    def test_stream_emits_react_control_preview_at_payload_boundary(self) -> None:
+        """The first payload marker should unlock early summary/tool UI events."""
+        control_json = """
+{
+  "observe": "Need file content",
+  "reason": "Call the file tool",
+  "summary": "Reading the requested file",
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+""".strip()
+        llm = _StreamingLlmStub(
+            [
+                Response(
+                    id="resp-3",
+                    choices=[
+                        Choice(
+                            index=0,
+                            message=ChatMessage(
+                                role="assistant",
+                                content=control_json[:120],
+                            ),
+                        )
+                    ],
+                    created=0,
+                    model="stream-model",
+                ),
+                Response(
+                    id="resp-3",
+                    choices=[
+                        Choice(
+                            index=0,
+                            message=ChatMessage(
+                                role="assistant",
+                                content=(
+                                    control_json[120:]
+                                    + "\n<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>\n"
+                                ),
+                            ),
+                        )
+                    ],
+                    created=0,
+                    model="stream-model",
+                ),
+            ]
+        )
+        engine = ReactEngine(
+            llm=llm,
+            tool_manager=SimpleNamespace(),
+            db=self.session,
+        )
+        token_counter = engine._new_token_counter()
+        token_meter_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+        response = asyncio.run(
+            engine._stream_chat_response(
+                messages=[{"role": "user", "content": "hello"}],
+                llm_chat_kwargs={},
+                token_counter=token_counter,
+                token_meter_queue=token_meter_queue,
+            )
+        )
+
+        queued_items: list[dict[str, object]] = []
+        while not token_meter_queue.empty():
+            queued_items.append(token_meter_queue.get_nowait())
+        control_items = [
+            item for item in queued_items if item.get("type") == "react_control"
+        ]
+
+        expected_content = (
+            control_json + "\n<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>\n"
+        )
+
+        self.assertEqual(response.first().message.content, expected_content)
+        self.assertEqual(len(control_items), 1)
+        self.assertEqual(control_items[0]["summary"], "Reading the requested file")
+        self.assertEqual(control_items[0]["action_type"], "CALL_TOOL")
+        self.assertEqual(
+            control_items[0]["tool_calls"],
+            [
+                {
+                    "id": "call-1",
+                    "name": "read_file",
+                    "arguments": {"path": {"$payload_ref": "path_payload"}},
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

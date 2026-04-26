@@ -222,8 +222,8 @@ describe("RecursionCard", () => {
       screen.getByRole("button", { name: /Loaded project files/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /已执行 read_files/i }),
-    ).toHaveTextContent("Running");
+      screen.getByRole("button", { name: /正执行 read_files/i }),
+    ).not.toHaveTextContent("Running");
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 

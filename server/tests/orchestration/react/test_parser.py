@@ -12,7 +12,9 @@ SERVER_ROOT = Path(__file__).resolve().parents[3]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-parse_react_output = import_module("app.orchestration.react.parser").parse_react_output
+react_parser = import_module("app.orchestration.react.parser")
+parse_react_output = react_parser.parse_react_output
+parse_react_control_section = react_parser.parse_react_control_section
 
 
 class _StubToolManager:
@@ -86,6 +88,40 @@ class ReactParserTestCase(unittest.TestCase):
         self.assertEqual(
             [item.to_dict() for item in decision.action.step_status_update],
             [{"step_id": "1", "status": "running"}],
+        )
+
+    def test_parse_control_section_keeps_payload_refs_for_stream_preview(self) -> None:
+        """Early control parsing should not require completed payload bodies."""
+        content = """
+{
+  "observe": "Need file content",
+  "reason": "Call the file tool",
+  "summary": "Reading the requested file",
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+""".strip()
+
+        decision = parse_react_control_section(content)
+
+        self.assertEqual(decision.summary, "Reading the requested file")
+        self.assertEqual(decision.action.action_type, "CALL_TOOL")
+        self.assertEqual(
+            decision.action.tool_calls[0].arguments,
+            {"path": {"$payload_ref": "path_payload"}},
         )
 
     def test_reject_legacy_top_level_step_status_update(self) -> None:

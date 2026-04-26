@@ -203,6 +203,49 @@ def parse_react_output(
     )
 
 
+def parse_react_control_section(content: str) -> ParsedReactDecision:
+    """Parse only the leading JSON control section of a ReAct response.
+
+    This is intentionally lighter than :func:`parse_react_output`: it validates
+    the JSON decision envelope before payload blocks are complete, but leaves
+    CALL_TOOL arguments as their ``{"$payload_ref": ...}`` placeholders. The
+    returned decision is suitable for early UI streaming only; final execution
+    must still use ``parse_react_output`` so payload references are resolved.
+    """
+    json_section, _payload_section = split_json_and_payload_sections(content)
+    raw_payload = safe_load_json(json_section)
+    action = _parse_action(raw_payload)
+
+    observe = _expect_optional_string(raw_payload.get("observe"), "observe")
+    reason = _expect_optional_string(raw_payload.get("reason"), "reason")
+    summary = _expect_optional_string(raw_payload.get("summary"), "summary")
+    thinking_next_turn = _expect_optional_bool(
+        raw_payload.get("thinking_next_turn"),
+        "thinking_next_turn",
+    )
+    session_title = _expect_optional_string(
+        raw_payload.get("session_title"),
+        "session_title",
+    )
+    task_summary = _expect_optional_dict(
+        raw_payload.get("task_summary"),
+        "task_summary",
+    )
+
+    preview_payload = dict(raw_payload)
+    preview_payload["action"] = action.to_dict()
+    return ParsedReactDecision(
+        observe=observe,
+        reason=reason,
+        summary=summary,
+        thinking_next_turn=thinking_next_turn,
+        session_title=session_title,
+        action=action,
+        task_summary=task_summary,
+        raw_payload=preview_payload,
+    )
+
+
 def _parse_action(payload: dict[str, Any]) -> ParsedAction:
     """Validate and normalize the action section.
 

@@ -29,6 +29,7 @@ interface ToolExecutionSnapshot {
   toolResults: Array<{
     tool_call_id: string;
     name: string;
+    arguments?: Record<string, unknown> | string;
     result?: unknown;
     error?: string;
     success: boolean;
@@ -69,6 +70,7 @@ function getToolExecutionSnapshot(eventData: unknown): ToolExecutionSnapshot {
           tool_results?: Array<{
             tool_call_id: string;
             name: string;
+            arguments?: Record<string, unknown> | string;
             result?: unknown;
             error?: string;
             success: boolean;
@@ -108,7 +110,7 @@ function formatToolValue(value: unknown): string {
 
 function getToolResultLabel(result: ToolResultSnapshot | undefined): string | null {
   if (!result) {
-    return "Running";
+    return null;
   }
   return result.success ? null : "Failed";
 }
@@ -124,20 +126,15 @@ function getToolResultBadgeClass(result: ToolResultSnapshot | undefined): string
 
 function getToolGroupStatus(
   items: ToolExecutionItemSnapshot[],
-): "Running" | "Failed" | null {
+): "Failed" | null {
   if (items.some(({ result }) => result?.success === false)) {
     return "Failed";
-  }
-  if (items.some(({ result }) => !result)) {
-    return "Running";
   }
   return null;
 }
 
-function getToolGroupStatusBadgeClass(status: "Running" | "Failed"): string {
-  return status === "Running"
-    ? "bg-orange-500/10 text-orange-600"
-    : "bg-danger/10 text-danger";
+function getToolGroupStatusBadgeClass(_status: "Failed"): string {
+  return "bg-danger/10 text-danger";
 }
 
 function getToolArgumentRecord(
@@ -232,6 +229,7 @@ function ToolExecutionItem({
   const defaultOpen = result?.success === false;
   const [open, setOpen] = useState(defaultOpen);
   const statusLabel = getToolResultLabel(result);
+  const executionLabel = result ? "已执行" : "正执行";
   const resultPayload =
     result?.result !== undefined
       ? result.result
@@ -254,9 +252,17 @@ function ToolExecutionItem({
             }`}
           />
           <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs leading-relaxed text-foreground">
-            <span className="shrink-0 text-muted-foreground">已执行</span>
-            <span className="shrink-0 font-semibold">{call.name}</span>
-            <ToolExecutionSummary call={call} />
+            <span
+              className={`flex min-w-0 items-center gap-1.5 ${
+                result ? "" : "thinking-silver-shimmer"
+              }`}
+            >
+              <span className={`shrink-0 ${result ? "text-muted-foreground" : ""}`}>
+                {executionLabel}
+              </span>
+              <span className="shrink-0 font-semibold">{call.name}</span>
+              <ToolExecutionSummary call={call} />
+            </span>
             {statusLabel && (
               <span
                 className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${getToolResultBadgeClass(
@@ -351,15 +357,17 @@ function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
 function StatusIcon({
   status,
   iconKey,
+  runningOffsetClassName = "top-px",
 }: {
   status: ReturnType<typeof getRecursionStatus>;
   iconKey: string;
+  runningOffsetClassName?: string;
 }) {
   if (status === "running") {
     return (
       <Loader2
         key={`${iconKey}-running`}
-        className="relative top-[4px] h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-foreground/60"
+        className={`relative h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-foreground/60 ${runningOffsetClassName}`}
       />
     );
   }
@@ -580,26 +588,59 @@ function ExecutionDetails({
 }
 
 function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
-  const toolCallEvents = events.filter((event) => event.type === "tool_call");
+  const toolEvents = events.filter(
+    (event) => event.type === "tool_call" || event.type === "tool_result",
+  );
 
-  if (toolCallEvents.length === 0) {
+  if (toolEvents.length === 0) {
     return null;
   }
 
-  const toolItems = toolCallEvents.flatMap<ToolExecutionItemSnapshot>(
-    (event, eventIndex) => {
-      const toolSnapshot = getToolExecutionSnapshot(event.data);
-      const resultById = new Map(
-        toolSnapshot.toolResults.map((result) => [result.tool_call_id, result]),
-      );
+  const callById = new Map<string, ToolCallSnapshot>();
+  const resultById = new Map<string, ToolResultSnapshot>();
+  const orderedIds: string[] = [];
 
-      return toolSnapshot.toolCalls.map((call, callIndex) => ({
-        key: `${eventIndex}-${call.id || callIndex}`,
+  for (const event of toolEvents) {
+    const toolSnapshot = getToolExecutionSnapshot(event.data);
+
+    for (const call of toolSnapshot.toolCalls) {
+      const id = call.id || `${orderedIds.length}`;
+      if (!callById.has(id)) {
+        orderedIds.push(id);
+      }
+      callById.set(id, { ...call, id });
+    }
+
+    for (const result of toolSnapshot.toolResults) {
+      const id = result.tool_call_id;
+      if (!id) {
+        continue;
+      }
+      resultById.set(id, result);
+      if (!callById.has(id)) {
+        orderedIds.push(id);
+        callById.set(id, {
+          id,
+          name: result.name,
+          arguments: result.arguments ?? {},
+        });
+      }
+    }
+  }
+
+  const toolItems = orderedIds.flatMap<ToolExecutionItemSnapshot>((id) => {
+    const call = callById.get(id);
+    if (!call) {
+      return [];
+    }
+    return [
+      {
+        key: id,
         call,
-        result: resultById.get(call.id),
-      }));
-    },
-  );
+        result: resultById.get(id),
+      },
+    ];
+  });
 
   if (toolItems.length === 0) {
     return null;
@@ -667,7 +708,13 @@ export function RecursionCard({
       >
         <div className="flex min-w-0 flex-1 gap-2">
           <div className="pt-0.5">
-            <StatusIcon status={effectiveStatus} iconKey={key} />
+            <StatusIcon
+              status={effectiveStatus}
+              iconKey={key}
+              runningOffsetClassName={
+                shouldShowPendingTicker ? "top-[4px]" : "top-px"
+              }
+            />
           </div>
           <div className="min-w-0 flex-1 space-y-1">
             {effectiveStatus === "running" ? (

@@ -1755,19 +1755,45 @@ describe("ChatContainer session rollover", () => {
                         arguments: { path: "README.md" },
                       },
                     ],
-                    tool_results: [
-                      {
-                        tool_call_id: "call-1",
-                        name: "read_file",
-                        result: "file contents",
-                        success: true,
-                      },
-                    ],
+                    tool_results: [],
                   },
                   timestamp: "2026-03-21T00:00:03.000Z",
                 },
                 {
                   event_id: 4,
+                  type: "tool_result",
+                  task_id: "task-live-tool",
+                  trace_id: "trace-live-tool",
+                  iteration: 0,
+                  data: {
+                    tool_results: [
+                      {
+                        tool_call_id: "call-1",
+                        name: "read_file",
+                        arguments: { path: "README.md" },
+                        result: "file contents",
+                        success: true,
+                      },
+                    ],
+                  },
+                  timestamp: "2026-03-21T00:00:03.500Z",
+                },
+                {
+                  event_id: 5,
+                  type: "summary",
+                  task_id: "task-live-tool",
+                  trace_id: "trace-live-tool",
+                  iteration: 0,
+                  delta: "Read file complete",
+                  tokens: {
+                    prompt_tokens: 100,
+                    completion_tokens: 23,
+                    total_tokens: 123,
+                  },
+                  timestamp: "2026-03-21T00:00:03.750Z",
+                },
+                {
+                  event_id: 6,
                   type: "task_complete",
                   task_id: "task-live-tool",
                   iteration: 0,
@@ -1783,7 +1809,7 @@ describe("ChatContainer session rollover", () => {
                   if (index === events.length - 1) {
                     controller.close();
                   }
-                }, index * 10);
+                }, index * 80);
               });
             },
           }),
@@ -1808,12 +1834,17 @@ describe("ChatContainer session rollover", () => {
     await user.type(screen.getByPlaceholderText("Ask anything"), "Read the file");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
+    expect(
+      await screen.findByRole("button", { name: /正执行 read_file/i }),
+    ).toBeInTheDocument();
+
     const toolExecution = await screen.findByRole("button", {
       name: /已执行 read_file/i,
     });
     await user.click(toolExecution);
 
     expect(screen.getByText("Result:")).toBeInTheDocument();
+    expect(await screen.findByText("123 tokens")).toBeInTheDocument();
   });
 
   it("reorders the sidebar from the backend after launching a new session task", async () => {
