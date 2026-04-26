@@ -1808,11 +1808,12 @@ describe("ChatContainer session rollover", () => {
     await user.type(screen.getByPlaceholderText("Ask anything"), "Read the file");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    await screen.findByText("1 tool");
-    await user.click(screen.getByText("1 tool"));
+    const toolExecution = await screen.findByRole("button", {
+      name: /已执行 read_file/i,
+    });
+    await user.click(toolExecution);
 
-    expect(await screen.findByText("TOOL EXECUTION")).toBeInTheDocument();
-    expect(screen.getByText("📤 Result: read_file")).toBeInTheDocument();
+    expect(screen.getByText("Result:")).toBeInTheDocument();
   });
 
   it("reorders the sidebar from the backend after launching a new session task", async () => {

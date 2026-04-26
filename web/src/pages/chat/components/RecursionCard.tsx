@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   AlertCircle,
@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Loader2,
   Square,
-  Wrench,
   XCircle,
 } from "@/lib/lucide";
 
@@ -37,6 +36,14 @@ interface ToolExecutionSnapshot {
   pendingResultCount: number;
   isWaiting: boolean;
 }
+
+type ToolCallSnapshot = ToolExecutionSnapshot["toolCalls"][number];
+type ToolResultSnapshot = ToolExecutionSnapshot["toolResults"][number];
+type ToolExecutionItemSnapshot = {
+  key: string;
+  call: ToolCallSnapshot;
+  result?: ToolResultSnapshot;
+};
 
 interface RecursionCardProps {
   messageId: string;
@@ -85,40 +92,203 @@ function getToolExecutionSnapshot(eventData: unknown): ToolExecutionSnapshot {
   };
 }
 
-/** Shared wrapper for collapsible content with 200ms grid-row animation. */
-function CollapsePanel({
-  defaultOpen = false,
-  trigger,
-  children,
+function formatToolValue(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (_error) {
+    return "[Unserializable value]";
+  }
+}
+
+function getToolResultLabel(result: ToolResultSnapshot | undefined): string | null {
+  if (!result) {
+    return "Running";
+  }
+  return result.success ? null : "Failed";
+}
+
+function getToolResultBadgeClass(result: ToolResultSnapshot | undefined): string {
+  if (!result) {
+    return "bg-orange-500/10 text-orange-600";
+  }
+  return result.success
+    ? "bg-success/10 text-success"
+    : "bg-danger/10 text-danger";
+}
+
+function getToolGroupStatus(
+  items: ToolExecutionItemSnapshot[],
+): "Running" | "Failed" | null {
+  if (items.some(({ result }) => result?.success === false)) {
+    return "Failed";
+  }
+  if (items.some(({ result }) => !result)) {
+    return "Running";
+  }
+  return null;
+}
+
+function getToolGroupStatusBadgeClass(status: "Running" | "Failed"): string {
+  return status === "Running"
+    ? "bg-orange-500/10 text-orange-600"
+    : "bg-danger/10 text-danger";
+}
+
+function getToolArgumentRecord(
+  value: ToolCallSnapshot["arguments"],
+): Record<string, unknown> | null {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+  return value;
+}
+
+function getStringArgument(
+  args: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const value = args?.[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function ToolExecutionSummary({ call }: { call: ToolCallSnapshot }) {
+  const args = getToolArgumentRecord(call.arguments);
+  const path = getStringArgument(args, "path");
+  const dirPath = getStringArgument(args, "dir_path");
+  const command = getStringArgument(args, "command");
+  const query = getStringArgument(args, "query");
+
+  if (
+    (call.name === "write_file" ||
+      call.name === "edit_file" ||
+      call.name === "read_file") &&
+    path
+  ) {
+    return <span className="min-w-0 truncate font-mono text-muted-foreground">{path}</span>;
+  }
+
+  if (call.name === "list_directories" && dirPath) {
+    return (
+      <span className="min-w-0 truncate font-mono text-muted-foreground">
+        {dirPath}
+      </span>
+    );
+  }
+
+  if (call.name === "run_bash" && command) {
+    return (
+      <span
+        className="min-w-0 truncate font-mono text-muted-foreground"
+        title={command}
+      >
+        {command}
+      </span>
+    );
+  }
+
+  if (call.name === "search") {
+    return (
+      <>
+        {path ? (
+          <span className="shrink-0 font-mono text-muted-foreground">{path}</span>
+        ) : null}
+        {query ? (
+          <span
+            className="min-w-0 truncate font-mono text-muted-foreground"
+            title={query}
+          >
+            {query}
+          </span>
+        ) : null}
+      </>
+    );
+  }
+
+  return null;
+}
+
+function ToolExecutionItem({
+  call,
+  result,
 }: {
-  defaultOpen?: boolean;
-  trigger: React.ReactNode;
-  children: React.ReactNode;
+  call: ToolCallSnapshot;
+  result?: ToolResultSnapshot;
 }) {
+  const defaultOpen = result?.success === false;
   const [open, setOpen] = useState(defaultOpen);
+  const statusLabel = getToolResultLabel(result);
+  const resultPayload =
+    result?.result !== undefined
+      ? result.result
+      : result?.error
+        ? { error: result.error }
+        : null;
 
   return (
-    <div className="space-y-1">
+    <div className="rounded-md bg-background/45">
       <button
         type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-1 text-left"
+        onClick={() => setOpen((previous) => !previous)}
+        className="group flex w-full items-start justify-between gap-3 rounded-md px-3 py-1.5 text-left transition-colors hover:bg-muted/25"
+        aria-expanded={open}
       >
-        <ChevronRight
-          className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
-            open ? "rotate-90" : ""
-          }`}
-        />
-        {trigger}
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <ChevronRight
+            className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-all duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 ${
+              open ? "rotate-90" : ""
+            }`}
+          />
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs leading-relaxed text-foreground">
+            <span className="shrink-0 text-muted-foreground">已执行</span>
+            <span className="shrink-0 font-semibold">{call.name}</span>
+            <ToolExecutionSummary call={call} />
+            {statusLabel && (
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${getToolResultBadgeClass(
+                  result,
+                )}`}
+              >
+                {statusLabel}
+              </span>
+            )}
+          </div>
+        </div>
       </button>
+
       <div
         className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
           open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
         }`}
       >
         <div className="overflow-hidden">
-          <div className="rounded bg-muted/30 p-2">
-            {children}
+          <div className="px-3 pb-2.5 pl-8">
+            <div className="rounded-md border border-border/70 bg-black/90 p-3 font-mono text-xs leading-relaxed text-zinc-100 shadow-inner">
+              <div className="mb-1 font-semibold text-zinc-300">Arguments:</div>
+              <pre className="mb-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
+                {formatToolValue(call.arguments)}
+              </pre>
+              <div className="mb-1 font-semibold text-zinc-300">Result:</div>
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
+                {resultPayload === null
+                  ? "Waiting for tool result..."
+                  : formatToolValue(resultPayload)}
+              </pre>
+            </div>
           </div>
         </div>
       </div>
@@ -126,76 +296,328 @@ function CollapsePanel({
   );
 }
 
-/** Collapsible wrapper for a single tool call's arguments. */
-function CollapsibleCallDetail({
-  defaultOpen = false,
+function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
+  const [open, setOpen] = useState(false);
+  const statusLabel = getToolGroupStatus(items);
+
+  return (
+    <div className="rounded-md bg-background/45">
+      <button
+        type="button"
+        onClick={() => setOpen((previous) => !previous)}
+        className="group flex w-full items-start justify-between gap-3 rounded-md px-3 py-1.5 text-left transition-colors hover:bg-muted/25"
+        aria-expanded={open}
+      >
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <ChevronRight
+            className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-all duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 ${
+              open ? "rotate-90" : ""
+            }`}
+          />
+          <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs leading-relaxed text-foreground">
+            <span className="font-normal text-muted-foreground transition-colors duration-200 group-hover:text-muted-foreground/45 group-focus-visible:text-muted-foreground/45">
+              {items.length} tools used
+            </span>
+            {statusLabel && (
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${getToolGroupStatusBadgeClass(
+                  statusLabel,
+                )}`}
+              >
+                {statusLabel}
+              </span>
+            )}
+          </div>
+        </div>
+      </button>
+
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="overflow-hidden" aria-hidden={!open}>
+          <div className="space-y-0.5 px-1 pb-0.5 pl-6">
+            {items.map(({ key, call, result }) => (
+              <ToolExecutionItem key={key} call={call} result={result} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusIcon({
+  status,
+  iconKey,
+}: {
+  status: ReturnType<typeof getRecursionStatus>;
+  iconKey: string;
+}) {
+  if (status === "running") {
+    return (
+      <Loader2
+        key={`${iconKey}-running`}
+        className="relative top-[4px] h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-foreground/60"
+      />
+    );
+  }
+  if (status === "completed") {
+    return (
+      <CheckCircle2
+        key={`${iconKey}-completed`}
+        className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100"
+      />
+    );
+  }
+  if (status === "warning") {
+    return (
+      <AlertCircle
+        key={`${iconKey}-warning`}
+        className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-warning"
+      />
+    );
+  }
+  if (status === "error") {
+    return (
+      <XCircle
+        key={`${iconKey}-error`}
+        className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-danger"
+      />
+    );
+  }
+  return (
+    <Square
+      key={`${iconKey}-stopped`}
+      className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
+    />
+  );
+}
+
+function DetailBarIcon() {
+  return (
+    <span className="flex h-3.5 w-3.5 items-center justify-center">
+      <span className="h-3.5 w-1 rounded-full bg-muted-foreground" />
+    </span>
+  );
+}
+
+function ThinkingSection({ recursion }: { recursion: RecursionRecord }) {
+  const [open, setOpen] = useState(recursion.status === "running");
+  const isRunning = recursion.status === "running";
+
+  useEffect(() => {
+    setOpen(isRunning);
+  }, [isRunning]);
+
+  if (!recursion.thinking) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-md bg-background/50">
+      <button
+        type="button"
+        onClick={() => setOpen((previous) => !previous)}
+        className="group flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/20"
+        aria-expanded={open}
+        aria-label="Toggle thinking details"
+      >
+        <ChevronRight
+          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-all duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+        <span
+          className={`text-xs font-normal transition-colors duration-200 group-hover:text-muted-foreground/45 group-focus-visible:text-muted-foreground/45 ${
+            isRunning ? "thinking-silver-shimmer" : "text-muted-foreground"
+          }`}
+        >
+          Thinking
+        </span>
+      </button>
+      <div
+        className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
+          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="max-h-64 overflow-y-auto break-words whitespace-pre-wrap px-3 pb-3 pl-9 text-xs leading-relaxed text-muted-foreground">
+            {recursion.thinking}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailBlock({
+  icon,
   label,
   children,
 }: {
-  defaultOpen?: boolean;
+  icon: React.ReactNode;
   label: string;
   children: React.ReactNode;
 }) {
   return (
-    <CollapsePanel
-      defaultOpen={defaultOpen}
-      trigger={<span className="text-xs font-semibold text-foreground">{label}</span>}
-    >
-      {children}
-    </CollapsePanel>
+    <div className="space-y-1.5 rounded-md bg-background/60 p-2">
+      <div className="flex items-center gap-1.5">
+        {icon}
+        <span className="text-xs font-semibold text-foreground">{label}</span>
+      </div>
+      <div className="pl-5 text-xs leading-relaxed text-muted-foreground">
+        {children}
+      </div>
+    </div>
   );
 }
 
-/** Collapsible wrapper for a single tool result's body. */
-function CollapsibleResultDetail({
-  defaultOpen = false,
-  result,
-}: {
-  defaultOpen?: boolean;
-  result: {
-    name: string;
-    result?: unknown;
-    error?: string;
-    success: boolean;
-  };
-}) {
-  const hasContent =
-    result.result !== undefined && result.result !== null;
-  const hasError = Boolean(result.error);
+function hasExecutionDetails(recursion: RecursionRecord) {
+  const nonToolEvents = recursion.events.filter(
+    (event) => event.type === "reflect" || event.type === "error",
+  );
 
   return (
-    <CollapsePanel
-      defaultOpen={defaultOpen}
-      trigger={
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-foreground">
-            📤 Result: {result.name}
-          </span>
-          {result.success ? (
-            <span className="rounded bg-success/10 px-1.5 py-0.5 text-xs text-success">
-              ✓
-            </span>
-          ) : (
-            <span className="rounded bg-danger/10 px-1.5 py-0.5 text-xs text-danger">
-              ✗
-            </span>
-          )}
-        </div>
-      }
-    >
-      {hasContent && (
-        <div className="break-all font-mono text-xs text-muted-foreground">
-          {typeof result.result === "string"
-            ? result.result
-            : JSON.stringify(result.result, null, 2)}
+    Boolean(recursion.observe) ||
+    Boolean(recursion.reason) ||
+    Boolean(recursion.action) ||
+    nonToolEvents.length > 0 ||
+    Boolean(recursion.errorLog)
+  );
+}
+
+function ExecutionDetails({
+  recursion,
+  taskId,
+}: {
+  recursion: RecursionRecord;
+  taskId?: string;
+}) {
+  const nonToolEvents = recursion.events.filter(
+    (event) => event.type === "reflect" || event.type === "error",
+  );
+
+  if (!hasExecutionDetails(recursion)) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-1">
+      {recursion.observe && (
+        <DetailBlock icon={<DetailBarIcon />} label="Observe">
+          {recursion.observe}
+        </DetailBlock>
+      )}
+
+      {recursion.reason && (
+        <DetailBlock icon={<DetailBarIcon />} label="Reason">
+          {recursion.reason}
+        </DetailBlock>
+      )}
+
+      {recursion.action && (
+        <DetailBlock icon={<DetailBarIcon />} label="Action">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-primary">{recursion.action}</span>
+            {taskId && (
+              <RecursionStateViewer
+                taskId={taskId}
+                iteration={recursion.iteration}
+              />
+            )}
+          </div>
+        </DetailBlock>
+      )}
+
+      {nonToolEvents.map((event, index) => {
+        if (event.type === "reflect") {
+          const reflectData = event.data as { summary?: string } | undefined;
+
+          return (
+            <DetailBlock
+              key={`reflect-${index}`}
+              icon={<Brain className="h-3.5 w-3.5 text-indigo-500" />}
+              label="Reflect"
+            >
+              {reflectData?.summary || "Reflecting on current state..."}
+            </DetailBlock>
+          );
+        }
+
+        const errorData = event.data as { error?: string } | undefined;
+
+        return (
+          <div
+            key={`error-${index}`}
+            className="rounded-md border border-danger/30 bg-danger/5 p-2"
+          >
+            <div className="mb-1 flex items-center gap-1.5">
+              <XCircle className="h-3.5 w-3.5 text-danger" />
+              <span className="text-xs font-semibold text-danger">Error</span>
+            </div>
+            <div className="pl-5 text-xs text-danger/90">
+              {errorData?.error || "Unknown error"}
+            </div>
+          </div>
+        );
+      })}
+
+      {recursion.errorLog && (
+        <div className="rounded-md border border-danger/30 bg-danger/5 p-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <XCircle className="h-3.5 w-3.5 text-danger" />
+            <span className="text-xs font-semibold text-danger">Error log</span>
+          </div>
+          <div className="pl-5 text-xs leading-relaxed text-danger/90">
+            {recursion.errorLog}
+          </div>
         </div>
       )}
-      {hasError && (
-        <div className="rounded border border-danger/30 bg-danger/10 p-2 text-xs text-danger">
-          {result.error}
-        </div>
-      )}
-    </CollapsePanel>
+    </div>
+  );
+}
+
+function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
+  const toolCallEvents = events.filter((event) => event.type === "tool_call");
+
+  if (toolCallEvents.length === 0) {
+    return null;
+  }
+
+  const toolItems = toolCallEvents.flatMap<ToolExecutionItemSnapshot>(
+    (event, eventIndex) => {
+      const toolSnapshot = getToolExecutionSnapshot(event.data);
+      const resultById = new Map(
+        toolSnapshot.toolResults.map((result) => [result.tool_call_id, result]),
+      );
+
+      return toolSnapshot.toolCalls.map((call, callIndex) => ({
+        key: `${eventIndex}-${call.id || callIndex}`,
+        call,
+        result: resultById.get(call.id),
+      }));
+    },
+  );
+
+  if (toolItems.length === 0) {
+    return null;
+  }
+
+  if (toolItems.length === 1) {
+    const [item] = toolItems;
+    return (
+      <div className="space-y-1">
+        <ToolExecutionItem call={item.call} result={item.result} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <ToolExecutionGroup items={toolItems} />
+    </div>
   );
 }
 
@@ -211,7 +633,6 @@ export function RecursionCard({
 }: RecursionCardProps) {
   const key = `${messageId}-${recursion.uid}`;
   const effectiveStatus = getRecursionStatus(recursion);
-  const toolCallEvents = recursion.events.filter((event) => event.type === "tool_call");
   const hasStableRunningLabel = Boolean(
     recursion.summary || recursion.reason || recursion.observe || recursion.action,
   );
@@ -222,71 +643,55 @@ export function RecursionCard({
     recursion.reason ||
     recursion.observe ||
     recursion.action ||
-    `Iteration ${recursion.iteration + 1}`;
+    "Working...";
+  const completedLabel =
+    recursion.summary ||
+    recursion.reason ||
+    recursion.observe ||
+    recursion.action ||
+    "Completed step";
+  const canExpandDetails = hasExecutionDetails(recursion);
 
   return (
-    <div className="mb-3 overflow-hidden rounded-md bg-muted/20">
+    <div className="mb-2 space-y-1">
+      <ThinkingSection recursion={recursion} />
+
       <button
-        onClick={() => onToggle(messageId, recursion.uid)}
-        className="flex w-full items-center justify-between px-3 py-2 transition-colors hover:bg-muted/30"
+        onClick={() => {
+          if (canExpandDetails) {
+            onToggle(messageId, recursion.uid);
+          }
+        }}
+        className="group flex w-full items-start justify-between gap-3 rounded-md bg-muted/20 px-3 py-2 text-left transition-colors hover:bg-muted/30"
+        aria-expanded={canExpandDetails ? isExpanded : undefined}
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {effectiveStatus === "running" && (
-            <Loader2
-              key={`${key}-running`}
-              className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-foreground/60"
-            />
-          )}
-          {effectiveStatus === "completed" && (
-            <CheckCircle2
-              key={`${key}-completed`}
-              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
-            />
-          )}
-          {effectiveStatus === "warning" && (
-            <AlertCircle
-              key={`${key}-warning`}
-              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-warning"
-            />
-          )}
-          {effectiveStatus === "error" && (
-            <XCircle
-              key={`${key}-error`}
-              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-danger"
-            />
-          )}
-          {effectiveStatus === "stopped" && (
-            <Square
-              key={`${key}-stopped`}
-              className="status-icon-enter h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
-            />
-          )}
-          {effectiveStatus === "running" ? (
-            shouldShowPendingTicker ? (
-              <ThinkingWordTicker className="truncate text-xs font-semibold text-muted-foreground" />
+        <div className="flex min-w-0 flex-1 gap-2">
+          <div className="pt-0.5">
+            <StatusIcon status={effectiveStatus} iconKey={key} />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            {effectiveStatus === "running" ? (
+              shouldShowPendingTicker ? (
+                <ThinkingWordTicker className="truncate text-xs font-semibold text-muted-foreground" />
+              ) : (
+                <div
+                  className="break-words text-xs font-semibold leading-relaxed text-foreground"
+                  title={stableRunningLabel}
+                >
+                  {stableRunningLabel}
+                </div>
+              )
             ) : (
-              <span
-                className="truncate text-xs font-semibold text-foreground"
-                title={stableRunningLabel}
+              <div
+                className="break-words text-xs font-semibold leading-relaxed text-foreground"
+                title={completedLabel}
               >
-                {stableRunningLabel}
-              </span>
-            )
-          ) : (
-            <span
-              className="truncate text-xs font-semibold text-foreground"
-              title={recursion.summary || `Iteration ${recursion.iteration + 1}`}
-            >
-              {recursion.summary || `Iteration ${recursion.iteration + 1}`}
-            </span>
-          )}
-          {toolCallEvents.length > 0 && (
-            <span className="flex-shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-xs text-primary">
-              {toolCallEvents.length} tool{toolCallEvents.length > 1 ? "s" : ""}
-            </span>
-          )}
+                {completedLabel}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex flex-shrink-0 items-center gap-2.5">
+        <div className="flex flex-shrink-0 items-center gap-2.5 pt-0.5">
           {recursion.endTime && (
             <span className="text-xs tabular-nums text-muted-foreground">
               {calculateDuration(recursion.startTime, recursion.endTime)}s
@@ -312,231 +717,31 @@ export function RecursionCard({
               />
             )
           )}
+          {canExpandDetails && (
+            <ChevronRight
+              className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                isExpanded ? "rotate-90" : ""
+              }`}
+            />
+          )}
         </div>
       </button>
 
-      <div
-        className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
-          isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-        }`}
-      >
-        <div className="overflow-hidden">
-          <div className="space-y-2 px-3 pb-3">
-          {recursion.thinking && (
-            <div className="rounded bg-background/60 p-2">
-              <div className="mb-1.5 flex items-center gap-1.5">
-                <Brain className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-semibold text-foreground">
-                  THINKING
-                </span>
-              </div>
-              <div className="max-h-64 overflow-y-auto break-words whitespace-pre-wrap pl-5 pr-1 text-xs leading-relaxed text-muted-foreground">
-                {recursion.thinking}
-              </div>
+      {canExpandDetails && (
+        <div
+          className={`grid transition-[grid-template-rows] duration-200 ease-in-out ${
+            isExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+          }`}
+        >
+          <div className="overflow-hidden">
+            <div className="px-1 pb-1 pt-1">
+              <ExecutionDetails recursion={recursion} taskId={taskId} />
             </div>
-          )}
-
-          {recursion.observe && (
-            <div className="rounded bg-background/50 p-2">
-              <div className="mb-1 flex items-center gap-1.5">
-                <div className="flex h-3.5 w-3.5 items-center justify-center">
-                  <div className="h-4 w-1 rounded-full bg-blue-500" />
-                </div>
-                <span className="text-xs font-semibold text-foreground">
-                  OBSERVE
-                </span>
-              </div>
-              <p className="pl-5 text-xs leading-relaxed text-muted-foreground">
-                {recursion.observe}
-              </p>
-            </div>
-          )}
-
-          {recursion.reason && (
-            <div className="rounded bg-background/50 p-2">
-              <div className="mb-1 flex items-center gap-1.5">
-                <Brain className="h-3.5 w-3.5 text-purple-500" />
-                <span className="text-xs font-semibold text-foreground">
-                  REASON
-                </span>
-              </div>
-              <p className="pl-5 text-xs leading-relaxed text-muted-foreground">
-                {recursion.reason}
-              </p>
-            </div>
-          )}
-
-          {recursion.summary && (
-            <div className="rounded bg-background/50 p-2">
-              <div className="mb-1 flex items-center gap-1.5">
-                <div className="flex h-3.5 w-3.5 items-center justify-center">
-                  <div className="h-4 w-1 rounded-full bg-amber-500" />
-                </div>
-                <span className="text-xs font-semibold text-foreground">
-                  SUMMARY
-                </span>
-              </div>
-              <p className="pl-5 text-xs leading-relaxed text-muted-foreground">
-                {recursion.summary}
-              </p>
-            </div>
-          )}
-
-          {recursion.action && (
-            <div className="rounded bg-background/50 p-2">
-              <div className="mb-1 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div className="flex h-3.5 w-3.5 items-center justify-center">
-                    <div className="h-4 w-1 rounded-full bg-green-500" />
-                  </div>
-                  <span className="text-xs font-semibold text-foreground">
-                    ACTION
-                  </span>
-                </div>
-                {taskId && (
-                  <RecursionStateViewer
-                    taskId={taskId}
-                    iteration={recursion.iteration}
-                  />
-                )}
-              </div>
-              <p className="pl-5 font-mono text-xs text-primary">
-                {recursion.action}
-              </p>
-            </div>
-          )}
-
-          {recursion.events.map((event, index) => {
-            if (event.type === "tool_call") {
-              const toolSnapshot = getToolExecutionSnapshot(event.data);
-
-              return (
-                <div
-                  key={index}
-                  className="rounded bg-background/50 p-2"
-                >
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <Wrench className="h-3.5 w-3.5 text-orange-500" />
-                      <span className="text-xs font-semibold text-foreground">
-                        TOOL EXECUTION
-                      </span>
-                    </div>
-                    {toolSnapshot.isWaiting && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[11px] font-medium text-orange-600">
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Running...
-                      </span>
-                    )}
-                  </div>
-                  <div className="space-y-3 pl-5">
-                    {toolSnapshot.isWaiting && (
-                      <div className="flex items-center gap-2 rounded border border-dashed border-orange-500/30 bg-orange-500/5 px-2.5 py-2 text-xs text-muted-foreground">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin text-orange-500" />
-                        <span>
-                          {toolSnapshot.pendingResultCount ===
-                          toolSnapshot.toolCalls.length
-                            ? "Waiting for tool result..."
-                            : `Waiting for ${toolSnapshot.pendingResultCount} tool result${
-                                toolSnapshot.pendingResultCount > 1 ? "s" : ""
-                              }...`}
-                        </span>
-                      </div>
-                    )}
-
-                    {toolSnapshot.toolCalls.map((call, callIndex) => (
-                      <CollapsibleCallDetail
-                        key={`call-${callIndex}`}
-                        label={`📥 Call: ${call.name}`}
-                        defaultOpen={false}
-                      >
-                        <div className="mb-1 text-[10px] text-muted-foreground/70">
-                          Arguments:
-                        </div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {typeof call.arguments === "string"
-                            ? call.arguments
-                            : JSON.stringify(call.arguments, null, 2)}
-                        </div>
-                      </CollapsibleCallDetail>
-                    ))}
-
-                    {toolSnapshot.toolResults.map((result, resultIndex) => (
-                      <CollapsibleResultDetail
-                        key={`result-${resultIndex}`}
-                        result={result}
-                      />
-                    ))}
-                  </div>
-                </div>
-              );
-            }
-
-            if (event.type === "plan_update") {
-              return null;
-            }
-
-            if (event.type === "reflect") {
-              const reflectData = event.data as { summary?: string } | undefined;
-
-              return (
-                <div
-                  key={index}
-                  className="rounded bg-background/50 p-2"
-                >
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <Brain className="h-3.5 w-3.5 text-indigo-500" />
-                    <span className="text-xs font-semibold text-foreground">
-                      REFLECT
-                    </span>
-                  </div>
-                  <div className="pl-5 text-xs leading-relaxed text-muted-foreground">
-                    {reflectData?.summary || "Reflecting on current state..."}
-                  </div>
-                </div>
-              );
-            }
-
-            if (event.type === "error") {
-              const errorData = event.data as { error?: string } | undefined;
-
-              return (
-                <div
-                  key={index}
-                  className="rounded border border-danger/30 bg-danger/5 p-2"
-                >
-                  <div className="mb-1 flex items-center gap-1.5">
-                    <XCircle className="h-3.5 w-3.5 text-danger" />
-                    <span className="text-xs font-semibold text-danger">
-                      ERROR
-                    </span>
-                  </div>
-                  <div className="pl-5 text-xs text-danger/90">
-                    {errorData?.error || "Unknown error"}
-                  </div>
-                </div>
-              );
-            }
-
-            return null;
-          })}
-
-          {recursion.errorLog && (
-            <div className="rounded border border-danger/30 bg-danger/5 p-2">
-              <div className="mb-1 flex items-center gap-1.5">
-                <XCircle className="h-3.5 w-3.5 text-danger" />
-                <span className="text-xs font-semibold text-danger">
-                  ERROR LOG
-                </span>
-              </div>
-              <div className="pl-5 text-xs leading-relaxed text-danger/90">
-                {recursion.errorLog}
-              </div>
-            </div>
-          )}
+          </div>
         </div>
-        </div>
-      </div>
+      )}
+
+      <ToolTimeline events={recursion.events} />
     </div>
   );
 }
