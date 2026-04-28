@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   AlertCircle,
   Brain,
+  Check,
   CheckCircle2,
   ChevronRight,
+  Copy,
   Loader2,
   Square,
   XCircle,
 } from "@/lib/lucide";
+import { toast } from "sonner";
 
 import type { RecursionRecord } from "../types";
 import {
@@ -34,6 +37,7 @@ interface ToolExecutionSnapshot {
     error?: string;
     success: boolean;
   }>;
+  pendingArguments: boolean;
   pendingResultCount: number;
   isWaiting: boolean;
 }
@@ -44,6 +48,7 @@ type ToolExecutionItemSnapshot = {
   key: string;
   call: ToolCallSnapshot;
   result?: ToolResultSnapshot;
+  isPreparing: boolean;
 };
 
 interface RecursionCardProps {
@@ -75,6 +80,7 @@ function getToolExecutionSnapshot(eventData: unknown): ToolExecutionSnapshot {
             error?: string;
             success: boolean;
           }>;
+          pending_arguments?: boolean;
         })
       : undefined;
 
@@ -89,6 +95,7 @@ function getToolExecutionSnapshot(eventData: unknown): ToolExecutionSnapshot {
   return {
     toolCalls,
     toolResults,
+    pendingArguments: normalized?.pending_arguments === true,
     pendingResultCount,
     isWaiting: toolCalls.length > 0 && pendingResultCount > 0,
   };
@@ -219,23 +226,88 @@ function ToolExecutionSummary({ call }: { call: ToolCallSnapshot }) {
   return null;
 }
 
+function ToolPayloadSection({
+  label,
+  value,
+}: {
+  label: "Arguments" | "Result";
+  value: string;
+}) {
+  const [hasCopied, setHasCopied] = useState(false);
+  const copyResetTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+      setHasCopied(true);
+      copyResetTimeoutRef.current = window.setTimeout(() => {
+        setHasCopied(false);
+        copyResetTimeoutRef.current = null;
+      }, 2000);
+    } catch {
+      toast.error(`Failed to copy ${label.toLowerCase()}`);
+    }
+  };
+
+  return (
+    <div className="group/payload">
+      <div className="mb-1 flex items-center justify-between gap-3 font-semibold text-zinc-300">
+        <span>{label}:</span>
+        <button
+          type="button"
+          onClick={() => {
+            void handleCopy();
+          }}
+          className="flex h-6 w-6 items-center justify-center rounded-md bg-transparent text-zinc-400 opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-white/10 hover:text-zinc-100 focus-visible:bg-white/10 focus-visible:text-zinc-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400/60 group-hover/payload:opacity-100"
+          aria-label={hasCopied ? `Copied ${label}` : `Copy ${label}`}
+          title={hasCopied ? "Copied" : `Copy ${label}`}
+        >
+          {hasCopied ? (
+            <Check className="h-3.5 w-3.5" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </div>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
 function ToolExecutionItem({
   call,
   result,
+  isPreparing,
 }: {
   call: ToolCallSnapshot;
   result?: ToolResultSnapshot;
+  isPreparing: boolean;
 }) {
-  const defaultOpen = result?.success === false;
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
   const statusLabel = getToolResultLabel(result);
-  const executionLabel = result ? "已执行" : "正执行";
+  const executionLabel = result ? "Ran" : isPreparing ? "Preparing" : "Running";
   const resultPayload =
     result?.result !== undefined
       ? result.result
       : result?.error
         ? { error: result.error }
         : null;
+  const argumentText = formatToolValue(call.arguments);
+  const resultText =
+    resultPayload === null ? "Waiting for tool result..." : formatToolValue(resultPayload);
 
   return (
     <div className="rounded-md bg-background/45">
@@ -284,16 +356,10 @@ function ToolExecutionItem({
         <div className="overflow-hidden">
           <div className="px-3 pb-2.5 pl-8">
             <div className="rounded-md border border-border/70 bg-black/90 p-3 font-mono text-xs leading-relaxed text-zinc-100 shadow-inner">
-              <div className="mb-1 font-semibold text-zinc-300">Arguments:</div>
-              <pre className="mb-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
-                {formatToolValue(call.arguments)}
-              </pre>
-              <div className="mb-1 font-semibold text-zinc-300">Result:</div>
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
-                {resultPayload === null
-                  ? "Waiting for tool result..."
-                  : formatToolValue(resultPayload)}
-              </pre>
+              <div className="space-y-3">
+                <ToolPayloadSection label="Arguments" value={argumentText} />
+                <ToolPayloadSection label="Result" value={resultText} />
+              </div>
             </div>
           </div>
         </div>
@@ -344,8 +410,13 @@ function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
       >
         <div className="overflow-hidden" aria-hidden={!open}>
           <div className="space-y-0.5 px-1 pb-0.5 pl-6">
-            {items.map(({ key, call, result }) => (
-              <ToolExecutionItem key={key} call={call} result={result} />
+            {items.map(({ key, call, result, isPreparing }) => (
+              <ToolExecutionItem
+                key={key}
+                call={call}
+                result={result}
+                isPreparing={isPreparing}
+              />
             ))}
           </div>
         </div>
@@ -588,9 +659,20 @@ function ExecutionDetails({
 }
 
 function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
-  const toolEvents = events.filter(
-    (event) => event.type === "tool_call" || event.type === "tool_result",
-  );
+  const toolEvents = events
+    .map((event, index) => ({ event, index }))
+    .filter(
+      ({ event }) => event.type === "tool_call" || event.type === "tool_result",
+    )
+    .sort((left, right) => {
+      const leftTime = Date.parse(left.event.timestamp);
+      const rightTime = Date.parse(right.event.timestamp);
+      if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
+        return leftTime === rightTime ? left.index - right.index : leftTime - rightTime;
+      }
+      return left.index - right.index;
+    })
+    .map(({ event }) => event);
 
   if (toolEvents.length === 0) {
     return null;
@@ -598,6 +680,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
 
   const callById = new Map<string, ToolCallSnapshot>();
   const resultById = new Map<string, ToolResultSnapshot>();
+  const preparingById = new Map<string, boolean>();
   const orderedIds: string[] = [];
 
   for (const event of toolEvents) {
@@ -609,6 +692,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
         orderedIds.push(id);
       }
       callById.set(id, { ...call, id });
+      preparingById.set(id, toolSnapshot.pendingArguments && !resultById.has(id));
     }
 
     for (const result of toolSnapshot.toolResults) {
@@ -617,6 +701,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
         continue;
       }
       resultById.set(id, result);
+      preparingById.set(id, false);
       if (!callById.has(id)) {
         orderedIds.push(id);
         callById.set(id, {
@@ -638,6 +723,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
         key: id,
         call,
         result: resultById.get(id),
+        isPreparing: preparingById.get(id) ?? false,
       },
     ];
   });
@@ -650,7 +736,11 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
     const [item] = toolItems;
     return (
       <div className="space-y-1">
-        <ToolExecutionItem call={item.call} result={item.result} />
+        <ToolExecutionItem
+          call={item.call}
+          result={item.result}
+          isPreparing={item.isPreparing}
+        />
       </div>
     );
   }

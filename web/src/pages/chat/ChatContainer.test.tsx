@@ -1835,11 +1835,11 @@ describe("ChatContainer session rollover", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
 
     expect(
-      await screen.findByRole("button", { name: /正执行 read_file/i }),
+      await screen.findByRole("button", { name: /Running read_file/i }),
     ).toBeInTheDocument();
 
     const toolExecution = await screen.findByRole("button", {
-      name: /已执行 read_file/i,
+      name: /Ran read_file/i,
     });
     await user.click(toolExecution);
 

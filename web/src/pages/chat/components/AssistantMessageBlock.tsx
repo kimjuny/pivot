@@ -3,7 +3,8 @@ import {
   Check,
   CheckCircle2,
   Copy,
-  MessageSquare,
+  MessageCircleQuestion,
+  MessagesSquare,
   Square,
   XCircle,
 } from "@/lib/lucide";
@@ -121,14 +122,14 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
               <div className="flex items-center gap-1.5">
                 {clarifyMessage ? (
                   <>
-                    <MessageSquare className="h-3.5 w-3.5 text-info" />
+                    <MessageCircleQuestion className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100" />
                     <span className="text-xs font-semibold text-foreground">
                       QUESTION
                     </span>
                   </>
                 ) : (
                   <>
-                    <MessageSquare className="h-3.5 w-3.5 text-success" />
+                    <MessagesSquare className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100" />
                     <span className="text-xs font-semibold text-foreground">
                       FINAL ANSWER
                     </span>
@@ -193,7 +194,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
             {message.status === "completed" && (
               <>
-                <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">Completed</span>
                 {message.totalTokens && (
                   <TokenUsageLabel

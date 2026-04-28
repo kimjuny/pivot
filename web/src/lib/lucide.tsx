@@ -43,6 +43,8 @@ import {
   LogOut as LogOutIcon,
   Maximize2 as Maximize2Icon,
   MessageSquare as MessageSquareIcon,
+  MessageCircleQuestion as MessageCircleQuestionIcon,
+  MessagesSquare as MessagesSquareIcon,
   Minimize2 as Minimize2Icon,
   Minus as MinusIcon,
   Moon as MoonIcon,
@@ -132,6 +134,8 @@ export const LogIn = withDefaultStroke(LogInIcon);
 export const LogOut = withDefaultStroke(LogOutIcon);
 export const Maximize2 = withDefaultStroke(Maximize2Icon);
 export const MessageSquare = withDefaultStroke(MessageSquareIcon);
+export const MessageCircleQuestion = withDefaultStroke(MessageCircleQuestionIcon);
+export const MessagesSquare = withDefaultStroke(MessagesSquareIcon);
 export const Minimize2 = withDefaultStroke(Minimize2Icon);
 export const Minus = withDefaultStroke(MinusIcon);
 export const Moon = withDefaultStroke(MoonIcon);

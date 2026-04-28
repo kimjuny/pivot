@@ -75,6 +75,7 @@ describe("RecursionCard", () => {
                   },
                 ],
                 tool_results: [],
+                pending_arguments: true,
               },
             },
           ],
@@ -85,6 +86,9 @@ describe("RecursionCard", () => {
     );
 
     expect(screen.getByTestId("thinking-word-ticker")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Preparing read_files/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Iteration 3")).not.toBeInTheDocument();
   });
 
@@ -222,8 +226,8 @@ describe("RecursionCard", () => {
       screen.getByRole("button", { name: /Loaded project files/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /正执行 read_files/i }),
-    ).not.toHaveTextContent("Running");
+      screen.getByRole("button", { name: /Running read_files/i }),
+    ).toHaveTextContent("Running");
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 
@@ -314,32 +318,35 @@ describe("RecursionCard", () => {
     expect(toolGroup).toHaveTextContent("Failed");
     expect(toolGroup).toHaveAttribute("aria-expanded", "false");
     expect(
-      screen.queryByRole("button", { name: /已执行 read_file/i }),
+      screen.queryByRole("button", { name: /Ran read_file/i }),
     ).not.toBeInTheDocument();
 
     await user.click(toolGroup);
     expect(toolGroup).toHaveAttribute("aria-expanded", "true");
 
     const successfulTool = screen.getByRole("button", {
-      name: /已执行 read_file/i,
+      name: /Ran read_file/i,
     });
     expect(successfulTool).toHaveTextContent("web/src/pages/chat");
     expect(successfulTool).not.toHaveTextContent("Done");
     expect(successfulTool).toHaveAttribute("aria-expanded", "false");
 
-    const failedTool = screen.getByRole("button", { name: /已执行 run_lint/i });
+    const failedTool = screen.getByRole("button", { name: /Ran run_lint/i });
     expect(failedTool).not.toHaveTextContent('{"target":"web"}');
     expect(failedTool).toHaveTextContent("Failed");
+    expect(failedTool).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(failedTool);
     expect(failedTool).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText(/lint failed/)).toBeInTheDocument();
 
-    const bashTool = screen.getByRole("button", { name: /已执行 run_bash/i });
+    const bashTool = screen.getByRole("button", { name: /Ran run_bash/i });
     expect(bashTool).toHaveTextContent(
       "python3 /workspace/skills/ppt-master/scripts/total_md_split.py projects/shbank_pension_ppt169_20260426",
     );
     expect(bashTool).not.toHaveTextContent("Done");
 
-    const searchTool = screen.getByRole("button", { name: /已执行 search/i });
+    const searchTool = screen.getByRole("button", { name: /Ran search/i });
     expect(searchTool).toHaveTextContent("server/app");
     expect(searchTool).toHaveTextContent(
       "React recursion tool rendering implementation",
@@ -352,5 +359,122 @@ describe("RecursionCard", () => {
     ).toBeGreaterThan(0);
     expect(screen.getAllByText("Result:").length).toBeGreaterThan(0);
     expect(screen.getByText("ok")).toBeInTheDocument();
+  });
+
+  it("keeps failed tool results from falling back to preparing", () => {
+    render(
+      <RecursionCard
+        messageId="message-failed-reversed"
+        recursion={buildRecursion({
+          summary: "Lint failed",
+          status: "completed",
+          endTime: "2026-03-24T00:00:04.000Z",
+          events: [
+            {
+              type: "tool_result",
+              task_id: "task-failed-reversed",
+              trace_id: "trace-failed-reversed",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:03.000Z",
+              data: {
+                tool_results: [
+                  {
+                    tool_call_id: "call-failed",
+                    name: "run_lint",
+                    error: "lint failed",
+                    success: false,
+                  },
+                ],
+              },
+            },
+            {
+              type: "tool_call",
+              task_id: "task-failed-reversed",
+              trace_id: "trace-failed-reversed",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-failed",
+                    name: "run_lint",
+                    arguments: { target: "web" },
+                  },
+                ],
+                tool_results: [],
+                pending_arguments: true,
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    const failedTool = screen.getByRole("button", { name: /Ran run_lint/i });
+    expect(failedTool).toHaveTextContent("Failed");
+    expect(
+      screen.queryByRole("button", { name: /Preparing run_lint/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("copies expanded tool arguments and results independently", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(
+      <RecursionCard
+        messageId="message-copy-tool"
+        recursion={buildRecursion({
+          summary: "Read file",
+          status: "completed",
+          endTime: "2026-03-24T00:00:05.000Z",
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-copy-tool",
+              trace_id: "trace-copy-tool",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-copy",
+                    name: "read_file",
+                    arguments: { path: "README.md" },
+                  },
+                ],
+                tool_results: [
+                  {
+                    tool_call_id: "call-copy",
+                    name: "read_file",
+                    result: "file contents",
+                    success: true,
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Ran read_file/i }));
+    await user.click(screen.getByRole("button", { name: "Copy Arguments" }));
+    expect(writeText).toHaveBeenCalledWith('{\n  "path": "README.md"\n}');
+    expect(
+      screen.getByRole("button", { name: "Copied Arguments" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Copy Result" }));
+    expect(writeText).toHaveBeenLastCalledWith("file contents");
+    expect(screen.getByRole("button", { name: "Copied Result" })).toBeInTheDocument();
   });
 });
