@@ -20,6 +20,14 @@ path = Path(sys.argv[1])
 start_line = int(sys.argv[2])
 max_lines = int(sys.argv[3])
 
+display_path = str(path).removeprefix("/workspace/") or "."
+if not path.exists():
+    print(f"File not found: {display_path}", file=sys.stderr)
+    raise SystemExit(1)
+if path.is_dir():
+    print(f"Path is a directory, not a file: {display_path}", file=sys.stderr)
+    raise SystemExit(1)
+
 text = path.read_text(encoding="utf-8", errors="replace")
 lines = text.splitlines(keepends=True)
 total_lines = len(lines)
@@ -103,16 +111,32 @@ def read_file(
         raise ValueError("max_lines must be less than or equal to 800.")
 
     target = workspace_path(path)
-    output = exec_in_sandbox(
-        [
-            "python3",
-            "-c",
-            _READ_FILE_SCRIPT,
-            target,
-            str(start_line),
-            str(max_lines),
-        ]
-    )
+    try:
+        output = exec_in_sandbox(
+            [
+                "python3",
+                "-c",
+                _READ_FILE_SCRIPT,
+                target,
+                str(start_line),
+                str(max_lines),
+            ]
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        not_found_prefix = "Sandbox command failed (exit=1): File not found: "
+        directory_prefix = (
+            "Sandbox command failed (exit=1): Path is a directory, not a file: "
+        )
+        if message.startswith(not_found_prefix):
+            raise FileNotFoundError(
+                f"File not found: {message.removeprefix(not_found_prefix)}"
+            ) from exc
+        if message.startswith(directory_prefix):
+            raise IsADirectoryError(
+                f"Path is a directory, not a file: {message.removeprefix(directory_prefix)}"
+            ) from exc
+        raise
     payload = json.loads(output)
     if not isinstance(payload, dict):
         raise RuntimeError("Sandbox read_file returned an invalid payload.")

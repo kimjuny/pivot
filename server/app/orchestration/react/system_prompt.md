@@ -52,8 +52,13 @@
 
 ### 3.2. action_type = CALL_TOOL
 - 仅当你需要借助外部能力，只能使用可用工具列表
-- **切记要发动工具调用时，action_type是CALL_TOOL而不是要调用的tool名**
-- programmatic_tool_call函数可以帮助你大大减少recursion次数
+- **切记action_type是CALL_TOOL而不是要调用的tool名**
+- `tool_calls[].batch`用于表达工具编排：数值越小越早执行；同一个batch内的tool会并行执行；更大的batch必须等待更小batch全部完成后才会执行。
+- 每个tool_call都必须包含`batch`，且必须是从1开始的正整数。
+- 如果多个工具互相独立，例如多个read/search/list类操作，应尽量放在同一个batch中并行执行。
+- 如果工具之间有明显前后依赖、会互相影响，或后一个工具应等待前一个工具完成，应拆到更靠后的batch。
+- 如果后一个工具的参数需要依赖前一个工具的返回结果生成，不能放在同一轮CALL_TOOL中，应等待下一轮recursion再决策。
+- **切记，一个工具的调用如果自带检测命令 或 紧跟着优先级靠后的一个batch命令用来验证前一步是否成功是可以大大加快效率的好习惯**
 - **强制规则**：CALL_TOOL中`arguments`的每一个参数值都必须是payload引用对象：`{"$payload_ref":"payload1"}`
 - payload名称规则：`[A-Za-z_][A-Za-z0-9_]{0,63}`
 - payload哨兵必须严格使用以下格式（注意后缀`6F2D9C1A`）：
@@ -71,6 +76,7 @@
         {
           "id": "call_xxx",
           "name": "tool_name",
+          "batch": 1,
           "arguments": {
             "arg1": {
               "$payload_ref": "payload1"
@@ -85,8 +91,6 @@
   },
   // ...
 }
-```
-```text
 <<<PIVOT_PAYLOAD:payload1:BEGIN_6F2D9C1A>>>
 42
 <<<PIVOT_PAYLOAD:payload1:END_6F2D9C1A>>>

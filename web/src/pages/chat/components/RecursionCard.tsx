@@ -369,14 +369,28 @@ function ToolExecutionItem({
 }
 
 function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
-  const [open, setOpen] = useState(false);
+  const hasPendingTools = items.some(({ result }) => !result);
+  const [open, setOpen] = useState(hasPendingTools);
+  const autoOpenedForPendingRef = useRef(hasPendingTools);
   const statusLabel = getToolGroupStatus(items);
+
+  useEffect(() => {
+    if (hasPendingTools) {
+      autoOpenedForPendingRef.current = true;
+      setOpen(true);
+      return;
+    }
+    if (autoOpenedForPendingRef.current) {
+      autoOpenedForPendingRef.current = false;
+      setOpen(false);
+    }
+  }, [hasPendingTools]);
 
   return (
     <div className="rounded-md bg-background/45">
       <button
         type="button"
-        onClick={() => setOpen((previous) => !previous)}
+        onClick={() => setOpen((previous) => (hasPendingTools ? true : !previous))}
         className="group flex w-full items-start justify-between gap-3 rounded-md px-3 py-1.5 text-left transition-colors hover:bg-muted/25"
         aria-expanded={open}
       >

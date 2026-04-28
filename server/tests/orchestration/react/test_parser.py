@@ -1,5 +1,6 @@
 """Unit tests for strict ReAct parser behavior."""
 
+import json
 import sys
 import unittest
 from importlib import import_module
@@ -15,6 +16,9 @@ if str(SERVER_ROOT) not in sys.path:
 react_parser = import_module("app.orchestration.react.parser")
 parse_react_output = react_parser.parse_react_output
 parse_react_control_section = react_parser.parse_react_control_section
+collect_complete_payload_blocks = react_parser.collect_complete_payload_blocks
+resolve_tool_call_payloads = react_parser.resolve_tool_call_payloads
+ToolCallRequest = import_module("app.orchestration.react.types").ToolCallRequest
 
 
 class _StubToolManager:
@@ -53,6 +57,7 @@ class ReactParserTestCase(unittest.TestCase):
         {
           "id": "call-1",
           "name": "read_file",
+          "batch": 2,
           "arguments": {
             "path": {"$payload_ref": "path_payload"},
             "options": {"$payload_ref": "options_payload"}
@@ -78,6 +83,7 @@ class ReactParserTestCase(unittest.TestCase):
         self.assertEqual(decision.session_title, "Read demo file")
         self.assertEqual(decision.action.step_id, "1")
         self.assertEqual(len(decision.action.tool_calls), 1)
+        self.assertEqual(decision.action.tool_calls[0].batch, 2)
         self.assertEqual(
             decision.action.tool_calls[0].arguments,
             {
@@ -104,6 +110,7 @@ class ReactParserTestCase(unittest.TestCase):
         {
           "id": "call-1",
           "name": "read_file",
+          "batch": 1,
           "arguments": {
             "path": {"$payload_ref": "path_payload"}
           }
@@ -123,9 +130,169 @@ class ReactParserTestCase(unittest.TestCase):
             decision.action.tool_calls[0].arguments,
             {"path": {"$payload_ref": "path_payload"}},
         )
+        self.assertEqual(decision.action.tool_calls[0].batch, 1)
 
-    def test_reject_legacy_top_level_step_status_update(self) -> None:
-        """Legacy step-status locations should now fail fast."""
+    def test_collect_complete_payload_blocks_ignores_incomplete_tail(self) -> None:
+        """Streaming payload collection should return only closed blocks."""
+        content = """
+{"action":{"action_type":"CALL_TOOL","output":{"tool_calls":[]}}}
+<<<PIVOT_PAYLOAD:ready_payload:BEGIN_6F2D9C1A>>>
+"ready"
+<<<PIVOT_PAYLOAD:ready_payload:END_6F2D9C1A>>>
+<<<PIVOT_PAYLOAD:pending_payload:BEGIN_6F2D9C1A>>>
+"pending
+""".strip()
+
+        self.assertEqual(
+            collect_complete_payload_blocks(content),
+            {"ready_payload": '"ready"'},
+        )
+
+    def test_resolve_single_tool_call_payloads(self) -> None:
+        """One preview call can be resolved without parsing the whole response."""
+        tool_call = ToolCallRequest(
+            id="call-1",
+            name="read_file",
+            batch=3,
+            arguments={"path": {"$payload_ref": "path_payload"}},
+        )
+        tool_manager = _StubToolManager(
+            {"read_file": {"properties": {"path": {"type": "string"}}}}
+        )
+
+        resolved = resolve_tool_call_payloads(
+            tool_call,
+            {"path_payload": '"README.md"'},
+            tool_manager=tool_manager,
+        )
+
+        self.assertEqual(resolved.id, "call-1")
+        self.assertEqual(resolved.batch, 3)
+        self.assertEqual(resolved.arguments, {"path": "README.md"})
+
+    def test_parse_call_tool_defaults_batch_to_one(self) -> None:
+        """CALL_TOOL batch remains optional for compatibility and defaults to one."""
+        content = """
+{
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+"README.md"
+<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
+""".strip()
+
+        decision = parse_react_output(content)
+
+        self.assertEqual(decision.action.tool_calls[0].batch, 1)
+        self.assertEqual(
+            decision.action.tool_calls[0].to_dict(),
+            {
+                "id": "call-1",
+                "name": "read_file",
+                "batch": 1,
+                "arguments": {"path": "README.md"},
+            },
+        )
+
+    def test_reject_invalid_tool_call_batch(self) -> None:
+        """CALL_TOOL batch must be a positive integer, not bool or string."""
+        invalid_batches = [
+            ("0", 0),
+            ("negative", -1),
+            ("bool", True),
+            ("string", "1"),
+        ]
+
+        for _label, invalid_batch in invalid_batches:
+            batch_json = (
+                f'"{invalid_batch}"'
+                if isinstance(invalid_batch, str)
+                else json.dumps(invalid_batch)
+            )
+            content = f"""
+{{
+  "action": {{
+    "action_type": "CALL_TOOL",
+    "output": {{
+      "tool_calls": [
+        {{
+          "id": "call-1",
+          "name": "read_file",
+          "batch": {batch_json},
+          "arguments": {{
+            "path": {{"$payload_ref": "path_payload"}}
+          }}
+        }}
+      ]
+    }}
+  }}
+}}
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+"README.md"
+<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
+""".strip()
+
+            with (
+                self.subTest(invalid_batch=invalid_batch),
+                self.assertRaisesRegex(
+                    ValueError,
+                    r"action\.output\.tool_calls\[0\]\.batch must be a positive integer",
+                ),
+            ):
+                parse_react_output(content)
+
+    def test_reject_duplicate_tool_call_id(self) -> None:
+        """CALL_TOOL ids must be unique within one recursion."""
+        content = """
+{
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"}
+          }
+        },
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "arguments": {
+            "path": {"$payload_ref": "other_path_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+"README.md"
+<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
+<<<PIVOT_PAYLOAD:other_path_payload:BEGIN_6F2D9C1A>>>
+"package.json"
+<<<PIVOT_PAYLOAD:other_path_payload:END_6F2D9C1A>>>
+""".strip()
+
+        with self.assertRaisesRegex(ValueError, "Duplicate tool_call id: call-1"):
+            parse_react_output(content)
+
+    def test_normalizes_legacy_top_level_step_status_update(self) -> None:
+        """Top-level step-status drift should normalize into action."""
         content = """
 {
   "step_status_update": [{"step_id": "1", "status": "done"}],
@@ -136,11 +303,35 @@ class ReactParserTestCase(unittest.TestCase):
 }
 """.strip()
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "step_status_update is only allowed under action",
-        ):
-            parse_react_output(content)
+        decision = parse_react_output(content)
+
+        self.assertEqual(
+            [item.to_dict() for item in decision.action.step_status_update],
+            [{"step_id": "1", "status": "done"}],
+        )
+        self.assertNotIn("step_status_update", decision.raw_payload)
+
+    def test_normalizes_action_output_step_status_update(self) -> None:
+        """action.output step-status drift should normalize into action."""
+        content = """
+{
+  "action": {
+    "action_type": "RE_PLAN",
+    "output": {
+      "step_status_update": [{"step_id": "2", "status": "running"}],
+      "plan": []
+    }
+  }
+}
+""".strip()
+
+        decision = parse_react_output(content)
+
+        self.assertEqual(
+            [item.to_dict() for item in decision.action.step_status_update],
+            [{"step_id": "2", "status": "running"}],
+        )
+        self.assertNotIn("step_status_update", decision.action.output)
 
     def test_reject_non_object_tool_arguments(self) -> None:
         """CALL_TOOL arguments must be objects before payload resolution."""

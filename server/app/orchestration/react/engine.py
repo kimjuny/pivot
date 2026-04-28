@@ -11,6 +11,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -41,17 +42,36 @@ from .parser import (
     PARSE_RETRY_INSTRUCTION,
     PARSE_RETRY_LIMIT,
     PAYLOAD_BEGIN_RE,
+    collect_complete_payload_blocks,
+    collect_tool_call_payload_refs,
     parse_react_control_section,
     parse_react_output,
+    resolve_tool_call_payloads,
     safe_load_json,
 )
 from .prompt_template import build_runtime_system_prompt, build_runtime_user_prompt
+from .types import ToolCallRequest
 
 if TYPE_CHECKING:
     from .types import ParsedReactDecision
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _EagerToolExecutionState:
+    """Track tool calls that start while the model is still streaming."""
+
+    decision: "ParsedReactDecision | None" = None
+    payloads: dict[str, str] = field(default_factory=dict)
+    started_call_ids: set[str] = field(default_factory=set)
+    running_tasks: dict[str, asyncio.Task[dict[str, Any]]] = field(default_factory=dict)
+    result_pump_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    result_by_call_id: dict[str, dict[str, Any]] = field(default_factory=dict)
+    result_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    active_batch_index: int = 0
+    stopped_after_batch: bool = False
 
 
 class ReactEngine:
@@ -564,6 +584,7 @@ class ReactEngine:
         llm_chat_kwargs: dict[str, Any],
         token_counter: dict[str, int],
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
+        eager_tool_state: _EagerToolExecutionState | None = None,
     ) -> Response:
         """Collect full model output via ``chat_stream`` while emitting live updates."""
         stream_iterator = self.llm.chat_stream(
@@ -618,9 +639,8 @@ class ReactEngine:
                 if isinstance(content_delta, str) and content_delta:
                     content_parts.append(content_delta)
                     estimated_completion_tokens += estimate_text_tokens(content_delta)
-                    if (
-                        token_meter_queue is not None
-                        and not emitted_control_preview
+                    if not emitted_control_preview and (
+                        token_meter_queue is not None or eager_tool_state is not None
                     ):
                         partial_content = "".join(content_parts)
                         if PAYLOAD_BEGIN_RE.search(partial_content) is not None:
@@ -636,23 +656,37 @@ class ReactEngine:
                                 )
                             else:
                                 emitted_control_preview = True
-                                await token_meter_queue.put(
-                                    {
-                                        "type": "react_control",
-                                        "observe": preview_decision.observe,
-                                        "reason": preview_decision.reason,
-                                        "summary": preview_decision.summary,
-                                        "action_type": (
-                                            preview_decision.action.action_type
-                                        ),
-                                        "tool_calls": [
-                                            tool_call.to_dict()
-                                            for tool_call in (
-                                                preview_decision.action.tool_calls
-                                            )
-                                        ],
-                                    }
-                                )
+                                if (
+                                    eager_tool_state is not None
+                                    and preview_decision.action.action_type
+                                    == "CALL_TOOL"
+                                ):
+                                    eager_tool_state.decision = preview_decision
+                                if token_meter_queue is not None:
+                                    await token_meter_queue.put(
+                                        {
+                                            "type": "react_control",
+                                            "observe": preview_decision.observe,
+                                            "reason": preview_decision.reason,
+                                            "summary": preview_decision.summary,
+                                            "action_type": (
+                                                preview_decision.action.action_type
+                                            ),
+                                            "tool_calls": [
+                                                tool_call.to_dict()
+                                                for tool_call in (
+                                                    preview_decision.action.tool_calls
+                                                )
+                                            ],
+                                        }
+                                    )
+
+                    if eager_tool_state is not None:
+                        await self._advance_eager_tool_execution(
+                            eager_tool_state,
+                            "".join(content_parts),
+                            token_meter_queue,
+                        )
 
             if token_meter_queue is not None:
                 now = perf_counter()
@@ -674,6 +708,13 @@ class ReactEngine:
                     )
                     last_report_at = now
                     last_report_tokens = estimated_completion_tokens
+
+        if eager_tool_state is not None:
+            await self._advance_eager_tool_execution(
+                eager_tool_state,
+                "".join(content_parts),
+                token_meter_queue,
+            )
 
         # Final flush so UI gets the latest completion estimate before action arrives.
         if token_meter_queue is not None:
@@ -1009,6 +1050,14 @@ class ReactEngine:
                         "error", "Tool execution failed"
                     )
                 compact_results.append(compact_item)
+            parse_error = event_data.get("parse_error")
+            if isinstance(parse_error, str) and parse_error.strip():
+                compact_results.append(
+                    {
+                        "error": parse_error.strip(),
+                        "source": "assistant_response_parse",
+                    }
+                )
             return compact_results
         if action_type == "CLARIFY":
             output = event_data.get("output", {})
@@ -1030,6 +1079,320 @@ class ReactEngine:
             if isinstance(pending_user_action, dict):
                 return dict(pending_user_action)
         return None
+
+    @staticmethod
+    def _group_tool_calls_by_batch(
+        tool_calls: list[ToolCallRequest],
+    ) -> list[tuple[int, list[ToolCallRequest]]]:
+        """Group tool calls into ascending execution batches."""
+        calls_by_batch: dict[int, list[ToolCallRequest]] = {}
+        for tool_call in tool_calls:
+            calls_by_batch.setdefault(tool_call.batch, []).append(tool_call)
+        return sorted(calls_by_batch.items(), key=lambda item: item[0])
+
+    async def _emit_tool_result(
+        self,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+        result_item: dict[str, Any],
+    ) -> None:
+        """Emit one live tool result when streaming is active."""
+        if token_meter_queue is None:
+            return
+        await token_meter_queue.put(
+            {
+                "type": "tool_result",
+                "tool_results": [result_item],
+            }
+        )
+
+    async def _emit_tool_call(
+        self,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+        tool_calls: list[ToolCallRequest],
+    ) -> None:
+        """Emit live tool-call start events when streaming is active."""
+        if token_meter_queue is None or not tool_calls:
+            return
+        await token_meter_queue.put(
+            {
+                "type": "tool_call",
+                "tool_calls": [tool_call.to_dict() for tool_call in tool_calls],
+                "tool_results": [],
+            }
+        )
+
+    async def _execute_tool_call_request(
+        self,
+        tool_call: ToolCallRequest,
+    ) -> dict[str, Any]:
+        """Execute one validated tool call and normalize its result payload."""
+        try:
+            result = await run_in_threadpool(
+                self.tool_manager.execute,
+                tool_call.name,
+                context=self.tool_execution_context,
+                **tool_call.arguments,
+            )
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "result": result,
+                "success": True,
+            }
+        except Exception as e:
+            logger.error("Tool %s execution failed: %s", tool_call.name, e)
+            if "not found in registry" in str(e):
+                available_tools = self.tool_manager.list_tools()
+                tool_names = [tool.name for tool in available_tools]
+                error_msg = (
+                    f"Tool '{tool_call.name}' not found. "
+                    f"Available tools: {', '.join(tool_names)}"
+                )
+            else:
+                error_msg = f"Tool execution failed: {e!s}"
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": error_msg,
+                "success": False,
+            }
+
+    def _has_all_payloads_for_tool_call(
+        self,
+        tool_call: ToolCallRequest,
+        payloads: dict[str, str],
+    ) -> bool:
+        """Return whether one preview tool call can be resolved now."""
+        try:
+            refs = collect_tool_call_payload_refs(tool_call)
+        except ValueError:
+            logger.debug(
+                "Skipping eager tool start; tool_call payload refs are invalid.",
+                exc_info=True,
+            )
+            return False
+        return refs.issubset(payloads)
+
+    async def _drain_eager_tool_results(
+        self,
+        eager_state: _EagerToolExecutionState,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+        *,
+        wait_for_one: bool,
+    ) -> bool:
+        """Move completed eager tool tasks into the result map."""
+        if not eager_state.running_tasks:
+            return False
+
+        running_tasks = set(eager_state.running_tasks.values())
+        if wait_for_one:
+            await asyncio.wait(
+                running_tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+        drained = False
+        for tool_call_id, execution_task in list(eager_state.running_tasks.items()):
+            if not execution_task.done():
+                continue
+            drained = (
+                await self._complete_eager_tool_task(
+                    eager_state,
+                    token_meter_queue,
+                    tool_call_id,
+                    execution_task,
+                )
+                or drained
+            )
+        return drained
+
+    async def _complete_eager_tool_task(
+        self,
+        eager_state: _EagerToolExecutionState,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+        tool_call_id: str,
+        execution_task: asyncio.Task[dict[str, Any]],
+    ) -> bool:
+        """Record and emit one eager tool task exactly once."""
+        async with eager_state.result_lock:
+            current_task = eager_state.running_tasks.get(tool_call_id)
+            if current_task is not execution_task or not execution_task.done():
+                return False
+            result_item = execution_task.result()
+            eager_state.result_by_call_id[tool_call_id] = result_item
+            del eager_state.running_tasks[tool_call_id]
+
+        await self._emit_tool_result(token_meter_queue, result_item)
+        return True
+
+    async def _pump_eager_tool_result(
+        self,
+        eager_state: _EagerToolExecutionState,
+        token_meter_queue: asyncio.Queue[dict[str, Any]],
+        tool_call_id: str,
+        execution_task: asyncio.Task[dict[str, Any]],
+    ) -> None:
+        """Emit a tool result as soon as its eager task completes."""
+        try:
+            await execution_task
+            await self._complete_eager_tool_task(
+                eager_state,
+                token_meter_queue,
+                tool_call_id,
+                execution_task,
+            )
+        finally:
+            current_task = asyncio.current_task()
+            if current_task is not None:
+                eager_state.result_pump_tasks.discard(current_task)
+
+    async def _wait_eager_result_pumps(
+        self,
+        eager_state: _EagerToolExecutionState,
+    ) -> None:
+        """Wait for any live eager result pump tasks to finish emitting."""
+        while eager_state.result_pump_tasks:
+            await asyncio.gather(
+                *list(eager_state.result_pump_tasks),
+                return_exceptions=True,
+            )
+
+    async def _skip_unstarted_eager_tool_calls(
+        self,
+        eager_state: _EagerToolExecutionState,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> None:
+        """Close future tool calls after a prior batch requested user action."""
+        if eager_state.decision is None:
+            return
+        eager_state.stopped_after_batch = True
+
+        for tool_call in eager_state.decision.action.tool_calls:
+            if tool_call.id in eager_state.result_by_call_id:
+                continue
+            result_item = {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "Tool skipped because an earlier tool requested user action.",
+                "success": False,
+            }
+            eager_state.result_by_call_id[tool_call.id] = result_item
+            await self._emit_tool_result(token_meter_queue, result_item)
+
+    async def _advance_eager_tool_execution(
+        self,
+        eager_state: _EagerToolExecutionState,
+        content: str,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> bool:
+        """Start newly-ready tool calls while preserving batch order."""
+        await self._drain_eager_tool_results(
+            eager_state,
+            token_meter_queue,
+            wait_for_one=False,
+        )
+
+        if eager_state.decision is None or eager_state.stopped_after_batch:
+            return False
+        if eager_state.decision.action.action_type != "CALL_TOOL":
+            return False
+
+        try:
+            eager_state.payloads.update(collect_complete_payload_blocks(content))
+        except ValueError:
+            logger.debug("Skipping eager payload collection.", exc_info=True)
+            return False
+
+        grouped_calls = self._group_tool_calls_by_batch(
+            eager_state.decision.action.tool_calls
+        )
+        if eager_state.active_batch_index >= len(grouped_calls):
+            return False
+
+        _batch_number, batch_calls = grouped_calls[eager_state.active_batch_index]
+        batch_call_ids = {tool_call.id for tool_call in batch_calls}
+        if batch_call_ids.issubset(eager_state.result_by_call_id):
+            batch_results = [
+                eager_state.result_by_call_id[tool_call.id] for tool_call in batch_calls
+            ]
+            if self._extract_pending_user_action_from_tool_results(batch_results):
+                await self._skip_unstarted_eager_tool_calls(
+                    eager_state,
+                    token_meter_queue,
+                )
+                return False
+            eager_state.active_batch_index += 1
+            return await self._advance_eager_tool_execution(
+                eager_state,
+                content,
+                token_meter_queue,
+            )
+
+        started_any = False
+        for tool_call in batch_calls:
+            if tool_call.id in eager_state.started_call_ids:
+                continue
+            if not self._has_all_payloads_for_tool_call(
+                tool_call, eager_state.payloads
+            ):
+                continue
+
+            try:
+                resolved_tool_call = resolve_tool_call_payloads(
+                    tool_call,
+                    eager_state.payloads,
+                    tool_manager=self.tool_manager,
+                )
+            except ValueError:
+                logger.debug("Skipping eager tool-call resolution.", exc_info=True)
+                continue
+
+            eager_state.started_call_ids.add(resolved_tool_call.id)
+            execution_task = asyncio.create_task(
+                self._execute_tool_call_request(resolved_tool_call)
+            )
+            eager_state.running_tasks[resolved_tool_call.id] = execution_task
+            if token_meter_queue is not None:
+                pump_task = asyncio.create_task(
+                    self._pump_eager_tool_result(
+                        eager_state,
+                        token_meter_queue,
+                        resolved_tool_call.id,
+                        execution_task,
+                    )
+                )
+                eager_state.result_pump_tasks.add(pump_task)
+            await self._emit_tool_call(token_meter_queue, [resolved_tool_call])
+            started_any = True
+
+        return started_any
+
+    async def _finish_eager_tool_execution(
+        self,
+        eager_state: _EagerToolExecutionState,
+        content: str,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> None:
+        """Finish all eager-ready calls before final recursion persistence."""
+        while True:
+            progressed = await self._advance_eager_tool_execution(
+                eager_state,
+                content,
+                token_meter_queue,
+            )
+            if eager_state.running_tasks:
+                await self._drain_eager_tool_results(
+                    eager_state,
+                    token_meter_queue,
+                    wait_for_one=True,
+                )
+                continue
+            if not progressed:
+                await self._wait_eager_result_pumps(eager_state)
+                break
 
     async def execute_recursion(
         self,
@@ -1075,14 +1438,21 @@ class ReactEngine:
             decision: ParsedReactDecision | None = None
             parse_error: ValueError | None = None
             request_messages = messages
+            eager_tool_state: _EagerToolExecutionState | None = None
 
             for parse_attempt in range(PARSE_RETRY_LIMIT + 1):
+                eager_tool_state = (
+                    _EagerToolExecutionState()
+                    if self.stream_llm_responses and parse_attempt == 0
+                    else None
+                )
                 if self.stream_llm_responses:
                     response = await self._stream_chat_response(
                         messages=request_messages,
                         llm_chat_kwargs=llm_chat_kwargs or {},
                         token_counter=token_counter,
                         token_meter_queue=token_meter_queue,
+                        eager_tool_state=eager_tool_state,
                     )
                 else:
                     response = await run_in_threadpool(
@@ -1113,7 +1483,11 @@ class ReactEngine:
                     break
                 except ValueError as e:
                     parse_error = e
-                    if parse_attempt < PARSE_RETRY_LIMIT:
+                    can_retry_parse = parse_attempt < PARSE_RETRY_LIMIT and not (
+                        eager_tool_state is not None
+                        and bool(eager_tool_state.started_call_ids)
+                    )
+                    if can_retry_parse:
                         logger.warning(
                             "Failed to parse LLM output (trace_id=%s, attempt=%s): %s. "
                             "Retrying once with strict format repair instruction.",
@@ -1131,19 +1505,127 @@ class ReactEngine:
                         f"Iteration: {task.iteration}\n"
                         f"Error: {e}"
                     )
+                    break
 
             if response is None or decision is None or message is None:
+                parse_error_message = str(parse_error or "Failed to parse LLM output")
+                if eager_tool_state is not None:
+                    while eager_tool_state.running_tasks:
+                        await self._drain_eager_tool_results(
+                            eager_tool_state,
+                            token_meter_queue,
+                            wait_for_one=True,
+                        )
+                    await self._wait_eager_result_pumps(eager_tool_state)
+                    if eager_tool_state.started_call_ids and (
+                        eager_tool_state.decision is not None
+                    ):
+                        preview_decision = eager_tool_state.decision
+                        result_by_call_id = dict(eager_tool_state.result_by_call_id)
+
+                        for tool_call in preview_decision.action.tool_calls:
+                            if tool_call.id in result_by_call_id:
+                                continue
+                            result_by_call_id[tool_call.id] = {
+                                "tool_call_id": tool_call.id,
+                                "name": tool_call.name,
+                                "arguments": tool_call.arguments,
+                                "error": (
+                                    "Tool skipped because assistant response parsing "
+                                    f"failed before this call could start: {parse_error_message}"
+                                ),
+                                "success": False,
+                            }
+                            await self._emit_tool_result(
+                                token_meter_queue,
+                                result_by_call_id[tool_call.id],
+                            )
+
+                        recovered_tool_calls: list[dict[str, Any]] = []
+                        for tool_call in preview_decision.action.tool_calls:
+                            recovered_tool_call = tool_call.to_dict()
+                            result_item = result_by_call_id.get(tool_call.id)
+                            if isinstance(result_item, dict) and isinstance(
+                                result_item.get("arguments"),
+                                dict,
+                            ):
+                                recovered_tool_call["arguments"] = result_item[
+                                    "arguments"
+                                ]
+                            recovered_tool_calls.append(recovered_tool_call)
+
+                        tool_results = [
+                            result_by_call_id[tool_call.id]
+                            for tool_call in preview_decision.action.tool_calls
+                            if tool_call.id in result_by_call_id
+                        ]
+                        action_output = dict(preview_decision.action.output)
+                        action_output["tool_calls"] = recovered_tool_calls
+                        step_status_updates_validated = [
+                            item.to_dict()
+                            for item in preview_decision.action.step_status_update
+                        ]
+                        pending_user_action = (
+                            self._extract_pending_user_action_from_tool_results(
+                                tool_results
+                            )
+                        )
+                        tokens_data = self.state_service.finalize_partial_tool_error(
+                            task=task,
+                            recursion=recursion,
+                            context=context,
+                            observe=preview_decision.observe,
+                            thinking=message.reasoning_content
+                            if message is not None
+                            else None,
+                            reason=preview_decision.reason,
+                            action_output=action_output,
+                            action_step_id=preview_decision.action.step_id,
+                            step_status_updates=step_status_updates_validated,
+                            summary=preview_decision.summary,
+                            tool_results=tool_results,
+                            error_log=parse_error_message,
+                            pending_user_action=pending_user_action,
+                            token_counter=token_counter,
+                        )
+                        return recursion, {
+                            "trace_id": trace_id,
+                            "action_type": "CALL_TOOL",
+                            "error": parse_error_message,
+                            "parse_error": parse_error_message,
+                            "tokens": tokens_data,
+                            "assistant_message": assistant_message_raw,
+                            "rollback_messages": False,
+                            "llm_response_id": response.id
+                            if response is not None
+                            else None,
+                            "observe": preview_decision.observe,
+                            "thinking": message.reasoning_content
+                            if message is not None
+                            else None,
+                            "reason": preview_decision.reason,
+                            "summary": preview_decision.summary,
+                            "session_title": "",
+                            "output": action_output,
+                            "answer_attachments": [],
+                            "tool_calls": recovered_tool_calls,
+                            "tool_results": tool_results,
+                            "pending_user_action": pending_user_action,
+                            "task_summary": preview_decision.task_summary,
+                            "step_status_update": step_status_updates_validated,
+                            "current_plan": self._build_current_plan_payload(context),
+                        }
                 tokens_data = self.state_service.finalize_error(
                     task,
                     recursion,
-                    str(parse_error or "Failed to parse LLM output"),
+                    parse_error_message,
                     token_counter,
                 )
 
                 return recursion, {
                     "trace_id": trace_id,
                     "action_type": "ERROR",
-                    "error": str(parse_error or "Failed to parse LLM output"),
+                    "error": parse_error_message,
                     "tokens": tokens_data,
                     "assistant_message": None,
                     "rollback_messages": True,
@@ -1201,63 +1683,117 @@ class ReactEngine:
                             "action_type": action_type,
                         }
                     )
-                    await token_meter_queue.put(
-                        {
-                            "type": "tool_call",
-                            "tool_calls": reconstructed_tool_calls,
-                            "tool_results": [],
-                        }
+
+                if eager_tool_state is not None:
+                    await self._finish_eager_tool_execution(
+                        eager_tool_state,
+                        assistant_message_raw or "",
+                        token_meter_queue,
                     )
 
+                result_by_call_id: dict[str, dict[str, Any]] = (
+                    dict(eager_tool_state.result_by_call_id)
+                    if eager_tool_state is not None
+                    else {}
+                )
                 for tool_call in action.tool_calls:
-                    try:
-                        # Execute tool asynchronously via thread pool
-                        result = await run_in_threadpool(
-                            self.tool_manager.execute,
-                            tool_call.name,
-                            context=self.tool_execution_context,
-                            **tool_call.arguments,
-                        )
+                    existing_result = result_by_call_id.get(tool_call.id)
+                    if existing_result is not None:
+                        existing_result["arguments"] = tool_call.arguments
+                should_stop_after_batch = False
 
-                        tool_results.append(
-                            {
-                                "tool_call_id": tool_call.id,
-                                "name": tool_call.name,
-                                "arguments": tool_call.arguments,
-                                "result": result,
-                                "success": True,
-                            }
-                        )
+                for _batch_number, batch_calls in self._group_tool_calls_by_batch(
+                    action.tool_calls
+                ):
+                    if all(
+                        tool_call.id in result_by_call_id for tool_call in batch_calls
+                    ):
+                        batch_results = [
+                            result_by_call_id[tool_call.id] for tool_call in batch_calls
+                        ]
+                        if self._extract_pending_user_action_from_tool_results(
+                            batch_results
+                        ):
+                            should_stop_after_batch = True
+                            break
+                        continue
 
-                    except Exception as e:
-                        logger.error("Tool %s execution failed: %s", tool_call.name, e)
-                        # Provide helpful error message with available tools
-                        if "not found in registry" in str(e):
-                            available_tools = self.tool_manager.list_tools()
-                            tool_names = [tool.name for tool in available_tools]
-                            error_msg = (
-                                f"Tool '{tool_call.name}' not found. "
-                                f"Available tools: {', '.join(tool_names)}"
+                    pending_batch_calls = [
+                        tool_call
+                        for tool_call in batch_calls
+                        if tool_call.id not in result_by_call_id
+                    ]
+
+                    await self._emit_tool_call(token_meter_queue, pending_batch_calls)
+
+                    batch_results: list[dict[str, Any]] = []
+                    if len(pending_batch_calls) == 1:
+                        batch_results.append(
+                            await self._execute_tool_call_request(
+                                pending_batch_calls[0]
                             )
-                        else:
-                            error_msg = f"Tool execution failed: {e!s}"
-                        tool_results.append(
-                            {
-                                "tool_call_id": tool_call.id,
-                                "name": tool_call.name,
-                                "arguments": tool_call.arguments,
-                                "error": error_msg,
-                                "success": False,
-                            }
                         )
-                    finally:
-                        if token_meter_queue is not None and tool_results:
+                    else:
+                        execution_tasks = [
+                            asyncio.create_task(
+                                self._execute_tool_call_request(tool_call)
+                            )
+                            for tool_call in pending_batch_calls
+                        ]
+                        for execution_task in asyncio.as_completed(execution_tasks):
+                            batch_results.append(await execution_task)
+
+                    for result_item in batch_results:
+                        tool_call_id = result_item.get("tool_call_id")
+                        if isinstance(tool_call_id, str):
+                            result_by_call_id[tool_call_id] = result_item
+                        if token_meter_queue is not None:
                             await token_meter_queue.put(
                                 {
                                     "type": "tool_result",
-                                    "tool_results": [tool_results[-1]],
+                                    "tool_results": [result_item],
                                 }
                             )
+
+                    batch_results = [
+                        result_by_call_id[tool_call.id]
+                        for tool_call in batch_calls
+                        if tool_call.id in result_by_call_id
+                    ]
+                    if self._extract_pending_user_action_from_tool_results(
+                        batch_results
+                    ):
+                        should_stop_after_batch = True
+                    if should_stop_after_batch:
+                        break
+
+                if should_stop_after_batch:
+                    for tool_call in action.tool_calls:
+                        if tool_call.id in result_by_call_id:
+                            continue
+                        result_by_call_id[tool_call.id] = {
+                            "tool_call_id": tool_call.id,
+                            "name": tool_call.name,
+                            "arguments": tool_call.arguments,
+                            "error": (
+                                "Tool skipped because an earlier tool requested "
+                                "user action."
+                            ),
+                            "success": False,
+                        }
+                        if token_meter_queue is not None:
+                            await token_meter_queue.put(
+                                {
+                                    "type": "tool_result",
+                                    "tool_results": [result_by_call_id[tool_call.id]],
+                                }
+                            )
+
+                tool_results = [
+                    result_by_call_id[tool_call.id]
+                    for tool_call in action.tool_calls
+                    if tool_call.id in result_by_call_id
+                ]
 
             # Validate optional step status updates requested by the LLM.
             step_status_updates_validated = [
@@ -1965,6 +2501,19 @@ class ReactEngine:
                             "iteration": task.iteration,
                             "data": {
                                 "tool_results": tool_results_data,
+                            },
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+                    parse_recovery_error = event_data.get("error")
+                    if isinstance(parse_recovery_error, str) and parse_recovery_error:
+                        yield {
+                            "type": "error",
+                            "task_id": task.task_id,
+                            "trace_id": event_data.get("trace_id"),
+                            "iteration": task.iteration,
+                            "data": {
+                                "error": parse_recovery_error,
+                                "terminal": False,
                             },
                             "timestamp": datetime.now(UTC).isoformat(),
                         }

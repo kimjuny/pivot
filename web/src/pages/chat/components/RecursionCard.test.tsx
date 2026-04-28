@@ -361,6 +361,93 @@ describe("RecursionCard", () => {
     expect(screen.getByText("ok")).toBeInTheDocument();
   });
 
+  it("keeps multi-tool groups expanded while any tool is still running", () => {
+    const baseEvents = [
+      {
+        type: "tool_call" as const,
+        task_id: "task-tools-running",
+        trace_id: "trace-tools-running",
+        iteration: 0,
+        timestamp: "2026-03-24T00:00:02.000Z",
+        data: {
+          tool_calls: [
+            {
+              id: "call-read",
+              name: "read_file",
+              arguments: { path: "README.md" },
+            },
+            {
+              id: "call-test",
+              name: "run_bash",
+              arguments: { command: "npm test" },
+            },
+          ],
+          tool_results: [
+            {
+              tool_call_id: "call-read",
+              name: "read_file",
+              result: "ok",
+              success: true,
+            },
+          ],
+        },
+      },
+    ];
+
+    const { rerender } = render(
+      <RecursionCard
+        messageId="message-tools-running"
+        recursion={buildRecursion({
+          summary: "Running checks",
+          status: "running",
+          events: baseEvents,
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    const toolGroup = screen.getByRole("button", { name: /2 tools used/i });
+    expect(toolGroup).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: /Running run_bash/i }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <RecursionCard
+        messageId="message-tools-running"
+        recursion={buildRecursion({
+          summary: "Running checks",
+          status: "running",
+          events: [
+            {
+              ...baseEvents[0],
+              data: {
+                ...baseEvents[0].data,
+                tool_results: [
+                  ...baseEvents[0].data.tool_results,
+                  {
+                    tool_call_id: "call-test",
+                    name: "run_bash",
+                    result: { ok: true },
+                    success: true,
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(toolGroup).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", { name: /Ran run_bash/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps failed tool results from falling back to preparing", () => {
     render(
       <RecursionCard

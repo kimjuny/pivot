@@ -140,6 +140,107 @@ def parse_payload_blocks(payload_section: str) -> dict[str, str]:
     return payloads
 
 
+def collect_complete_payload_blocks(content: str) -> dict[str, str]:
+    """Collect payload blocks that are fully closed in a partial response.
+
+    Unlike :func:`parse_payload_blocks`, this helper intentionally ignores the
+    final incomplete block so streaming callers can start work as soon as one
+    tool payload is ready.
+    """
+    _json_section, payload_section = split_json_and_payload_sections(content)
+    if payload_section is None:
+        return {}
+
+    payloads: dict[str, str] = {}
+    text = payload_section.strip()
+    cursor = 0
+
+    while cursor < len(text):
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor >= len(text):
+            break
+
+        begin_match = PAYLOAD_BEGIN_RE.match(text, cursor)
+        if begin_match is None:
+            break
+
+        payload_name = begin_match.group(1)
+        if payload_name in payloads:
+            raise ValueError(f"Duplicate payload name: {payload_name}")
+
+        content_start = begin_match.end()
+        if content_start < len(text) and text[content_start] == "\n":
+            content_start += 1
+
+        end_re = re.compile(
+            rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
+        )
+        end_match = end_re.search(text, content_start)
+        if end_match is None:
+            break
+
+        content_end = end_match.start()
+        if content_end > content_start and text[content_end - 1] == "\n":
+            content_end -= 1
+            if content_end > content_start and text[content_end - 1] == "\r":
+                content_end -= 1
+
+        payloads[payload_name] = text[content_start:content_end]
+        cursor = end_match.end()
+
+    return payloads
+
+
+def collect_tool_call_payload_refs(tool_call: ToolCallRequest) -> set[str]:
+    """Return all payload names referenced by one tool call."""
+    refs: set[str] = set()
+    for arg_name, raw_arg_value in tool_call.arguments.items():
+        refs.add(
+            _extract_payload_ref_name(
+                raw_arg_value,
+                path=f"tool_call[{tool_call.id}].arguments.{arg_name}",
+            )
+        )
+    return refs
+
+
+def resolve_tool_call_payloads(
+    tool_call: ToolCallRequest,
+    payloads: dict[str, str],
+    *,
+    tool_manager: Any | None = None,
+) -> ToolCallRequest:
+    """Resolve one preview tool call once all referenced payload blocks are ready."""
+    resolved_arguments: dict[str, Any] = {}
+    for arg_name, raw_arg_value in tool_call.arguments.items():
+        ref_name = _extract_payload_ref_name(
+            raw_arg_value,
+            path=f"tool_call[{tool_call.id}].arguments.{arg_name}",
+        )
+        if ref_name not in payloads:
+            raise ValueError(
+                f"Payload reference '{ref_name}' in tool_call[{tool_call.id}]."
+                f"arguments.{arg_name} is not defined."
+            )
+        expected_type = _lookup_tool_argument_type(
+            tool_manager=tool_manager,
+            tool_name=tool_call.name,
+            arg_name=arg_name,
+        )
+        resolved_arguments[arg_name] = _decode_payload_value(
+            payloads[ref_name],
+            expected_type=expected_type,
+        )
+
+    return ToolCallRequest(
+        id=tool_call.id,
+        name=tool_call.name,
+        arguments=resolved_arguments,
+        batch=tool_call.batch,
+    )
+
+
 def parse_react_output(
     content: str,
     *,
@@ -168,6 +269,7 @@ def parse_react_output(
         payloads,
         tool_manager=tool_manager,
     )
+    resolved_payload = _normalize_step_status_update_location(resolved_payload)
     action = _parse_action(resolved_payload)
 
     observe = _expect_optional_string(resolved_payload.get("observe"), "observe")
@@ -214,6 +316,7 @@ def parse_react_control_section(content: str) -> ParsedReactDecision:
     """
     json_section, _payload_section = split_json_and_payload_sections(content)
     raw_payload = safe_load_json(json_section)
+    raw_payload = _normalize_step_status_update_location(raw_payload)
     action = _parse_action(raw_payload)
 
     observe = _expect_optional_string(raw_payload.get("observe"), "observe")
@@ -246,6 +349,38 @@ def parse_react_control_section(content: str) -> ParsedReactDecision:
     )
 
 
+def _normalize_step_status_update_location(payload: dict[str, Any]) -> dict[str, Any]:
+    """Move legacy step-status locations into ``action.step_status_update``.
+
+    The prompt contract asks the model to emit ``action.step_status_update``, but
+    models sometimes drift to the old top-level or ``action.output`` locations.
+    Treat that as recoverable structure drift instead of failing the recursion.
+    """
+    normalized_payload = dict(payload)
+    action_raw = normalized_payload.get("action")
+    if not isinstance(action_raw, dict):
+        return normalized_payload
+
+    normalized_action = dict(action_raw)
+    action_output = normalized_action.get("output")
+    normalized_output = dict(action_output) if isinstance(action_output, dict) else None
+
+    legacy_step_status_update = normalized_payload.pop("step_status_update", None)
+    output_step_status_update = None
+    if normalized_output is not None:
+        output_step_status_update = normalized_output.pop("step_status_update", None)
+        normalized_action["output"] = normalized_output
+
+    if "step_status_update" not in normalized_action:
+        if legacy_step_status_update is not None:
+            normalized_action["step_status_update"] = legacy_step_status_update
+        elif output_step_status_update is not None:
+            normalized_action["step_status_update"] = output_step_status_update
+
+    normalized_payload["action"] = normalized_action
+    return normalized_payload
+
+
 def _parse_action(payload: dict[str, Any]) -> ParsedAction:
     """Validate and normalize the action section.
 
@@ -258,9 +393,6 @@ def _parse_action(payload: dict[str, Any]) -> ParsedAction:
     Raises:
         ValueError: If the action section is missing or invalid.
     """
-    if "step_status_update" in payload:
-        raise ValueError("step_status_update is only allowed under action.")
-
     action_raw = payload.get("action")
     if not isinstance(action_raw, dict):
         raise ValueError("Missing or invalid action object.")
@@ -278,8 +410,6 @@ def _parse_action(payload: dict[str, Any]) -> ParsedAction:
     action_output = action_raw.get("output")
     if not isinstance(action_output, dict):
         raise ValueError("action.output must be an object.")
-    if "step_status_update" in action_output:
-        raise ValueError("step_status_update is only allowed under action.")
 
     step_id = _parse_step_id(action_raw.get("step_id"))
     step_status_update = _parse_step_status_updates(
@@ -416,6 +546,7 @@ def _parse_tool_calls(
             "CALL_TOOL requires action.output.tool_calls to be a non-empty list."
         )
 
+    seen_tool_call_ids: set[str] = set()
     normalized_tool_calls: list[ToolCallRequest] = []
     for index, item in enumerate(tool_calls):
         if not isinstance(item, dict):
@@ -426,6 +557,10 @@ def _parse_tool_calls(
             raise ValueError(
                 f"action.output.tool_calls[{index}].id must be a non-empty string."
             )
+        normalized_tool_call_id = tool_call_id.strip()
+        if normalized_tool_call_id in seen_tool_call_ids:
+            raise ValueError(f"Duplicate tool_call id: {normalized_tool_call_id}.")
+        seen_tool_call_ids.add(normalized_tool_call_id)
 
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
@@ -439,11 +574,18 @@ def _parse_tool_calls(
                 f"action.output.tool_calls[{index}].arguments must be an object."
             )
 
+        batch = item.get("batch", 1)
+        if isinstance(batch, bool) or not isinstance(batch, int) or batch < 1:
+            raise ValueError(
+                f"action.output.tool_calls[{index}].batch must be a positive integer."
+            )
+
         normalized_tool_calls.append(
             ToolCallRequest(
-                id=tool_call_id.strip(),
+                id=normalized_tool_call_id,
                 name=name.strip(),
                 arguments=arguments,
+                batch=batch,
             )
         )
 

@@ -225,6 +225,73 @@ class ReactStateService:
         self.db.commit()
         return tokens_data
 
+    def finalize_partial_tool_error(
+        self,
+        task: ReactTask,
+        recursion: ReactRecursion,
+        context: ReactContext,
+        observe: str,
+        thinking: str | None,
+        reason: str,
+        action_output: dict[str, Any],
+        action_step_id: str | None,
+        step_status_updates: list[dict[str, str]],
+        summary: str,
+        tool_results: list[dict[str, Any]],
+        error_log: str,
+        pending_user_action: dict[str, Any] | None = None,
+        token_counter: dict[str, int] | None = None,
+    ) -> dict[str, int] | None:
+        """Persist a failed CALL_TOOL recursion after tools already ran.
+
+        Once a tool starts, the recursion has crossed the side-effect boundary.
+        We therefore keep the assistant decision preview, tool results, and parse
+        failure as durable facts for the next recursion to recover from.
+        """
+        raw_action_output = copy.deepcopy(action_output)
+
+        recursion.observe = observe
+        recursion.thinking = thinking
+        recursion.reason = reason
+        recursion.action_type = "CALL_TOOL"
+        recursion.action_output = json.dumps(raw_action_output, ensure_ascii=False)
+        recursion.plan_step_id = self._resolve_plan_step_id(
+            task=task,
+            action_type="CALL_TOOL",
+            action_step_id=action_step_id,
+            trace_id=recursion.trace_id,
+        )
+        if summary:
+            recursion.summary = summary
+        if tool_results:
+            recursion.tool_call_results = json.dumps(tool_results, ensure_ascii=False)
+
+        tokens_data = self._apply_token_usage(task, recursion, token_counter or {})
+        recursion.status = "error"
+        recursion.error_log = error_log
+        recursion.updated_at = datetime.now(UTC)
+        self.db.add(recursion)
+
+        self._merge_tool_results_into_action_output(action_output, tool_results)
+        self._sync_context_before_snapshot(
+            task=task,
+            context=context,
+            recursion=recursion,
+            action_type="CALL_TOOL",
+            action_output=action_output,
+            step_status_updates=step_status_updates,
+            summary=summary,
+        )
+        self._save_snapshot(task, recursion, context)
+        if pending_user_action is not None:
+            task.pending_user_action_json = json.dumps(
+                pending_user_action,
+                ensure_ascii=False,
+            )
+            self._set_task_status(task, "waiting_input", commit=False)
+        self.db.commit()
+        return tokens_data
+
     def mark_running(self, task: ReactTask) -> None:
         """Persist the task as running.
 

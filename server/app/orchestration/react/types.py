@@ -35,12 +35,15 @@ class ToolCallRequest:
     Attributes:
         id: Tool-call identifier returned by the model.
         name: Tool registry name to execute.
+        batch: Positive execution batch. Lower batches run first; calls in the
+            same batch may run concurrently.
         arguments: Fully resolved argument object for the call.
     """
 
     id: str
     name: str
     arguments: dict[str, Any]
+    batch: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the tool call for persistence and streaming.
@@ -51,6 +54,7 @@ class ToolCallRequest:
         return {
             "id": self.id,
             "name": self.name,
+            "batch": self.batch,
             "arguments": self.arguments,
         }
 
