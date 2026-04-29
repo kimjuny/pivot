@@ -370,20 +370,34 @@ function ToolExecutionItem({
 
 function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
   const hasPendingTools = items.some(({ result }) => !result);
-  const [open, setOpen] = useState(hasPendingTools);
+  const [open, setOpen] = useState(false);
   const autoOpenedForPendingRef = useRef(hasPendingTools);
   const statusLabel = getToolGroupStatus(items);
 
   useEffect(() => {
+    let frameId: number | null = null;
     if (hasPendingTools) {
       autoOpenedForPendingRef.current = true;
-      setOpen(true);
-      return;
+      frameId = window.requestAnimationFrame(() => {
+        setOpen(true);
+      });
+      return () => {
+        if (frameId !== null) {
+          window.cancelAnimationFrame(frameId);
+        }
+      };
     }
     if (autoOpenedForPendingRef.current) {
       autoOpenedForPendingRef.current = false;
-      setOpen(false);
+      frameId = window.requestAnimationFrame(() => {
+        setOpen(false);
+      });
     }
+    return () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
   }, [hasPendingTools]);
 
   return (
@@ -851,7 +865,7 @@ export function RecursionCard({
           {recursion.status === "running" &&
           typeof recursion.liveTokensPerSecond === "number" ? (
             <span
-              className="whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+              className="inline-block w-24 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground"
               title={
                 typeof recursion.estimatedCompletionTokens === "number"
                   ? `Estimated output: ${formatTokenCount(recursion.estimatedCompletionTokens)} tokens`

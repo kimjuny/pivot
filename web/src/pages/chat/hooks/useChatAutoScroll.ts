@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 import type { ChatMessage } from "../types";
 
@@ -13,6 +13,7 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
   const autoScrollEnabledRef = useRef<boolean>(true);
   const lastScrollTopRef = useRef<number>(0);
   const forceAutoScrollNextRef = useRef<boolean>(false);
+  const programmaticScrollUntilRef = useRef<number>(0);
 
   /**
    * Scrolls the message viewport to the latest content while preserving a small bottom gap.
@@ -29,6 +30,7 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
       0,
     );
     lastScrollTopRef.current = targetTop;
+    programmaticScrollUntilRef.current = Date.now() + 450;
     scrollContainer.scrollTo({ top: targetTop, behavior });
   }, []);
 
@@ -58,6 +60,11 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     }
 
     const currentTop = scrollContainer.scrollTop;
+    if (Date.now() < programmaticScrollUntilRef.current) {
+      lastScrollTopRef.current = currentTop;
+      return;
+    }
+
     const userScrolledUp = currentTop + 2 < lastScrollTopRef.current;
     const nearBottom = isNearBottom();
 
@@ -79,7 +86,7 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     forceAutoScrollNextRef.current = true;
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const forceAutoScroll = forceAutoScrollNextRef.current;
     const scrollContainer = scrollContainerRef.current;
 
@@ -105,6 +112,24 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     forceAutoScrollNextRef.current = false;
     previousMessageCountRef.current = messages.length;
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const observedElement = scrollContainer.firstElementChild ?? scrollContainer;
+
+    const observer = new ResizeObserver(() => {
+      if (autoScrollEnabledRef.current || forceAutoScrollNextRef.current) {
+        scrollToBottom("auto");
+      }
+    });
+    observer.observe(observedElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [scrollToBottom]);
 
   return {
     scrollContainerRef,

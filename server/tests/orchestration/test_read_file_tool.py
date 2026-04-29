@@ -21,8 +21,8 @@ read_file_module = import_module("app.orchestration.tool.builtin.read_file")
 class ReadFileToolTestCase(unittest.TestCase):
     """Validate exact-content chunk reading for edit workflows."""
 
-    def test_script_returns_exact_chunk_without_line_numbers(self) -> None:
-        """The returned content should match the file text exactly."""
+    def test_script_returns_numbered_chunk(self) -> None:
+        """The returned content should include line numbers for diff hunks."""
         module = cast(Any, read_file_module)
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
@@ -46,8 +46,7 @@ class ReadFileToolTestCase(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["start_line"], 2)
         self.assertEqual(payload["end_line"], 3)
-        self.assertEqual(payload["content"], "  beta\ngamma\n")
-        self.assertNotIn("2:", payload["content"])
+        self.assertEqual(payload["content"], "2 |   beta\n3 | gamma\n")
 
     def test_script_truncates_requested_range_by_max_lines(self) -> None:
         """Chunk metadata should tell the caller when more lines remain."""
@@ -72,7 +71,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["content"], "b\nc\n")
+        self.assertEqual(payload["content"], "2 | b\n3 | c\n")
         self.assertTrue(payload["truncated"])
         self.assertEqual(payload["next_start_line"], 4)
 

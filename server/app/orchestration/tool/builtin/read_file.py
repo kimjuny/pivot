@@ -56,6 +56,11 @@ if start_line > total_lines:
 
 actual_end_line = min(total_lines, start_line + max_lines - 1)
 chunk_lines = lines[start_line - 1 : actual_end_line]
+number_width = len(str(actual_end_line))
+numbered_chunk = "".join(
+    f"{line_number:>{number_width}} | {line}"
+    for line_number, line in enumerate(chunk_lines, start=start_line)
+)
 
 payload = {
     "path": str(path).removeprefix("/workspace/") or ".",
@@ -68,7 +73,7 @@ payload = {
     "truncated": actual_end_line < total_lines,
     "next_start_line": actual_end_line + 1 if actual_end_line < total_lines else None,
     "previous_start_line": max(1, start_line - max_lines) if start_line > 1 else None,
-    "content": "".join(chunk_lines),
+    "content": numbered_chunk,
 }
 print(json.dumps(payload, ensure_ascii=False))
 """.strip()
@@ -80,12 +85,13 @@ def read_file(
     start_line: int = 1,
     max_lines: int = 400,
 ) -> dict[str, object]:
-    """Read an exact text chunk from a UTF-8 file under ``/workspace``.
+    """Read a numbered text chunk from a UTF-8 file under ``/workspace``.
 
     This tool is optimized for ``search -> read -> edit`` workflows. It returns
-    the original text exactly as it appears in the file so the agent can pass
-    precise snippets into ``edit_file`` without stripping synthetic line-number
-    prefixes. Chunk metadata is still included to help with pagination.
+    one chunk with stable line-number prefixes so the agent can produce
+    line-accurate unified diffs for ``edit_file``. The line-number prefixes are
+    display aids only; use them for ``@@`` hunk headers and remove them from
+    diff body lines.
 
     Args:
         path (required, str): Relative or absolute workspace path to a text
@@ -96,7 +102,7 @@ def read_file(
             ``start_line``. Defaults to ``400``.
 
     Returns:
-        Structured payload with chunk bounds, pagination hints, and exact file
+        Structured payload with chunk bounds, pagination hints, and numbered
         ``content`` for the requested line range.
 
     Raises:

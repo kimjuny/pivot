@@ -96,6 +96,42 @@ class ReactParserTestCase(unittest.TestCase):
             [{"step_id": "1", "status": "running"}],
         )
 
+    def test_parse_call_tool_tolerates_payload_markdown_fence(self) -> None:
+        """A mistaken ```text wrapper around payload blocks should be stripped."""
+        content = """
+{
+  "summary": "Reading the requested file",
+  "action": {
+    "action_type": "CALL_TOOL",
+    "output": {
+      "tool_calls": [
+        {
+          "id": "call-1",
+          "name": "read_file",
+          "batch": 1,
+          "arguments": {
+            "path": {"$payload_ref": "path_payload"}
+          }
+        }
+      ]
+    }
+  }
+}
+```text
+<<<PIVOT_PAYLOAD:path_payload:BEGIN_6F2D9C1A>>>
+"/tmp/demo.txt"
+<<<PIVOT_PAYLOAD:path_payload:END_6F2D9C1A>>>
+```
+""".strip()
+
+        decision = parse_react_output(content)
+
+        self.assertEqual(decision.action.action_type, "CALL_TOOL")
+        self.assertEqual(
+            decision.action.tool_calls[0].arguments,
+            {"path": "/tmp/demo.txt"},
+        )
+
     def test_parse_control_section_keeps_payload_refs_for_stream_preview(self) -> None:
         """Early control parsing should not require completed payload bodies."""
         content = """

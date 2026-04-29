@@ -81,9 +81,29 @@ def split_json_and_payload_sections(content: str) -> tuple[str, str | None]:
         return normalized, None
 
     json_section = normalized[: begin_match.start()].strip()
+    json_lines = json_section.splitlines()
+    if json_lines and json_lines[-1].strip().lower() == "```text":
+        json_section = "\n".join(json_lines[:-1]).strip()
+
     if not json_section:
         raise ValueError("Missing JSON section before payload blocks.")
-    return json_section, normalized[begin_match.start() :]
+    return json_section, _strip_payload_section_markdown_fence(
+        normalized[begin_match.start() :]
+    )
+
+
+def _strip_payload_section_markdown_fence(payload_section: str) -> str:
+    """Tolerate an accidental closing fence after payload blocks.
+
+    The prompt forbids markdown fences, but models sometimes wrap the payload
+    tail in ```text. ``split_json_and_payload_sections`` removes the opening
+    fence before the first payload marker; this helper removes only the matching
+    final fence line so payload content remains untouched.
+    """
+    lines = payload_section.strip().splitlines()
+    if lines and lines[-1].strip() == "```":
+        return "\n".join(lines[:-1]).strip()
+    return payload_section
 
 
 def parse_payload_blocks(payload_section: str) -> dict[str, str]:

@@ -3346,7 +3346,7 @@ function ChatContainer({
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div
         ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+        className="flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]"
         onScroll={handleScroll}
       >
         <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">

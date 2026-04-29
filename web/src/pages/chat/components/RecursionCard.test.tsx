@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -361,7 +361,7 @@ describe("RecursionCard", () => {
     expect(screen.getByText("ok")).toBeInTheDocument();
   });
 
-  it("keeps multi-tool groups expanded while any tool is still running", () => {
+  it("keeps multi-tool groups expanded while any tool is still running", async () => {
     const baseEvents = [
       {
         type: "tool_call" as const,
@@ -408,7 +408,9 @@ describe("RecursionCard", () => {
     );
 
     const toolGroup = screen.getByRole("button", { name: /2 tools used/i });
-    expect(toolGroup).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => {
+      expect(toolGroup).toHaveAttribute("aria-expanded", "true");
+    });
     expect(
       screen.getByRole("button", { name: /Running run_bash/i }),
     ).toBeInTheDocument();
@@ -442,7 +444,9 @@ describe("RecursionCard", () => {
       />,
     );
 
-    expect(toolGroup).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => {
+      expect(toolGroup).toHaveAttribute("aria-expanded", "false");
+    });
     expect(
       screen.queryByRole("button", { name: /Ran run_bash/i }),
     ).not.toBeInTheDocument();
