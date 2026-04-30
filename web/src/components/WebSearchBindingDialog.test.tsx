@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/utils/api", () => ({
@@ -25,37 +26,39 @@ describe("WebSearchBindingDialog", () => {
     });
 
     render(
-      <WebSearchBindingDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        agentId={3}
-        configuredProviderKeys={[]}
-        catalog={[
-          {
-            manifest: {
-              key: "tavily",
-              name: "Tavily",
-              description: "General-purpose search",
-              docs_url: "https://docs.tavily.com",
-              visibility: "builtin",
-              status: "active",
-              auth_schema: [
-                {
-                  key: "api_key",
-                  label: "API Key",
-                  type: "secret",
-                  required: true,
-                },
-              ],
-              config_schema: [],
-              setup_steps: ["Paste the key", "Test it", "Save it"],
-              supported_parameters: ["query", "max_results"],
+      <MemoryRouter>
+        <WebSearchBindingDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          agentId={3}
+          configuredProviderKeys={[]}
+          catalog={[
+            {
+              manifest: {
+                key: "tavily",
+                name: "Tavily",
+                description: "General-purpose search",
+                docs_url: "https://docs.tavily.com",
+                visibility: "builtin",
+                status: "active",
+                auth_schema: [
+                  {
+                    key: "api_key",
+                    label: "API Key",
+                    type: "secret",
+                    required: true,
+                  },
+                ],
+                config_schema: [],
+                setup_steps: ["Paste the key", "Test it", "Save it"],
+                supported_parameters: ["query", "max_results"],
+              },
             },
-          },
-        ]}
-        initialBinding={null}
-        onSaved={vi.fn()}
-      />,
+          ]}
+          initialBinding={null}
+          onSaved={vi.fn()}
+        />
+      </MemoryRouter>,
     );
 
     await user.type(screen.getByLabelText("API Key *"), "tvly-demo");

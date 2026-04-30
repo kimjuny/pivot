@@ -744,6 +744,7 @@ export interface MediaProviderConfigField {
   type: 'text' | 'number' | 'secret' | 'textarea' | 'boolean';
   required: boolean;
   placeholder?: string | null;
+  default_value?: string | number | boolean | null;
   description?: string | null;
 }
 

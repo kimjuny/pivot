@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader2, RefreshCcw } from "@/lib/lucide";
+import { useNavigate } from 'react-router-dom';
+import { ExternalLink, Inbox, Loader2, Plus, RefreshCcw } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import ConfigFieldGroup from './ConfigFieldGroup';
 import DraggableDialog from './DraggableDialog';
 import { MediaProviderBadge } from './MediaProviderBadge';
@@ -35,6 +44,19 @@ function toFieldValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+/**
+ * Build form defaults from manifest fields before merging saved binding data.
+ */
+function getDefaultFieldValues(
+  fields: MediaProviderManifest['config_schema'],
+): Record<string, string> {
+  return Object.fromEntries(
+    fields
+      .filter((field) => field.default_value !== null && field.default_value !== undefined)
+      .map((field) => [field.key, toFieldValue(field.default_value)])
+  );
+}
+
 interface MediaGenerationBindingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,6 +79,7 @@ function MediaGenerationBindingDialog({
   initialBinding,
   onSaved,
 }: MediaGenerationBindingDialogProps) {
+  const navigate = useNavigate();
   const [providerKey, setProviderKey] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [authConfig, setAuthConfig] = useState<Record<string, string>>({});
@@ -98,13 +121,21 @@ function MediaGenerationBindingDialog({
     }
 
     if (initialBinding) {
+      const nextManifest =
+        catalog.find((item) => item.manifest.key === initialBinding.provider_key)?.manifest ?? null;
       setProviderKey(initialBinding.provider_key);
       setEnabled(initialBinding.enabled);
-      setAuthConfig(initialBinding.auth_config);
+      setAuthConfig({
+        ...(nextManifest ? getDefaultFieldValues(nextManifest.auth_schema) : {}),
+        ...initialBinding.auth_config,
+      });
       setRuntimeConfig(
-        Object.fromEntries(
-          Object.entries(initialBinding.runtime_config).map(([key, value]) => [key, toFieldValue(value)])
-        )
+        {
+          ...(nextManifest ? getDefaultFieldValues(nextManifest.config_schema) : {}),
+          ...Object.fromEntries(
+            Object.entries(initialBinding.runtime_config).map(([key, value]) => [key, toFieldValue(value)])
+          ),
+        }
       );
       setTestMessage(initialBinding.last_health_message);
       return;
@@ -113,10 +144,10 @@ function MediaGenerationBindingDialog({
     const firstManifest = selectableCatalog[0]?.manifest;
     setProviderKey(firstManifest?.key ?? '');
     setEnabled(true);
-    setAuthConfig({});
-    setRuntimeConfig({});
+    setAuthConfig(firstManifest ? getDefaultFieldValues(firstManifest.auth_schema) : {});
+    setRuntimeConfig(firstManifest ? getDefaultFieldValues(firstManifest.config_schema) : {});
     setTestMessage(null);
-  }, [initialBinding, open, selectableCatalog]);
+  }, [catalog, initialBinding, open, selectableCatalog]);
 
   const handleFieldChange = (
     scope: 'auth' | 'runtime',
@@ -128,6 +159,15 @@ function MediaGenerationBindingDialog({
       return;
     }
     setRuntimeConfig((prev) => ({ ...prev, [fieldKey]: value }));
+  };
+
+  const handleProviderChange = (nextProviderKey: string) => {
+    const nextManifest =
+      catalog.find((item) => item.manifest.key === nextProviderKey)?.manifest ?? null;
+    setProviderKey(nextProviderKey);
+    setAuthConfig(nextManifest ? getDefaultFieldValues(nextManifest.auth_schema) : {});
+    setRuntimeConfig(nextManifest ? getDefaultFieldValues(nextManifest.config_schema) : {});
+    setTestMessage(null);
   };
 
   const handleSave = async () => {
@@ -188,6 +228,13 @@ function MediaGenerationBindingDialog({
     }
   };
 
+  const hasNoAvailableProviders = !initialBinding && selectableCatalog.length === 0;
+
+  const handleOpenMediaProvidersList = () => {
+    navigate('/studio/connections/media-generation');
+    onOpenChange(false);
+  };
+
   return (
     <DraggableDialog
       open={open}
@@ -196,11 +243,32 @@ function MediaGenerationBindingDialog({
       size="default"
     >
       <div className="flex h-full flex-col">
+        {hasNoAvailableProviders ? (
+          <div className="flex flex-1 items-center justify-center px-4 py-6">
+            <Empty className="min-h-64 gap-4 p-4 md:p-6">
+              <EmptyHeader className="gap-1.5">
+                <EmptyMedia variant="icon">
+                  <Inbox className="size-5" />
+                </EmptyMedia>
+                <EmptyTitle className="text-base">No media providers available</EmptyTitle>
+                <EmptyDescription className="text-xs/relaxed">
+                  Add or install a media provider first, then bind it to this agent.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button type="button" size="sm" onClick={handleOpenMediaProvidersList}>
+                  <Plus className="size-3.5" />
+                  Go to Media Providers
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </div>
+        ) : (
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {!initialBinding && (
             <div className="space-y-2">
               <Label htmlFor="media-provider">Provider</Label>
-              <Select value={providerKey} onValueChange={setProviderKey}>
+              <Select value={providerKey} onValueChange={handleProviderChange}>
                 <SelectTrigger id="media-provider">
                   {manifest ? (
                     <MediaProviderBadge
@@ -340,28 +408,35 @@ function MediaGenerationBindingDialog({
             </>
           )}
         </div>
+        )}
 
         <Separator />
 
         <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void handleTest()}
-            disabled={isTesting || !manifest}
-          >
-            {isTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            Test Connection
-          </Button>
+          {!hasNoAvailableProviders ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleTest()}
+              disabled={isTesting || !manifest}
+            >
+              {isTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              Test Connection
+            </Button>
+          ) : (
+            <div />
+          )}
 
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {hasNoAvailableProviders ? 'Close' : 'Cancel'}
             </Button>
-            <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save
-            </Button>
+            {!hasNoAvailableProviders && (
+              <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save
+              </Button>
+            )}
           </div>
         </div>
       </div>

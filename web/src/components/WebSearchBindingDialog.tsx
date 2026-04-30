@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Loader2, RefreshCcw } from "@/lib/lucide";
+import { useNavigate } from 'react-router-dom';
+import { ExternalLink, Inbox, Loader2, Plus, RefreshCcw } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import ConfigFieldGroup from './ConfigFieldGroup';
 import DraggableDialog from './DraggableDialog';
 import { ProviderMetadataBadges } from './ProviderMetadataBadges';
@@ -57,6 +66,7 @@ function WebSearchBindingDialog({
   initialBinding,
   onSaved,
 }: WebSearchBindingDialogProps) {
+  const navigate = useNavigate();
   const [providerKey, setProviderKey] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [authConfig, setAuthConfig] = useState<Record<string, string>>({});
@@ -188,6 +198,13 @@ function WebSearchBindingDialog({
     }
   };
 
+  const hasNoAvailableProviders = !initialBinding && selectableCatalog.length === 0;
+
+  const handleOpenWebSearchList = () => {
+    navigate('/studio/connections/web-search');
+    onOpenChange(false);
+  };
+
   return (
     <DraggableDialog
       open={open}
@@ -196,6 +213,27 @@ function WebSearchBindingDialog({
       size="default"
     >
       <div className="flex h-full flex-col">
+        {hasNoAvailableProviders ? (
+          <div className="flex flex-1 items-center justify-center px-4 py-6">
+            <Empty className="min-h-64 gap-4 p-4 md:p-6">
+              <EmptyHeader className="gap-1.5">
+                <EmptyMedia variant="icon">
+                  <Inbox className="size-5" />
+                </EmptyMedia>
+                <EmptyTitle className="text-base">No web search providers available</EmptyTitle>
+                <EmptyDescription className="text-xs/relaxed">
+                  Add or install a web search provider first, then bind it to this agent.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button type="button" size="sm" onClick={handleOpenWebSearchList}>
+                  <Plus className="size-3.5" />
+                  Go to Web Search
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </div>
+        ) : (
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
           {!initialBinding && (
             <div className="space-y-2">
@@ -325,28 +363,35 @@ function WebSearchBindingDialog({
             </>
           )}
         </div>
+        )}
 
         <Separator />
 
         <div className="flex items-center justify-between gap-3 px-4 py-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void handleTest()}
-            disabled={isTesting || !manifest}
-          >
-            {isTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-            Test Connection
-          </Button>
+          {!hasNoAvailableProviders ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleTest()}
+              disabled={isTesting || !manifest}
+            >
+              {isTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              Test Connection
+            </Button>
+          ) : (
+            <div />
+          )}
 
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {hasNoAvailableProviders ? 'Close' : 'Cancel'}
             </Button>
-            <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save
-            </Button>
+            {!hasNoAvailableProviders && (
+              <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save
+              </Button>
+            )}
           </div>
         </div>
       </div>

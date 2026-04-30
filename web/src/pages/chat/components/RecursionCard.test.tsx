@@ -358,6 +358,65 @@ describe("RecursionCard", () => {
     expect(screen.getByText("-old")).toBeInTheDocument();
   });
 
+  it("labels truncated write_file previews with real source line numbers", async () => {
+    const user = userEvent.setup();
+    const content = Array.from(
+      { length: 430 },
+      (_, index) => `line-${index + 1}`,
+    ).join("\n");
+
+    render(
+      <RecursionCard
+        messageId="message-long-write"
+        recursion={buildRecursion({
+          summary: "Writing a large file",
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-long-write",
+              trace_id: "trace-long-write",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-write-long",
+                    name: "write_file",
+                    arguments: {
+                      path: "web/src/index.css",
+                      content,
+                    },
+                  },
+                ],
+                tool_results: [
+                  {
+                    tool_call_id: "call-write-long",
+                    tool_name: "write_file",
+                    status: "success",
+                    result: "ok",
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Ran write_file/i }));
+
+    expect(
+      screen.getByText((_, element) =>
+        element?.textContent === "Showing lines 11-430 of 430",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("11")).toBeInTheDocument();
+    expect(screen.getByText("line-11")).toBeInTheDocument();
+    expect(screen.queryByText("line-1")).not.toBeInTheDocument();
+  });
+
   it("renders tool executions as one-line records with terminal details", async () => {
     const user = userEvent.setup();
 

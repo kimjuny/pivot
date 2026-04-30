@@ -340,6 +340,10 @@ function AgentDetailSidebar({
     const hasFetchedSkillsRef = useRef(false);
     const latestAgentIdRef = useRef<number | null>(agent?.id ?? null);
     const { openTab, activeTabId } = useAgentTabStore();
+    const selectedExtensionPackages = useMemo(
+        () => extensionPackages.filter((pkg) => pkg.selected_binding !== null),
+        [extensionPackages],
+    );
 
     // Sync localToolIds when the agent prop changes
     useEffect(() => {
@@ -1307,13 +1311,17 @@ function AgentDetailSidebar({
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading tools…
                                         </div>
-                                    ) : tools.length + extensionTools.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No tools available
-                                        </div>
-                                    ) : displayedTools.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No tools configured for this agent
+                                    ) : tools.length + extensionTools.length === 0 || displayedTools.length === 0 ? (
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={() => setIsToolSelectorOpen(true)}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first tool
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu>
@@ -1436,13 +1444,17 @@ function AgentDetailSidebar({
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading skills…
                                         </div>
-                                    ) : skills.length + extensionSkills.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No skills available
-                                        </div>
-                                    ) : displayedSkills.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No skills configured for this agent
+                                    ) : skills.length + extensionSkills.length === 0 || displayedSkills.length === 0 ? (
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={() => setIsSkillSelectorOpen(true)}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first skill
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu>
@@ -1545,7 +1557,7 @@ function AgentDetailSidebar({
                                     <Server className="size-4" />
                                     <span className="flex-1 text-left">Extensions</span>
                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {extensionsLoading ? '…' : extensionPackages.filter((pkg) => pkg.selected_binding !== null).length}
+                                        {extensionsLoading ? '…' : selectedExtensionPackages.length}
                                     </span>
                                     {agent?.id && (
                                         <Tooltip>
@@ -1573,71 +1585,77 @@ function AgentDetailSidebar({
                                         <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
                                             Loading extensions…
                                         </div>
-                                    ) : extensionPackages.filter((pkg) => pkg.selected_binding !== null).length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No extensions configured for this agent
+                                    ) : selectedExtensionPackages.length === 0 ? (
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={handleAddExtension}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first extension
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {extensionPackages
-                                                .filter((pkg) => pkg.selected_binding !== null)
-                                                .map((pkg) => (
-                                                    <SidebarMenuItem key={pkg.package_id} className="group/item">
-                                                        <Tooltip>
-                                                            <TooltipTrigger asChild>
-                                                                <SidebarMenuButton
-                                                                    size="sm"
-                                                                    onClick={() => handleEditExtension(pkg)}
-                                                                    className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-                                                                >
-                                                                    <ExtensionLogoAvatar
-                                                                        name={pkg.display_name}
-                                                                        logoUrl={getExtensionLogoUrl(pkg)}
-                                                                        fallback={<Server className="size-3.5" aria-hidden="true" />}
-                                                                        containerClassName="flex size-3.5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-sidebar-foreground/60"
-                                                                        imageClassName="size-full object-contain"
-                                                                    />
-                                                                    <span className="truncate flex-1">
-                                                                        {pkg.display_name}
-                                                                    </span>
-                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                        {pkg.selected_binding?.installation.version ?? pkg.latest_version}
-                                                                    </span>
-                                                                </SidebarMenuButton>
-                                                            </TooltipTrigger>
-                                                            <TooltipContent side="right" className="max-w-xs">
-                                                                <div className="space-y-1">
-                                                                    <div className="flex items-center gap-1.5">
-                                                                        <p className="font-semibold">{pkg.display_name}</p>
-                                                                        {pkg.has_update_available && (
-                                                                            <span className="text-[10px] text-primary">
-                                                                                update available
-                                                                            </span>
-                                                                        )}
-                                                                    </div>
-                                                                    <p className="text-xs text-muted-foreground">
-                                                                        {pkg.selected_binding?.installation.version ?? 'Unbound'}
-                                                                        {' · '}
-                                                                        {pkg.selected_binding?.enabled ? 'enabled' : 'disabled'}
-                                                                    </p>
-                                                                </div>
-                                                            </TooltipContent>
-                                                        </Tooltip>
-                                                        {pkg.selected_binding && (
-                                                            <SidebarMenuAction
-                                                                showOnHover
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleRequestDeleteExtension(pkg);
-                                                                }}
-                                                                className="hover:bg-destructive/10 hover:text-destructive"
+                                            {selectedExtensionPackages.map((pkg) => (
+                                                <SidebarMenuItem key={pkg.package_id} className="group/item">
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <SidebarMenuButton
+                                                                size="sm"
+                                                                onClick={() => handleEditExtension(pkg)}
+                                                                className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                                                             >
-                                                                <X className="size-3.5" />
-                                                                <span className="sr-only">Delete extension</span>
-                                                            </SidebarMenuAction>
-                                                        )}
-                                                    </SidebarMenuItem>
-                                                ))}
+                                                                <ExtensionLogoAvatar
+                                                                    name={pkg.display_name}
+                                                                    logoUrl={getExtensionLogoUrl(pkg)}
+                                                                    fallback={<Server className="size-3.5" aria-hidden="true" />}
+                                                                    containerClassName="flex size-3.5 shrink-0 items-center justify-center overflow-hidden rounded-sm text-sidebar-foreground/60"
+                                                                    imageClassName="size-full object-contain"
+                                                                />
+                                                                <span className="truncate flex-1">
+                                                                    {pkg.display_name}
+                                                                </span>
+                                                                <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
+                                                                    {pkg.selected_binding?.installation.version ?? pkg.latest_version}
+                                                                </span>
+                                                            </SidebarMenuButton>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent side="right" className="max-w-xs">
+                                                            <div className="space-y-1">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <p className="font-semibold">{pkg.display_name}</p>
+                                                                    {pkg.has_update_available && (
+                                                                        <span className="text-[10px] text-primary">
+                                                                            update available
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {pkg.selected_binding?.installation.version ?? 'Unbound'}
+                                                                    {' · '}
+                                                                    {pkg.selected_binding?.enabled ? 'enabled' : 'disabled'}
+                                                                </p>
+                                                            </div>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                    {pkg.selected_binding && (
+                                                        <SidebarMenuAction
+                                                            showOnHover
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRequestDeleteExtension(pkg);
+                                                            }}
+                                                            className="hover:bg-destructive/10 hover:text-destructive"
+                                                        >
+                                                            <X className="size-3.5" />
+                                                            <span className="sr-only">Delete extension</span>
+                                                        </SidebarMenuAction>
+                                                    )}
+                                                </SidebarMenuItem>
+                                            ))}
                                         </SidebarMenu>
                                     )}
                                 </SidebarGroupContent>
@@ -1702,8 +1720,16 @@ function AgentDetailSidebar({
                                             Loading channels…
                                         </div>
                                     ) : channels.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No channels configured for this agent
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={handleAddChannel}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first channel
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu>
@@ -1828,8 +1854,16 @@ function AgentDetailSidebar({
                                             Loading media providers…
                                         </div>
                                     ) : imageProviderBindings.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No media providers configured for this agent
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={handleAddMediaProviderBinding}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first media provider
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu>
@@ -1957,8 +1991,16 @@ function AgentDetailSidebar({
                                             Loading web search providers…
                                         </div>
                                     ) : webSearchBindings.length === 0 ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            No web search providers configured for this agent
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={handleAddWebSearchBinding}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first web search
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu>

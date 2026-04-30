@@ -17,6 +17,8 @@ export interface ConfigFieldDefinition {
   required: boolean;
   /** Optional placeholder shown when the field is empty. */
   placeholder?: string | null;
+  /** Optional default value used when creating a binding. */
+  default_value?: string | number | boolean | null;
   /** Optional helper text rendered below the field. */
   description?: string | null;
 }

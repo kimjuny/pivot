@@ -2,14 +2,43 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+const navigateMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@/utils/api", () => ({
   replaceAgentExtensionBindings: vi.fn(),
   upsertAgentExtensionBinding: vi.fn(),
 }));
 
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => navigateMock,
+}));
+
 import ExtensionBindingDialog from "./ExtensionBindingDialog";
 
 describe("ExtensionBindingDialog", () => {
+  it("shows an empty state when no extension can be installed yet", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+
+    render(
+      <ExtensionBindingDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        agentId={3}
+        packages={[]}
+        initialPackage={null}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("No extensions installed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Go to Extensions" }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/studio/assets/extensions");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("renders package logos and keeps latest metadata inside version choices", async () => {
     const user = userEvent.setup();
     if (!("hasPointerCapture" in HTMLElement.prototype)) {

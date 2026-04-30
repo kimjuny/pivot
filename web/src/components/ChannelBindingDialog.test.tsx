@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/utils/api", () => ({
@@ -27,38 +28,40 @@ describe("ChannelBindingDialog", () => {
     });
 
     render(
-      <ChannelBindingDialog
-        open={true}
-        onOpenChange={vi.fn()}
-        agentId={3}
-        catalog={[
-          {
-            manifest: {
-              key: "telegram",
-              name: "Telegram",
-              description: "Telegram bot binding",
-              icon: "send",
-              docs_url: "https://example.com/docs",
-              transport_mode: "polling",
-              visibility: "public",
-              status: "active",
-              capabilities: ["receive_text"],
-              auth_schema: [
-                {
-                  key: "bot_token",
-                  label: "Bot Token",
-                  type: "secret",
-                  required: true,
-                },
-              ],
-              config_schema: [],
-              setup_steps: ["Paste the token", "Test the connection", "Save it"],
+      <MemoryRouter>
+        <ChannelBindingDialog
+          open={true}
+          onOpenChange={vi.fn()}
+          agentId={3}
+          catalog={[
+            {
+              manifest: {
+                key: "telegram",
+                name: "Telegram",
+                description: "Telegram bot binding",
+                icon: "send",
+                docs_url: "https://example.com/docs",
+                transport_mode: "polling",
+                visibility: "public",
+                status: "active",
+                capabilities: ["receive_text"],
+                auth_schema: [
+                  {
+                    key: "bot_token",
+                    label: "Bot Token",
+                    type: "secret",
+                    required: true,
+                  },
+                ],
+                config_schema: [],
+                setup_steps: ["Paste the token", "Test the connection", "Save it"],
+              },
             },
-          },
-        ]}
-        initialBinding={null}
-        onSaved={vi.fn()}
-      />,
+          ]}
+          initialBinding={null}
+          onSaved={vi.fn()}
+        />
+      </MemoryRouter>,
     );
 
     await user.type(screen.getByLabelText("Bot Token *"), "123:abc");

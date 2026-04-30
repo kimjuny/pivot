@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, Loader2, RefreshCcw } from "@/lib/lucide";
+import { useNavigate } from 'react-router-dom';
+import { Copy, Inbox, Loader2, Plus, RefreshCcw } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,6 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import DraggableDialog from './DraggableDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
 import ConfigFieldGroup from './ConfigFieldGroup';
@@ -57,6 +66,7 @@ function ChannelBindingDialog({
   initialBinding,
   onSaved,
 }: ChannelBindingDialogProps) {
+  const navigate = useNavigate();
   const [channelKey, setChannelKey] = useState('');
   const [name, setName] = useState('');
   const [enabled, setEnabled] = useState(true);
@@ -225,6 +235,13 @@ function ChannelBindingDialog({
     }
   };
 
+  const hasNoAvailableChannels = !initialBinding && catalog.length === 0;
+
+  const handleOpenChannelsList = () => {
+    navigate('/studio/connections/channels');
+    onOpenChange(false);
+  };
+
   return (
     <DraggableDialog
       open={open}
@@ -233,6 +250,27 @@ function ChannelBindingDialog({
       size="default"
     >
       <div className="flex h-full flex-col">
+        {hasNoAvailableChannels ? (
+          <div className="flex flex-1 items-center justify-center px-4 py-6">
+            <Empty className="min-h-64 gap-4 p-4 md:p-6">
+              <EmptyHeader className="gap-1.5">
+                <EmptyMedia variant="icon">
+                  <Inbox className="size-5" />
+                </EmptyMedia>
+                <EmptyTitle className="text-base">No channel providers available</EmptyTitle>
+                <EmptyDescription className="text-xs/relaxed">
+                  Add or install a channel provider first, then bind it to this agent.
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button type="button" size="sm" onClick={handleOpenChannelsList}>
+                  <Plus className="size-3.5" />
+                  Go to Channels
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </div>
+        ) : (
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
           {!initialBinding && (
             <div className="space-y-2">
@@ -376,21 +414,24 @@ function ChannelBindingDialog({
             </>
           )}
         </div>
+        )}
 
         <Separator />
 
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleTest()}
-              disabled={isTesting}
-            >
-              {isTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-              Test Connection
-            </Button>
-            {initialBinding?.manifest.transport_mode === 'polling' && (
+            {!hasNoAvailableChannels && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleTest()}
+                disabled={isTesting}
+              >
+                {isTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                Test Connection
+              </Button>
+            )}
+            {!hasNoAvailableChannels && initialBinding?.manifest.transport_mode === 'polling' && (
               <Button
                 type="button"
                 variant="outline"
@@ -405,12 +446,14 @@ function ChannelBindingDialog({
 
           <div className="flex items-center gap-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {hasNoAvailableChannels ? 'Close' : 'Cancel'}
             </Button>
-            <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
-              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save
-            </Button>
+            {!hasNoAvailableChannels && (
+              <Button type="button" onClick={() => void handleSave()} disabled={isSaving || !manifest}>
+                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save
+              </Button>
+            )}
           </div>
         </div>
       </div>

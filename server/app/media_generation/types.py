@@ -22,6 +22,7 @@ class MediaProviderConfigField(AppBaseModel):
     type: FieldType
     required: bool = False
     placeholder: str | None = None
+    default_value: str | int | float | bool | None = None
     description: str | None = None
 
 

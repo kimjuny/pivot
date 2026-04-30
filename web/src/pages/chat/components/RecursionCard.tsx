@@ -416,12 +416,27 @@ function ToolPayloadSection({
   );
 }
 
-function getWindowedLines(value: string, maxLines = 420): string[] {
+function getWindowedLines(value: string, maxLines = 420): {
+  lines: string[];
+  startLine: number;
+  totalLines: number;
+  isTruncated: boolean;
+} {
   const lines = value.split(/\r\n|\r|\n/);
   if (lines.length <= maxLines) {
-    return lines;
+    return {
+      lines,
+      startLine: 1,
+      totalLines: lines.length,
+      isTruncated: false,
+    };
   }
-  return lines.slice(lines.length - maxLines);
+  return {
+    lines: lines.slice(lines.length - maxLines),
+    startLine: lines.length - maxLines + 1,
+    totalLines: lines.length,
+    isTruncated: true,
+  };
 }
 
 function ToolCodePreview({
@@ -431,17 +446,25 @@ function ToolCodePreview({
   value: string;
   emptyLabel: string;
 }) {
-  const lines = value ? getWindowedLines(value) : [];
+  const preview = value ? getWindowedLines(value) : null;
+  const lines = preview?.lines ?? [];
 
   return (
     <div>
-      <div className="mb-1 font-semibold text-zinc-300">Preview:</div>
+      <div className="mb-1 flex items-center justify-between gap-3 font-semibold text-zinc-300">
+        <span>Preview:</span>
+        {preview?.isTruncated ? (
+          <span className="text-[11px] font-normal text-zinc-500">
+            Showing lines {preview.startLine}-{preview.totalLines} of {preview.totalLines}
+          </span>
+        ) : null}
+      </div>
       <div className="max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
         {lines.length > 0 ? (
           lines.map((line, index) => (
             <div key={`${index}-${line}`} className="flex min-w-0">
               <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
-                {index + 1}
+                {(preview?.startLine ?? 1) + index}
               </span>
               <span className="min-w-0 flex-1 whitespace-pre text-zinc-100">
                 {line || " "}
@@ -457,11 +480,19 @@ function ToolCodePreview({
 }
 
 function ToolDiffPreview({ value }: { value: string }) {
-  const lines = value ? getWindowedLines(value) : [];
+  const preview = value ? getWindowedLines(value) : null;
+  const lines = preview?.lines ?? [];
 
   return (
     <div>
-      <div className="mb-1 font-semibold text-zinc-300">Diff:</div>
+      <div className="mb-1 flex items-center justify-between gap-3 font-semibold text-zinc-300">
+        <span>Diff:</span>
+        {preview?.isTruncated ? (
+          <span className="text-[11px] font-normal text-zinc-500">
+            Showing lines {preview.startLine}-{preview.totalLines} of {preview.totalLines}
+          </span>
+        ) : null}
+      </div>
       <div className="max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
         {lines.length > 0 ? (
           lines.map((line, index) => {
@@ -479,7 +510,7 @@ function ToolDiffPreview({ value }: { value: string }) {
                 className={`flex min-w-0 ${lineClassName}`}
               >
                 <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
-                  {index + 1}
+                  {(preview?.startLine ?? 1) + index}
                 </span>
                 <span className="min-w-0 flex-1 whitespace-pre">
                   {line || " "}

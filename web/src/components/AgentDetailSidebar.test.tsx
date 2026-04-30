@@ -490,7 +490,7 @@ describe("AgentDetailSidebar", () => {
     nextAgentBindings.resolve([]);
 
     expect(
-      await screen.findByText("No web search providers configured for this agent"),
+      await screen.findByRole("button", { name: "Add first web search" }),
     ).toBeInTheDocument();
   });
 });

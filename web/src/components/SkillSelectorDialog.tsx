@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { User as UserIcon, Search, Loader2, Globe2 } from "@/lib/lucide";
+import { useNavigate } from 'react-router-dom';
+import { User as UserIcon, Search, Loader2, Globe2, Inbox, Plus } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getSharedSkills,
@@ -16,6 +17,14 @@ import { Separator } from '@/components/ui/separator';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import DraggableDialog from './DraggableDialog';
 
 interface SkillEntry {
@@ -48,6 +57,7 @@ function SkillSelectorDialog({
   currentSkillIds,
   onSaved,
 }: SkillSelectorDialogProps) {
+  const navigate = useNavigate();
   const [allSkills, setAllSkills] = useState<SkillEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -180,6 +190,11 @@ function SkillSelectorDialog({
     }
   };
 
+  const handleOpenSkillsList = () => {
+    navigate('/studio/assets/skills');
+    onOpenChange(false);
+  };
+
   const visibleAllChecked = filteredSkills.length > 0 && filteredSkills.every((s) => isSkillChecked(s.name));
   const visibleSomeChecked = !visibleAllChecked && filteredSkills.some((s) => isSkillChecked(s.name));
 
@@ -239,9 +254,31 @@ function SkillSelectorDialog({
 
           <div className="flex-1 overflow-y-auto overflow-x-hidden">
             {filteredSkills.length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-                {allSkills.length === 0 ? 'No skills available.' : 'No skills match your search.'}
-              </div>
+              allSkills.length === 0 ? (
+                <div className="flex h-full min-h-64 items-center justify-center px-4 py-6">
+                  <Empty className="min-h-64 gap-4 p-4 md:p-6">
+                    <EmptyHeader className="gap-1.5">
+                      <EmptyMedia variant="icon">
+                        <Inbox className="size-5" />
+                      </EmptyMedia>
+                      <EmptyTitle className="text-base">No skills available</EmptyTitle>
+                      <EmptyDescription className="text-xs/relaxed">
+                        Add or import a skill first, then configure it for this agent.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button type="button" size="sm" onClick={handleOpenSkillsList}>
+                        <Plus className="size-3.5" />
+                        Go to Skills
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                  No skills match your search.
+                </div>
+              )
             ) : (
               <table className="w-full caption-bottom text-sm table-fixed">
                 <thead className="sticky top-0 bg-background z-10 [&_tr]:border-b">

@@ -1,11 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
-import { ArrowUp, Loader2 } from "@/lib/lucide";
+import { ArrowUp, Loader2, Plus, Server } from "@/lib/lucide";
 import { toast } from 'sonner';
 
 import DraggableDialog from './DraggableDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -87,12 +96,14 @@ function ExtensionBindingDialog({
   initialPackage = null,
   onSaved,
 }: ExtensionBindingDialogProps) {
+  const navigate = useNavigate();
   const [packageId, setPackageId] = useState('');
   const [installationId, setInstallationId] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [priority, setPriority] = useState('100');
   const [configText, setConfigText] = useState('{\n}');
   const [isSaving, setIsSaving] = useState(false);
+  const configTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const selectablePackages = useMemo(() => {
     if (initialPackage) {
@@ -146,6 +157,25 @@ function ExtensionBindingDialog({
     const preferredInstallation = getPreferredInstallation(selectedPackage);
     setInstallationId(preferredInstallation ? String(preferredInstallation.id) : '');
   }, [initialPackage, selectedPackage]);
+
+  /**
+   * Match the chat composer behavior: start compact, then grow with content
+   * until it reaches a bounded scroll area.
+   */
+  useEffect(() => {
+    const textarea = configTextareaRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const minHeight = 60;
+    const maxHeight = 240;
+    textarea.style.height = '0px';
+    textarea.style.height = `${Math.min(
+      Math.max(textarea.scrollHeight, minHeight),
+      maxHeight,
+    )}px`;
+  }, [configText, selectedPackage]);
 
   const handleSave = async () => {
     const parsedInstallationId = Number(installationId);
@@ -220,6 +250,13 @@ function ExtensionBindingDialog({
   };
 
   const activeVersionOptions = selectedPackage?.versions ?? [];
+  const hasNoAvailableExtensions = !initialPackage && selectablePackages.length === 0;
+  const emptyTitle = packages.length === 0
+    ? 'No extensions installed'
+    : 'No extensions available';
+  const emptyDescription = packages.length === 0
+    ? 'Install an extension package first, then bind it to this agent.'
+    : 'All installed extension packages are already bound to this agent.';
   const isLatestVersion = (version: ExtensionInstallation) => (
     selectedPackage?.latest_version === version.version
   );
@@ -235,6 +272,11 @@ function ExtensionBindingDialog({
     </span>
   );
 
+  const handleOpenExtensionsList = () => {
+    navigate('/studio/assets/extensions');
+    onOpenChange(false);
+  };
+
   return (
     <DraggableDialog
       open={open}
@@ -243,34 +285,55 @@ function ExtensionBindingDialog({
       size="default"
     >
       <div className="flex h-full flex-col">
-        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
-          {!initialPackage && (
-            <div className="space-y-2">
-              <Label htmlFor="extension-package">Package</Label>
-              <Select value={packageId} onValueChange={setPackageId}>
-                <SelectTrigger id="extension-package">
-                  {selectedPackage ? (
-                    <ExtensionPackageBadge
-                      name={selectedPackage.display_name}
-                      logoUrl={getPackageLogoUrl(selectedPackage)}
-                    />
-                  ) : (
-                    <SelectValue placeholder="Select an extension package" />
-                  )}
-                </SelectTrigger>
-                <SelectContent>
-                  {selectablePackages.map((pkg) => (
-                    <SelectItem key={pkg.package_id} value={pkg.package_id}>
+        {hasNoAvailableExtensions ? (
+          <div className="flex flex-1 items-center justify-center px-4 py-6">
+            <Empty className="min-h-64 gap-4 p-4 md:p-6">
+              <EmptyHeader className="gap-1.5">
+                <EmptyMedia variant="icon">
+                  <Server className="size-5" />
+                </EmptyMedia>
+                <EmptyTitle className="text-base">{emptyTitle}</EmptyTitle>
+                <EmptyDescription className="text-xs/relaxed">
+                  {emptyDescription}
+                </EmptyDescription>
+              </EmptyHeader>
+              <EmptyContent>
+                <Button type="button" size="sm" onClick={handleOpenExtensionsList}>
+                  <Plus className="size-3.5" />
+                  Go to Extensions
+                </Button>
+              </EmptyContent>
+            </Empty>
+          </div>
+        ) : (
+          <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+            {!initialPackage && (
+              <div className="space-y-2">
+                <Label htmlFor="extension-package">Package</Label>
+                <Select value={packageId} onValueChange={setPackageId}>
+                  <SelectTrigger id="extension-package">
+                    {selectedPackage ? (
                       <ExtensionPackageBadge
-                        name={pkg.display_name}
-                        logoUrl={getPackageLogoUrl(pkg)}
+                        name={selectedPackage.display_name}
+                        logoUrl={getPackageLogoUrl(selectedPackage)}
                       />
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
+                    ) : (
+                      <SelectValue placeholder="Select an extension package" />
+                    )}
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectablePackages.map((pkg) => (
+                      <SelectItem key={pkg.package_id} value={pkg.package_id}>
+                        <ExtensionPackageBadge
+                          name={pkg.display_name}
+                          logoUrl={getPackageLogoUrl(pkg)}
+                        />
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
           {selectedPackage && (
             <>
@@ -342,10 +405,11 @@ function ExtensionBindingDialog({
               <div className="space-y-2">
                 <Label htmlFor="extension-config">Config (JSON)</Label>
                 <Textarea
+                  ref={configTextareaRef}
                   id="extension-config"
                   value={configText}
                   onChange={(event) => setConfigText(event.target.value)}
-                  className="min-h-[180px] font-mono text-xs"
+                  className="min-h-[60px] max-h-60 resize-none overflow-y-auto font-mono text-xs [field-sizing:content]"
                   placeholder='{"region":"us"}'
                 />
                 <div className="text-xs text-muted-foreground">
@@ -362,7 +426,8 @@ function ExtensionBindingDialog({
                 : 'Install an extension package first, then add it to this agent.'}
             </div>
           )}
-        </div>
+          </div>
+        )}
 
         <div className="border-t border-border px-4 py-3">
           <div className="flex items-center justify-end gap-2">
@@ -372,16 +437,18 @@ function ExtensionBindingDialog({
               onClick={() => onOpenChange(false)}
               disabled={isSaving}
             >
-              Cancel
+              {hasNoAvailableExtensions ? 'Close' : 'Cancel'}
             </Button>
-            <Button
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={isSaving || !selectedPackage || !selectedInstallation}
-            >
-              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save
-            </Button>
+            {!hasNoAvailableExtensions && (
+              <Button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={isSaving || !selectedPackage || !selectedInstallation}
+              >
+                {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save
+              </Button>
+            )}
           </div>
         </div>
       </div>

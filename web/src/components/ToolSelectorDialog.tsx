@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Lock, User as UserIcon, Search, Loader2 } from "@/lib/lucide";
+import { useNavigate } from 'react-router-dom';
+import { Lock, User as UserIcon, Search, Loader2, Inbox, Plus } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getSharedTools,
@@ -23,6 +24,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Label } from '@/components/ui/label';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import DraggableDialog from './DraggableDialog';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +98,7 @@ function ToolSelectorDialog({
   currentToolIds,
   onSaved,
 }: ToolSelectorDialogProps) {
+  const navigate = useNavigate();
   const [allTools, setAllTools] = useState<ToolEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -234,6 +244,11 @@ function ToolSelectorDialog({
     }
   };
 
+  const handleOpenToolsList = () => {
+    navigate('/studio/assets/tools');
+    onOpenChange(false);
+  };
+
   // ---------------------------------------------------------------------------
   // Derived counts
   // ---------------------------------------------------------------------------
@@ -307,9 +322,31 @@ function ToolSelectorDialog({
           {/* overflow-x-hidden prevents the inner Table from pushing the dialog wider */}
           <div className="flex-1 overflow-y-auto overflow-x-hidden">
             {filteredTools.length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-                {allTools.length === 0 ? 'No tools available.' : 'No tools match your search.'}
-              </div>
+              allTools.length === 0 ? (
+                <div className="flex h-full min-h-64 items-center justify-center px-4 py-6">
+                  <Empty className="min-h-64 gap-4 p-4 md:p-6">
+                    <EmptyHeader className="gap-1.5">
+                      <EmptyMedia variant="icon">
+                        <Inbox className="size-5" />
+                      </EmptyMedia>
+                      <EmptyTitle className="text-base">No tools available</EmptyTitle>
+                      <EmptyDescription className="text-xs/relaxed">
+                        Add or import a tool first, then configure it for this agent.
+                      </EmptyDescription>
+                    </EmptyHeader>
+                    <EmptyContent>
+                      <Button type="button" size="sm" onClick={handleOpenToolsList}>
+                        <Plus className="size-3.5" />
+                        Go to Tools
+                      </Button>
+                    </EmptyContent>
+                  </Empty>
+                </div>
+              ) : (
+                <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                  No tools match your search.
+                </div>
+              )
             ) : (
               <table className="w-full caption-bottom text-sm table-fixed">
                 <thead className="sticky top-0 bg-background z-10 [&_tr]:border-b">
