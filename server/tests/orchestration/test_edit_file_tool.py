@@ -124,6 +124,44 @@ class EditFileToolTestCase(unittest.TestCase):
         self.assertEqual(payload["warnings"], [])
         self.assertEqual(updated, "new\n")
 
+    def test_script_matches_lf_diff_against_crlf_file(self) -> None:
+        """Agents should not need to encode target-file line endings in diffs."""
+        module = cast(Any, edit_file_module)
+        diff = """@@ -1,3 +1,4 @@
++import tailwindcss from '@tailwindcss/vite'
+ import { defineConfig } from 'vite'
+ import react from '@vitejs/plugin-react'
+ 
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "vite.config.ts"
+            original = (
+                "import { defineConfig } from 'vite'\r\n"
+                "import react from '@vitejs/plugin-react'\r\n"
+                "\r\n"
+            )
+            with file_path.open("w", encoding="utf-8", newline="") as target_file:
+                target_file.write(original)
+
+            completed = subprocess.run(
+                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            with file_path.open("r", encoding="utf-8", newline="") as source_file:
+                updated = source_file.read()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            updated,
+            "import tailwindcss from '@tailwindcss/vite'\r\n"
+            "import { defineConfig } from 'vite'\r\n"
+            "import react from '@vitejs/plugin-react'\r\n"
+            "\r\n",
+        )
+
     def test_script_tolerates_count_mismatch_with_warning(self) -> None:
         """Hunk counts are advisory; body matching remains the safety check."""
         module = cast(Any, edit_file_module)

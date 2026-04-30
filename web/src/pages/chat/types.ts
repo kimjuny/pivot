@@ -126,6 +126,7 @@ export type ReactStreamEventType =
   | "summary"
   | "action"
   | "tool_call"
+  | "tool_payload_delta"
   | "tool_result"
   | "plan_update"
   | "reflect"

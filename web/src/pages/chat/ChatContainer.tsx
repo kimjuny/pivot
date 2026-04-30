@@ -312,6 +312,76 @@ function hasPendingToolExecutions(events: ReactStreamEvent[]): boolean {
   return toolCallIds.size > 0 && toolResultIds.size < toolCallIds.size;
 }
 
+function SurfaceDevDebugContent({
+  activeSurfaceSession,
+  currentSessionId,
+  isCreatingSurfaceSession,
+  surfaceCreationError,
+  onAttach,
+}: {
+  activeSurfaceSession: DevSurfaceSessionResponse | null;
+  currentSessionId: string | null;
+  isCreatingSurfaceSession: boolean;
+  surfaceCreationError: string | null;
+  onAttach: (runtimeUrl: string) => void;
+}) {
+  const [runtimeUrlInput, setRuntimeUrlInput] = useState(LOCAL_VITE_RUNTIME_URL);
+
+  return (
+    <div className="space-y-3">
+      <label className="block">
+        <div className="mb-1 text-xs font-medium text-muted-foreground">
+          Runtime URL
+        </div>
+        <Input
+          type="url"
+          value={runtimeUrlInput}
+          onChange={(event) => setRuntimeUrlInput(event.target.value)}
+        />
+        <div className="mt-2 text-xs leading-5 text-muted-foreground">
+          Accepts either a dev server root such as{" "}
+          <span className="font-mono text-foreground/80">
+            {LOCAL_VITE_RUNTIME_URL}
+          </span>{" "}
+          or a concrete entry page.
+        </div>
+      </label>
+
+      <button
+        type="button"
+        onClick={() => onAttach(runtimeUrlInput)}
+        disabled={!currentSessionId || isCreatingSurfaceSession}
+        className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-foreground px-3 text-sm font-medium text-background transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isCreatingSurfaceSession ? "Attaching..." : "Attach Dev Surface"}
+      </button>
+
+      {surfaceCreationError ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          {surfaceCreationError}
+        </div>
+      ) : null}
+
+      {activeSurfaceSession ? (
+        <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground">
+              {activeSurfaceSession.display_name}
+            </span>
+            <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
+              Dev
+            </span>
+          </div>
+          <div className="mt-2">
+            Attached to this chat session. Use the chat-header surface icon to
+            open the dock.
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function normalizePreviewEndpoint(
   preview: unknown,
 ): PreviewEndpointResponse | null {
@@ -634,9 +704,6 @@ function ChatContainer({
   const [isExtensionDockMounted, setIsExtensionDockMounted] = useState(false);
   const [dockPanelSize, setDockPanelSize] = useState(58);
   const [renderedDockPanelSize, setRenderedDockPanelSize] = useState(0);
-  const [surfaceRuntimeUrlInput, setSurfaceRuntimeUrlInput] = useState(
-    LOCAL_VITE_RUNTIME_URL,
-  );
   const [isCreatingSurfaceSession, setIsCreatingSurfaceSession] =
     useState(false);
   const [surfaceCreationError, setSurfaceCreationError] = useState<
@@ -1584,6 +1651,7 @@ function ChatContainer({
         matchingRecursionFromMessage &&
           (event.type === "tool_call" ||
             event.type === "tool_result" ||
+            event.type === "tool_payload_delta" ||
             ((event.type === "observe" ||
               event.type === "reason" ||
               event.type === "summary" ||
@@ -1682,7 +1750,11 @@ function ChatContainer({
           endTime: isToolCallAction ? undefined : event.timestamp,
           tokens: event.tokens ?? currentRecursion.tokens,
         };
-      } else if (event.type === "tool_call" || event.type === "tool_result") {
+      } else if (
+        event.type === "tool_call" ||
+        event.type === "tool_result" ||
+        event.type === "tool_payload_delta"
+      ) {
         const hasPendingTools = hasPendingToolExecutions(updatedEvents);
         nextRecursion = {
           ...nextRecursion,
@@ -3171,64 +3243,18 @@ function ChatContainer({
       description:
         "Attach one local surface runtime to this chat session and open it from the chat header.",
       content: (
-        <div className="space-y-3">
-          <label className="block">
-            <div className="mb-1 text-xs font-medium text-muted-foreground">
-              Runtime URL
-            </div>
-            <Input
-              type="url"
-              value={surfaceRuntimeUrlInput}
-              onChange={(event) =>
-                setSurfaceRuntimeUrlInput(event.target.value)
-              }
-            />
-            <div className="mt-2 text-xs leading-5 text-muted-foreground">
-              Accepts either a dev server root such as{" "}
-              <span className="font-mono text-foreground/80">
-                {LOCAL_VITE_RUNTIME_URL}
-              </span>{" "}
-              or a concrete entry page.
-            </div>
-          </label>
-
-          <button
-            type="button"
-            onClick={() => {
-              void handleCreateSurfaceDevSession(
-                OFFICIAL_SAMPLE_SURFACE_KEY,
-                surfaceRuntimeUrlInput,
-              );
-            }}
-            disabled={!currentSessionId || isCreatingSurfaceSession}
-            className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-foreground px-3 text-sm font-medium text-background transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isCreatingSurfaceSession ? "Attaching..." : "Attach Dev Surface"}
-          </button>
-
-          {surfaceCreationError ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {surfaceCreationError}
-            </div>
-          ) : null}
-
-          {activeSurfaceSession ? (
-            <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-foreground">
-                  {activeSurfaceSession.display_name}
-                </span>
-                <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">
-                  Dev
-                </span>
-              </div>
-              <div className="mt-2">
-                Attached to this chat session. Use the chat-header surface icon
-                to open the dock.
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <SurfaceDevDebugContent
+          activeSurfaceSession={activeSurfaceSession}
+          currentSessionId={currentSessionId}
+          isCreatingSurfaceSession={isCreatingSurfaceSession}
+          surfaceCreationError={surfaceCreationError}
+          onAttach={(runtimeUrl) => {
+            void handleCreateSurfaceDevSession(
+              OFFICIAL_SAMPLE_SURFACE_KEY,
+              runtimeUrl,
+            );
+          }}
+        />
       ),
     };
   }, [
@@ -3237,7 +3263,6 @@ function ChatContainer({
     handleCreateSurfaceDevSession,
     isCreatingSurfaceSession,
     surfaceCreationError,
-    surfaceRuntimeUrlInput,
   ]);
 
   useRegisterChatDebugPanelSection(surfaceDevDebugSection);

@@ -102,6 +102,7 @@ def parse_diff(diff_text: str) -> tuple[list[dict[str, object]], list[str]]:
         index += 1
         old_lines: list[str] = []
         new_lines: list[str] = []
+        body_entries: list[tuple[str, str]] = []
         added_line_count = 0
         removed_line_count = 0
         previous_prefix = ""
@@ -117,6 +118,9 @@ def parse_diff(diff_text: str) -> tuple[list[dict[str, object]], list[str]]:
                     old_lines[-1] = old_lines[-1].removesuffix("\n")
                 if previous_prefix in (" ", "+") and new_lines:
                     new_lines[-1] = new_lines[-1].removesuffix("\n")
+                if previous_prefix in (" ", "-", "+") and body_entries:
+                    entry_prefix, entry_content = body_entries[-1]
+                    body_entries[-1] = (entry_prefix, entry_content.removesuffix("\n"))
                 index += 1
                 continue
             if body_line == "\n":
@@ -126,11 +130,14 @@ def parse_diff(diff_text: str) -> tuple[list[dict[str, object]], list[str]]:
             if prefix == " ":
                 old_lines.append(content)
                 new_lines.append(content)
+                body_entries.append((prefix, content))
             elif prefix == "-":
                 old_lines.append(content)
+                body_entries.append((prefix, content))
                 removed_line_count += 1
             elif prefix == "+":
                 new_lines.append(content)
+                body_entries.append((prefix, content))
                 added_line_count += 1
             else:
                 fail(
@@ -161,6 +168,7 @@ def parse_diff(diff_text: str) -> tuple[list[dict[str, object]], list[str]]:
                 "new_start": new_start,
                 "old_lines": old_lines,
                 "new_lines": new_lines,
+                "body_entries": body_entries,
                 "added_line_count": added_line_count,
                 "removed_line_count": removed_line_count,
             }
@@ -183,6 +191,63 @@ def format_preview(lines: list[str], start_line: int, limit: int = 8) -> str:
     return "\n".join(preview)
 
 
+def split_line_ending(line: str) -> tuple[str, str]:
+    if line.endswith("\r\n"):
+        return line[:-2], "\r\n"
+    if line.endswith("\n"):
+        return line[:-1], "\n"
+    if line.endswith("\r"):
+        return line[:-1], "\r"
+    return line, ""
+
+
+def line_body(line: str) -> str:
+    return split_line_ending(line)[0]
+
+
+def dominant_line_ending(lines: list[str]) -> str:
+    counts: dict[str, int] = {"\r\n": 0, "\n": 0, "\r": 0}
+    for line in lines:
+        ending = split_line_ending(line)[1]
+        if ending:
+            counts[ending] += 1
+    return max(counts, key=lambda ending: counts[ending]) if any(counts.values()) else "\n"
+
+
+def line_ending_near(lines: list[str], old_cursor: int, fallback: str) -> str:
+    if 0 <= old_cursor - 1 < len(lines):
+        previous = split_line_ending(lines[old_cursor - 1])[1]
+        if previous:
+            return previous
+    if 0 <= old_cursor < len(lines):
+        current = split_line_ending(lines[old_cursor])[1]
+        if current:
+            return current
+    return fallback
+
+
+def materialize_new_lines(
+    body_entries: list[tuple[str, str]],
+    current_slice: list[str],
+    fallback_line_ending: str,
+) -> list[str]:
+    materialized: list[str] = []
+    old_cursor = 0
+    for prefix, content in body_entries:
+        if prefix == " ":
+            materialized.append(current_slice[old_cursor])
+            old_cursor += 1
+            continue
+        if prefix == "-":
+            old_cursor += 1
+            continue
+        body, ending = split_line_ending(content)
+        if ending:
+            ending = line_ending_near(current_slice, old_cursor, fallback_line_ending)
+        materialized.append(f"{body}{ending}")
+    return materialized
+
+
 if not path.exists():
     fail(f"Cannot edit file because it does not exist: {display_path(path)}")
 if path.is_dir():
@@ -190,15 +255,17 @@ if path.is_dir():
 
 expected_path = target_relative_path(path)
 hunks, warnings = parse_diff(diff)
-original_lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+with path.open("r", encoding="utf-8", newline="") as source_file:
+    original_lines = source_file.read().splitlines(keepends=True)
 updated_lines = list(original_lines)
+fallback_line_ending = dominant_line_ending(original_lines)
 line_delta = 0
 
 for hunk in hunks:
     hunk_index = int(hunk["index"])
     old_start = int(hunk["old_start"])
     old_lines = hunk["old_lines"]
-    new_lines = hunk["new_lines"]
+    body_entries = hunk["body_entries"]
     if old_start == 0 and not old_lines:
         start_index = 0
     else:
@@ -210,7 +277,7 @@ for hunk in hunks:
             "the current file. No changes were written."
         )
     current_slice = updated_lines[start_index:end_index]
-    if current_slice != old_lines:
+    if [line_body(line) for line in current_slice] != [line_body(line) for line in old_lines]:
         fail(
             f"Patch failed at hunk {hunk_index}: context did not match around "
             f"original line {old_start}. old_start is the strict location anchor; "
@@ -220,10 +287,12 @@ for hunk in hunks:
             f"{format_preview(old_lines, old_start)}\nActual file lines there:\n"
             f"{format_preview(current_slice, old_start)}\nNo changes were written."
         )
+    new_lines = materialize_new_lines(body_entries, current_slice, fallback_line_ending)
     updated_lines[start_index:end_index] = new_lines
     line_delta += len(new_lines) - len(old_lines)
 
-path.write_text("".join(updated_lines), encoding="utf-8")
+with path.open("w", encoding="utf-8", newline="") as target_file:
+    target_file.write("".join(updated_lines))
 payload = {
     "message": "Applied patch successfully.",
     "path": expected_path,
@@ -243,6 +312,11 @@ def edit_file(path: str, diff: str) -> dict[str, object]:
     Use this after ``read_file``. ``read_file`` returns line-numbered content;
     use those numbers to write accurate ``@@`` hunk headers, but do not include
     the line-number prefixes in diff body lines.
+
+    IMPORTANT: Prefer an absolute sandbox path that starts with ``/workspace/``,
+    for example ``/workspace/app/index.html``. Never pass host-machine paths
+    such as ``/Users/...`` or ``/tmp/...``; paths outside ``/workspace`` are
+    rejected.
 
     The diff should contain only one or more ``@@`` hunks, without markdown
     fences, file headers, or full git metadata such as ``diff --git`` /
@@ -267,8 +341,9 @@ def edit_file(path: str, diff: str) -> dict[str, object]:
       noise and ignores them; ``path`` is the only target file.
 
     Args:
-        path (required, str): Relative or absolute workspace path to the target
-            file.
+        path (required, str): Absolute ``/workspace/...`` path to the target
+            file. Workspace-relative paths are accepted, but absolute sandbox
+            paths are clearer and less error-prone.
         diff (required, str): Simplified unified diff hunks for that file.
 
     Returns:

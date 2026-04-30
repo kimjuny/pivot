@@ -44,11 +44,23 @@ interface ToolExecutionSnapshot {
 
 type ToolCallSnapshot = ToolExecutionSnapshot["toolCalls"][number];
 type ToolResultSnapshot = ToolExecutionSnapshot["toolResults"][number];
+type LiveToolPayloadSnapshot = {
+  arguments: Record<string, string>;
+  finalArguments: Set<string>;
+};
+type ToolExecutionSummaryPart = {
+  key: string;
+  content: string;
+  className: string;
+  title?: string;
+  isCount?: boolean;
+};
 type ToolExecutionItemSnapshot = {
   key: string;
   call: ToolCallSnapshot;
   result?: ToolResultSnapshot;
   isPreparing: boolean;
+  livePayload?: LiveToolPayloadSnapshot;
 };
 
 interface RecursionCardProps {
@@ -170,60 +182,177 @@ function getStringArgument(
     : null;
 }
 
-function ToolExecutionSummary({ call }: { call: ToolCallSnapshot }) {
+function getRawStringArgument(
+  args: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const value = args?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function getPathBasename(path: string): string {
+  const normalizedPath = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedPath.split("/").filter(Boolean).pop() || path;
+}
+
+function countTextLines(value: string): number {
+  if (value.length === 0) {
+    return 0;
+  }
+  const lines = value.split(/\r\n|\r|\n/);
+  const lastLine = lines[lines.length - 1];
+  return lastLine === "" ? lines.length - 1 : lines.length;
+}
+
+function countDiffLines(value: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of value.split(/\r\n|\r|\n/)) {
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      additions += 1;
+    } else if (line.startsWith("-")) {
+      deletions += 1;
+    }
+  }
+  return { additions, deletions };
+}
+
+function getLiveOrResolvedStringArgument(
+  args: Record<string, unknown> | null,
+  livePayload: LiveToolPayloadSnapshot | undefined,
+  key: string,
+): string | null {
+  const liveValue = livePayload?.arguments[key];
+  if (typeof liveValue === "string") {
+    return liveValue;
+  }
+  return getRawStringArgument(args, key);
+}
+
+function normalizeToolPath(path: string): string {
+  const trimmed = path.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function getToolExecutionSummaryParts(
+  call: ToolCallSnapshot,
+  livePayload?: LiveToolPayloadSnapshot,
+): ToolExecutionSummaryPart[] {
   const args = getToolArgumentRecord(call.arguments);
-  const path = getStringArgument(args, "path");
+  const rawPath = getLiveOrResolvedStringArgument(args, livePayload, "path");
+  const path = rawPath ? normalizeToolPath(rawPath) : null;
   const dirPath = getStringArgument(args, "dir_path");
   const command = getStringArgument(args, "command");
   const query = getStringArgument(args, "query");
+  const content = getLiveOrResolvedStringArgument(args, livePayload, "content");
+  const diff = getLiveOrResolvedStringArgument(args, livePayload, "diff");
 
   if (
     (call.name === "write_file" ||
-      call.name === "edit_file" ||
-      call.name === "read_file") &&
+      call.name === "edit_file") &&
     path
   ) {
-    return <span className="min-w-0 truncate font-mono text-muted-foreground">{path}</span>;
+    const parts: ToolExecutionSummaryPart[] = [
+      {
+        key: "path",
+        content: getPathBasename(path),
+        className: "min-w-0 truncate font-mono text-muted-foreground",
+        title: path,
+      },
+    ];
+    if (call.name === "write_file" && content !== null) {
+      parts.push({
+        key: "additions",
+        content: `+${countTextLines(content)}`,
+        className: "shrink-0 font-mono text-success",
+        isCount: true,
+      });
+    }
+    if (call.name === "edit_file" && diff !== null) {
+      const diffCounts = countDiffLines(diff);
+      parts.push(
+        {
+          key: "additions",
+          content: `+${diffCounts.additions}`,
+          className: "shrink-0 font-mono text-success",
+          isCount: true,
+        },
+        {
+          key: "deletions",
+          content: `-${diffCounts.deletions}`,
+          className: "shrink-0 font-mono text-danger",
+          isCount: true,
+        },
+      );
+    }
+    return parts;
+  }
+
+  if (call.name === "read_file" && path) {
+    return [
+      {
+        key: "path",
+        content: path,
+        className: "min-w-0 truncate font-mono text-muted-foreground",
+      },
+    ];
   }
 
   if (call.name === "list_directories" && dirPath) {
-    return (
-      <span className="min-w-0 truncate font-mono text-muted-foreground">
-        {dirPath}
-      </span>
-    );
+    return [
+      {
+        key: "dir_path",
+        content: dirPath,
+        className: "min-w-0 truncate font-mono text-muted-foreground",
+      },
+    ];
   }
 
   if (call.name === "run_bash" && command) {
-    return (
-      <span
-        className="min-w-0 truncate font-mono text-muted-foreground"
-        title={command}
-      >
-        {command}
-      </span>
-    );
+    return [
+      {
+        key: "command",
+        content: command,
+        className: "min-w-0 truncate font-mono text-muted-foreground",
+        title: command,
+      },
+    ];
   }
 
   if (call.name === "search") {
-    return (
-      <>
-        {path ? (
-          <span className="shrink-0 font-mono text-muted-foreground">{path}</span>
-        ) : null}
-        {query ? (
-          <span
-            className="min-w-0 truncate font-mono text-muted-foreground"
-            title={query}
-          >
-            {query}
-          </span>
-        ) : null}
-      </>
-    );
+    return [
+      ...(path
+        ? [
+            {
+              key: "path",
+              content: path,
+              className: "shrink-0 font-mono text-muted-foreground",
+            },
+          ]
+        : []),
+      ...(query
+        ? [
+            {
+              key: "query",
+              content: query,
+              className: "min-w-0 truncate font-mono text-muted-foreground",
+              title: query,
+            },
+          ]
+        : []),
+    ];
   }
 
-  return null;
+  return [];
 }
 
 function ToolPayloadSection({
@@ -287,14 +416,95 @@ function ToolPayloadSection({
   );
 }
 
+function getWindowedLines(value: string, maxLines = 420): string[] {
+  const lines = value.split(/\r\n|\r|\n/);
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  return lines.slice(lines.length - maxLines);
+}
+
+function ToolCodePreview({
+  value,
+  emptyLabel,
+}: {
+  value: string;
+  emptyLabel: string;
+}) {
+  const lines = value ? getWindowedLines(value) : [];
+
+  return (
+    <div>
+      <div className="mb-1 font-semibold text-zinc-300">Preview:</div>
+      <div className="max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
+        {lines.length > 0 ? (
+          lines.map((line, index) => (
+            <div key={`${index}-${line}`} className="flex min-w-0">
+              <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 whitespace-pre text-zinc-100">
+                {line || " "}
+              </span>
+            </div>
+          ))
+        ) : (
+          <div className="px-3 text-zinc-500">{emptyLabel}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToolDiffPreview({ value }: { value: string }) {
+  const lines = value ? getWindowedLines(value) : [];
+
+  return (
+    <div>
+      <div className="mb-1 font-semibold text-zinc-300">Diff:</div>
+      <div className="max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
+        {lines.length > 0 ? (
+          lines.map((line, index) => {
+            const lineClassName = line.startsWith("+") && !line.startsWith("+++")
+              ? "bg-success/10 text-emerald-200"
+              : line.startsWith("-") && !line.startsWith("---")
+                ? "bg-danger/10 text-red-200"
+                : line.startsWith("@@")
+                  ? "bg-sky-500/10 text-sky-200"
+                  : "text-zinc-100";
+
+            return (
+              <div
+                key={`${index}-${line}`}
+                className={`flex min-w-0 ${lineClassName}`}
+              >
+                <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
+                  {index + 1}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre">
+                  {line || " "}
+                </span>
+              </div>
+            );
+          })
+        ) : (
+          <div className="px-3 text-zinc-500">Waiting for diff...</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ToolExecutionItem({
   call,
   result,
   isPreparing,
+  livePayload,
 }: {
   call: ToolCallSnapshot;
   result?: ToolResultSnapshot;
   isPreparing: boolean;
+  livePayload?: LiveToolPayloadSnapshot;
 }) {
   const [open, setOpen] = useState(false);
   const statusLabel = getToolResultLabel(result);
@@ -308,6 +518,19 @@ function ToolExecutionItem({
   const argumentText = formatToolValue(call.arguments);
   const resultText =
     resultPayload === null ? "Waiting for tool result..." : formatToolValue(resultPayload);
+  const args = getToolArgumentRecord(call.arguments);
+  const writeContent =
+    call.name === "write_file"
+      ? getLiveOrResolvedStringArgument(args, livePayload, "content")
+      : null;
+  const editDiff =
+    call.name === "edit_file"
+      ? getLiveOrResolvedStringArgument(args, livePayload, "diff")
+      : null;
+  const usesSpecialPreview = call.name === "write_file" || call.name === "edit_file";
+  const summaryParts = getToolExecutionSummaryParts(call, livePayload);
+  const shimmerSummaryParts = summaryParts.filter((part) => !part.isCount);
+  const countSummaryParts = summaryParts.filter((part) => part.isCount);
 
   return (
     <div className="rounded-md bg-background/45">
@@ -333,8 +556,21 @@ function ToolExecutionItem({
                 {executionLabel}
               </span>
               <span className="shrink-0 font-semibold">{call.name}</span>
-              <ToolExecutionSummary call={call} />
+              {shimmerSummaryParts.map((part) => (
+                <span
+                  key={part.key}
+                  className={part.className}
+                  title={part.title}
+                >
+                  {part.content}
+                </span>
+              ))}
             </span>
+            {countSummaryParts.map((part) => (
+              <span key={part.key} className={part.className} title={part.title}>
+                {part.content}
+              </span>
+            ))}
             {statusLabel && (
               <span
                 className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${getToolResultBadgeClass(
@@ -357,7 +593,18 @@ function ToolExecutionItem({
           <div className="px-3 pb-2.5 pl-8">
             <div className="rounded-md border border-border/70 bg-black/90 p-3 font-mono text-xs leading-relaxed text-zinc-100 shadow-inner">
               <div className="space-y-3">
-                <ToolPayloadSection label="Arguments" value={argumentText} />
+                {usesSpecialPreview ? (
+                  call.name === "write_file" ? (
+                    <ToolCodePreview
+                      value={writeContent ?? ""}
+                      emptyLabel="Waiting for file content..."
+                    />
+                  ) : (
+                    <ToolDiffPreview value={editDiff ?? ""} />
+                  )
+                ) : (
+                  <ToolPayloadSection label="Arguments" value={argumentText} />
+                )}
                 <ToolPayloadSection label="Result" value={resultText} />
               </div>
             </div>
@@ -438,12 +685,13 @@ function ToolExecutionGroup({ items }: { items: ToolExecutionItemSnapshot[] }) {
       >
         <div className="overflow-hidden" aria-hidden={!open}>
           <div className="space-y-0.5 px-1 pb-0.5 pl-6">
-            {items.map(({ key, call, result, isPreparing }) => (
+            {items.map(({ key, call, result, isPreparing, livePayload }) => (
               <ToolExecutionItem
                 key={key}
                 call={call}
                 result={result}
                 isPreparing={isPreparing}
+                livePayload={livePayload}
               />
             ))}
           </div>
@@ -690,7 +938,10 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
   const toolEvents = events
     .map((event, index) => ({ event, index }))
     .filter(
-      ({ event }) => event.type === "tool_call" || event.type === "tool_result",
+      ({ event }) =>
+        event.type === "tool_call" ||
+        event.type === "tool_payload_delta" ||
+        event.type === "tool_result",
     )
     .sort((left, right) => {
       const leftTime = Date.parse(left.event.timestamp);
@@ -709,9 +960,45 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
   const callById = new Map<string, ToolCallSnapshot>();
   const resultById = new Map<string, ToolResultSnapshot>();
   const preparingById = new Map<string, boolean>();
+  const livePayloadById = new Map<string, LiveToolPayloadSnapshot>();
   const orderedIds: string[] = [];
 
   for (const event of toolEvents) {
+    if (event.type === "tool_payload_delta") {
+      const data =
+        event.data && typeof event.data === "object" && !Array.isArray(event.data)
+          ? (event.data as {
+              tool_call_id?: unknown;
+              argument_name?: unknown;
+              delta?: unknown;
+              is_final?: unknown;
+            })
+          : null;
+      const toolCallId = data?.tool_call_id;
+      const argumentName = data?.argument_name;
+      const delta = data?.delta;
+      if (
+        typeof toolCallId === "string" &&
+        toolCallId.length > 0 &&
+        typeof argumentName === "string" &&
+        argumentName.length > 0 &&
+        typeof delta === "string"
+      ) {
+        const livePayload = livePayloadById.get(toolCallId) ?? {
+          arguments: {},
+          finalArguments: new Set<string>(),
+        };
+        livePayload.arguments[argumentName] = `${
+          livePayload.arguments[argumentName] ?? ""
+        }${delta}`;
+        if (data?.is_final === true) {
+          livePayload.finalArguments.add(argumentName);
+        }
+        livePayloadById.set(toolCallId, livePayload);
+      }
+      continue;
+    }
+
     const toolSnapshot = getToolExecutionSnapshot(event.data);
 
     for (const call of toolSnapshot.toolCalls) {
@@ -737,6 +1024,11 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
           name: result.name,
           arguments: result.arguments ?? {},
         });
+      } else if (result.arguments !== undefined) {
+        callById.set(id, {
+          ...callById.get(id)!,
+          arguments: result.arguments,
+        });
       }
     }
   }
@@ -752,6 +1044,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
         call,
         result: resultById.get(id),
         isPreparing: preparingById.get(id) ?? false,
+        livePayload: livePayloadById.get(id),
       },
     ];
   });
@@ -768,6 +1061,7 @@ function ToolTimeline({ events }: { events: RecursionRecord["events"] }) {
           call={item.call}
           result={item.result}
           isPreparing={item.isPreparing}
+          livePayload={item.livePayload}
         />
       </div>
     );

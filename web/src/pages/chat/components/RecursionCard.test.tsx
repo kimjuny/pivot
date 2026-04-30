@@ -231,6 +231,133 @@ describe("RecursionCard", () => {
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 
+  it("renders live write and edit payload previews with filename counters", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <RecursionCard
+        messageId="message-live-tools"
+        recursion={buildRecursion({
+          summary: "Updating files",
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-live-tools",
+              trace_id: "trace-live-tools",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-write",
+                    name: "write_file",
+                    arguments: {
+                      path: { $payload_ref: "write_path" },
+                      content: { $payload_ref: "write_content" },
+                    },
+                  },
+                  {
+                    id: "call-edit",
+                    name: "edit_file",
+                    arguments: {
+                      path: { $payload_ref: "edit_path" },
+                      diff: { $payload_ref: "edit_diff" },
+                    },
+                  },
+                ],
+                tool_results: [],
+              },
+            },
+            {
+              type: "tool_payload_delta",
+              task_id: "task-live-tools",
+              trace_id: "trace-live-tools",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.100Z",
+              data: {
+                tool_call_id: "call-write",
+                tool_name: "write_file",
+                argument_name: "path",
+                payload_name: "write_path",
+                delta: "web/src/pages/chat/index.tsx",
+                is_final: true,
+              },
+            },
+            {
+              type: "tool_payload_delta",
+              task_id: "task-live-tools",
+              trace_id: "trace-live-tools",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.200Z",
+              data: {
+                tool_call_id: "call-write",
+                tool_name: "write_file",
+                argument_name: "content",
+                payload_name: "write_content",
+                delta: "alpha\nbeta\ngamma",
+                is_final: false,
+              },
+            },
+            {
+              type: "tool_payload_delta",
+              task_id: "task-live-tools",
+              trace_id: "trace-live-tools",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.300Z",
+              data: {
+                tool_call_id: "call-edit",
+                tool_name: "edit_file",
+                argument_name: "path",
+                payload_name: "edit_path",
+                delta: "server/app/demo.py",
+                is_final: true,
+              },
+            },
+            {
+              type: "tool_payload_delta",
+              task_id: "task-live-tools",
+              trace_id: "trace-live-tools",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.400Z",
+              data: {
+                tool_call_id: "call-edit",
+                tool_name: "edit_file",
+                argument_name: "diff",
+                payload_name: "edit_diff",
+                delta: "@@ -1,2 +1,2 @@\n-old\n+new\n context",
+                is_final: false,
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    const toolGroup = screen.getByRole("button", { name: /2 tools used/i });
+    await user.click(toolGroup);
+
+    const writeTool = screen.getByRole("button", { name: /Running write_file/i });
+    expect(writeTool).toHaveTextContent("index.tsx");
+    expect(writeTool).toHaveTextContent("+3");
+
+    const editTool = screen.getByRole("button", { name: /Running edit_file/i });
+    expect(editTool).toHaveTextContent("demo.py");
+    expect(editTool).toHaveTextContent("+1");
+    expect(editTool).toHaveTextContent("-1");
+
+    await user.click(writeTool);
+    expect(screen.queryByText("Arguments:")).not.toBeInTheDocument();
+    expect(screen.getByText("Preview:")).toBeInTheDocument();
+    expect(screen.getByText("gamma")).toBeInTheDocument();
+
+    await user.click(editTool);
+    expect(screen.getByText("Diff:")).toBeInTheDocument();
+    expect(screen.getByText("+new")).toBeInTheDocument();
+    expect(screen.getByText("-old")).toBeInTheDocument();
+  });
+
   it("renders tool executions as one-line records with terminal details", async () => {
     const user = userEvent.setup();
 

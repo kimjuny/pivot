@@ -245,7 +245,9 @@ def create_preview_endpoint(
 
     return _serialize_preview_record(
         record=record,
-        workspace_logical_root=WorkspaceService(db).get_workspace_logical_root(workspace),
+        workspace_logical_root=WorkspaceService(db).get_workspace_logical_root(
+            workspace
+        ),
         service=service,
     )
 
@@ -489,7 +491,9 @@ def read_dev_surface_workspace_text_file(
     return WorkspaceTextFileResponse(path=path, content=content)
 
 
-@router.put("/chat-surfaces/dev-sessions/{surface_session_id}/files/text", status_code=204)
+@router.put(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/text", status_code=204
+)
 def write_dev_surface_workspace_text_file(
     surface_session_id: str,
     request: WriteWorkspaceFileRequest,
@@ -670,7 +674,9 @@ def read_dev_surface_workspace_file(
     )
 
 
-@router.put("/chat-surfaces/dev-sessions/{surface_session_id}/files/content", status_code=204)
+@router.put(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/content", status_code=204
+)
 def write_dev_surface_workspace_file(
     surface_session_id: str,
     request: WriteWorkspaceFileRequest,
@@ -1080,7 +1086,9 @@ async def proxy_chat_preview(
     ):
         rewritten_module = _rewrite_root_relative_js_specifiers(
             source=proxy_result.body.decode("utf-8"),
-            proxy_base_path=_build_preview_proxy_base_path(preview_id=record.preview_id),
+            proxy_base_path=_build_preview_proxy_base_path(
+                preview_id=record.preview_id
+            ),
         )
         response_headers["Content-Type"] = "application/javascript; charset=utf-8"
         return Response(
@@ -1175,10 +1183,14 @@ async def proxy_chat_preview_websocket(
             )
 
             client_to_upstream = create_task(
-                _forward_client_messages(websocket=websocket, upstream=manager_websocket)
+                _forward_client_messages(
+                    websocket=websocket, upstream=manager_websocket
+                )
             )
             upstream_to_client = create_task(
-                _forward_upstream_messages(websocket=websocket, upstream=manager_websocket)
+                _forward_upstream_messages(
+                    websocket=websocket, upstream=manager_websocket
+                )
             )
             done, pending = await wait(
                 {client_to_upstream, upstream_to_client},
@@ -1322,7 +1334,9 @@ def proxy_dev_surface_runtime(
 
 @router.get("/chat-surfaces/installed-sessions/{surface_session_id}/runtime")
 @router.get("/chat-surfaces/installed-sessions/{surface_session_id}/runtime/")
-@router.get("/chat-surfaces/installed-sessions/{surface_session_id}/runtime/{runtime_path:path}")
+@router.get(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/runtime/{runtime_path:path}"
+)
 def serve_installed_surface_runtime(
     surface_session_id: str,
     request: FastAPIRequest,
@@ -1380,7 +1394,9 @@ def serve_installed_surface_runtime(
             )
         return response
 
-    if _is_javascript_response(content_type=asset.content_type, proxy_path=runtime_path):
+    if _is_javascript_response(
+        content_type=asset.content_type, proxy_path=runtime_path
+    ):
         rewritten_module = _rewrite_root_relative_js_specifiers(
             source=asset.content.decode("utf-8"),
             proxy_base_path=_build_installed_runtime_base_path(record=record),
@@ -1945,7 +1961,9 @@ def _build_proxy_base_path(*, surface_session_id: str) -> str:
 
 def _build_installed_runtime_base_path(*, record: SurfaceSessionRecord) -> str:
     """Return the stable proxy prefix for one installed surface runtime."""
-    base_path = f"/api/chat-surfaces/installed-sessions/{record.surface_session_id}/runtime/"
+    base_path = (
+        f"/api/chat-surfaces/installed-sessions/{record.surface_session_id}/runtime/"
+    )
     parent_path = (record.runtime_entrypoint_parent_path or "").strip("/")
     if not parent_path:
         return base_path
@@ -2079,9 +2097,9 @@ def _is_html_response(*, content_type: str, payload: bytes) -> bool:
     normalized_content_type = content_type.lower()
     if "text/html" in normalized_content_type:
         return True
-    return payload.lstrip().startswith(b"<!doctype html") or payload.lstrip().startswith(
-        b"<html"
-    )
+    return payload.lstrip().startswith(
+        b"<!doctype html"
+    ) or payload.lstrip().startswith(b"<html")
 
 
 def _inject_bootstrap_script(
@@ -2127,6 +2145,42 @@ def _inject_preview_runtime_script(*, html: str, preview_id: str) -> str:
         f"window.__PIVOT_PREVIEW_PROXY_BASE__ = {json.dumps(proxy_base_path)};"
         f"window.__PIVOT_PREVIEW_WS_BASE__ = {json.dumps(websocket_base_path)};"
         "(function(){"
+        "const proxyBasePath = window.__PIVOT_PREVIEW_PROXY_BASE__;"
+        "function shouldRewriteRootUrl(rawUrl){"
+        "if (typeof rawUrl !== 'string') return false;"
+        "if (!rawUrl.startsWith('/') || rawUrl.startsWith('//')) return false;"
+        "const path = rawUrl.slice(1);"
+        "if (path.startsWith('api/chat-previews/') || path.startsWith('api/chat-surfaces/')) return false;"
+        "return true;"
+        "}"
+        "function rewriteRootUrl(rawUrl){"
+        "return shouldRewriteRootUrl(rawUrl) ? `${proxyBasePath}${rawUrl.slice(1)}` : rawUrl;"
+        "}"
+        "const originalSetAttribute = Element.prototype.setAttribute;"
+        "Element.prototype.setAttribute = function(name, value){"
+        "const normalizedName = String(name).toLowerCase();"
+        "if (['src','href','poster','action','data'].includes(normalizedName)) {"
+        "return originalSetAttribute.call(this, name, rewriteRootUrl(value));"
+        "}"
+        "return originalSetAttribute.call(this, name, value);"
+        "};"
+        "function patchUrlProperty(proto, prop){"
+        "if (!proto) return;"
+        "const descriptor = Object.getOwnPropertyDescriptor(proto, prop);"
+        "if (!descriptor || typeof descriptor.set !== 'function') return;"
+        "Object.defineProperty(proto, prop, {"
+        "configurable: descriptor.configurable,"
+        "enumerable: descriptor.enumerable,"
+        "get: descriptor.get,"
+        "set(value){ return descriptor.set.call(this, rewriteRootUrl(value)); }"
+        "});"
+        "}"
+        "patchUrlProperty(window.HTMLImageElement && HTMLImageElement.prototype, 'src');"
+        "patchUrlProperty(window.HTMLScriptElement && HTMLScriptElement.prototype, 'src');"
+        "patchUrlProperty(window.HTMLSourceElement && HTMLSourceElement.prototype, 'src');"
+        "patchUrlProperty(window.HTMLVideoElement && HTMLVideoElement.prototype, 'poster');"
+        "patchUrlProperty(window.HTMLLinkElement && HTMLLinkElement.prototype, 'href');"
+        "patchUrlProperty(window.HTMLAnchorElement && HTMLAnchorElement.prototype, 'href');"
         "const OriginalWebSocket = window.WebSocket;"
         "if (typeof OriginalWebSocket !== 'function') return;"
         "const wsBasePath = window.__PIVOT_PREVIEW_WS_BASE__;"
@@ -2178,7 +2232,7 @@ def _rewrite_root_relative_asset_urls(*, html: str, proxy_base_path: str) -> str
 
     def replace(match: re.Match[str]) -> str:
         path = match.group("path")
-        if path.startswith("api/chat-surfaces/"):
+        if path.startswith(("api/chat-surfaces/", "api/chat-previews/")):
             return match.group(0)
         return (
             f"{match.group('attr')}={match.group('quote')}"
@@ -2203,10 +2257,15 @@ def _is_vite_client_request(*, proxy_path: str, content_type: str) -> bool:
 def _is_javascript_response(*, content_type: str, proxy_path: str) -> bool:
     """Return whether one proxied response should be treated as JavaScript."""
     normalized_content_type = content_type.lower()
-    if "javascript" in normalized_content_type or "ecmascript" in normalized_content_type:
+    if (
+        "javascript" in normalized_content_type
+        or "ecmascript" in normalized_content_type
+    ):
         return True
-    return proxy_path.endswith(".js") or proxy_path.endswith(".mjs") or proxy_path.endswith(
-        ".ts"
+    return (
+        proxy_path.endswith(".js")
+        or proxy_path.endswith(".mjs")
+        or proxy_path.endswith(".ts")
     )
 
 
@@ -2214,10 +2273,7 @@ def _rewrite_vite_client_hmr_target(*, source: str, hmr_proxy_path: str) -> str:
     """Rewrite Vite's websocket host resolution to use Pivot's HMR tunnel."""
     rewritten = re.sub(
         r"const socketHost = .*?;",
-        (
-            "const socketHost = "
-            f"`${{importMetaUrl.host}}{hmr_proxy_path}`;"
-        ),
+        ("const socketHost = " f"`${{importMetaUrl.host}}{hmr_proxy_path}`;"),
         source,
         count=1,
     )
@@ -2237,7 +2293,7 @@ def _rewrite_root_relative_js_specifiers(*, source: str, proxy_base_path: str) -
 
     def replace(match: re.Match[str]) -> str:
         path = match.group("path")
-        if path.startswith("api/chat-surfaces/"):
+        if path.startswith(("api/chat-surfaces/", "api/chat-previews/")):
             return match.group(0)
         return (
             f"{match.group('prefix')}{match.group('quote')}"

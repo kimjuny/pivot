@@ -411,6 +411,267 @@ parallel_policy = {
 
 但不要在 Phase 3A 主动扩大范围。
 
+## Phase 3E: Live Tool Payload Preview（新增共识）
+
+目标：让前端不只是看到 `Preparing / Running / Ran`，还可以在模型生成 tool 参数 payload 的过程中实时展示参数内容。第一批重点支持 `write_file` 和 `edit_file`：
+
+- 折叠态只显示文件名和实时变更统计。
+- 展开态不再把这两个工具渲染成传统 `Arguments:` JSON，而是渲染成类代码编辑器 / diff viewer。
+- 统计和预览都随 payload stream 实时增长。
+
+### 用户侧目标形态
+
+折叠态：
+
+```text
+Running write_file index.html +37
+Running edit_file index.html +12 -5
+```
+
+展开态：
+
+```text
+write_file index.html
++ 1  <!doctype html>
++ 2  <html>
++ 3    <head>
+...
+```
+
+```diff
+edit_file index.html
+@@ -56,6 +56,6 @@
+  .hero {
+-   background: old;
++   background: new;
+  }
+```
+
+### 后端 SSE 事件
+
+新增一种 live payload event：
+
+```json
+{
+  "type": "tool_payload_delta",
+  "task_id": "...",
+  "trace_id": "...",
+  "iteration": 1,
+  "data": {
+    "tool_call_id": "call_1",
+    "tool_name": "edit_file",
+    "argument_name": "diff",
+    "payload_name": "diff_payload",
+    "delta": "...",
+    "is_final": false
+  },
+  "timestamp": "..."
+}
+```
+
+字段语义：
+
+- `tool_call_id`: 所属 tool call。
+- `tool_name`: 工具名，例如 `write_file` / `edit_file`。
+- `argument_name`: 参数名，例如 `content` / `diff` / `path`。
+- `payload_name`: payload block 名称。
+- `delta`: 本次新增 payload 文本。
+- `is_final`: 该 payload 是否已经看到 END sentinel。
+
+### 映射来源
+
+后端需要先从 JSON control section 得到：
+
+```text
+payload_name -> tool_call_id + tool_name + argument_name
+```
+
+来源示例：
+
+```json
+{
+  "id": "call_1",
+  "name": "edit_file",
+  "arguments": {
+    "path": {"$payload_ref": "path_payload"},
+    "diff": {"$payload_ref": "diff_payload"}
+  }
+}
+```
+
+如果 payload begin 先于映射可用（极端 streaming 时序），可以先按 `payload_name` 暂存 delta；映射可用后再补发或补绑定。正常协议里 JSON control section 在前，payload blocks 在后，因此大多数情况下映射应已存在。
+
+### 后端增量解析
+
+后端 streaming parser 已经能明确感知 payload begin / end：
+
+```text
+<<<PIVOT_PAYLOAD:name:BEGIN_6F2D9C1A>>>
+...
+<<<PIVOT_PAYLOAD:name:END_6F2D9C1A>>>
+```
+
+新增能力：
+
+- 当某个 payload begin 出现后，后端开始把 payload 内容作为 delta 推给前端。
+- END sentinel 不进入 delta 内容。
+- begin/end sentinel 只用于协议，不展示给用户。
+- payload 完整后仍走现有 final parse / resolved tool_call / eager execution 逻辑。
+
+边界：
+
+- tool 仍不能在 payload 未完整前执行。
+- payload 协议失败时，沿用 Phase 3C 的 parse failure recovery 规则。
+- 不要为了预览改变最终 tool arguments 的解析语义。
+
+### 前端状态设计
+
+不要把实时 payload delta 直接塞进主 `messages` 状态。否则每个 delta 都会重渲染整条 Chat timeline，容易卡顿。
+
+推荐新增一个轻量 live payload store：
+
+```ts
+type LiveToolPayloadState = {
+  toolCallId: string;
+  toolName: string;
+  argumentName: string;
+  payloadName: string;
+  filename?: string;
+  addedLines: number;
+  removedLines: number;
+  isFinal: boolean;
+  previewLines: string[];
+};
+```
+
+设计原则：
+
+- 用 `Map<toolCallId, LiveToolPayloadState>` 存在独立 store/ref 中。
+- SSE 收到 delta 后先 append 到 buffer/ref。
+- 用 `requestAnimationFrame` 或 100ms throttle 批量通知订阅组件。
+- 只有相关 tool row / expanded preview 订阅自己的 `toolCallId`。
+- 未展开时只渲染 filename 和 counters。
+- 展开时才渲染代码 / diff 预览。
+- 大 payload 不要全量渲染，优先渲染窗口，例如最近 300-500 行。
+
+这样能复用 Chat 列表当前的 memo 分层，同时避免高频 payload 更新牵动整个 `messages` tree。
+
+### `write_file` 展示规则
+
+摘要：
+
+```text
+Running write_file filename +N
+```
+
+文件名：
+
+- `write_file` 和 `edit_file` 的摘要只显示 basename。
+- 完整 path 放到 `title`，hover 时可看。
+
+计数：
+
+- `write_file.content` 按当前 payload 内容统计写入行数。
+- 折叠态实时显示 `+N`，绿色。
+- content 完整后以最终 resolved arguments 为准校正一次。
+
+展开态：
+
+- 用等宽字体 + 行号。
+- 每一行按新增行展示为绿色。
+- 可以显示为：
+
+```text
++ 1  first line
++ 2  second line
+```
+
+性能：
+
+- 未展开时不渲染正文。
+- 展开时渲染可视窗口，不一次性渲染超大文件全文。
+- 可以在完成后提供 “show full” 行为，但初版不必做复杂编辑器。
+
+### `edit_file` 展示规则
+
+摘要：
+
+```text
+Running edit_file filename +N -M
+```
+
+计数：
+
+- 统计 `edit_file.diff` payload 中真正的 diff body 行。
+- `+` 开头计入 added，绿色。
+- `-` 开头计入 removed，红色。
+- 忽略 `+++` / `---` file header。
+- 忽略 `@@` hunk header 和 context 行。
+- diff payload 完整后以最终 resolved arguments 为准校正一次。
+
+展开态：
+
+- 渲染轻量 diff viewer：
+  - hunk header 灰色。
+  - added 行绿色。
+  - removed 行红色。
+  - context 行正常。
+- 不展示 `Arguments:` JSON。
+- `Result:` 仍可在底部保留，或折叠在 “Tool result” 区域。
+
+### 渲染性能约束
+
+核心原则：
+
+```text
+Payload delta can be high-frequency; React state updates must be low-frequency and local.
+```
+
+约束：
+
+- 不允许每个 token / chunk 都 set 主消息状态。
+- 不允许每个 delta 都重新 split 全量 payload。
+- 统计用增量算法。
+- previewLines 只保留窗口，或者保留完整 buffer 在 ref 中、渲染只取尾部。
+- 使用 `requestAnimationFrame` 合并 UI 更新。
+- 展开态组件卸载后要取消订阅，避免后台继续重渲染。
+- auto scroll 只响应已启用 follow mode 的可见高度变化，不因每个 payload token 抖动锚点。
+
+### 与现有 tool_result 的关系
+
+live payload preview 是“参数正在生成”的 UI，不替代最终 tool lifecycle。
+
+完整 lifecycle：
+
+```text
+JSON control parsed
+=> tool_call preview: Preparing
+=> payload begin
+=> tool_payload_delta: live content / diff preview
+=> payload end
+=> resolved tool_call: Running
+=> tool_result: Ran / Failed
+```
+
+如果最终 parse failure 发生在 tool 执行前：
+
+- live preview 可以消失或标记为 parse failed。
+- 不应显示为已执行。
+
+如果 eager tool 已经执行后最终 parse failure：
+
+- 沿用 Phase 3C：已执行结果作为事实保留。
+- live preview 可保留为本轮失败诊断的一部分。
+
+### 实施顺序建议
+
+1. 前端先把 `write_file` / `edit_file` 摘要从完整 path 改为 basename，并在 resolved arguments 后显示最终 `+N` / `+N -M`。
+2. 后端新增 `tool_payload_delta` SSE event。
+3. 前端新增 live payload store，折叠态实时 counters。
+4. 前端给 `write_file` 做展开态 code preview。
+5. 前端给 `edit_file` 做展开态 diff preview。
+6. 大 payload 下做窗口化 / show full 优化。
+
 ## 推荐执行顺序（当前进度）
 
 1. 已完成：更新 `system_prompt.md`，加入 `batch` 规范与示例。

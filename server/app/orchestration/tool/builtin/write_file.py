@@ -10,9 +10,15 @@ def write_file(path: str, content: str) -> str:
     """Write UTF-8 text to a file under ``/workspace``.
 
     Parent directories are created automatically.
+    IMPORTANT: Prefer an absolute sandbox path that starts with ``/workspace/``,
+    for example ``/workspace/app/index.html``. Never pass host-machine paths
+    such as ``/Users/...`` or ``/tmp/...``; paths outside ``/workspace`` are
+    rejected.
 
     Args:
-        path (required, str): Relative or absolute workspace path to file.
+        path (required, str): Absolute ``/workspace/...`` path to the target
+            file. Workspace-relative paths are accepted, but absolute sandbox
+            paths are clearer and less error-prone.
         content (required, str): UTF-8 text content to write. This tool expects
             a string, not a JSON object or other structured value.
 

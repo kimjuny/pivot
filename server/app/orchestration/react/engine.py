@@ -42,6 +42,8 @@ from .parser import (
     PARSE_RETRY_INSTRUCTION,
     PARSE_RETRY_LIMIT,
     PAYLOAD_BEGIN_RE,
+    PAYLOAD_REF_KEY,
+    PAYLOAD_SENTINEL_SUFFIX,
     collect_complete_payload_blocks,
     collect_tool_call_payload_refs,
     parse_react_control_section,
@@ -72,6 +74,8 @@ class _EagerToolExecutionState:
     result_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     active_batch_index: int = 0
     stopped_after_batch: bool = False
+    live_payload_emitted_lengths: dict[str, int] = field(default_factory=dict)
+    live_payload_finalized: set[str] = field(default_factory=set)
 
 
 class ReactEngine:
@@ -682,6 +686,11 @@ class ReactEngine:
                                     )
 
                     if eager_tool_state is not None:
+                        await self._emit_live_payload_deltas(
+                            eager_tool_state,
+                            "".join(content_parts),
+                            token_meter_queue,
+                        )
                         await self._advance_eager_tool_execution(
                             eager_tool_state,
                             "".join(content_parts),
@@ -710,6 +719,11 @@ class ReactEngine:
                     last_report_tokens = estimated_completion_tokens
 
         if eager_tool_state is not None:
+            await self._emit_live_payload_deltas(
+                eager_tool_state,
+                "".join(content_parts),
+                token_meter_queue,
+            )
             await self._advance_eager_tool_execution(
                 eager_tool_state,
                 "".join(content_parts),
@@ -1120,6 +1134,122 @@ class ReactEngine:
                 "tool_results": [],
             }
         )
+
+    @staticmethod
+    def _build_payload_ref_index(
+        tool_calls: list[ToolCallRequest],
+    ) -> dict[str, dict[str, str]]:
+        """Map payload names to the tool argument they are filling."""
+        ref_index: dict[str, dict[str, str]] = {}
+        for tool_call in tool_calls:
+            for argument_name, argument_value in tool_call.arguments.items():
+                if not isinstance(argument_value, dict):
+                    continue
+                payload_ref = argument_value.get(PAYLOAD_REF_KEY)
+                if not isinstance(payload_ref, str) or not payload_ref:
+                    continue
+                ref_index[payload_ref] = {
+                    "tool_call_id": tool_call.id,
+                    "tool_name": tool_call.name,
+                    "argument_name": argument_name,
+                }
+        return ref_index
+
+    @staticmethod
+    def _trim_possible_payload_end_marker(
+        payload_text: str,
+        payload_name: str,
+    ) -> str:
+        """Hold back only text that could be a partial payload END marker."""
+        end_marker = (
+            f"<<<PIVOT_PAYLOAD:{payload_name}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>"
+        )
+        line_start = payload_text.rfind("\n") + 1
+        tail = payload_text[line_start:]
+        if tail and end_marker.startswith(tail):
+            return payload_text[:line_start]
+        return payload_text
+
+    async def _emit_live_payload_deltas(
+        self,
+        eager_state: _EagerToolExecutionState,
+        content: str,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> None:
+        """Emit incremental payload text for frontend live tool previews."""
+        if (
+            token_meter_queue is None
+            or eager_state.decision is None
+            or eager_state.decision.action.action_type != "CALL_TOOL"
+        ):
+            return
+
+        ref_index = self._build_payload_ref_index(
+            eager_state.decision.action.tool_calls
+        )
+        if not ref_index:
+            return
+
+        for begin_match in PAYLOAD_BEGIN_RE.finditer(content):
+            payload_name = begin_match.group(1)
+            ref_data = ref_index.get(payload_name)
+            if ref_data is None:
+                continue
+
+            content_start = begin_match.end()
+            if content_start < len(content) and content[content_start] == "\n":
+                content_start += 1
+
+            end_re = re.compile(
+                rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
+            )
+            end_match = end_re.search(content, content_start)
+            is_final = end_match is not None
+            if is_final:
+                content_end = end_match.start()
+                if content_end > content_start and content[content_end - 1] == "\n":
+                    content_end -= 1
+                    if content_end > content_start and content[content_end - 1] == "\r":
+                        content_end -= 1
+            else:
+                content_end = len(content)
+
+            if content_end < content_start:
+                continue
+
+            payload_text = content[content_start:content_end]
+            if not is_final:
+                payload_text = self._trim_possible_payload_end_marker(
+                    payload_text,
+                    payload_name,
+                )
+            emitted_length = eager_state.live_payload_emitted_lengths.get(
+                payload_name, 0
+            )
+            delta = payload_text[emitted_length:]
+            if delta:
+                eager_state.live_payload_emitted_lengths[payload_name] = len(
+                    payload_text
+                )
+
+            should_emit_final = (
+                is_final and payload_name not in eager_state.live_payload_finalized
+            )
+            if should_emit_final:
+                eager_state.live_payload_finalized.add(payload_name)
+
+            if not delta and not should_emit_final:
+                continue
+
+            await token_meter_queue.put(
+                {
+                    "type": "tool_payload_delta",
+                    **ref_data,
+                    "payload_name": payload_name,
+                    "delta": delta,
+                    "is_final": is_final,
+                }
+            )
 
     async def _execute_tool_call_request(
         self,
@@ -2297,6 +2427,38 @@ class ReactEngine:
                                 "iteration": task.iteration,
                                 "data": {
                                     "tool_results": tool_results_data,
+                                },
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        continue
+
+                    if meter_type == "tool_payload_delta":
+                        tool_call_id = meter_data.get("tool_call_id")
+                        tool_name = meter_data.get("tool_name")
+                        argument_name = meter_data.get("argument_name")
+                        payload_name = meter_data.get("payload_name")
+                        delta = meter_data.get("delta")
+                        is_final = meter_data.get("is_final")
+                        if (
+                            isinstance(tool_call_id, str)
+                            and isinstance(tool_name, str)
+                            and isinstance(argument_name, str)
+                            and isinstance(payload_name, str)
+                            and isinstance(delta, str)
+                            and isinstance(is_final, bool)
+                        ):
+                            yield {
+                                "type": "tool_payload_delta",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "data": {
+                                    "tool_call_id": tool_call_id,
+                                    "tool_name": tool_name,
+                                    "argument_name": argument_name,
+                                    "payload_name": payload_name,
+                                    "delta": delta,
+                                    "is_final": is_final,
                                 },
                                 "timestamp": datetime.now(UTC).isoformat(),
                             }

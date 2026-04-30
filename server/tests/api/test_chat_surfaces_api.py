@@ -146,7 +146,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["workspace_id"], self.workspace.workspace_id)
         self.assertIn("users/alice/agents/7", payload["workspace_logical_root"])
         self.assertIsInstance(payload["surface_token"], str)
-        self.assertEqual(payload["bootstrap"]["surface_token"], payload["surface_token"])
+        self.assertEqual(
+            payload["bootstrap"]["surface_token"], payload["surface_token"]
+        )
         self.assertEqual(
             payload["bootstrap"]["workspace_logical_root"],
             payload["workspace_logical_root"],
@@ -282,7 +284,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["active_preview_id"], preview_record.preview_id)
         self.assertEqual(len(payload["available_previews"]), 1)
 
-    def test_generic_workspace_file_contract_supports_directory_text_and_blob_flows(self) -> None:
+    def test_generic_workspace_file_contract_supports_directory_text_and_blob_flows(
+        self,
+    ) -> None:
         """Surface sessions should expose reusable directory/text/blob file endpoints."""
         create_surface_response = self.client.post(
             "/api/chat-surfaces/dev-sessions",
@@ -316,7 +320,10 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         )
         self.assertEqual(directory_response.status_code, 200)
         self.assertEqual(
-            [(item["path"], item["kind"]) for item in directory_response.json()["entries"]],
+            [
+                (item["path"], item["kind"])
+                for item in directory_response.json()["entries"]
+            ],
             [(".pivot/apps/canvas/scene.json", "file")],
         )
 
@@ -356,7 +363,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(read_blob_response.content, image_bytes)
         self.assertEqual(read_blob_response.headers["content-type"], "image/png")
 
-    def test_reconnect_surface_preview_can_restore_recipe_from_earlier_session(self) -> None:
+    def test_reconnect_surface_preview_can_restore_recipe_from_earlier_session(
+        self,
+    ) -> None:
         """Surface reconnect should copy a historical preview recipe into the active session."""
         second_workspace = WorkspaceService(self.session).create_workspace(
             agent_id=7,
@@ -388,7 +397,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(create_surface_response.status_code, 201)
         surface_payload = create_surface_response.json()
 
-        historical_preview = PreviewEndpointService(self.session).create_preview_endpoint(
+        historical_preview = PreviewEndpointService(
+            self.session
+        ).create_preview_endpoint(
             username="alice",
             session_id="session-1",
             port=3000,
@@ -415,7 +426,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(reconnect_response.status_code, 200)
         payload = reconnect_response.json()
         self.assertEqual(payload["preview"]["session_id"], "session-2")
-        self.assertEqual(payload["preview"]["workspace_id"], second_workspace.workspace_id)
+        self.assertEqual(
+            payload["preview"]["workspace_id"], second_workspace.workspace_id
+        )
         self.assertTrue(payload["preview"]["has_launch_recipe"])
         self.assertEqual(payload["active_preview_id"], payload["preview"]["preview_id"])
         self.assertEqual(len(payload["available_previews"]), 1)
@@ -564,7 +577,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
 
     def test_dev_surface_can_list_read_and_write_workspace_files(self) -> None:
         """Surface-scoped file endpoints should expose a minimal edit loop."""
-        workspace_path = WorkspaceService(self.session).get_workspace_path(self.workspace)
+        workspace_path = WorkspaceService(self.session).get_workspace_path(
+            self.workspace
+        )
         source_dir = workspace_path / "src"
         source_dir.mkdir(parents=True, exist_ok=True)
         (source_dir / "App.tsx").write_text(
@@ -591,7 +606,10 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         )
         self.assertEqual(tree_response.status_code, 200)
         self.assertEqual(
-            [(entry["path"], entry["kind"]) for entry in tree_response.json()["entries"]],
+            [
+                (entry["path"], entry["kind"])
+                for entry in tree_response.json()["entries"]
+            ],
             [("src", "directory"), ("src/App.tsx", "file")],
         )
 
@@ -618,7 +636,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
 
     def test_dev_surface_can_read_previewable_image_files(self) -> None:
         """Surface file reads should return image payloads for common image formats."""
-        workspace_path = WorkspaceService(self.session).get_workspace_path(self.workspace)
+        workspace_path = WorkspaceService(self.session).get_workspace_path(
+            self.workspace
+        )
         image_dir = workspace_path / "assets"
         image_dir.mkdir(parents=True, exist_ok=True)
         image_bytes = base64.b64decode(
@@ -742,6 +762,8 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
                 html_response.text,
             )
             self.assertIn("window.__PIVOT_PREVIEW_WS_BASE__", html_response.text)
+            self.assertIn("rewriteRootUrl", html_response.text)
+            self.assertIn("HTMLImageElement", html_response.text)
             self.assertIn(
                 f"/api/chat-previews/{preview_id}/ws/",
                 html_response.text,
@@ -757,7 +779,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             )
             self.assertEqual(js_response.status_code, 200)
             self.assertIn(
-                f'/api/chat-previews/{preview_id}/proxy/src/deps.js',
+                f"/api/chat-previews/{preview_id}/proxy/src/deps.js",
                 js_response.text,
             )
 
@@ -856,9 +878,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         try:
             with (
                 patch.object(
-                chat_surfaces_api_module,
-                "get_sandbox_service",
-                return_value=_StubSandboxService(),
+                    chat_surfaces_api_module,
+                    "get_sandbox_service",
+                    return_value=_StubSandboxService(),
                 ),
                 self.client.websocket_connect(
                     f"/api/chat-previews/{preview_id}/ws/socket"
@@ -1099,7 +1121,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
 
             self.assertEqual(proxy_response.status_code, 200)
             self.assertIn("window.__PIVOT_SURFACE_BOOTSTRAP__", proxy_response.text)
-            self.assertIn("pivot_surface_access", proxy_response.headers.get("set-cookie", ""))
+            self.assertIn(
+                "pivot_surface_access", proxy_response.headers.get("set-cookie", "")
+            )
             self.assertIn("workspace-editor", proxy_response.text)
             self.assertIn("<div id='root'></div>", proxy_response.text)
         finally:
@@ -1161,8 +1185,12 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
                 params={"surface_token": surface_token},
             )
             self.assertEqual(proxy_html_response.status_code, 200)
-            self.assertIn("window.__PIVOT_SURFACE_BOOTSTRAP__", proxy_html_response.text)
-            self.assertIn("window.__PIVOT_SURFACE_PROXY_BASE__", proxy_html_response.text)
+            self.assertIn(
+                "window.__PIVOT_SURFACE_BOOTSTRAP__", proxy_html_response.text
+            )
+            self.assertIn(
+                "window.__PIVOT_SURFACE_PROXY_BASE__", proxy_html_response.text
+            )
 
             proxy_asset_response = self.client.get(
                 f"/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/main.js"
@@ -1215,9 +1243,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             create_payload = create_response.json()
             surface_session_id = create_payload["surface_session_id"]
             surface_token = create_payload["surface_token"]
-            proxy_base = (
-                f"/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/"
-            )
+            proxy_base = f"/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/"
 
             proxy_html_response = self.client.get(
                 f"/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/",
@@ -1290,7 +1316,9 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
-    def test_dev_surface_proxy_rewrites_root_relative_js_module_specifiers(self) -> None:
+    def test_dev_surface_proxy_rewrites_root_relative_js_module_specifiers(
+        self,
+    ) -> None:
         """Proxying should keep JS module imports under the surface proxy prefix."""
 
         class _ViteModuleHandler(BaseHTTPRequestHandler):
@@ -1337,11 +1365,11 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
 
             self.assertEqual(module_response.status_code, 200)
             self.assertIn(
-                f'/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/src/styles.css?t=123',
+                f"/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/src/styles.css?t=123",
                 module_response.text,
             )
             self.assertIn(
-                f'/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/@fs/Users/example/project/sdk.js?t=456',
+                f"/api/chat-surfaces/dev-sessions/{surface_session_id}/proxy/@fs/Users/example/project/sdk.js?t=456",
                 module_response.text,
             )
         finally:
@@ -1413,9 +1441,13 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         finally:
             hmr_server.stop()
 
-    def test_surface_cookie_allows_follow_up_requests_without_repeating_token(self) -> None:
+    def test_surface_cookie_allows_follow_up_requests_without_repeating_token(
+        self,
+    ) -> None:
         """Initial proxy bootstrap should scope a cookie for later surface requests."""
-        workspace_path = WorkspaceService(self.session).get_workspace_path(self.workspace)
+        workspace_path = WorkspaceService(self.session).get_workspace_path(
+            self.workspace
+        )
         workspace_path.mkdir(parents=True, exist_ok=True)
         (workspace_path / "notes.txt").write_text("hello surface\n", encoding="utf-8")
 
@@ -1460,7 +1492,10 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             )
             self.assertEqual(tree_response.status_code, 200)
             self.assertEqual(
-                [(entry["path"], entry["kind"]) for entry in tree_response.json()["entries"]],
+                [
+                    (entry["path"], entry["kind"])
+                    for entry in tree_response.json()["entries"]
+                ],
                 [("notes.txt", "file")],
             )
         finally:

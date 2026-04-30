@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   type ReactNode,
 } from "react";
 
@@ -69,17 +70,31 @@ export function useRegisterChatDebugPanelSection(
   section: ChatDebugPanelSection | null,
 ): void {
   const { removeSection, upsertSection } = useContext(ChatDebugPanelContext);
+  const registeredKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!section) {
+      if (registeredKeyRef.current) {
+        removeSection(registeredKeyRef.current);
+        registeredKeyRef.current = null;
+      }
       return;
     }
 
     const { key, ...restSection } = section;
+    if (registeredKeyRef.current && registeredKeyRef.current !== key) {
+      removeSection(registeredKeyRef.current);
+    }
+    registeredKeyRef.current = key;
     upsertSection(key, restSection);
-
-    return () => {
-      removeSection(key);
-    };
   }, [removeSection, section, upsertSection]);
+
+  useEffect(() => {
+    return () => {
+      if (registeredKeyRef.current) {
+        removeSection(registeredKeyRef.current);
+        registeredKeyRef.current = null;
+      }
+    };
+  }, [removeSection]);
 }
