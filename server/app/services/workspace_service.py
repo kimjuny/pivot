@@ -15,6 +15,7 @@ import ast
 import importlib.util
 import inspect
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,7 @@ from app.utils.logging_config import get_logger
 from sqlmodel import Session as DBSession, select
 
 logger = get_logger("workspace_service")
+_TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def workspace_root() -> Path:
@@ -57,6 +59,27 @@ def _user_tools_dir(username: str) -> Path:
     tools_dir = workspace_root() / "users" / username / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
     return tools_dir
+
+
+def _validate_tool_name(tool_name: str) -> None:
+    """Reject names that cannot be both a .py stem and Python function name."""
+    if not _TOOL_NAME_PATTERN.fullmatch(tool_name):
+        raise ValueError(
+            "Tool name must be a Python identifier using letters, numbers, "
+            "and underscores, and cannot start with a number."
+        )
+
+
+def _validate_tool_source_name(tool_name: str, source: str) -> None:
+    """Require the tool source to define the function named by the file stem."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        raise ValueError(f"Tool source has invalid Python syntax: {exc.msg}") from exc
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == tool_name:
+            return
+    raise ValueError(f"Tool source must define function '{tool_name}'.")
 
 
 def ensure_agent_workspace(username: str, agent_id: int) -> Path:
@@ -301,6 +324,7 @@ def read_user_tool(username: str, tool_name: str) -> str:
     Raises:
         FileNotFoundError: If the tool file does not exist.
     """
+    _validate_tool_name(tool_name)
     tool_path = _user_tools_dir(username) / f"{tool_name}.py"
     if not tool_path.exists():
         raise FileNotFoundError(f"Tool '{tool_name}' not found for user '{username}'.")
@@ -315,6 +339,8 @@ def write_user_tool(username: str, tool_name: str, source: str) -> None:
         tool_name: Stem of the tool file (without ``.py``).
         source: Python source code to write.
     """
+    _validate_tool_name(tool_name)
+    _validate_tool_source_name(tool_name, source)
     tool_path = _user_tools_dir(username) / f"{tool_name}.py"
     tool_path.write_text(source, encoding="utf-8")
     logger.info("Wrote tool '%s' for user '%s'", tool_name, username)
@@ -330,6 +356,7 @@ def delete_user_tool(username: str, tool_name: str) -> None:
     Raises:
         FileNotFoundError: If the tool file does not exist.
     """
+    _validate_tool_name(tool_name)
     tool_path = _user_tools_dir(username) / f"{tool_name}.py"
     if not tool_path.exists():
         raise FileNotFoundError(f"Tool '{tool_name}' not found for user '{username}'.")
@@ -376,6 +403,7 @@ def load_user_tool_metadata(username: str, tool_name: str) -> ToolMetadata | Non
     Returns:
         ToolMetadata if a decorated function is found, None otherwise.
     """
+    _validate_tool_name(tool_name)
     tool_path = _user_tools_dir(username) / f"{tool_name}.py"
     if not tool_path.exists():
         return None

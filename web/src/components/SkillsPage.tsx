@@ -1,13 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Globe2,
   Pencil,
   Plus,
   SlidersHorizontal,
   Trash2,
   Upload,
-  User as UserIcon,
-  X,
 } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
@@ -48,7 +45,6 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatTimestamp } from '@/utils/timestamp';
@@ -126,7 +122,6 @@ function SkillsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [kindFilter, setKindFilter] = useState<'all' | 'shared' | 'private'>('all');
   const [currentPage, setCurrentPage] = useState(1);
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -178,17 +173,16 @@ function SkillsPage() {
   const filteredRows = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allRows.filter((row) => {
-      if (kindFilter !== 'all' && row.kind !== kindFilter) return false;
       if (!q) return true;
       return row.skill.name.toLowerCase().includes(q) || row.skill.description.toLowerCase().includes(q);
     });
-  }, [allRows, searchQuery, kindFilter]);
+  }, [allRows, searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, kindFilter]);
+  }, [searchQuery]);
 
   const pagedRows = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -231,8 +225,16 @@ function SkillsPage() {
     }
     setEditorReadOnly(false);
     setEditorSaveMode('dialog');
+    setSkillDialogOpen(false);
     setEditorOpen(true);
   };
+
+  const handleEditorOpenChange = useCallback((open: boolean) => {
+    setEditorOpen(open);
+    if (!open && editorSaveMode === 'dialog') {
+      setSkillDialogOpen(true);
+    }
+  }, [editorSaveMode]);
 
   const openSkillDialog = useCallback(async (row: SkillRow) => {
     if (row.skill.read_only) {
@@ -373,8 +375,6 @@ function SkillsPage() {
     }
   }, [loadSkills]);
 
-  const sharedCount = allRows.filter((r) => r.kind === 'shared').length;
-  const privateCount = allRows.filter((r) => r.kind === 'private').length;
   const existingSkillNames = useMemo(
     () => new Set(allRows.map((row) => row.skill.name)),
     [allRows]
@@ -385,6 +385,7 @@ function SkillsPage() {
       null,
     [allRows, skillDialogName],
   );
+  const skillDialogTabIndex = skillDialogTab === 'auth' ? 1 : 0;
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -417,41 +418,6 @@ function SkillsPage() {
       </div>
 
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {(
-            [
-              { value: 'all', label: 'All', count: allRows.length },
-              { value: 'shared', label: 'Shared', count: sharedCount },
-              { value: 'private', label: 'Private', count: privateCount },
-            ] as const
-          ).map(({ value, label, count }) => (
-            <button
-              key={value}
-              onClick={() => setKindFilter(value)}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
-            >
-              <Badge
-                variant={kindFilter === value ? 'default' : 'outline'}
-                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
-                  kindFilter === value ? 'list-filter-badge-active' : ''
-                }`}
-              >
-                {label}
-                <span className={kindFilter === value ? 'opacity-70' : 'text-muted-foreground'}>{count}</span>
-              </Badge>
-            </button>
-          ))}
-          {kindFilter !== 'all' && (
-            <button
-              onClick={() => setKindFilter('all')}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Clear filter"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
         <ButtonGroup className="list-search-group">
           <Input
             placeholder="Search by name or description…"
@@ -488,7 +454,6 @@ function SkillsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[220px]">Name</TableHead>
-                <TableHead className="w-[120px]">Kind</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="w-[170px]">Updated</TableHead>
                 <TableHead className="w-[120px] text-right">Actions</TableHead>
@@ -498,24 +463,6 @@ function SkillsPage() {
               {pagedRows.map((row) => (
                 <TableRow key={`${row.kind}-${row.source}-${row.skill.name}`}>
                   <TableCell className="font-mono text-xs font-medium">{row.skill.name}</TableCell>
-                  <TableCell>
-                    {row.kind === 'private' ? (
-                      <Badge variant="outline" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
-                        <UserIcon className="w-2.5 h-2.5" />
-                        Private
-                      </Badge>
-                    ) : row.skill.read_only ? (
-                      <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
-                        <Globe2 className="w-2.5 h-2.5" />
-                        {`Shared / ${row.skill.creator ?? 'Unknown'}`}
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="flex items-center gap-1 w-fit text-[11px] px-1.5">
-                        <Globe2 className="w-2.5 h-2.5" />
-                        Shared / You
-                      </Badge>
-                    )}
-                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
                     {row.skill.description || '—'}
                   </TableCell>
@@ -628,61 +575,92 @@ function SkillsPage() {
           <Tabs
             value={skillDialogTab}
             onValueChange={(value) => setSkillDialogTab(value as SkillDialogTab)}
-            className="min-h-0 flex-1"
+            orientation="vertical"
+            className="flex min-h-0 flex-1 gap-3 py-2"
           >
-            <TabsList className="grid h-auto w-full grid-cols-2">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="auth">Auth</TabsTrigger>
+            <TabsList className="relative flex h-[560px] max-h-[calc(90vh-150px)] w-24 shrink-0 flex-col items-stretch justify-start gap-1 bg-transparent p-0">
+              <span
+                className="absolute left-0 top-1.5 h-6 w-0.5 bg-foreground transition-transform duration-200 ease-out"
+                style={{
+                  transform: `translateY(${skillDialogTabIndex * 40}px)`,
+                }}
+                aria-hidden="true"
+              />
+              <TabsTrigger
+                value="general"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                General
+              </TabsTrigger>
+              <TabsTrigger
+                value="auth"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                Auth
+              </TabsTrigger>
             </TabsList>
-            <TabsContent value="general" className="space-y-4 pt-4">
-              <div className="space-y-2">
-                <Label htmlFor="skill-name">Name</Label>
-                <Input
-                  id="skill-name"
-                  value={skillDialogName}
-                  onChange={(event) => setSkillDialogName(event.target.value)}
-                  disabled={skillDialogMode === 'edit' || isSaving}
-                  autoComplete="off"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">Edit SKILL.md file</div>
-                  <div className="text-xs text-muted-foreground">
-                    Open the markdown source editor for this skill.
+
+            <div className="min-w-0 flex-1">
+              <TabsContent
+                value="general"
+                className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+              >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="skill-name">
+                      Name <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="skill-name"
+                      value={skillDialogName}
+                      onChange={(event) => setSkillDialogName(event.target.value)}
+                      disabled={skillDialogMode === 'edit' || isSaving}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium">Edit SKILL.md file</div>
+                      <div className="text-xs text-muted-foreground">
+                        Open the markdown source editor for this skill.
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void openDialogSourceEditor()}
+                      disabled={isSaving}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit
+                    </Button>
                   </div>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void openDialogSourceEditor()}
-                  disabled={isSaving}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  Edit
-                </Button>
-              </div>
-            </TabsContent>
-            <TabsContent value="auth" className="pt-4">
-              <ResourceAuthTab
-                access={skillAccess}
-                users={skillAccessUsers}
-                groups={skillAccessGroups}
-                loading={skillAccessLoading}
-                lockedEditUserIds={
-                  skillDialogMode === 'edit' && skillDialogCreatorId !== null
-                    ? [skillDialogCreatorId]
-                    : []
-                }
-                onAccessChange={(nextAccess) =>
-                  setSkillAccess((current) => ({
-                    ...current,
-                    ...nextAccess,
-                  }))
-                }
-              />
-            </TabsContent>
+              </TabsContent>
+              <TabsContent
+                value="auth"
+                className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+              >
+                <ResourceAuthTab
+                  access={skillAccess}
+                  users={skillAccessUsers}
+                  groups={skillAccessGroups}
+                  loading={skillAccessLoading}
+                  lockedEditUserIds={
+                    skillDialogMode === 'edit' && skillDialogCreatorId !== null
+                      ? [skillDialogCreatorId]
+                      : []
+                  }
+                  onAccessChange={(nextAccess) =>
+                    setSkillAccess((current) => ({
+                      ...current,
+                      ...nextAccess,
+                    }))
+                  }
+                />
+              </TabsContent>
+            </div>
           </Tabs>
           <DialogFooter>
             <Button
@@ -706,7 +684,7 @@ function SkillsPage() {
 
       <DraggableDialog
         open={editorOpen}
-        onOpenChange={setEditorOpen}
+        onOpenChange={handleEditorOpenChange}
         title={
           editingName
             ? `${editorReadOnly ? 'View' : 'Edit'} Skill: ${editingName}`
@@ -724,6 +702,7 @@ function SkillsPage() {
                   if (editorSaveMode === 'dialog') {
                     setSkillDialogSource(src);
                     setEditorOpen(false);
+                    setSkillDialogOpen(true);
                     return;
                   }
                   void handleSave(src);

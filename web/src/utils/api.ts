@@ -2728,6 +2728,15 @@ export interface PrivateTool {
   tool_type: ToolExecutionType;
 }
 
+export interface UsableTool {
+  name: string;
+  description: string;
+  parameters: ToolParameters;
+  tool_type: ToolExecutionType;
+  source_type: ToolSourceType;
+  read_only: boolean;
+}
+
 /**
  * Source code payload for a tool read response.
  */
@@ -2735,6 +2744,21 @@ export interface ToolSourcePayload {
   name: string;
   source: string;
 }
+
+export type ToolSourceType = 'builtin' | 'manual';
+
+export interface ToolAccess {
+  tool_name: string;
+  source_type: ToolSourceType;
+  read_only: boolean;
+  use_scope: 'all' | 'selected';
+  use_user_ids: number[];
+  use_group_ids: number[];
+  edit_user_ids: number[];
+  edit_group_ids: number[];
+}
+
+export type ToolAccessOptions = LLMAccessOptions;
 
 /**
  * Backward-compatible alias for private tool source payload.
@@ -3201,6 +3225,14 @@ export const getPrivateTools = async (): Promise<PrivateTool[]> => {
   return apiRequest('/tools/private') as Promise<PrivateTool[]>;
 };
 
+export const getUsableTools = async (): Promise<UsableTool[]> => {
+  return apiRequest('/tools/usable') as Promise<UsableTool[]>;
+};
+
+export const getToolCreateAccessOptions = async (): Promise<ToolAccessOptions> => {
+  return apiRequest('/tools/access-options') as Promise<ToolAccessOptions>;
+};
+
 /**
  * Surface-scoped workspace file endpoint URLs exposed by the backend bootstrap.
  */
@@ -3519,6 +3551,44 @@ export const getPrivateToolSource = async (toolName: string): Promise<ToolSource
 export const getSharedToolSource = async (toolName: string): Promise<ToolSourcePayload> => {
   const encodedToolName = encodeURIComponent(toolName);
   return apiRequest(`/tools/shared/${encodedToolName}`) as Promise<ToolSourcePayload>;
+};
+
+export const getToolAccess = async (
+  sourceType: ToolSourceType,
+  toolName: string,
+): Promise<ToolAccess> => {
+  const encodedToolName = encodeURIComponent(toolName);
+  return apiRequest(
+    `/tools/${sourceType}/${encodedToolName}/access`,
+  ) as Promise<ToolAccess>;
+};
+
+export const getToolAccessOptions = async (
+  sourceType: ToolSourceType,
+  toolName: string,
+): Promise<ToolAccessOptions> => {
+  const encodedToolName = encodeURIComponent(toolName);
+  return apiRequest(
+    `/tools/${sourceType}/${encodedToolName}/access-options`,
+  ) as Promise<ToolAccessOptions>;
+};
+
+export const updateToolAccess = async (
+  sourceType: ToolSourceType,
+  toolName: string,
+  access: Omit<ToolAccess, 'tool_name' | 'source_type' | 'read_only'>,
+): Promise<ToolAccess> => {
+  const encodedToolName = encodeURIComponent(toolName);
+  return apiRequest(`/tools/${sourceType}/${encodedToolName}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_scope: access.use_scope,
+      use_user_ids: access.use_user_ids,
+      use_group_ids: access.use_group_ids,
+      edit_user_ids: access.edit_user_ids,
+      edit_group_ids: access.edit_group_ids,
+    }),
+  }) as Promise<ToolAccess>;
 };
 
 /**

@@ -60,8 +60,7 @@ import {
 } from '@/utils/providerMetadata';
 import type { Agent } from '../types';
 import {
-    getSharedTools,
-    getPrivateTools,
+    getUsableTools,
     getUsableSkills,
     getChannels,
     getAgentChannels,
@@ -75,8 +74,7 @@ import {
     getAgentWebSearchBindings,
     deleteAgentWebSearchBinding,
     type AgentExtensionPackage,
-    type SharedTool,
-    type PrivateTool,
+    type UsableTool,
     type SkillSource,
     type UsableSkill,
     type ChannelBinding,
@@ -565,26 +563,14 @@ function AgentDetailSidebar({
             hasFetchedToolsRef.current = true;
             setToolsLoading(true);
             try {
-                const [shared, priv] = await Promise.all([
-                    getSharedTools(),
-                    getPrivateTools(),
-                ]);
-                const merged: SidebarTool[] = [
-                    ...shared.map((t: SharedTool) => ({
-                        name: t.name,
-                        description: t.description,
-                        kind: 'shared' as const,
-                        source: 'builtin' as const,
-                        readOnly: true,
-                    })),
-                    ...priv.map((t: PrivateTool) => ({
-                        name: t.name,
-                        description: '',
-                        kind: 'private' as const,
-                        source: 'user' as const,
-                        readOnly: false,
-                    })),
-                ];
+                const usableTools = await getUsableTools();
+                const merged: SidebarTool[] = usableTools.map((tool: UsableTool) => ({
+                    name: tool.name,
+                    description: tool.description,
+                    kind: tool.source_type === 'builtin' ? 'shared' : 'private',
+                    source: tool.source_type === 'builtin' ? 'builtin' : 'user',
+                    readOnly: tool.read_only,
+                }));
                 setTools(merged);
             } catch (err) {
                 const error = err instanceof Error ? err : new Error(String(err));

@@ -1,20 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User as UserIcon, Search, Loader2, Inbox, Plus } from "@/lib/lucide";
+import { Search, Loader2, Inbox, Plus } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
-  getSharedTools,
-  getPrivateTools,
-  type SharedTool,
-  type PrivateTool,
+  getUsableTools,
+  type UsableTool,
 } from '../utils/api';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table,
   TableBody,
@@ -43,10 +39,7 @@ interface ToolEntry {
   name: string;
   /** First non-blank line of the description, for compact display. */
   summary: string;
-  kind: 'shared' | 'private';
 }
-
-type FilterKind = 'all' | 'shared' | 'private';
 
 /**
  * Props for ToolSelectorDialog.
@@ -87,7 +80,6 @@ function firstLine(desc: string): string {
  * Features:
  * - shadcn Checkbox, Table, Input, Badge, Separator primitives
  * - Live search (filters by tool name)
- * - Kind filter tabs: All / Shared / Private
  * - "Select all / deselect all" across the current filtered view
  * - Enabled count summary in the header action area
  */
@@ -113,7 +105,6 @@ function ToolSelectorDialog({
 
   // Search / filter state
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterKind, setFilterKind] = useState<FilterKind>('all');
 
   // ---------------------------------------------------------------------------
   // Data loading
@@ -122,19 +113,11 @@ function ToolSelectorDialog({
   const loadTools = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [shared, priv] = await Promise.all([getSharedTools(), getPrivateTools()]);
-      const merged: ToolEntry[] = [
-        ...shared.map((t: SharedTool): ToolEntry => ({
-          name: t.name,
-          summary: firstLine(t.description),
-          kind: 'shared',
-        })),
-        ...priv.map((t: PrivateTool): ToolEntry => ({
-          name: t.name,
-          summary: '',
-          kind: 'private',
-        })),
-      ];
+      const usable = await getUsableTools();
+      const merged: ToolEntry[] = usable.map((tool: UsableTool): ToolEntry => ({
+        name: tool.name,
+        summary: firstLine(tool.description),
+      }));
       setAllTools(merged);
 
       if (currentToolIds === null || currentToolIds === undefined) {
@@ -162,7 +145,6 @@ function ToolSelectorDialog({
   useEffect(() => {
     if (open) {
       setSearchQuery('');
-      setFilterKind('all');
       void loadTools();
     }
   }, [open, loadTools]);
@@ -174,11 +156,10 @@ function ToolSelectorDialog({
   const filteredTools = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allTools.filter(t => {
-      const matchesKind = filterKind === 'all' || t.kind === filterKind;
       const matchesSearch = !q || t.name.toLowerCase().includes(q) || t.summary.toLowerCase().includes(q);
-      return matchesKind && matchesSearch;
+      return matchesSearch;
     });
-  }, [allTools, searchQuery, filterKind]);
+  }, [allTools, searchQuery]);
 
   // ---------------------------------------------------------------------------
   // Toggle helpers
@@ -215,7 +196,7 @@ function ToolSelectorDialog({
       // Select all visible (keep non-visible as-is)
       visibleNames.forEach(n => nextChecked.add(n));
       // If no filter is active and all are now checked, re-enter allow-all mode
-      const unfiltered = !searchQuery.trim() && filterKind === 'all';
+      const unfiltered = !searchQuery.trim();
       if (unfiltered && nextChecked.size === allTools.length) {
         setAllowAll(true);
       } else {
@@ -257,12 +238,6 @@ function ToolSelectorDialog({
   const visibleAllChecked = filteredTools.length > 0 && filteredTools.every(t => isToolChecked(t.name));
   const visibleSomeChecked = !visibleAllChecked && filteredTools.some(t => isToolChecked(t.name));
 
-  const kindCounts = useMemo(() => ({
-    all: allTools.length,
-    shared: allTools.filter(t => t.kind === 'shared').length,
-    private: allTools.filter(t => t.kind === 'private').length,
-  }), [allTools]);
-
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -297,23 +272,6 @@ function ToolSelectorDialog({
               </Button>
             </ButtonGroup>
 
-            {/* Kind filter — official shadcn Tabs */}
-            <Tabs value={filterKind} onValueChange={v => setFilterKind(v as FilterKind)}>
-              <TabsList className="h-7 p-0.5 gap-0.5">
-                <TabsTrigger value="all" className="h-6 px-2.5 text-xs gap-1">
-                  All
-                  <span className="tabular-nums text-[10px] opacity-70">{kindCounts.all}</span>
-                </TabsTrigger>
-                <TabsTrigger value="shared" className="h-6 px-2.5 text-xs gap-1">
-                  <Lock className="w-3 h-3" />Shared
-                  <span className="tabular-nums text-[10px] opacity-70">{kindCounts.shared}</span>
-                </TabsTrigger>
-                <TabsTrigger value="private" className="h-6 px-2.5 text-xs gap-1">
-                  <UserIcon className="w-3 h-3" />Private
-                  <span className="tabular-nums text-[10px] opacity-70">{kindCounts.private}</span>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
           </div>
 
           <Separator />
@@ -358,8 +316,7 @@ function ToolSelectorDialog({
                         aria-label="Select all visible tools"
                       />
                     </th>
-                    <th className="w-[38%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Tool name</th>
-                    <th className="w-[22%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Type</th>
+                    <th className="w-[45%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Tool name</th>
                     <th className="h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Description</th>
                   </tr>
                 </thead>
@@ -368,7 +325,7 @@ function ToolSelectorDialog({
                     const isChecked = isToolChecked(tool.name);
                     return (
                       <tr
-                        key={`${tool.kind}-${tool.name}`}
+                        key={tool.name}
                         className="border-b transition-colors hover:bg-muted/50 cursor-pointer data-[state=selected]:bg-muted"
                         onClick={() => toggleTool(tool.name)}
                         data-state={isChecked ? 'selected' : undefined}
@@ -383,17 +340,6 @@ function ToolSelectorDialog({
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           <span className="font-mono text-xs font-medium block truncate">{tool.name}</span>
-                        </td>
-                        <td className="px-2 py-2 align-middle">
-                          {tool.kind === 'shared' ? (
-                            <Badge variant="secondary" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">
-                              <Lock className="w-2.5 h-2.5" />Shared
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">
-                              <UserIcon className="w-2.5 h-2.5" />Private
-                            </Badge>
-                          )}
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           {tool.summary ? (

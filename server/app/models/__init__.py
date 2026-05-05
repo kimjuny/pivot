@@ -41,6 +41,7 @@ from app.models.session import Session
 from app.models.skill import Skill
 from app.models.skill_change_submission import SkillChangeSubmission
 from app.models.task_attachment import TaskAttachment
+from app.models.tool import ToolResource
 from app.models.user import User, UserLogin, UserResponse
 from app.models.web_search import AgentWebSearchBinding
 from app.models.workspace import Workspace
@@ -81,6 +82,7 @@ __all__ = [
     "Skill",
     "SkillChangeSubmission",
     "TaskAttachment",
+    "ToolResource",
     "User",
     "UserGroup",
     "UserLogin",

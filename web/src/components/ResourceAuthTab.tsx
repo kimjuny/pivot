@@ -32,6 +32,7 @@ interface ResourceAuthTabProps {
   users: ResourceAuthUserOption[];
   groups: ResourceAuthGroupOption[];
   loading?: boolean;
+  disabled?: boolean;
   lockedEditUserIds?: number[];
   onAccessChange: (access: ResourceAuthAccess) => void;
 }
@@ -57,6 +58,7 @@ function ResourceAuthTab({
   users,
   groups,
   loading = false,
+  disabled = false,
   lockedEditUserIds = [],
   onAccessChange,
 }: ResourceAuthTabProps) {
@@ -79,6 +81,7 @@ function ResourceAuthTab({
     userId: number,
     checked: boolean,
   ) {
+    if (disabled) return;
     if (section === 'edit' && lockedEditUsers.has(userId) && !checked) {
       return;
     }
@@ -97,6 +100,7 @@ function ResourceAuthTab({
     groupId: number,
     checked: boolean,
   ) {
+    if (disabled) return;
     onAccessChange({
       ...access,
       [section === 'use' ? 'use_group_ids' : 'edit_group_ids']: toggleId(
@@ -131,7 +135,7 @@ function ResourceAuthTab({
               >
                 <Checkbox
                   checked={selectedIds.includes(user.id) || isLocked}
-                  disabled={isLocked}
+                  disabled={disabled || isLocked}
                   onCheckedChange={(value) =>
                     updateUserGrant(section, user.id, value === true)
                   }
@@ -159,6 +163,7 @@ function ResourceAuthTab({
   }
 
   function updateUseScope(useScope: 'all' | 'selected') {
+    if (disabled) return;
     onAccessChange({
       ...access,
       use_scope: useScope,
@@ -189,6 +194,7 @@ function ResourceAuthTab({
             >
               <Checkbox
                 checked={selectedIds.includes(group.id)}
+                disabled={disabled}
                 onCheckedChange={(value) =>
                   updateGroupGrant(section, group.id, value === true)
                 }
@@ -215,6 +221,7 @@ function ResourceAuthTab({
         <div className="mb-3 text-sm font-medium">Who can use</div>
         <RadioGroup
           value={access.use_scope}
+          disabled={disabled}
           onValueChange={(value: string) =>
             updateUseScope(value === 'selected' ? 'selected' : 'all')
           }

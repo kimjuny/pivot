@@ -1,34 +1,19 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  ChevronDown,
-  KeyRound,
-  Pencil,
-  Plus,
-  Share2,
-  Trash2,
-  Lock,
-  User as UserIcon,
-  X,
-} from "@/lib/lucide";
+import { Pencil, Plus, SlidersHorizontal, Trash2 } from '@/lib/lucide';
 import { toast } from 'sonner';
+
+import ResourceAuthTab from '@/components/ResourceAuthTab';
+import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import {
-  getSharedTools,
-  getPrivateTools,
-  getSharedToolSource,
-  getPrivateToolSource,
-  upsertPrivateTool,
-  deletePrivateTool,
-  type SharedTool,
-  type PrivateTool,
-} from '../utils/api';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Pagination,
   PaginationContent,
@@ -38,28 +23,40 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import { Button } from '@/components/ui/button';
-import { ButtonGroup } from '@/components/ui/button-group';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  deletePrivateTool,
+  getPrivateTools,
+  getPrivateToolSource,
+  getSharedTools,
+  getSharedToolSource,
+  getToolAccess,
+  getToolAccessOptions,
+  getToolCreateAccessOptions,
+  updateToolAccess,
+  upsertPrivateTool,
+  type PrivateTool,
+  type SharedTool,
+  type ToolAccess,
+  type ToolAccessOptions,
+  type ToolSourceType,
+} from '../utils/api';
 import DraggableDialog from './DraggableDialog';
 import ToolEditor from './ToolEditor';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 10;
 
@@ -79,26 +76,27 @@ def my_tool(input: str) -> str:
     return input
 `;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+const EMPTY_TOOL_ACCESS: ToolAccess = {
+  tool_name: '',
+  source_type: 'manual',
+  read_only: false,
+  use_scope: 'all',
+  use_user_ids: [],
+  use_group_ids: [],
+  edit_user_ids: [],
+  edit_group_ids: [],
+};
+
+const TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 type ToolRow =
-  | { kind: 'shared'; tool: SharedTool }
-  | { kind: 'private'; tool: PrivateTool };
+  | { sourceType: 'builtin'; tool: SharedTool }
+  | { sourceType: 'manual'; tool: PrivateTool };
 
-// ---------------------------------------------------------------------------
-// Pagination helper
-// ---------------------------------------------------------------------------
+type ToolDialogTab = 'general' | 'auth';
 
-/**
- * Build the page number list with ellipsis slots for a given total/current.
- * Returns either a number or the string 'ellipsis'.
- */
 function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
-  if (total <= 7) {
-    return Array.from({ length: total }, (_, i) => i + 1);
-  }
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages: (number | 'ellipsis')[] = [1];
   if (current > 3) pages.push('ellipsis');
   const start = Math.max(2, current - 1);
@@ -109,47 +107,75 @@ function buildPageList(current: number, total: number): (number | 'ellipsis')[] 
   return pages;
 }
 
-// ---------------------------------------------------------------------------
-// Main component
-// ---------------------------------------------------------------------------
+function normalizeToolName(raw: string): string {
+  return raw.trim();
+}
 
-/**
- * Tools management page.
- *
- * Displays all shared (built-in, read-only) and private (user-owned, editable)
- * tools in a unified searchable, paginated table. Users can create, edit, and
- * delete their own private tools via a DraggableDialog with a Python editor.
- */
+function isValidToolName(name: string): boolean {
+  return TOOL_NAME_PATTERN.test(name);
+}
+
+function getToolNameError(name: string): string | null {
+  if (!name.trim()) {
+    return 'Tool name is required.';
+  }
+  if (!isValidToolName(name.trim())) {
+    return 'Use a Python function name: letters, numbers, and underscores; cannot start with a number.';
+  }
+  return null;
+}
+
+function getToolFileNameLabel(name: string): string {
+  const normalizedName = normalizeToolName(name);
+  return isValidToolName(normalizedName) ? `${normalizedName}.py` : 'tool.py';
+}
+
+function extractFunctionName(source: string): string | null {
+  return /^def\s+(\w+)\s*\(/m.exec(source)?.[1] ?? null;
+}
+
+function getToolDescription(row: ToolRow): string {
+  return row.sourceType === 'builtin' ? row.tool.description : '—';
+}
+
 function ToolsPage() {
   const [sharedTools, setSharedTools] = useState<SharedTool[]>([]);
   const [privateTools, setPrivateTools] = useState<PrivateTool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Search + filter state
   const [searchQuery, setSearchQuery] = useState('');
-  const [kindFilter, setKindFilter] = useState<'all' | 'shared' | 'private'>('all');
-
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Editor dialog state
   const [editorOpen, setEditorOpen] = useState(false);
+  const [editorSaveMode, setEditorSaveMode] = useState<'direct' | 'dialog'>('direct');
   const [editingName, setEditingName] = useState<string | null>(null);
+  const [editingSourceType, setEditingSourceType] = useState<ToolSourceType>('manual');
   const [editorSource, setEditorSource] = useState('');
   const [editorReadOnly, setEditorReadOnly] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // Data loading
-  // ---------------------------------------------------------------------------
+  const [toolDialogOpen, setToolDialogOpen] = useState(false);
+  const [toolDialogMode, setToolDialogMode] = useState<'create' | 'edit'>('create');
+  const [toolDialogTab, setToolDialogTab] = useState<ToolDialogTab>('general');
+  const [toolDialogSourceType, setToolDialogSourceType] =
+    useState<ToolSourceType>('manual');
+  const [toolDialogName, setToolDialogName] = useState('my_tool');
+  const [toolDialogSource, setToolDialogSource] = useState(NEW_TOOL_TEMPLATE);
+  const [toolAccess, setToolAccess] = useState<ToolAccess>(EMPTY_TOOL_ACCESS);
+  const [toolAccessUsers, setToolAccessUsers] =
+    useState<ToolAccessOptions['users']>([]);
+  const [toolAccessGroups, setToolAccessGroups] =
+    useState<ToolAccessOptions['groups']>([]);
+  const [toolAccessLoading, setToolAccessLoading] = useState(false);
+  const toolDialogNameError =
+    toolDialogSourceType === 'builtin' ? null : getToolNameError(toolDialogName);
+  const toolDialogFileName = getToolFileNameLabel(toolDialogName);
 
   const loadTools = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [shared, priv] = await Promise.all([getSharedTools(), getPrivateTools()]);
+      const [shared, manual] = await Promise.all([getSharedTools(), getPrivateTools()]);
       setSharedTools(shared);
-      setPrivateTools(priv);
+      setPrivateTools(manual);
     } catch {
       toast.error('Failed to load tools');
     } finally {
@@ -161,37 +187,27 @@ function ToolsPage() {
     void loadTools();
   }, [loadTools]);
 
-  // ---------------------------------------------------------------------------
-  // Filtered + paginated rows
-  // ---------------------------------------------------------------------------
-
   const allRows: ToolRow[] = useMemo(
     () => [
-      ...sharedTools.map((t): ToolRow => ({ kind: 'shared', tool: t })),
-      ...privateTools.map((t): ToolRow => ({ kind: 'private', tool: t })),
+      ...sharedTools.map((tool): ToolRow => ({ sourceType: 'builtin', tool })),
+      ...privateTools.map((tool): ToolRow => ({ sourceType: 'manual', tool })),
     ],
-    [sharedTools, privateTools]
+    [sharedTools, privateTools],
   );
 
   const filteredRows = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allRows.filter((row) => {
-      if (kindFilter !== 'all' && row.kind !== kindFilter) return false;
       if (!q) return true;
-      if (row.kind === 'shared') {
-        return row.tool.name.toLowerCase().includes(q) || row.tool.description.toLowerCase().includes(q);
-      }
-      return row.tool.name.toLowerCase().includes(q);
+      return (
+        row.tool.name.toLowerCase().includes(q) ||
+        getToolDescription(row).toLowerCase().includes(q)
+      );
     });
-  }, [allRows, searchQuery, kindFilter]);
-
-  // Counts for badge labels
-  const sharedCount = allRows.filter(r => r.kind === 'shared').length;
-  const privateCount = allRows.filter(r => r.kind === 'private').length;
+  }, [allRows, searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
-  // Reset to page 1 when filter changes
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
@@ -201,415 +217,529 @@ function ToolsPage() {
     return filteredRows.slice(start, start + PAGE_SIZE);
   }, [filteredRows, currentPage]);
 
-  // ---------------------------------------------------------------------------
-  // Editor helpers
-  // ---------------------------------------------------------------------------
-
-  const openCreateDialog = () => {
-    setEditingName(null);
-    setEditorSource(NEW_TOOL_TEMPLATE);
-    setEditorReadOnly(false);
-    setEditorOpen(true);
+  const openCreateDialog = async () => {
+    setToolDialogMode('create');
+    setToolDialogTab('general');
+    setToolDialogSourceType('manual');
+    setToolDialogName('my_tool');
+    setToolDialogSource(NEW_TOOL_TEMPLATE);
+    setToolAccess(EMPTY_TOOL_ACCESS);
+    setToolDialogOpen(true);
+    setToolAccessLoading(true);
+    try {
+      const options = await getToolCreateAccessOptions();
+      setToolAccessUsers(options.users);
+      setToolAccessGroups(options.groups);
+    } catch {
+      toast.error('Failed to load tool auth options');
+    } finally {
+      setToolAccessLoading(false);
+    }
   };
 
-  const openEditDialog = useCallback(async (row: ToolRow) => {
+  const openToolDialog = useCallback(async (row: ToolRow) => {
+    const toolName = row.tool.name;
+    setToolDialogMode('edit');
+    setToolDialogTab('general');
+    setToolDialogSourceType(row.sourceType);
+    setToolDialogName(toolName);
+    setToolDialogOpen(true);
+    setToolAccessLoading(true);
+    try {
+      const [access, options, source] = await Promise.all([
+        getToolAccess(row.sourceType, toolName),
+        getToolAccessOptions(row.sourceType, toolName),
+        row.sourceType === 'builtin'
+          ? getSharedToolSource(toolName)
+          : getPrivateToolSource(toolName),
+      ]);
+      setToolAccess(access);
+      setToolAccessUsers(options.users);
+      setToolAccessGroups(options.groups);
+      setToolDialogSource(source.source);
+    } catch {
+      toast.error(`Failed to load tool "${toolName}"`);
+      setToolDialogOpen(false);
+    } finally {
+      setToolAccessLoading(false);
+    }
+  }, []);
+
+  const openSourceEditor = useCallback(async (row: ToolRow) => {
     const toolName = row.tool.name;
     try {
-      if (row.kind === 'shared') {
-        const result = await getSharedToolSource(toolName);
-        setEditingName(toolName);
-        setEditorSource(result.source);
-        setEditorReadOnly(true);
-        setEditorOpen(true);
-        return;
-      }
-
-      const result = await getPrivateToolSource(toolName);
+      const result =
+        row.sourceType === 'builtin'
+          ? await getSharedToolSource(toolName)
+          : await getPrivateToolSource(toolName);
+      setEditorSaveMode('direct');
       setEditingName(toolName);
+      setEditingSourceType(row.sourceType);
       setEditorSource(result.source);
-      setEditorReadOnly(false);
+      setEditorReadOnly(row.sourceType === 'builtin');
       setEditorOpen(true);
     } catch {
       toast.error(`Failed to load source for "${toolName}"`);
     }
   }, []);
 
-  /**
-   * Save callback – triggered by the Save button or Ctrl+S inside the editor.
-   * Tool name is derived from the decorated function name when creating new.
-   */
-  const handleSave = useCallback(
+  const openDialogSourceEditor = () => {
+    setEditorSaveMode('dialog');
+    setEditingName(
+      isValidToolName(normalizeToolName(toolDialogName))
+        ? normalizeToolName(toolDialogName)
+        : null,
+    );
+    setEditingSourceType(toolDialogSourceType);
+    setEditorSource(toolDialogSource);
+    setEditorReadOnly(toolDialogSourceType === 'builtin');
+    setToolDialogOpen(false);
+    setEditorOpen(true);
+  };
+
+  const handleEditorOpenChange = useCallback((open: boolean) => {
+    setEditorOpen(open);
+    if (!open && editorSaveMode === 'dialog') {
+      setToolDialogOpen(true);
+    }
+  }, [editorSaveMode]);
+
+  const handleDirectSourceSave = useCallback(
     async (source: string) => {
-      if (editorReadOnly) {
-        toast.error('Built-in shared tools are read-only');
+      if (editorReadOnly || editingSourceType === 'builtin') {
+        toast.error('Built-in tools are read-only');
         return;
       }
 
-      let toolName = editingName;
-      if (!toolName) {
-        const match = /^def\s+(\w+)\s*\(/m.exec(source);
-        if (!match) {
-          toast.error('Cannot determine tool name: no function definition found');
-          return;
-        }
-        toolName = match[1];
+      const targetName = normalizeToolName(editingName ?? extractFunctionName(source) ?? '');
+      const nameError = getToolNameError(targetName);
+      if (nameError) {
+        toast.error(nameError);
+        return;
       }
 
       setIsSaving(true);
       try {
-        await upsertPrivateTool(toolName, source);
-        toast.success(`Tool "${toolName}" saved`);
+        await upsertPrivateTool(targetName, source);
+        toast.success(`Tool "${targetName}" saved`);
         setEditorOpen(false);
         await loadTools();
       } catch {
-        toast.error(`Failed to save tool "${toolName}"`);
+        toast.error(`Failed to save tool "${targetName}"`);
       } finally {
         setIsSaving(false);
       }
     },
-    [editingName, editorReadOnly, loadTools]
+    [editingName, editingSourceType, editorReadOnly, loadTools],
   );
 
-  const handleDelete = useCallback(async (toolName: string) => {
+  const handleEditorSave = useCallback(
+    async (source: string) => {
+      if (editorSaveMode === 'dialog') {
+        setToolDialogSource(source);
+        if (toolDialogMode === 'create') {
+          setToolDialogName(normalizeToolName(extractFunctionName(source) ?? toolDialogName));
+        }
+        setEditorOpen(false);
+        setToolDialogOpen(true);
+        return;
+      }
+      await handleDirectSourceSave(source);
+    },
+    [editorSaveMode, handleDirectSourceSave, toolDialogMode, toolDialogName],
+  );
+
+  const handleToolDialogSave = useCallback(async () => {
+    if (toolDialogSourceType === 'builtin') {
+      toast.error('Built-in tools are read-only');
+      return;
+    }
+
+    const targetName = normalizeToolName(toolDialogName);
+    const nameError = getToolNameError(targetName);
+    if (nameError) {
+      toast.error(nameError);
+      return;
+    }
+    const sourceFunctionName = extractFunctionName(toolDialogSource);
+    if (sourceFunctionName !== targetName) {
+      toast.error(`Tool source must define function "${targetName}".`);
+      return;
+    }
+
+    setIsSaving(true);
     try {
-      await deletePrivateTool(toolName);
-      toast.success(`Tool "${toolName}" deleted`);
+      await upsertPrivateTool(targetName, toolDialogSource);
+      await updateToolAccess('manual', targetName, {
+        use_scope: toolAccess.use_scope,
+        use_user_ids: toolAccess.use_user_ids,
+        use_group_ids: toolAccess.use_group_ids,
+        edit_user_ids: toolAccess.edit_user_ids,
+        edit_group_ids: toolAccess.edit_group_ids,
+      });
+      toast.success(`Tool "${targetName}" saved`);
+      setToolDialogOpen(false);
       await loadTools();
     } catch {
-      toast.error(`Failed to delete tool "${toolName}"`);
+      toast.error(`Failed to save tool "${targetName}"`);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [loadTools, toolAccess, toolDialogName, toolDialogSource, toolDialogSourceType]);
+
+  const handleDelete = useCallback(async (row: ToolRow) => {
+    if (row.sourceType === 'builtin') {
+      toast.error('Built-in tools are read-only');
+      return;
+    }
+    try {
+      await deletePrivateTool(row.tool.name);
+      toast.success(`Tool "${row.tool.name}" deleted`);
+      await loadTools();
+    } catch {
+      toast.error(`Failed to delete tool "${row.tool.name}"`);
     }
   }, [loadTools]);
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  const isBuiltinDialog = toolDialogSourceType === 'builtin';
+  const toolDialogTabIndex = toolDialogTab === 'auth' ? 1 : 0;
 
   return (
     <TooltipProvider>
       <div className="max-w-5xl mx-auto px-6 py-8">
-      {/* Page header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">Tools</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Built-in shared tools are read-only. Private tools are yours only.
-          </p>
-        </div>
-        <div
-          onMouseEnter={() => setIsCreateMenuOpen(true)}
-          onMouseLeave={() => setIsCreateMenuOpen(false)}
-        >
-          <DropdownMenu open={isCreateMenuOpen} onOpenChange={setIsCreateMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" className="flex items-center gap-1.5">
-                <Plus className="w-4 h-4" />
-                New
-                <ChevronDown className="w-3.5 h-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="w-44"
-              onMouseEnter={() => setIsCreateMenuOpen(true)}
-              onMouseLeave={() => setIsCreateMenuOpen(false)}
-            >
-              <DropdownMenuItem
-                onClick={() => {
-                  toast.info('Shared tools are built-in and read-only');
-                  setIsCreateMenuOpen(false);
-                }}
-                className="gap-2"
-              >
-                <Share2 className="w-4 h-4" />
-                Shared
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  openCreateDialog();
-                  setIsCreateMenuOpen(false);
-                }}
-                className="gap-2"
-              >
-                <KeyRound className="w-4 h-4" />
-                Private
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      {/* Filter + search bar */}
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        {/* Badge filter tags */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {(
-            [
-              { value: 'all', label: 'All', count: allRows.length },
-              { value: 'shared', label: 'Shared', count: sharedCount },
-              { value: 'private', label: 'Private', count: privateCount },
-            ] as const
-          ).map(({ value, label, count }) => (
-            <button
-              key={value}
-              onClick={() => setKindFilter(value)}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
-            >
-              <Badge
-                variant={kindFilter === value ? 'default' : 'outline'}
-                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
-                  kindFilter === value ? 'list-filter-badge-active' : ''
-                }`}
-              >
-                {label}
-                <span className={kindFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
-                  {count}
-                </span>
-              </Badge>
-            </button>
-          ))}
-          {kindFilter !== 'all' && (
-            <button
-              onClick={() => setKindFilter('all')}
-              className="text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Clear filter"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-
-        {/* Search */}
-        <ButtonGroup className="list-search-group">
-          <Input
-            placeholder="Search by name or description…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            aria-label="Search tools"
-            autoComplete="off"
-          />
-          <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
-            Search
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">Tools</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Manage tools and control who can use or edit each one.
+            </p>
+          </div>
+          <Button
+            size="sm"
+            className="flex items-center gap-1.5"
+            onClick={() => void openCreateDialog()}
+          >
+            <Plus className="h-4 w-4" />
+            New
           </Button>
-        </ButtonGroup>
-      </div>
+        </div>
 
-      {/* Tools table */}
-      {isLoading ? (
-        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
-          Loading tools…
+        <div className="mb-4 flex justify-end">
+          <ButtonGroup className="list-search-group">
+            <Input
+              placeholder="Search by name or description…"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search tools"
+              autoComplete="off"
+            />
+            <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
+              Search
+            </Button>
+          </ButtonGroup>
         </div>
-      ) : filteredRows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
-          {allRows.length === 0 ? (
-            <>
-              <p className="text-sm">No tools found.</p>
-              <Button size="sm" variant="outline" onClick={openCreateDialog}>
-                <Plus className="w-4 h-4 mr-1.5" />
-                Create your first tool
-              </Button>
-            </>
-          ) : (
-            <p className="text-sm">No tools match your search.</p>
-          )}
-        </div>
-      ) : (
-        <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[200px]">Name</TableHead>
-                <TableHead className="w-[80px]">Type</TableHead>
-                <TableHead className="w-[120px]">Sandbox</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead className="w-[100px] text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pagedRows.map((row) => (
-                <ToolTableRow
-                  key={`${row.kind}-${row.tool.name}`}
-                  row={row}
-                  onEdit={openEditDialog}
-                  onDelete={handleDelete}
+
+        {isLoading ? (
+          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+            Loading tools…
+          </div>
+        ) : filteredRows.length === 0 ? (
+          <div className="flex h-40 flex-col items-center justify-center gap-3 text-muted-foreground">
+            {allRows.length === 0 ? (
+              <>
+                <p className="text-sm">No tools found.</p>
+                <Button size="sm" variant="outline" onClick={() => void openCreateDialog()}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Create your first tool
+                </Button>
+              </>
+            ) : (
+              <p className="text-sm">No tools match your search.</p>
+            )}
+          </div>
+        ) : (
+          <>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[220px]">Name</TableHead>
+                  <TableHead className="w-[120px]">Sandbox</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="w-[120px] text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pagedRows.map((row) => {
+                  const description = getToolDescription(row);
+                  return (
+                    <TableRow key={`${row.sourceType}-${row.tool.name}`}>
+                      <TableCell className="font-mono text-xs font-medium">
+                        {row.tool.name}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {row.tool.tool_type === 'sandbox' ? 'Yes' : 'No'}
+                      </TableCell>
+                      <TableCell className="max-w-xs">
+                        {description === '—' ? (
+                          <span className="text-sm text-muted-foreground">—</span>
+                        ) : (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div className="cursor-help truncate text-sm text-muted-foreground">
+                                {description}
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="top"
+                              className="max-w-md whitespace-pre-wrap break-words"
+                            >
+                              {description}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            aria-label={`Configure tool ${row.tool.name}`}
+                            onClick={() => void openToolDialog(row)}
+                          >
+                            <SlidersHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            aria-label={`${row.sourceType === 'builtin' ? 'View' : 'Edit'} tool.py for ${row.tool.name}`}
+                            onClick={() => void openSourceEditor(row)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          {row.sourceType === 'manual' ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              aria-label={`Delete tool ${row.tool.name}`}
+                              onClick={() => void handleDelete(row)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            {totalPages > 1 && (
+              <div className="mt-4 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {filteredRows.length} tool{filteredRows.length !== 1 ? 's' : ''}
+                  {searchQuery ? ' found' : ' total'}
+                </span>
+                <Pagination className="mx-0 w-auto justify-end">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (currentPage > 1) setCurrentPage((page) => page - 1);
+                        }}
+                        className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}
+                      />
+                    </PaginationItem>
+
+                    {buildPageList(currentPage, totalPages).map((page, index) =>
+                      page === 'ellipsis' ? (
+                        <PaginationItem key={`ellipsis-${index}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      ) : (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            href="#"
+                            isActive={page === currentPage}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              setCurrentPage(page);
+                            }}
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ),
+                    )}
+
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (currentPage < totalPages) setCurrentPage((page) => page + 1);
+                        }}
+                        className={
+                          currentPage === totalPages ? 'pointer-events-none opacity-50' : ''
+                        }
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
+          </>
+        )}
+
+        <Dialog open={toolDialogOpen} onOpenChange={setToolDialogOpen}>
+          <DialogContent className="flex max-h-[90vh] min-h-0 flex-col overflow-hidden sm:max-w-[720px]">
+            <DialogHeader>
+              <DialogTitle>
+                {toolDialogMode === 'create' ? 'New Tool' : 'Edit Tool'}
+              </DialogTitle>
+            </DialogHeader>
+            <Tabs
+              value={toolDialogTab}
+              onValueChange={(value) => setToolDialogTab(value as ToolDialogTab)}
+              orientation="vertical"
+              className="flex min-h-0 flex-1 gap-3 py-2"
+            >
+              <TabsList className="relative flex h-[560px] max-h-[calc(90vh-150px)] w-24 shrink-0 flex-col items-stretch justify-start gap-1 bg-transparent p-0">
+                <span
+                  className="absolute left-0 top-1.5 h-6 w-0.5 bg-foreground transition-transform duration-200 ease-out"
+                  style={{
+                    transform: `translateY(${toolDialogTabIndex * 40}px)`,
+                  }}
+                  aria-hidden="true"
                 />
-              ))}
-            </TableBody>
-          </Table>
+                <TabsTrigger
+                  value="general"
+                  className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                >
+                  General
+                </TabsTrigger>
+                <TabsTrigger
+                  value="auth"
+                  className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                >
+                  Auth
+                </TabsTrigger>
+              </TabsList>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                {filteredRows.length} tool{filteredRows.length !== 1 ? 's' : ''}
-                {searchQuery ? ' found' : ' total'}
-              </span>
-              <Pagination className="w-auto mx-0 justify-end">
-                <PaginationContent>
-                  <PaginationItem>
-                    <PaginationPrevious
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (currentPage > 1) setCurrentPage((p) => p - 1);
-                      }}
-                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : ''}
-                    />
-                  </PaginationItem>
+              <div className="min-w-0 flex-1">
+                <TabsContent
+                  value="general"
+                  className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+                >
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="tool-name">
+                        Name <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="tool-name"
+                        value={toolDialogName}
+                        onChange={(event) => setToolDialogName(event.target.value)}
+                        disabled={toolDialogMode === 'edit' || isSaving}
+                        aria-invalid={toolDialogNameError ? true : undefined}
+                        autoComplete="off"
+                      />
+                      {toolDialogNameError ? (
+                        <p className="text-xs text-destructive">{toolDialogNameError}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          This name is also the .py filename and the decorated Python
+                          function name.
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium">
+                          {isBuiltinDialog
+                            ? `View ${toolDialogFileName} file`
+                            : `Edit ${toolDialogFileName} file`}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Open the Python source editor for this tool.
+                        </div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={openDialogSourceEditor}
+                        disabled={isSaving}
+                      >
+                        {isBuiltinDialog ? 'View' : 'Edit'}
+                      </Button>
+                    </div>
+                  </div>
+                </TabsContent>
+                <TabsContent
+                  value="auth"
+                  className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+                >
+                  <ResourceAuthTab
+                    access={toolAccess}
+                    users={toolAccessUsers}
+                    groups={toolAccessGroups}
+                    loading={toolAccessLoading}
+                    disabled={isBuiltinDialog || isSaving}
+                    onAccessChange={(access) =>
+                      setToolAccess((current) => ({ ...current, ...access }))
+                    }
+                  />
+                </TabsContent>
+              </div>
+            </Tabs>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setToolDialogOpen(false)}
+                disabled={isSaving}
+              >
+                {isBuiltinDialog ? 'Close' : 'Cancel'}
+              </Button>
+              {!isBuiltinDialog ? (
+                <Button
+                  type="button"
+                  onClick={() => void handleToolDialogSave()}
+                  disabled={isSaving || Boolean(toolDialogNameError)}
+                >
+                  {isSaving ? 'Saving…' : 'Save'}
+                </Button>
+              ) : null}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-                  {buildPageList(currentPage, totalPages).map((page, idx) =>
-                    page === 'ellipsis' ? (
-                      <PaginationItem key={`ellipsis-${idx}`}>
-                        <PaginationEllipsis />
-                      </PaginationItem>
-                    ) : (
-                      <PaginationItem key={page}>
-                        <PaginationLink
-                          href="#"
-                          isActive={page === currentPage}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            setCurrentPage(page);
-                          }}
-                        >
-                          {page}
-                        </PaginationLink>
-                      </PaginationItem>
-                    )
-                  )}
-
-                  <PaginationItem>
-                    <PaginationNext
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (currentPage < totalPages) setCurrentPage((p) => p + 1);
-                      }}
-                      className={currentPage === totalPages ? 'pointer-events-none opacity-50' : ''}
-                    />
-                  </PaginationItem>
-                </PaginationContent>
-              </Pagination>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Editor dialog – Save button is now inside the editor status bar */}
         <DraggableDialog
           open={editorOpen}
-          onOpenChange={setEditorOpen}
-          title={editingName ? `${editorReadOnly ? 'View' : 'Edit'} Tool: ${editingName}` : 'New Tool'}
+          onOpenChange={handleEditorOpenChange}
+          title={
+            editingName
+              ? `${editorReadOnly ? 'View' : 'Edit'} tool.py: ${editingName}`
+              : 'Edit tool.py'
+          }
           size="large"
         >
           <ToolEditor
             value={editorSource}
             onChange={setEditorSource}
-            onSave={editorReadOnly ? undefined : (src) => void handleSave(src)}
+            onSave={editorReadOnly ? undefined : (source) => void handleEditorSave(source)}
             isSaving={isSaving}
             readOnly={editorReadOnly}
           />
         </DraggableDialog>
       </div>
     </TooltipProvider>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ToolTableRow
-// ---------------------------------------------------------------------------
-
-interface ToolTableRowProps {
-  row: ToolRow;
-  onEdit: (row: ToolRow) => Promise<void>;
-  onDelete: (name: string) => Promise<void>;
-}
-
-/**
- * Single row in the tools table.
- * Shared tools are read-only and only allow opening the source in view mode.
- */
-function ToolTableRow({ row, onEdit, onDelete }: ToolTableRowProps) {
-  const isShared = row.kind === 'shared';
-  const name = row.tool.name;
-  const description = isShared ? (row.tool).description : '—';
-  const toolType = row.tool.tool_type;
-  const isSandboxTool = toolType === 'sandbox';
-
-  return (
-    <TableRow>
-      <TableCell className="font-mono text-xs font-medium">{name}</TableCell>
-
-      <TableCell>
-        {isShared ? (
-          <Badge
-            variant="secondary"
-            className="flex w-fit shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
-          >
-            <Lock className="w-2.5 h-2.5" />
-            Shared
-          </Badge>
-        ) : (
-          <Badge
-            variant="secondary"
-            className="flex w-fit shrink-0 items-center gap-1 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
-          >
-            <UserIcon className="w-2.5 h-2.5" />
-            Private
-          </Badge>
-        )}
-      </TableCell>
-
-      <TableCell>
-        <Badge
-          variant="secondary"
-          className="w-fit shrink-0 whitespace-nowrap px-2.5 py-0.5 text-xs transition-colors"
-        >
-          {isSandboxTool ? 'Yes' : 'No'}
-        </Badge>
-      </TableCell>
-
-      <TableCell className="max-w-xs">
-        {description === '—' ? (
-          <span className="text-sm text-muted-foreground">{description}</span>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="text-sm text-muted-foreground truncate cursor-help">
-                {description}
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-md whitespace-pre-wrap break-words">
-              {description}
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </TableCell>
-
-      <TableCell className="text-right">
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7"
-            aria-label={`Edit tool ${name}`}
-            onClick={() => void onEdit(row)}
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </Button>
-          {!isShared && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-destructive hover:text-destructive"
-              aria-label={`Delete tool ${name}`}
-              onClick={() => void onDelete(name)}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </Button>
-          )}
-        </div>
-      </TableCell>
-    </TableRow>
   );
 }
 

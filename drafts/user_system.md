@@ -397,8 +397,9 @@ WebSearch Provider
 | Published Agent | 发布时选择 all/selected | creator + selected editors |
 | Project | selected | creator |
 | Workspace | 跟随 Session/Project | creator 或 Project editors |
-| User Tool | selected | creator |
-| User Skill | selected/shared 按现有 kind 演进 | creator |
+| User Tool | all | creator |
+| User Skill | all | creator |
+| Built-in Tool | all | none |
 | ExtensionInstallation | selected/admin controlled | installer/admin |
 | ChannelBinding | selected | agent editors |
 | LLM Provider Config | selected/admin controlled | admin/selected managers |
@@ -895,8 +896,14 @@ web/src/components/Navigation.tsx
 - LLM 已新增 Studio 侧 usable selector API：Agent 配置选择 LLM 时只读取当前用户有 `LLM.use` 或 `LLM.edit` 的安全字段，不暴露 `api_key`、endpoint、extra config 等管理信息。
 - LLM 编辑 dialog 已增加 `Auth` tab，可通过同一套 user/group 选择器管理 `use/edit` 授权。
 - Skill 已新增 Studio 侧 usable selector API：Agent 技能选择器和 Agent 侧边栏只读取当前用户有 `Skill.use` 或 `Skill.edit` 的技能；use-only 的 private skill 可以被配置进 Agent，但不会开放 Skill 源码编辑能力。
-- Skill 已开始从 `private/shared` 操作模型收敛到统一 Auth：Skill registry 增加 `use_scope`，Skills 列表新增实体设置入口，实体编辑 dialog 使用 `General/Auth` 结构；原 pencil 入口保留为直接编辑 `SKILL.md`。
+- Skill 已开始从 `private/shared` 操作模型收敛到统一 Auth：Skill registry 增加 `use_scope`，Skills 列表新增实体设置入口，实体编辑 dialog 使用左侧 vertical tabs + 右侧固定高度内容的 `General/Auth` 结构；原 pencil 入口保留为直接编辑 `SKILL.md`。
+- Tool 已开始从 `private/shared` 操作模型收敛到统一 Auth：Tools 列表移除 `Type/private/shared` 操作表达，新增实体设置入口；Tool 编辑 dialog 使用左侧 vertical tabs + 右侧固定高度内容的 `General/Auth` 结构；原 pencil 入口保留为直接编辑 `tool.py`。
+- Tool 已新增 `ToolResource` auth metadata，不存源码，只持久化 Tool 的 `use_scope` 和 ResourceAccess 关联键；源码文件仍通过 workspace service 管理。
+- User-created Tool 默认 `use_scope = all`，创建者默认拥有 `edit`；Tool name 必须同时满足 `.py` 文件名 stem 和 Python function name 规则，并要求源码中定义同名 decorated function。
+- Built-in Tool 固定为所有人可 `use`、无人可 `edit`；可以打开 settings/source 查看，但不能修改 Auth 或源码。
+- Tool 已新增 Studio 侧 usable selector API：Agent Tool 选择器和 Agent 侧边栏只读取当前用户有 `Tool.use` 或 `Tool.edit` 的工具；builtin tools 始终可用。
 - `Auth` tab 的 `Use` 权限支持 `Everyone` / `Selected Members`，实体新建默认 `Everyone`。
+- Skill/Tool 的源码编辑器是实体设置 dialog 的子流程：从 `General` 打开 Monaco 时先隐藏设置 dialog，Monaco 保存只回填当前 draft source，最终创建/保存仍由设置 dialog 的主 `Save` 完成，避免 modal overlay/focus trap 与 Monaco 交互冲突。
 - 前端已抽出可复用的 `ResourceAuthTab`，后续实体可以复用同一套 Auth tab 交互。
 - 已对齐权限边界：LLM/Skill/Tool/Extension 等底层实体的 `use` 是 Studio 侧配置权限；Agent 对外开放后，最终用户运行 Agent 时只检查 `Agent.use`，不会因为缺少底层实体 `use` 权限而失败。
 
