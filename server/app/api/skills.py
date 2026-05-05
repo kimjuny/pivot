@@ -6,31 +6,39 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any, Literal
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.config import get_settings
 from app.db.session import managed_session
+from app.models.access import AccessLevel, PrincipalType, ResourceAccess, ResourceType
 from app.models.user import User
+from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
+from app.services.group_service import GroupService
 from app.services.skill_import_progress_service import (
     get_skill_import_progress_service,
 )
 from app.services.skill_service import (
     BundleImportFile,
     delete_user_skill,
+    get_skill_by_name,
     install_archive_skill,
     install_bundle_skill,
     install_github_skill,
     list_private_skills,
     list_shared_skills,
+    list_visible_skills,
     probe_github_skill_import,
     read_shared_skill,
     read_user_skill,
+    set_skill_access,
     upsert_user_skill,
 )
+from app.services.user_service import UserService
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import Session, select
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -77,10 +85,109 @@ class SkillArchiveImportJobResponse(BaseModel):
     job_id: str
 
 
+class SkillAccessUpdate(BaseModel):
+    """Payload for replacing one skill's selected access."""
+
+    use_scope: Literal["all", "selected"] = "all"
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class SkillAccessResponse(SkillAccessUpdate):
+    """Direct use/edit grants for one skill."""
+
+    skill_name: str
+
+
+class SkillAccessUserOption(BaseModel):
+    """Selectable user in a skill auth editor."""
+
+    id: int
+    username: str
+    display_name: str | None
+    email: str | None
+
+
+class SkillAccessGroupOption(BaseModel):
+    """Selectable group in a skill auth editor."""
+
+    id: int
+    name: str
+    description: str
+    member_count: int
+
+
+class SkillAccessOptionsResponse(BaseModel):
+    """Selectable users and groups for a skill auth editor."""
+
+    users: list[SkillAccessUserOption]
+    groups: list[SkillAccessGroupOption]
+
+
+def _grant_principal_ids(
+    grants: list[ResourceAccess],
+    principal_type: PrincipalType,
+) -> list[int]:
+    """Return integer principal IDs for one principal type."""
+    principal_ids: list[int] = []
+    for grant in grants:
+        if grant.principal_type == principal_type:
+            principal_ids.append(int(grant.principal_id))
+    return sorted(principal_ids)
+
+
+def _serialize_skill_access(
+    skill_name: str,
+    use_scope: str,
+    grants: list[ResourceAccess],
+) -> SkillAccessResponse:
+    """Serialize direct grants for one skill."""
+    use_grants = [grant for grant in grants if grant.access_level == AccessLevel.USE]
+    edit_grants = [grant for grant in grants if grant.access_level == AccessLevel.EDIT]
+    return SkillAccessResponse(
+        skill_name=skill_name,
+        use_scope="selected" if use_scope == "selected" else "all",
+        use_user_ids=_grant_principal_ids(use_grants, PrincipalType.USER),
+        use_group_ids=_grant_principal_ids(use_grants, PrincipalType.GROUP),
+        edit_user_ids=_grant_principal_ids(edit_grants, PrincipalType.USER),
+        edit_group_ids=_grant_principal_ids(edit_grants, PrincipalType.GROUP),
+    )
+
+
+def _serialize_skill_access_options(db: Session) -> SkillAccessOptionsResponse:
+    """Serialize selectable users and groups for one skill access editor."""
+    group_service = GroupService(db)
+    member_counts = group_service.get_member_count_by_group_id()
+    return SkillAccessOptionsResponse(
+        users=[
+            SkillAccessUserOption(
+                id=user.id or 0,
+                username=user.username,
+                display_name=user.display_name,
+                email=user.email,
+            )
+            for user in UserService(db).list_users()
+            if user.id is not None and user.status == "active"
+        ],
+        groups=[
+            SkillAccessGroupOption(
+                id=group.id or 0,
+                name=group.name,
+                description=group.description,
+                member_count=member_counts.get(group.id or 0, 0),
+            )
+            for group in group_service.list_groups()
+            if group.id is not None
+        ],
+    )
+
+
 @router.get("/skills/shared")
 async def get_shared_skills(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """List shared skills visible to the current user."""
     return list_shared_skills(db, current_user.username)
@@ -89,17 +196,128 @@ async def get_shared_skills(
 @router.get("/skills/private")
 async def get_private_skills(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """List private skills for current user."""
     return list_private_skills(db, current_user.username)
+
+
+@router.get("/skills/access-options", response_model=SkillAccessOptionsResponse)
+async def get_skill_create_access_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> SkillAccessOptionsResponse:
+    """Return selectable principals for a new skill access editor."""
+    return _serialize_skill_access_options(db)
+
+
+@router.get("/skills/usable")
+async def get_usable_skills(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> list[dict[str, Any]]:
+    """List skills the current Studio user can select for agents."""
+    return list_visible_skills(db, current_user.username)
+
+
+@router.get(
+    "/skills/{skill_name}/access-options",
+    response_model=SkillAccessOptionsResponse,
+)
+async def get_skill_access_options(
+    skill_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> SkillAccessOptionsResponse:
+    """Return selectable principals for one skill access editor."""
+    skill = get_skill_by_name(db, skill_name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found.")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.SKILL,
+        resource_id=skill.id,
+        access_level=AccessLevel.EDIT,
+        creator_user_id=skill.creator_id,
+        use_scope=skill.use_scope,
+    )
+    return _serialize_skill_access_options(db)
+
+
+@router.get("/skills/{skill_name}/access", response_model=SkillAccessResponse)
+async def get_skill_access(
+    skill_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> SkillAccessResponse:
+    """Return direct use/edit grants for one skill."""
+    skill = get_skill_by_name(db, skill_name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found.")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.SKILL,
+        resource_id=skill.id,
+        access_level=AccessLevel.EDIT,
+        creator_user_id=skill.creator_id,
+        use_scope=skill.use_scope,
+    )
+    return _serialize_skill_access(
+        skill_name=skill.name,
+        use_scope=skill.use_scope,
+        grants=AccessService(db).list_resource_grants(
+            resource_type=ResourceType.SKILL,
+            resource_id=skill.id or 0,
+        ),
+    )
+
+
+@router.put("/skills/{skill_name}/access", response_model=SkillAccessResponse)
+async def update_skill_access(
+    skill_name: str,
+    payload: SkillAccessUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> SkillAccessResponse:
+    """Replace direct use/edit grants for one skill."""
+    skill = get_skill_by_name(db, skill_name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found.")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.SKILL,
+        resource_id=skill.id,
+        access_level=AccessLevel.EDIT,
+        creator_user_id=skill.creator_id,
+        use_scope=skill.use_scope,
+    )
+    try:
+        set_skill_access(
+            db,
+            skill=skill,
+            use_scope=payload.use_scope,
+            use_user_ids=set(payload.use_user_ids),
+            use_group_ids=set(payload.use_group_ids),
+            edit_user_ids=set(payload.edit_user_ids),
+            edit_group_ids=set(payload.edit_group_ids),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_skill_access(
+        skill_name=skill.name,
+        use_scope=skill.use_scope,
+        grants=AccessService(db).list_resource_grants(
+            resource_type=ResourceType.SKILL,
+            resource_id=skill.id or 0,
+        ),
+    )
 
 
 @router.get("/skills/shared/{skill_name}")
 async def get_shared_skill_source(
     skill_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Read one shared skill source visible to the current user."""
     try:
@@ -116,7 +334,7 @@ async def get_shared_skill_source(
 async def import_bundle_skill_endpoint(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Install one skill bundle uploaded from the local machine."""
     form_data = await request.form(
@@ -185,7 +403,7 @@ async def import_bundle_skill_endpoint(
     response_model=SkillArchiveImportJobResponse,
 )
 async def create_archive_import_job(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> SkillArchiveImportJobResponse:
     """Create one SSE-observable archive import job."""
     job = get_skill_import_progress_service().create_job(
@@ -199,7 +417,7 @@ async def stream_archive_import_job_events(
     job_id: str,
     raw_request: Request,
     after_id: int = 0,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> StreamingResponse:
     """Stream progress events for one local skill archive import job."""
     progress_service = get_skill_import_progress_service()
@@ -260,7 +478,7 @@ async def stream_archive_import_job_events(
 async def import_archive_skill_endpoint(
     job_id: str,
     request: Request,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Install one skill archive uploaded from the local machine."""
     progress_service = get_skill_import_progress_service()
@@ -370,7 +588,7 @@ async def get_user_skill_source(
     kind: Literal["private", "shared"],
     skill_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Read a user-owned skill source from private/shared namespace."""
     try:
@@ -389,7 +607,7 @@ async def upsert_skill_source(
     skill_name: str,
     body: SkillWriteRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Create or update a user-owned markdown skill."""
     try:
@@ -411,7 +629,7 @@ async def upsert_skill_source(
 async def probe_github_skill(
     body: GitHubSkillProbeRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Probe a public GitHub repository for importable skills."""
     try:
@@ -429,7 +647,7 @@ async def probe_github_skill(
 async def import_github_skill(
     body: GitHubSkillImportRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Install one skill folder from a public GitHub repository."""
     try:
@@ -456,7 +674,7 @@ async def delete_skill_source(
     kind: Literal["private", "shared"],
     skill_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, str]:
     """Delete a user-owned markdown skill."""
     try:

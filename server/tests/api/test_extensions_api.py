@@ -14,7 +14,7 @@ from unittest.mock import patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -25,10 +25,12 @@ if str(SERVER_ROOT) not in sys.path:
 
 import_module("app.models")
 Agent = import_module("app.models.agent").Agent
+Role = import_module("app.models.access").Role
 User = import_module("app.models.user").User
 auth_module = import_module("app.api.auth")
 dependencies_module = import_module("app.api.dependencies")
 extensions_api_module = import_module("app.api.extensions")
+permission_service_module = import_module("app.services.permission_service")
 hook_execution_service_module = import_module(
     "app.services.extension_hook_execution_service"
 )
@@ -38,6 +40,7 @@ workspace_service = import_module("app.services.workspace_service")
 ExtensionHookExecutionService = (
     hook_execution_service_module.ExtensionHookExecutionService
 )
+PermissionService = permission_service_module.PermissionService
 LocalFilesystemObjectStorageProvider = import_module(
     "app.storage.providers.local_fs"
 ).LocalFilesystemObjectStorageProvider
@@ -55,6 +58,8 @@ class ExtensionsApiTestCase(unittest.TestCase):
         )
         SQLModel.metadata.create_all(self.engine)
         self.session = Session(self.engine)
+        PermissionService(self.session).seed_defaults()
+        admin_role = self.session.exec(select(Role).where(Role.key == "admin")).one()
 
         self.tmpdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmpdir.name)
@@ -85,7 +90,11 @@ class ExtensionsApiTestCase(unittest.TestCase):
             llm_id=1,
             active_release_id=None,
         )
-        self.user = User(username="alice", password_hash="hash")
+        self.user = User(
+            username="alice",
+            password_hash="hash",
+            role_id=admin_role.id or 0,
+        )
         self.session.add(self.agent)
         self.session.add(self.user)
         self.session.commit()

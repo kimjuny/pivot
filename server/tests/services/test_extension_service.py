@@ -110,7 +110,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
             llm_id=1,
             active_release_id=None,
         )
-        self.user = User(username="alice", password_hash="hash")
+        self.user = User(username="alice", password_hash="hash", role_id=1)
         self.session.add(self.agent)
         self.session.add(self.user)
         self.session.commit()

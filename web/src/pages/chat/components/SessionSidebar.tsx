@@ -11,6 +11,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  Share2,
   SquarePen,
   Trash2,
 } from "@/lib/lucide";
@@ -65,6 +66,7 @@ interface SessionSidebarProps {
     projectId: string,
     name: string | null,
   ) => void | Promise<void>;
+  onManageProjectAccess?: (projectId: string) => void | Promise<void>;
   onDeleteProject?: (projectId: string) => void | Promise<void>;
   onSelectSession: (sessionId: string) => void | Promise<void>;
   onRenameSession: (
@@ -212,6 +214,7 @@ export function SessionSidebar({
   onCreateProject,
   onSelectProject,
   onRenameProject,
+  onManageProjectAccess,
   onDeleteProject,
   onSelectSession,
   onRenameSession,
@@ -656,43 +659,56 @@ export function SessionSidebar({
                                 >
                                   <span className="truncate">{project.name}</span>
                                 </SidebarMenuButton>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <SidebarMenuAction
-                                      showOnHover
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                      }}
-                                      title="Project actions"
-                                      className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
+                                {project.can_edit ? (
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <SidebarMenuAction
+                                        showOnHover
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                        }}
+                                        title="Project actions"
+                                        className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
+                                      >
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </SidebarMenuAction>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent
+                                      align="end"
+                                      onClick={(event) => event.stopPropagation()}
                                     >
-                                      <MoreHorizontal className="h-4 w-4" />
-                                    </SidebarMenuAction>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent
-                                    align="end"
-                                    onClick={(event) => event.stopPropagation()}
-                                  >
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        startRenamingProject(project);
-                                      }}
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                      Rename
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onSelect={() => {
-                                        void onDeleteProject?.(project.project_id);
-                                      }}
-                                      className="text-destructive focus:text-destructive"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
+                                      <DropdownMenuItem
+                                        onSelect={() => {
+                                          void onManageProjectAccess?.(
+                                            project.project_id,
+                                          );
+                                        }}
+                                      >
+                                        <Share2 className="h-4 w-4" />
+                                        Share
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onSelect={() => {
+                                          startRenamingProject(project);
+                                        }}
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                        Rename
+                                      </DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuItem
+                                        onSelect={() => {
+                                          void onDeleteProject?.(project.project_id);
+                                        }}
+                                        className="text-destructive focus:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" />
+                                        Delete
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                ) : null}
                               </div>
                             )}
                           </SidebarMenuItem>

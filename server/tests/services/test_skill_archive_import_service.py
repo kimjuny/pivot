@@ -63,7 +63,7 @@ class SkillArchiveImportServiceTestCase(unittest.TestCase):
         )
         self.workspace_patch.start()
         self.artifact_patch.start()
-        self.alice = User(username="alice", password_hash="hash")
+        self.alice = User(username="alice", password_hash="hash", role_id=1)
         self.session.add(self.alice)
         self.session.commit()
         self.session.refresh(self.alice)

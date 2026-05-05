@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.models.agent import Agent
 from app.models.channel import AgentChannelBinding
 from app.schemas.channel import (
@@ -19,6 +19,7 @@ from app.schemas.channel import (
     ChannelLinkTokenStatusResponse,
     ChannelTestResponse,
 )
+from app.security.permission_catalog import Permission
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.channel_service import ChannelService
 from app.services.provider_registry_service import ProviderRegistryService
@@ -33,7 +34,7 @@ router = APIRouter()
 async def list_channels(
     agent_id: int | None = None,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> list[dict[str, object]]:
     """List all installed built-in channel manifests."""
     del current_user
@@ -44,7 +45,7 @@ async def list_channels(
 async def get_channel(
     channel_key: str,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Return one channel manifest by provider key."""
     del current_user
@@ -62,7 +63,7 @@ async def get_channel(
 async def list_agent_channels(
     agent_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> list[ChannelBindingResponse]:
     """List the channel bindings configured for one agent."""
     del current_user
@@ -81,7 +82,7 @@ async def create_agent_channel(
     agent_id: int,
     payload: ChannelBindingCreate,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> ChannelBindingResponse:
     """Create one channel binding for an agent."""
     agent = db.get(Agent, agent_id)
@@ -114,7 +115,7 @@ async def update_agent_channel(
     binding_id: int,
     payload: ChannelBindingUpdate,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> ChannelBindingResponse:
     """Update one configured agent channel binding."""
     try:
@@ -138,7 +139,7 @@ async def update_agent_channel(
 async def delete_agent_channel(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> Response:
     """Delete one configured channel binding."""
     binding = db.get(AgentChannelBinding, binding_id)
@@ -159,7 +160,7 @@ async def delete_agent_channel(
 async def test_agent_channel(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test."""
     del current_user
@@ -188,7 +189,7 @@ async def test_channel_draft(
     channel_key: str,
     payload: ChannelBindingTestRequest,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test for unsaved form values."""
     del current_user
@@ -210,7 +211,7 @@ async def test_channel_draft(
 async def poll_agent_channel_once(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Manually poll a polling-based channel binding once."""
     del current_user
@@ -242,7 +243,7 @@ async def get_channel_link_status(
 async def complete_channel_link(
     token: str,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> ChannelLinkCompletionResponse:
     """Bind an external identity to the current authenticated user."""
     try:

@@ -101,7 +101,7 @@ class FilesApiTestCase(unittest.TestCase):
         self.file_profile_patch.start()
         self.workspace_profile_patch.start()
 
-        self.user = User(username="alice", password_hash="hash")
+        self.user = User(username="alice", password_hash="hash", role_id=1)
         self.session.add(self.user)
         self.session.commit()
         self.session.refresh(self.user)

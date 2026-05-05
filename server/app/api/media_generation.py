@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.models.agent import Agent
 from app.models.media_generation import AgentMediaProviderBinding
 from app.schemas.media_generation import (
@@ -14,6 +14,7 @@ from app.schemas.media_generation import (
     MediaProviderCatalogItemResponse,
     MediaProviderTestResponse,
 )
+from app.security.permission_catalog import Permission
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.media_generation_service import MediaGenerationService
 from app.services.provider_registry_service import ProviderRegistryService
@@ -29,7 +30,7 @@ router = APIRouter()
 async def list_media_generation_providers(
     agent_id: int | None = None,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> list[dict[str, object]]:
     """List all installed media-generation provider manifests."""
     del current_user
@@ -43,7 +44,7 @@ async def list_media_generation_providers(
 async def get_media_generation_provider_manifest(
     provider_key: str,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> dict[str, object]:
     """Return one media-generation provider manifest by provider key."""
     del current_user
@@ -65,7 +66,7 @@ async def get_media_generation_provider_manifest(
 async def list_agent_media_provider_bindings(
     agent_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> list[MediaProviderBindingResponse]:
     """List the media-generation bindings configured for one agent."""
     del current_user
@@ -84,7 +85,7 @@ async def create_agent_media_provider_binding(
     agent_id: int,
     payload: MediaProviderBindingCreate,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> MediaProviderBindingResponse:
     """Create one media-generation provider binding for an agent."""
     agent = db.get(Agent, agent_id)
@@ -119,7 +120,7 @@ async def update_agent_media_provider_binding(
     binding_id: int,
     payload: MediaProviderBindingUpdate,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> MediaProviderBindingResponse:
     """Update one configured media-generation provider binding."""
     try:
@@ -142,12 +143,14 @@ async def update_agent_media_provider_binding(
 async def delete_agent_media_provider_binding(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ):
     """Delete one configured media-generation provider binding."""
     binding = db.get(AgentMediaProviderBinding, binding_id)
     if binding is None:
-        raise HTTPException(status_code=404, detail="Media generation binding not found")
+        raise HTTPException(
+            status_code=404, detail="Media generation binding not found"
+        )
     try:
         MediaGenerationService(db).delete_binding(binding_id)
         AgentSnapshotService(db).save_draft(
@@ -166,13 +169,15 @@ async def delete_agent_media_provider_binding(
 async def test_agent_media_provider_binding(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test for a saved binding."""
     del current_user
     binding = db.get(AgentMediaProviderBinding, binding_id)
     if binding is None:
-        raise HTTPException(status_code=404, detail="Media generation binding not found")
+        raise HTTPException(
+            status_code=404, detail="Media generation binding not found"
+        )
     try:
         return MediaGenerationService(db).test_binding(binding_id)
     except ValueError as exc:
@@ -187,7 +192,7 @@ async def test_media_generation_provider_draft(
     provider_key: str,
     payload: MediaProviderBindingTestRequest,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.MEDIA_GENERATION_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test for unsaved form values."""
     del current_user

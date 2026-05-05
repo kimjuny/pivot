@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
+from app.models.access import AccessLevel, ResourceType
+from app.models.user import User
+from app.services.access_service import AccessService
 from app.services.workspace_service import WorkspaceService
+from sqlmodel import select
 
 if TYPE_CHECKING:
     from app.models.workspace import Workspace
@@ -101,12 +105,13 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace or directory is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not usable by the caller.
             WorkspaceFileValidationError: If the path is unsafe or not a directory.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.USE,
         )
         workspace_root = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
         target_dir = self._resolve_workspace_path(
@@ -165,12 +170,13 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace or directory is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not usable by the caller.
             WorkspaceFileValidationError: If the path is unsafe or not a directory.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.USE,
         )
         workspace_root = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
         target_dir = self._resolve_workspace_path(
@@ -225,13 +231,14 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace or file is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not usable by the caller.
             WorkspaceFileValidationError: If the path is unsafe or not a file.
             UnicodeDecodeError: If the file is not valid UTF-8.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.USE,
         )
         target_path = self._resolve_workspace_path(
             workspace=workspace,
@@ -263,13 +270,14 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace or file is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not usable by the caller.
             WorkspaceFileValidationError: If the path is unsafe, not a file, or
                 the file format is not previewable yet.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.USE,
         )
         target_path = self._resolve_workspace_path(
             workspace=workspace,
@@ -318,12 +326,13 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not editable by the caller.
             WorkspaceFileValidationError: If the path is unsafe.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.EDIT,
         )
         target_path = self._resolve_workspace_path(
             workspace=workspace,
@@ -352,12 +361,13 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace or file is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not usable by the caller.
             WorkspaceFileValidationError: If the path is unsafe or not a file.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.USE,
         )
         target_path = self._resolve_workspace_path(
             workspace=workspace,
@@ -400,12 +410,13 @@ class WorkspaceFileService:
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace is missing.
-            WorkspaceFilePermissionError: If the workspace is not owned.
+            WorkspaceFilePermissionError: If the workspace is not editable by the caller.
             WorkspaceFileValidationError: If the path is unsafe.
         """
-        workspace = self._get_workspace_for_owner(
+        workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
             username=username,
+            access_level=AccessLevel.EDIT,
         )
         target_path = self._resolve_workspace_path(
             workspace=workspace,
@@ -421,25 +432,42 @@ class WorkspaceFileService:
             size_bytes=len(content),
         )
 
-    def _get_workspace_for_owner(self, *, workspace_id: str, username: str) -> Workspace:
-        """Return one owned workspace row.
+    def _get_workspace_for_user(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        access_level: AccessLevel,
+    ) -> Workspace:
+        """Return one workspace row accessible to a user.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Username that must own the workspace.
+            username: Authenticated username.
+            access_level: Required workspace access level.
 
         Returns:
             Matching workspace row.
 
         Raises:
             WorkspaceFileNotFoundError: If the workspace does not exist.
-            WorkspaceFilePermissionError: If the workspace belongs to another user.
+            WorkspaceFilePermissionError: If the user cannot access the workspace.
         """
         workspace = WorkspaceService(self.db).get_workspace(workspace_id)
         if workspace is None:
             raise WorkspaceFileNotFoundError("Workspace not found.")
-        if workspace.user != username:
-            raise WorkspaceFilePermissionError("Workspace is not owned by the caller.")
+        user = self.db.exec(select(User).where(User.username == username)).first()
+        if user is None:
+            raise WorkspaceFilePermissionError("Workspace is not accessible.")
+        creator = self.db.exec(select(User).where(User.username == workspace.user)).first()
+        if not AccessService(self.db).has_resource_access(
+            user=user,
+            resource_type=ResourceType.WORKSPACE,
+            resource_id=workspace.workspace_id,
+            access_level=access_level,
+            creator_user_id=creator.id if creator is not None else None,
+        ):
+            raise WorkspaceFilePermissionError("Workspace is not accessible.")
         return workspace
 
     def _resolve_workspace_path(

@@ -78,7 +78,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         )
         self.workspace_profile_patch.start()
 
-        self.user = User(username="alice", password_hash="hash")
+        self.user = User(username="alice", password_hash="hash", role_id=1)
         self.session.add(self.user)
         self.session.commit()
         self.session.refresh(self.user)

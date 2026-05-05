@@ -1,3 +1,7 @@
+## Environment
+
+task start time: {{system_time}}
+
 ## 4. Available Tools
 
 **切记：** 你的环境中已安装git、node(with npm)、python(3.11)、curl、chromium可供调用。

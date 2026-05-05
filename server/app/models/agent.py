@@ -9,6 +9,12 @@ class Agent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str | None = Field(default=None)
+    created_by_user_id: int | None = Field(
+        default=None,
+        foreign_key="user.id",
+        index=True,
+    )
+    use_scope: str = Field(default="selected", index=True, max_length=32)
     llm_id: int | None = Field(default=None, foreign_key="llm.id", index=True)
     session_idle_timeout_minutes: int = Field(
         default=15,

@@ -198,3 +198,196 @@ export const getOperationsSessionDetail = async (
     `/operations/sessions/${sessionId}`,
   ) as Promise<OperationsSessionDetailResponse>;
 };
+
+export interface OperationsUser {
+  id: number;
+  username: string;
+  role_id: number;
+  role_key: string;
+  status: "active" | "disabled";
+  display_name: string | null;
+  email: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OperationsGroup {
+  id: number;
+  name: string;
+  description: string;
+  created_by_user_id: number | null;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OperationsGroupCreatePayload {
+  name: string;
+  description?: string;
+}
+
+export interface OperationsGroupUpdatePayload {
+  name?: string;
+  description?: string;
+}
+
+export interface OperationsGroupMember {
+  id: number;
+  username: string;
+  status: "active" | "disabled";
+  display_name: string | null;
+  email: string | null;
+}
+
+export interface OperationsUserCreatePayload {
+  username: string;
+  password: string;
+  role_id: number;
+  display_name?: string | null;
+  email?: string | null;
+}
+
+export interface OperationsUserUpdatePayload {
+  role_id?: number;
+  status?: "active" | "disabled";
+  display_name?: string | null;
+  email?: string | null;
+}
+
+export interface OperationsPermission {
+  key: string;
+  name: string;
+  description: string;
+  category: string;
+}
+
+export interface OperationsRole {
+  id: number;
+  key: string;
+  name: string;
+  description: string;
+  is_system: boolean;
+  permissions: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OperationsRoleCreatePayload {
+  key: string;
+  name: string;
+  description?: string;
+  permissions?: string[];
+}
+
+export async function listOperationsUsers(): Promise<OperationsUser[]> {
+  return apiRequest("/operations/users") as Promise<OperationsUser[]>;
+}
+
+export async function createOperationsUser(
+  payload: OperationsUserCreatePayload,
+): Promise<OperationsUser> {
+  return apiRequest("/operations/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }) as Promise<OperationsUser>;
+}
+
+export async function updateOperationsUser(
+  userId: number,
+  payload: OperationsUserUpdatePayload,
+): Promise<OperationsUser> {
+  return apiRequest(`/operations/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  }) as Promise<OperationsUser>;
+}
+
+export async function listOperationsGroups(): Promise<OperationsGroup[]> {
+  return apiRequest("/operations/groups") as Promise<OperationsGroup[]>;
+}
+
+export async function createOperationsGroup(
+  payload: OperationsGroupCreatePayload,
+): Promise<OperationsGroup> {
+  return apiRequest("/operations/groups", {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      description: payload.description ?? "",
+    }),
+  }) as Promise<OperationsGroup>;
+}
+
+export async function updateOperationsGroup(
+  groupId: number,
+  payload: OperationsGroupUpdatePayload,
+): Promise<OperationsGroup> {
+  return apiRequest(`/operations/groups/${groupId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  }) as Promise<OperationsGroup>;
+}
+
+export async function deleteOperationsGroup(groupId: number): Promise<void> {
+  await apiRequest(`/operations/groups/${groupId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function listOperationsGroupUserOptions(): Promise<
+  OperationsGroupMember[]
+> {
+  return apiRequest(
+    "/operations/groups/user-options",
+  ) as Promise<OperationsGroupMember[]>;
+}
+
+export async function listOperationsGroupMembers(
+  groupId: number,
+): Promise<OperationsGroupMember[]> {
+  return apiRequest(
+    `/operations/groups/${groupId}/members`,
+  ) as Promise<OperationsGroupMember[]>;
+}
+
+export async function updateOperationsGroupMembers(
+  groupId: number,
+  userIds: number[],
+): Promise<OperationsGroupMember[]> {
+  return apiRequest(`/operations/groups/${groupId}/members`, {
+    method: "PUT",
+    body: JSON.stringify({ user_ids: userIds }),
+  }) as Promise<OperationsGroupMember[]>;
+}
+
+export async function listOperationsPermissions(): Promise<OperationsPermission[]> {
+  return apiRequest("/operations/permissions") as Promise<OperationsPermission[]>;
+}
+
+export async function listOperationsRoles(): Promise<OperationsRole[]> {
+  return apiRequest("/operations/roles") as Promise<OperationsRole[]>;
+}
+
+export async function createOperationsRole(
+  payload: OperationsRoleCreatePayload,
+): Promise<OperationsRole> {
+  return apiRequest("/operations/roles", {
+    method: "POST",
+    body: JSON.stringify({
+      key: payload.key,
+      name: payload.name,
+      description: payload.description ?? "",
+      permissions: payload.permissions ?? [],
+    }),
+  }) as Promise<OperationsRole>;
+}
+
+export async function updateOperationsRolePermissions(
+  roleId: number,
+  permissionKeys: string[],
+): Promise<OperationsRole> {
+  return apiRequest(`/operations/roles/${roleId}/permissions`, {
+    method: "PUT",
+    body: JSON.stringify({ permissions: permissionKeys }),
+  }) as Promise<OperationsRole>;
+}

@@ -11,15 +11,22 @@ from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine, select
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+import_module("app.models")
+Role = import_module("app.models.access").Role
 User = import_module("app.models.user").User
 auth_module = import_module("app.api.auth")
 dependencies_module = import_module("app.api.dependencies")
 skills_api_module = import_module("app.api.skills")
+permission_service_module = import_module("app.services.permission_service")
+
+PermissionService = permission_service_module.PermissionService
 
 
 class SkillsApiTestCase(unittest.TestCase):
@@ -27,7 +34,23 @@ class SkillsApiTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         """Create one isolated app with auth and database overrides."""
-        self.user = User(username="alice", password_hash="hash")
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(self.engine)
+        self.session = Session(self.engine)
+        PermissionService(self.session).seed_defaults()
+        admin_role = self.session.exec(select(Role).where(Role.key == "admin")).one()
+        self.user = User(
+            username="alice",
+            password_hash="hash",
+            role_id=admin_role.id or 0,
+        )
+        self.session.add(self.user)
+        self.session.commit()
+        self.session.refresh(self.user)
         self.app = FastAPI()
         self.app.include_router(skills_api_module.router, prefix="/api")
         self.app.dependency_overrides[dependencies_module.get_db] = self._get_db
@@ -40,10 +63,11 @@ class SkillsApiTestCase(unittest.TestCase):
         """Release the test client and dependency overrides."""
         self.client.close()
         self.app.dependency_overrides.clear()
+        self.session.close()
 
     def _get_db(self):
-        """Yield one placeholder database dependency for patched service calls."""
-        yield object()
+        """Yield the shared test database session."""
+        yield self.session
 
     def _get_current_user(self) -> Any:
         """Return the authenticated test user for protected endpoints."""

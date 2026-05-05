@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from app.api.auth import get_current_user
+from app.api.permissions import permissions
 from app.crud.llm import llm as llm_crud
+from app.models.access import AccessLevel
 from app.schemas.schemas import AgentResponse
 from app.schemas.session import (
     ConsumerSessionListItem,
     ConsumerSessionListResponse,
 )
+from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.session_service import SessionService
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,6 +38,8 @@ def _serialize_consumer_agent_response(
         "id": agent.id,
         "name": agent.name,
         "description": agent.description,
+        "created_by_user_id": agent.created_by_user_id,
+        "use_scope": agent.use_scope,
         "llm_id": agent.llm_id,
         "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
         "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
@@ -68,17 +73,21 @@ def _resolve_model_display(
 @router.get("/consumer/agents", response_model=list[AgentResponse])
 async def list_consumer_agents(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> list[dict[str, Any]]:
     """List all agents currently visible in the Consumer product."""
-    del current_user
-    service = AgentService(db)
+    agents = AccessService(db).list_accessible_agents(
+        user=current_user,
+        access_level=AccessLevel.USE,
+        require_published=True,
+        require_serving=True,
+    )
     return [
         _serialize_consumer_agent_response(
             agent,
             model_display=_resolve_model_display(db, agent.llm_id, agent.model_name),
         )
-        for agent in service.list_consumer_visible_agents()
+        for agent in agents
     ]
 
 
@@ -86,14 +95,18 @@ async def list_consumer_agents(
 async def get_consumer_agent(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> dict[str, Any]:
     """Return one Consumer-visible agent by identifier."""
-    del current_user
     try:
         agent = AgentService(db).require_consumer_visible_agent(agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.USE,
+    )
 
     return _serialize_consumer_agent_response(
         agent,
@@ -105,12 +118,18 @@ async def get_consumer_agent(
 async def list_consumer_sessions(
     limit: int = 20,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> ConsumerSessionListResponse:
     """List the current user's recent sessions for Consumer-visible agents."""
     visible_agents = {
         agent.id: agent
-        for agent in AgentService(db).list_consumer_visible_agents()
+        for agent in AccessService(db).list_accessible_agents(
+            user=current_user,
+            access_level=AccessLevel.USE,
+            require_published=True,
+            require_serving=True,
+            limit=10000,
+        )
         if agent.id is not None
     }
     sessions = SessionService(db).get_sessions_by_user(

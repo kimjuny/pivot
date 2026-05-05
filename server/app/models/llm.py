@@ -32,6 +32,12 @@ class LLM(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
+    created_by_user_id: int | None = Field(
+        default=None,
+        foreign_key="user.id",
+        index=True,
+    )
+    use_scope: str = Field(default="all", index=True, max_length=32)
     endpoint: str = Field(description="HTTP API Base URL")
     model: str = Field(description="Model identifier for API")
     api_key: str = Field(description="Authentication credential (should be encrypted)")

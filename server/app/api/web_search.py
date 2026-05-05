@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.models.agent import Agent
 from app.models.web_search import AgentWebSearchBinding
 from app.schemas.web_search import (
@@ -14,6 +14,7 @@ from app.schemas.web_search import (
     WebSearchCatalogItemResponse,
     WebSearchTestResponse,
 )
+from app.security.permission_catalog import Permission
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.provider_registry_service import ProviderRegistryService
 from app.services.web_search_service import WebSearchService
@@ -49,7 +50,7 @@ async def get_web_search_provider_logo(
 async def list_web_search_providers(
     agent_id: int | None = None,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> list[dict[str, object]]:
     """List all installed built-in web-search provider manifests."""
     del current_user
@@ -63,7 +64,7 @@ async def list_web_search_providers(
 async def get_web_search_provider_manifest(
     provider_key: str,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> dict[str, object]:
     """Return one web-search provider manifest by provider key."""
     del current_user
@@ -83,7 +84,7 @@ async def get_web_search_provider_manifest(
 async def list_agent_web_search_bindings(
     agent_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> list[WebSearchBindingResponse]:
     """List the web-search bindings configured for one agent."""
     del current_user
@@ -102,7 +103,7 @@ async def create_agent_web_search_binding(
     agent_id: int,
     payload: WebSearchBindingCreate,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> WebSearchBindingResponse:
     """Create one web-search provider binding for an agent."""
     agent = db.get(Agent, agent_id)
@@ -137,7 +138,7 @@ async def update_agent_web_search_binding(
     binding_id: int,
     payload: WebSearchBindingUpdate,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> WebSearchBindingResponse:
     """Update one configured web-search provider binding."""
     try:
@@ -160,7 +161,7 @@ async def update_agent_web_search_binding(
 async def delete_agent_web_search_binding(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ):
     """Delete one configured web-search provider binding."""
     binding = db.get(AgentWebSearchBinding, binding_id)
@@ -184,7 +185,7 @@ async def delete_agent_web_search_binding(
 async def test_agent_web_search_binding(
     binding_id: int,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test for a saved binding."""
     del current_user
@@ -205,7 +206,7 @@ async def test_web_search_provider_draft(
     provider_key: str,
     payload: WebSearchBindingTestRequest,
     db=Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(permissions(Permission.WEB_SEARCH_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test for unsaved form values."""
     del current_user

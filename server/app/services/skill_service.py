@@ -16,6 +16,7 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 from zipfile import ZipFile
 
+from app.models.access import AccessLevel, ResourceType
 from app.models.skill import Skill
 from app.models.user import User
 from app.orchestration.skills.github import (
@@ -27,6 +28,7 @@ from app.orchestration.skills.skill_files import (
     parse_front_matter,
     rewrite_skill_name,
 )
+from app.services.access_service import AccessService
 from app.services.skill_artifact_storage_service import (
     SkillArtifactStorageService,
     StoredSkillArtifact,
@@ -480,6 +482,34 @@ def _creator_name_map(session: Session) -> dict[int, str]:
     return {user.id: user.username for user in users if user.id is not None}
 
 
+def _user_by_username(session: Session, username: str) -> User:
+    user = session.exec(select(User).where(User.username == username)).first()
+    if user is None or user.id is None:
+        raise ValueError(f"User '{username}' not found.")
+    return user
+
+
+def _skill_use_scope(skill: Skill) -> str:
+    return skill.use_scope
+
+
+def _has_skill_access(
+    session: Session,
+    *,
+    user: User,
+    skill: Skill,
+    access_level: AccessLevel,
+) -> bool:
+    return AccessService(session).has_resource_access(
+        user=user,
+        resource_type=ResourceType.SKILL,
+        resource_id=skill.id,
+        access_level=access_level,
+        creator_user_id=skill.creator_id,
+        use_scope=_skill_use_scope(skill),
+    )
+
+
 def _serialize_utc_timestamp(value: datetime) -> str:
     """Serialize persisted datetimes as explicit UTC ISO 8601 strings.
 
@@ -495,17 +525,18 @@ def _serialize_skill(
     *,
     creator_lookup: dict[int, str],
     current_username: str | None,
+    can_edit: bool | None = None,
 ) -> dict[str, Any]:
     creator = (
         creator_lookup.get(skill.creator_id) if skill.creator_id is not None else None
     )
-    read_only = False
-    if (
-        creator is not None
+    read_only = (
+        not can_edit
+        if can_edit is not None
+        else creator is not None
         and current_username is not None
         and creator != current_username
-    ):
-        read_only = True
+    )
 
     return {
         "name": skill.name,
@@ -517,7 +548,9 @@ def _serialize_skill(
         "artifact_digest": skill.artifact_digest,
         "artifact_size_bytes": skill.artifact_size_bytes,
         "kind": skill.kind,
+        "use_scope": skill.use_scope,
         "source": skill.source,
+        "creator_id": skill.creator_id,
         "creator": creator,
         "read_only": read_only,
         "md5": skill.md5,
@@ -536,14 +569,17 @@ def _all_skills_query(session: Session) -> list[Skill]:
 
 
 def _visible_skills_query(session: Session, username: str) -> list[Skill]:
-    user = session.exec(select(User).where(User.username == username)).first()
-    if user is None or user.id is None:
-        raise ValueError(f"User '{username}' not found.")
+    user = _user_by_username(session, username)
 
     return [
         skill
         for skill in _all_skills_query(session)
-        if skill.kind == "shared" or skill.creator_id == user.id
+        if _has_skill_access(
+            session,
+            user=user,
+            skill=skill,
+            access_level=AccessLevel.USE,
+        )
     ]
 
 
@@ -574,6 +610,7 @@ def _upsert_skill_row(
                 name=discovered.name,
                 description=discovered.description,
                 kind=discovered.kind,
+                use_scope="all",
                 source=discovered.source,
                 creator_id=discovered.creator_id,
                 location=discovered.location,
@@ -663,9 +700,7 @@ def list_shared_skills(session: Session, username: str) -> list[dict[str, Any]]:
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
-    user = session.exec(select(User).where(User.username == username)).first()
-    if user is None or user.id is None:
-        raise ValueError(f"User '{username}' not found.")
+    user = _user_by_username(session, username)
 
     statement = select(Skill).where(Skill.kind == "shared").order_by(Skill.name)
     skills = list(session.exec(statement).all())
@@ -674,8 +709,20 @@ def list_shared_skills(session: Session, username: str) -> list[dict[str, Any]]:
             skill,
             creator_lookup=creator_lookup,
             current_username=username,
+            can_edit=_has_skill_access(
+                session,
+                user=user,
+                skill=skill,
+                access_level=AccessLevel.EDIT,
+            ),
         )
         for skill in skills
+        if _has_skill_access(
+            session,
+            user=user,
+            skill=skill,
+            access_level=AccessLevel.USE,
+        )
     ]
 
 
@@ -691,13 +738,11 @@ def list_private_skills(session: Session, username: str) -> list[dict[str, Any]]
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
-    user = session.exec(select(User).where(User.username == username)).first()
-    if user is None or user.id is None:
-        raise ValueError(f"User '{username}' not found.")
+    user = _user_by_username(session, username)
 
     statement = (
         select(Skill)
-        .where(Skill.kind == "private", Skill.creator_id == user.id)
+        .where(Skill.kind == "private")
         .order_by(Skill.name)
     )
     skills = session.exec(statement).all()
@@ -706,8 +751,15 @@ def list_private_skills(session: Session, username: str) -> list[dict[str, Any]]
             skill,
             creator_lookup=creator_lookup,
             current_username=username,
+            can_edit=True,
         )
         for skill in skills
+        if _has_skill_access(
+            session,
+            user=user,
+            skill=skill,
+            access_level=AccessLevel.EDIT,
+        )
     ]
 
 
@@ -723,15 +775,69 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
+    user = _user_by_username(session, username)
     skills = _visible_skills_query(session, username)
     return [
         _serialize_skill(
             skill,
             creator_lookup=creator_lookup,
             current_username=username,
+            can_edit=_has_skill_access(
+                session,
+                user=user,
+                skill=skill,
+                access_level=AccessLevel.EDIT,
+            ),
         )
         for skill in skills
     ]
+
+
+def get_skill_by_name(session: Session, skill_name: str) -> Skill | None:
+    """Return one skill registry row by globally unique skill name."""
+    sync_skill_registry(session)
+    return session.exec(select(Skill).where(Skill.name == skill_name)).first()
+
+
+def set_skill_access(
+    session: Session,
+    *,
+    skill: Skill,
+    use_scope: str,
+    use_user_ids: set[int],
+    use_group_ids: set[int],
+    edit_user_ids: set[int],
+    edit_group_ids: set[int],
+) -> None:
+    """Replace selected use/edit grants for one skill."""
+    if skill.id is None:
+        raise ValueError("Skill must be persisted before access can be updated.")
+    if use_scope not in {"all", "selected"}:
+        raise ValueError("use_scope must be 'all' or 'selected'.")
+    if skill.creator_id is not None:
+        edit_user_ids = set(edit_user_ids)
+        edit_user_ids.add(skill.creator_id)
+
+    skill.use_scope = use_scope
+    skill.updated_at = datetime.now(UTC)
+    session.add(skill)
+    access_service = AccessService(session)
+    access_service._replace_resource_grants_in_session(
+        resource_type=ResourceType.SKILL,
+        resource_id=skill.id,
+        access_level=AccessLevel.USE,
+        user_ids=use_user_ids if use_scope == "selected" else set(),
+        group_ids=use_group_ids if use_scope == "selected" else set(),
+    )
+    access_service._replace_resource_grants_in_session(
+        resource_type=ResourceType.SKILL,
+        resource_id=skill.id,
+        access_level=AccessLevel.EDIT,
+        user_ids=edit_user_ids,
+        group_ids=edit_group_ids,
+    )
+    session.commit()
+    session.refresh(skill)
 
 
 def list_allowed_visible_skills(
@@ -814,6 +920,7 @@ def _read_skill_payload(
     username: str,
 ) -> dict[str, Any]:
     creator_lookup = _creator_name_map(session)
+    user = _user_by_username(session, username)
     return {
         "name": skill.name,
         "source": _read_markdown(_skill_content_path(skill)),
@@ -821,6 +928,12 @@ def _read_skill_payload(
             skill,
             creator_lookup=creator_lookup,
             current_username=username,
+            can_edit=_has_skill_access(
+                session,
+                user=user,
+                skill=skill,
+                access_level=AccessLevel.EDIT,
+            ),
         ),
     }
 
@@ -852,14 +965,17 @@ def read_user_skill(
         raise ValueError(f"Invalid skill kind: {kind}")
 
     sync_skill_registry(session)
-    user = session.exec(select(User).where(User.username == username)).first()
-    if user is None or user.id is None:
-        raise ValueError(f"User '{username}' not found.")
+    user = _user_by_username(session, username)
 
     skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if skill is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found.")
-    if skill.creator_id != user.id or skill.kind != kind:
+    if skill.kind != kind or not _has_skill_access(
+        session,
+        user=user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
         raise PermissionError(f"Skill '{skill_name}' is not editable by '{username}'.")
 
     return _read_skill_payload(session, skill=skill, username=username)
@@ -886,15 +1002,20 @@ def read_shared_skill(
     """
     _validate_skill_name(skill_name)
     sync_skill_registry(session)
-    user = session.exec(select(User).where(User.username == username)).first()
-    if user is None or user.id is None:
-        raise ValueError(f"User '{username}' not found.")
+    user = _user_by_username(session, username)
 
     skill = session.exec(
         select(Skill).where(Skill.name == skill_name, Skill.kind == "shared")
     ).first()
     if skill is None:
         raise FileNotFoundError(f"Shared skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=user,
+        skill=skill,
+        access_level=AccessLevel.USE,
+    ):
+        raise PermissionError(f"Shared skill '{skill_name}' is not visible.")
 
     return _read_skill_payload(session, skill=skill, username=username)
 

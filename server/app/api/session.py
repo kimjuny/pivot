@@ -5,6 +5,7 @@ from typing import Literal, cast
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.models.access import AccessLevel
 from app.models.session import Session
 from app.models.user import User
 from app.schemas.session import (
@@ -21,7 +22,11 @@ from app.schemas.session import (
     SessionUpdate,
     TaskMessage,
 )
+from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
+from app.services.agent_service import AgentService
 from app.services.agent_snapshot_service import AgentSnapshotService
+from app.services.permission_service import PermissionService
 from app.services.session_service import (
     SESSION_METADATA_UNSET,
     SessionService,
@@ -30,6 +35,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session as DBSession
 
 router = APIRouter()
+
+
+def _require_session_permission(
+    db: DBSession,
+    user: User,
+    session_type: Literal["consumer", "studio_test"],
+) -> None:
+    required_permission = (
+        Permission.AGENTS_MANAGE
+        if session_type == "studio_test"
+        else Permission.CLIENT_ACCESS
+    )
+    PermissionService(db).require_permissions(user, (required_permission,))
 
 
 def _build_session_response(
@@ -78,6 +96,15 @@ async def create_session(
     """
     service = SessionService(db)
     try:
+        _require_session_permission(db, current_user, request.type)
+        agent = AgentService(db).get_required_agent(request.agent_id)
+        AccessService(db).require_agent_access(
+            user=current_user,
+            agent=agent,
+            access_level=(
+                AccessLevel.EDIT if request.type == "studio_test" else AccessLevel.USE
+            ),
+        )
         test_snapshot_id: int | None = None
         if request.type == "studio_test":
             if request.test_snapshot is None:
@@ -136,6 +163,13 @@ async def list_sessions(
     Returns:
         List of sessions with brief information.
     """
+    if session_type is not None:
+        _require_session_permission(db, current_user, session_type)
+    else:
+        PermissionService(db).require_permissions(
+            current_user,
+            (Permission.CLIENT_ACCESS,),
+        )
     service = SessionService(db)
     sessions = service.get_sessions_by_user(
         user=current_user.username,
@@ -208,6 +242,9 @@ async def get_session(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_permission(
+        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
+    )
 
     test_workspace_hash = None
     if session.test_snapshot_id is not None:
@@ -249,6 +286,9 @@ async def update_session(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_permission(
+        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
+    )
 
     updated_session = service.update_session_metadata(
         session_id,
@@ -305,6 +345,9 @@ async def get_session_history(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_permission(
+        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
+    )
 
     messages = service.get_chat_history(session_id)
 
@@ -348,6 +391,9 @@ async def get_full_session_history(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_permission(
+        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
+    )
 
     tasks_data = service.get_full_session_history(session_id)
 
@@ -454,6 +500,9 @@ async def delete_session(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_permission(
+        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
+    )
 
     if service.delete_session(session_id):
         return {"status": "deleted", "session_id": session_id}

@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Plus, Pencil, Trash2, Server, X, Download, Upload, Copy } from "@/lib/lucide";
 import { toast } from 'sonner';
-import { getLLMs, deleteLLM, updateLLM, createLLM } from '../utils/api';
+import {
+  getLLMs,
+  deleteLLM,
+  updateLLM,
+  updateLLMAccess,
+  createLLM,
+  type LLMAccess,
+} from '../utils/api';
 import type { LLM } from '../types';
 import LLMModal from './LLMModal';
 import ConfirmationModal from './ConfirmationModal';
@@ -365,12 +372,20 @@ function LLMList() {
     image_output: boolean;
     max_context: number;
     extra_config: string;
-  }) => {
+  }, access: LLMAccess) => {
     if (modalMode === 'create') {
-      await createLLM(llmData);
+      await createLLM({
+        ...llmData,
+        use_scope: access.use_scope,
+        use_user_ids: access.use_user_ids,
+        use_group_ids: access.use_group_ids,
+        edit_user_ids: access.edit_user_ids,
+        edit_group_ids: access.edit_group_ids,
+      });
       toast.success('LLM created');
     } else if (modalMode === 'edit' && editingLLM) {
       await updateLLM(editingLLM.id, llmData);
+      await updateLLMAccess(editingLLM.id, access);
       toast.success('LLM updated');
     }
     await loadLLMs();
@@ -617,6 +632,8 @@ function LLMList() {
       <LLMModal
         isOpen={isModalOpen}
         mode={modalMode}
+        llmId={editingLLM?.id ?? null}
+        creatorUserId={editingLLM?.created_by_user_id ?? null}
         onClose={() => setIsModalOpen(false)}
         onSave={handleModalSave}
         initialData={

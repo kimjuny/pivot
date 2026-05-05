@@ -4,6 +4,8 @@ import { createContext, useContext } from 'react';
 export interface User {
   id: number;
   username: string;
+  role: string;
+  permissions: string[];
 }
 
 /** Authentication context type. */
@@ -121,6 +123,13 @@ export function getStoredUser(): User | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Return whether a user has one effective backend permission.
+ */
+export function hasPermission(user: User | null | undefined, permission: string): boolean {
+  return user?.permissions?.includes(permission) ?? false;
 }
 
 /**

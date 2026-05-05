@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  ChevronDown,
   Globe2,
-  KeyRound,
   Pencil,
   Plus,
-  Share2,
+  SlidersHorizontal,
   Trash2,
   Upload,
   User as UserIcon,
@@ -19,6 +17,12 @@ import {
   getSharedSkillSource,
   upsertUserSkill,
   deleteUserSkill,
+  getSkillAccess,
+  getSkillAccessOptions,
+  getSkillCreateAccessOptions,
+  updateSkillAccess,
+  type SkillAccess,
+  type SkillAccessOptions,
   type SkillSource,
   type SharedSkill,
   type UserSkill,
@@ -43,17 +47,15 @@ import {
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatTimestamp } from '@/utils/timestamp';
 import DraggableDialog from './DraggableDialog';
 import SkillEditor from './SkillEditor';
 import SkillImportDialog from './SkillImportDialog';
+import ResourceAuthTab from '@/components/ResourceAuthTab';
 
 const PAGE_SIZE = 10;
 
@@ -70,6 +72,17 @@ Describe reusable guidance or process here.
 type SkillRow =
   | { kind: 'shared'; source: SkillSource; skill: SharedSkill }
   | { kind: 'private'; source: SkillSource; skill: UserSkill };
+
+type SkillDialogTab = 'general' | 'auth';
+
+const EMPTY_SKILL_ACCESS: SkillAccess = {
+  skill_name: '',
+  use_scope: 'all',
+  use_user_ids: [],
+  use_group_ids: [],
+  edit_user_ids: [],
+  edit_group_ids: [],
+};
 
 function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -121,9 +134,21 @@ function SkillsPage() {
   const [editingKind, setEditingKind] = useState<'private' | 'shared'>('private');
   const [editorSource, setEditorSource] = useState('');
   const [editorReadOnly, setEditorReadOnly] = useState(false);
+  const [editorSaveMode, setEditorSaveMode] = useState<'direct' | 'dialog'>('direct');
   const [isSaving, setIsSaving] = useState(false);
-  const [isCreateMenuOpen, setIsCreateMenuOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [skillDialogOpen, setSkillDialogOpen] = useState(false);
+  const [skillDialogTab, setSkillDialogTab] = useState<SkillDialogTab>('general');
+  const [skillDialogMode, setSkillDialogMode] = useState<'create' | 'edit'>('create');
+  const [skillDialogKind, setSkillDialogKind] = useState<'private' | 'shared'>('private');
+  const [skillDialogName, setSkillDialogName] = useState('');
+  const [skillDialogSource, setSkillDialogSource] = useState(NEW_SKILL_TEMPLATE);
+  const [skillAccess, setSkillAccess] = useState<SkillAccess>(EMPTY_SKILL_ACCESS);
+  const [skillAccessUsers, setSkillAccessUsers] =
+    useState<SkillAccessOptions['users']>([]);
+  const [skillAccessGroups, setSkillAccessGroups] =
+    useState<SkillAccessOptions['groups']>([]);
+  const [skillAccessLoading, setSkillAccessLoading] = useState(false);
 
   const loadSkills = useCallback(async () => {
     setIsLoading(true);
@@ -170,18 +195,78 @@ function SkillsPage() {
     return filteredRows.slice(start, start + PAGE_SIZE);
   }, [filteredRows, currentPage]);
 
-  const openCreateDialog = (kind: 'private' | 'shared') => {
-    setEditingName(null);
-    setEditingKind(kind);
-    setEditorSource(NEW_SKILL_TEMPLATE);
+  const openCreateDialog = async () => {
+    setSkillDialogMode('create');
+    setSkillDialogKind('private');
+    setSkillDialogTab('general');
+    setSkillDialogName('my_skill');
+    setSkillDialogSource(NEW_SKILL_TEMPLATE);
+    setSkillAccess(EMPTY_SKILL_ACCESS);
+    setSkillDialogOpen(true);
+    setSkillAccessLoading(true);
+    try {
+      const options = await getSkillCreateAccessOptions();
+      setSkillAccessUsers(options.users);
+      setSkillAccessGroups(options.groups);
+    } catch {
+      toast.error('Failed to load skill auth options');
+    } finally {
+      setSkillAccessLoading(false);
+    }
+  };
+
+  const openDialogSourceEditor = async () => {
+    setEditingName(skillDialogMode === 'edit' ? skillDialogName : null);
+    setEditingKind(skillDialogKind);
+    if (skillDialogMode === 'edit') {
+      try {
+        const result = await getUserSkillSource(skillDialogKind, skillDialogName);
+        setEditorSource(result.source);
+      } catch {
+        toast.error(`Failed to load skill "${skillDialogName}"`);
+        return;
+      }
+    } else {
+      setEditorSource(skillDialogSource);
+    }
     setEditorReadOnly(false);
+    setEditorSaveMode('dialog');
     setEditorOpen(true);
   };
 
-  const openEditDialog = useCallback(async (row: SkillRow) => {
+  const openSkillDialog = useCallback(async (row: SkillRow) => {
+    if (row.skill.read_only) {
+      toast.error('This skill is read-only');
+      return;
+    }
+    setSkillDialogMode('edit');
+    setSkillDialogKind(row.kind);
+    setSkillDialogTab('general');
+    setSkillDialogName(row.skill.name);
+    setSkillDialogSource('');
+    setSkillAccessLoading(true);
+    setSkillDialogOpen(true);
+    try {
+      const [nextAccess, options] = await Promise.all([
+        getSkillAccess(row.skill.name),
+        getSkillAccessOptions(row.skill.name),
+      ]);
+      setSkillAccess(nextAccess);
+      setSkillAccessUsers(options.users);
+      setSkillAccessGroups(options.groups);
+    } catch {
+      toast.error(`Failed to load skill auth for "${row.skill.name}"`);
+      setSkillDialogOpen(false);
+    } finally {
+      setSkillAccessLoading(false);
+    }
+  }, []);
+
+  const openSourceEditor = useCallback(async (row: SkillRow) => {
     try {
       if (row.kind === 'private') {
         const result = await getUserSkillSource('private', row.skill.name);
+        setEditorSaveMode('direct');
         setEditingKind('private');
         setEditingName(row.skill.name);
         setEditorSource(result.source);
@@ -192,6 +277,7 @@ function SkillsPage() {
 
       if (!row.skill.read_only) {
         const result = await getUserSkillSource('shared', row.skill.name);
+        setEditorSaveMode('direct');
         setEditingKind('shared');
         setEditingName(row.skill.name);
         setEditorSource(result.source);
@@ -201,6 +287,7 @@ function SkillsPage() {
       }
 
       const result = await getSharedSkillSource(row.skill.name);
+      setEditorSaveMode('direct');
       setEditingKind('shared');
       setEditingName(row.skill.name);
       setEditorSource(result.source);
@@ -235,6 +322,41 @@ function SkillsPage() {
     }
   }, [editingKind, editingName, editorReadOnly, loadSkills]);
 
+  const handleSkillDialogSave = useCallback(async () => {
+    const targetName = sanitizeSkillName(skillDialogName);
+    if (!targetName) {
+      toast.error('Skill name is required');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      if (skillDialogMode === 'create') {
+        await upsertUserSkill('private', targetName, skillDialogSource);
+      }
+      await updateSkillAccess(targetName, {
+        use_scope: skillAccess.use_scope,
+        use_user_ids: skillAccess.use_user_ids,
+        use_group_ids: skillAccess.use_group_ids,
+        edit_user_ids: skillAccess.edit_user_ids,
+        edit_group_ids: skillAccess.edit_group_ids,
+      });
+      toast.success(`Skill "${targetName}" saved`);
+      setSkillDialogOpen(false);
+      await loadSkills();
+    } catch {
+      toast.error(`Failed to save skill "${targetName}"`);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    skillAccess,
+    skillDialogMode,
+    skillDialogName,
+    skillDialogSource,
+    loadSkills,
+  ]);
+
   const handleDelete = useCallback(async (row: SkillRow) => {
     if (row.skill.read_only) {
       toast.error('This skill is read-only');
@@ -257,6 +379,12 @@ function SkillsPage() {
     () => new Set(allRows.map((row) => row.skill.name)),
     [allRows]
   );
+  const skillDialogCreatorId = useMemo(
+    () =>
+      allRows.find((row) => row.skill.name === skillDialogName)?.skill.creator_id ??
+      null,
+    [allRows, skillDialogName],
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
@@ -264,7 +392,7 @@ function SkillsPage() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Skills</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Shared skills are visible to everyone, but only the creator can edit them.
+            Manage reusable skills and control who can use or edit each one.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -277,47 +405,14 @@ function SkillsPage() {
             <Upload className="w-4 h-4" />
             Import
           </Button>
-          <div
-            onMouseEnter={() => setIsCreateMenuOpen(true)}
-            onMouseLeave={() => setIsCreateMenuOpen(false)}
+          <Button
+            size="sm"
+            className="flex items-center gap-1.5"
+            onClick={() => void openCreateDialog()}
           >
-            <DropdownMenu open={isCreateMenuOpen} onOpenChange={setIsCreateMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" className="flex items-center gap-1.5">
-                  <Plus className="w-4 h-4" />
-                  New
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="w-44"
-                onMouseEnter={() => setIsCreateMenuOpen(true)}
-                onMouseLeave={() => setIsCreateMenuOpen(false)}
-              >
-                <DropdownMenuItem
-                  onClick={() => {
-                    openCreateDialog('shared');
-                    setIsCreateMenuOpen(false);
-                  }}
-                  className="gap-2"
-                >
-                  <Share2 className="w-4 h-4" />
-                  Shared
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    openCreateDialog('private');
-                    setIsCreateMenuOpen(false);
-                  }}
-                  className="gap-2"
-                >
-                  <KeyRound className="w-4 h-4" />
-                  Private
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+            <Plus className="w-4 h-4" />
+            New
+          </Button>
         </div>
       </div>
 
@@ -378,7 +473,7 @@ function SkillsPage() {
           {allRows.length === 0 ? (
             <>
               <p className="text-sm">No skills found.</p>
-              <Button size="sm" variant="outline" onClick={() => openCreateDialog('private')}>
+              <Button size="sm" variant="outline" onClick={() => void openCreateDialog()}>
                 <Plus className="w-4 h-4 mr-1.5" />
                 Create your first skill
               </Button>
@@ -433,8 +528,18 @@ function SkillsPage() {
                         variant="ghost"
                         size="icon"
                         className="h-7 w-7"
-                        aria-label={`Edit skill ${row.skill.name}`}
-                        onClick={() => void openEditDialog(row)}
+                        aria-label={`Configure skill ${row.skill.name}`}
+                        onClick={() => void openSkillDialog(row)}
+                        disabled={row.skill.read_only}
+                      >
+                        <SlidersHorizontal className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        aria-label={`Edit SKILL.md for ${row.skill.name}`}
+                        onClick={() => void openSourceEditor(row)}
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </Button>
@@ -513,20 +618,117 @@ function SkillsPage() {
         </>
       )}
 
+      <Dialog open={skillDialogOpen} onOpenChange={setSkillDialogOpen}>
+        <DialogContent className="flex max-h-[90vh] min-h-0 flex-col overflow-hidden sm:max-w-[720px]">
+          <DialogHeader>
+            <DialogTitle>
+              {skillDialogMode === 'create' ? 'New Skill' : 'Edit Skill'}
+            </DialogTitle>
+          </DialogHeader>
+          <Tabs
+            value={skillDialogTab}
+            onValueChange={(value) => setSkillDialogTab(value as SkillDialogTab)}
+            className="min-h-0 flex-1"
+          >
+            <TabsList className="grid h-auto w-full grid-cols-2">
+              <TabsTrigger value="general">General</TabsTrigger>
+              <TabsTrigger value="auth">Auth</TabsTrigger>
+            </TabsList>
+            <TabsContent value="general" className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label htmlFor="skill-name">Name</Label>
+                <Input
+                  id="skill-name"
+                  value={skillDialogName}
+                  onChange={(event) => setSkillDialogName(event.target.value)}
+                  disabled={skillDialogMode === 'edit' || isSaving}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium">Edit SKILL.md file</div>
+                  <div className="text-xs text-muted-foreground">
+                    Open the markdown source editor for this skill.
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void openDialogSourceEditor()}
+                  disabled={isSaving}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit
+                </Button>
+              </div>
+            </TabsContent>
+            <TabsContent value="auth" className="pt-4">
+              <ResourceAuthTab
+                access={skillAccess}
+                users={skillAccessUsers}
+                groups={skillAccessGroups}
+                loading={skillAccessLoading}
+                lockedEditUserIds={
+                  skillDialogMode === 'edit' && skillDialogCreatorId !== null
+                    ? [skillDialogCreatorId]
+                    : []
+                }
+                onAccessChange={(nextAccess) =>
+                  setSkillAccess((current) => ({
+                    ...current,
+                    ...nextAccess,
+                  }))
+                }
+              />
+            </TabsContent>
+          </Tabs>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setSkillDialogOpen(false)}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleSkillDialogSave()}
+              disabled={isSaving || skillAccessLoading || !skillDialogName.trim()}
+            >
+              {isSaving ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <DraggableDialog
         open={editorOpen}
         onOpenChange={setEditorOpen}
         title={
           editingName
             ? `${editorReadOnly ? 'View' : 'Edit'} Skill: ${editingName}`
-            : `New ${editingKind === 'shared' ? 'Shared' : 'Private'} Skill`
+            : 'Edit SKILL.md'
         }
         size="large"
       >
         <SkillEditor
           value={editorSource}
           onChange={setEditorSource}
-          onSave={editorReadOnly ? undefined : (src) => void handleSave(src)}
+          onSave={
+            editorReadOnly
+              ? undefined
+              : (src) => {
+                  if (editorSaveMode === 'dialog') {
+                    setSkillDialogSource(src);
+                    setEditorOpen(false);
+                    return;
+                  }
+                  void handleSave(src);
+                }
+          }
           isSaving={isSaving}
           readOnly={editorReadOnly}
         />

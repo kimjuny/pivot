@@ -12,16 +12,18 @@ import {
   Radio,
   Server,
   User,
+  Users,
   Wrench,
   Zap,
   FileText,
   Globe,
+  ShieldCheck,
 } from "@/lib/lucide";
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect, type ComponentType, type SVGProps } from 'react';
 import { getAgents } from '../utils/api';
 import type { Agent } from '../types';
-import { useAuth } from '../contexts/auth-core';
+import { hasPermission, useAuth } from '../contexts/auth-core';
 import { LLMBrandAvatar } from '@/components/LLMBrandAvatar';
 import { Button } from '@/components/ui/button';
 import { ModeToggle } from '@/components/ui/mode-toggle';
@@ -48,6 +50,7 @@ interface StudioMenuLinkItem {
   description: string;
   to?: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
+  requiredPermission?: string;
   disabled?: boolean;
 }
 
@@ -166,24 +169,28 @@ function Navigation() {
       description: 'Manage model endpoints, protocols, context limits, and thinking policies.',
       to: '/studio/assets/models',
       icon: Server,
+      requiredPermission: 'llms.manage',
     },
     {
       title: 'Tools',
       description: 'Manage executable capabilities that agents can call during runtime.',
       to: '/studio/assets/tools',
       icon: Wrench,
+      requiredPermission: 'tools.manage',
     },
     {
       title: 'Skills',
       description: 'Manage reusable guidance packs that can be mounted into agents.',
       to: '/studio/assets/skills',
       icon: Zap,
+      requiredPermission: 'skills.manage',
     },
     {
       title: 'Extensions',
       description: 'Import package folders, inspect installed versions, and manage package lifecycle state.',
       to: '/studio/assets/extensions',
       icon: FileText,
+      requiredPermission: 'extensions.manage',
     },
     {
       title: 'MCPs',
@@ -205,18 +212,21 @@ function Navigation() {
       description: 'Review installed delivery surfaces such as built-in and extension-backed channels.',
       to: '/studio/connections/channels',
       icon: Radio,
+      requiredPermission: 'channels.manage',
     },
     {
       title: 'Media Providers',
       description: 'Review installed media-generation providers before binding them to agents.',
       to: '/studio/connections/media-generation',
       icon: Layers,
+      requiredPermission: 'media_generation.manage',
     },
     {
       title: 'Web Search Providers',
       description: 'Review installed abstract search providers before binding them to agents.',
       to: '/studio/connections/web-search',
       icon: Globe,
+      requiredPermission: 'web_search.manage',
     },
     {
       title: 'Desktop Connectors',
@@ -238,6 +248,28 @@ function Navigation() {
       description: 'Inspect user sessions, execution traces, and long-running task behavior.',
       icon: Bot,
       to: '/studio/operations/sessions',
+      requiredPermission: 'operations.view',
+    },
+    {
+      title: 'Users',
+      description: 'Manage accounts, role assignment, and access status.',
+      icon: User,
+      to: '/studio/operations/users',
+      requiredPermission: 'users.manage',
+    },
+    {
+      title: 'Groups',
+      description: 'Manage batch authorization groups and their members.',
+      icon: Users,
+      to: '/studio/operations/groups',
+      requiredPermission: 'groups.manage',
+    },
+    {
+      title: 'Roles',
+      description: 'Configure system permissions for user roles.',
+      icon: ShieldCheck,
+      to: '/studio/operations/roles',
+      requiredPermission: 'roles.manage',
     },
     {
       title: 'Tool and Sandbox Logs',
@@ -313,17 +345,17 @@ function Navigation() {
     }
   }, [agentId]);
 
-  const handleAgentSelect = (agent: Agent) => {
-    navigate(`/studio/agents/${agent.id}`);
-  };
-
-  const handleNavigateToAgents = () => {
-    navigate('/studio/agents');
-  };
-
-  const handleNavigateToDashboard = () => {
-    navigate('/studio/dashboard');
-  };
+  const canAccessStudio = hasPermission(user, 'studio.access');
+  const canManageAgents = hasPermission(user, 'agents.manage');
+  const visibleAssetsMenuItems = assetsMenuItems.filter(
+    (item) => !item.requiredPermission || hasPermission(user, item.requiredPermission),
+  );
+  const visibleConnectionsMenuItems = connectionsMenuItems.filter(
+    (item) => !item.requiredPermission || hasPermission(user, item.requiredPermission),
+  );
+  const visibleOperationsMenuItems = operationsMenuItems.filter(
+    (item) => !item.requiredPermission || hasPermission(user, item.requiredPermission),
+  );
 
   return (
     <nav className="sticky top-0 z-50 bg-background border-b border-border">
@@ -347,56 +379,60 @@ function Navigation() {
         <div className="absolute left-1/2 -translate-x-1/2">
           <NavigationMenu viewport={false}>
             <NavigationMenuList className="gap-0">
-              <NavigationMenuItem>
-                <NavigationMenuLink asChild>
-                  <Link
-                    to="/studio/dashboard"
-                    className={cn(topLevelNavigationLinkClassName(isDashboardActive), "gap-1.5")}
-                  >
-                    <Presentation className="h-3.5 w-3.5" />
-                    <span>Dashboard</span>
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
+              {canAccessStudio && (
+                <NavigationMenuItem>
+                  <NavigationMenuLink asChild>
+                    <Link
+                      to="/studio/dashboard"
+                      className={cn(topLevelNavigationLinkClassName(isDashboardActive), "gap-1.5")}
+                    >
+                      <Presentation className="h-3.5 w-3.5" />
+                      <span>Dashboard</span>
+                    </Link>
+                  </NavigationMenuLink>
+                </NavigationMenuItem>
+              )}
 
-              <TopLevelSeparator />
+              {canAccessStudio && canManageAgents && <TopLevelSeparator />}
 
-              <NavigationMenuItem className="flex items-center gap-1">
-                <NavigationMenuLink asChild>
-                  <Link
-                    to="/studio/agents"
-                    className={cn(topLevelNavigationLinkClassName(isAgentsActive), "gap-1.5")}
-                    onMouseEnter={() => setIsAgentsButtonHovered(true)}
-                    onMouseLeave={() => setIsAgentsButtonHovered(false)}
-                  >
-                    <div className="relative h-3.5 w-3.5">
-                      <Bot
-                        className={cn(
-                          "absolute inset-0 h-3.5 w-3.5 transition-all duration-150",
-                          agentId && isAgentsButtonHovered
-                            ? "rotate-180 opacity-0"
-                            : "rotate-0 opacity-100"
-                        )}
-                        aria-hidden="true"
-                      />
-                      {agentId && (
-                        <ArrowLeft
+              {canManageAgents && (
+                <NavigationMenuItem className="flex items-center gap-1">
+                  <NavigationMenuLink asChild>
+                    <Link
+                      to="/studio/agents"
+                      className={cn(topLevelNavigationLinkClassName(isAgentsActive), "gap-1.5")}
+                      onMouseEnter={() => setIsAgentsButtonHovered(true)}
+                      onMouseLeave={() => setIsAgentsButtonHovered(false)}
+                    >
+                      <div className="relative h-3.5 w-3.5">
+                        <Bot
                           className={cn(
                             "absolute inset-0 h-3.5 w-3.5 transition-all duration-150",
-                            isAgentsButtonHovered
-                              ? "rotate-0 opacity-100"
-                              : "rotate-180 opacity-0"
+                            agentId && isAgentsButtonHovered
+                              ? "rotate-180 opacity-0"
+                              : "rotate-0 opacity-100"
                           )}
                           aria-hidden="true"
                         />
-                      )}
-                    </div>
-                    <span>Agents</span>
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
+                        {agentId && (
+                          <ArrowLeft
+                            className={cn(
+                              "absolute inset-0 h-3.5 w-3.5 transition-all duration-150",
+                              isAgentsButtonHovered
+                                ? "rotate-0 opacity-100"
+                                : "rotate-180 opacity-0"
+                            )}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </div>
+                      <span>Agents</span>
+                    </Link>
+                  </NavigationMenuLink>
+                </NavigationMenuItem>
+              )}
 
-              {agentId && currentAgent && (
+              {canManageAgents && agentId && currentAgent && (
                 <>
                   <li
                     aria-hidden="true"
@@ -429,8 +465,9 @@ function Navigation() {
                 </>
               )}
 
-              <TopLevelSeparator />
+              {visibleAssetsMenuItems.length > 0 && <TopLevelSeparator />}
 
+              {visibleAssetsMenuItems.length > 0 && (
               <NavigationMenuItem className="relative">
                 <NavigationMenuTrigger
                   className={cn(
@@ -443,7 +480,7 @@ function Navigation() {
                 </NavigationMenuTrigger>
                 <NavigationMenuContent>
                   <ul className="flex w-[280px] flex-col gap-1 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
-                    {assetsMenuItems.map((item) => (
+                    {visibleAssetsMenuItems.map((item) => (
                       <li key={item.title}>
                         <NavigationMenuListItem item={item} />
                       </li>
@@ -451,9 +488,11 @@ function Navigation() {
                   </ul>
                 </NavigationMenuContent>
               </NavigationMenuItem>
+              )}
 
-              <TopLevelSeparator />
+              {visibleConnectionsMenuItems.length > 0 && <TopLevelSeparator />}
 
+              {visibleConnectionsMenuItems.length > 0 && (
               <NavigationMenuItem className="relative">
                 <NavigationMenuTrigger
                   className={cn(
@@ -466,7 +505,7 @@ function Navigation() {
                 </NavigationMenuTrigger>
                 <NavigationMenuContent>
                   <ul className="flex w-[280px] flex-col gap-1 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
-                    {connectionsMenuItems.map((item) => (
+                    {visibleConnectionsMenuItems.map((item) => (
                       <li key={item.title}>
                         <NavigationMenuListItem item={item} />
                       </li>
@@ -474,9 +513,11 @@ function Navigation() {
                   </ul>
                 </NavigationMenuContent>
               </NavigationMenuItem>
+              )}
 
-              <TopLevelSeparator />
+              {visibleOperationsMenuItems.length > 0 && <TopLevelSeparator />}
 
+              {visibleOperationsMenuItems.length > 0 && (
               <NavigationMenuItem className="relative">
                 <NavigationMenuTrigger
                   className={cn(
@@ -489,7 +530,7 @@ function Navigation() {
                 </NavigationMenuTrigger>
                 <NavigationMenuContent>
                   <ul className="flex w-[280px] flex-col gap-1 rounded-md border bg-popover p-2 text-popover-foreground shadow-md">
-                    {operationsMenuItems.map((item) => (
+                    {visibleOperationsMenuItems.map((item) => (
                       <li key={item.title}>
                         <NavigationMenuListItem item={item} />
                       </li>
@@ -497,6 +538,7 @@ function Navigation() {
                   </ul>
                 </NavigationMenuContent>
               </NavigationMenuItem>
+              )}
             </NavigationMenuList>
           </NavigationMenu>
         </div>

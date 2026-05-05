@@ -1,3 +1,14 @@
+from app.models.access import (
+    AccessLevel,
+    GroupMember,
+    PermissionRecord,
+    PrincipalType,
+    ResourceAccess,
+    ResourceType,
+    Role,
+    RolePermission,
+    UserGroup,
+)
 from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import (
@@ -36,6 +47,7 @@ from app.models.workspace import Workspace
 
 __all__ = [
     "LLM",
+    "AccessLevel",
     "Agent",
     "AgentChannelBinding",
     "AgentExtensionBinding",
@@ -51,18 +63,26 @@ __all__ = [
     "ExtensionInstallation",
     "ExternalIdentityBinding",
     "FileAsset",
+    "GroupMember",
     "MediaGenerationUsageLog",
+    "PermissionRecord",
+    "PrincipalType",
     "Project",
     "ReactPlanStep",
     "ReactRecursion",
     "ReactRecursionState",
     "ReactTask",
     "ReactTaskEvent",
+    "ResourceAccess",
+    "ResourceType",
+    "Role",
+    "RolePermission",
     "Session",
     "Skill",
     "SkillChangeSubmission",
     "TaskAttachment",
     "User",
+    "UserGroup",
     "UserLogin",
     "UserResponse",
     "Workspace",

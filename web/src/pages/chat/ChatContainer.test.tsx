@@ -75,7 +75,12 @@ vi.mock("@/utils/api", async () => {
 vi.mock("@/contexts/auth-core", () => ({
   AUTH_EXPIRED_EVENT: "auth-expired",
   getAuthToken: () => "token-123",
-  getStoredUser: () => ({ username: "alice" }),
+  getStoredUser: () => ({
+    id: 1,
+    username: "alice",
+    role: "admin",
+    permissions: ["client.access"],
+  }),
   isTokenValid: () => true,
 }));
 
@@ -216,6 +221,7 @@ describe("ChatContainer session rollover", () => {
       name: "New Project",
       description: null,
       workspace_id: "workspace-1",
+      can_edit: true,
       created_at: "2026-03-19T00:00:00.000Z",
       updated_at: "2026-03-19T00:00:00.000Z",
     });
@@ -248,6 +254,7 @@ describe("ChatContainer session rollover", () => {
       name: "Renamed project",
       description: null,
       workspace_id: "workspace-1",
+      can_edit: true,
       created_at: "2026-03-19T00:00:00.000Z",
       updated_at: "2026-03-19T01:00:00.000Z",
     });

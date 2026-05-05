@@ -12,7 +12,7 @@ from typing import Any, cast
 from unittest.mock import patch
 
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
@@ -20,12 +20,26 @@ if str(SERVER_ROOT) not in sys.path:
 
 import_module("app.models")
 WorkspaceService = import_module("app.services.workspace_service").WorkspaceService
+access_models = import_module("app.models.access")
+user_models = import_module("app.models.user")
 workspace_service_module = import_module("app.services.workspace_service")
 workspace_file_service_module = import_module("app.services.workspace_file_service")
+access_service_module = import_module("app.services.access_service")
+permission_service_module = import_module("app.services.permission_service")
 WorkspaceFileService = workspace_file_service_module.WorkspaceFileService
 WorkspaceFileValidationError = (
     workspace_file_service_module.WorkspaceFileValidationError
 )
+WorkspaceFilePermissionError = (
+    workspace_file_service_module.WorkspaceFilePermissionError
+)
+AccessLevel = access_models.AccessLevel
+PrincipalType = access_models.PrincipalType
+ResourceType = access_models.ResourceType
+Role = access_models.Role
+User = user_models.User
+AccessService = access_service_module.AccessService
+PermissionService = permission_service_module.PermissionService
 LocalFilesystemPOSIXWorkspaceProvider = import_module(
     "app.storage.providers.local_fs"
 ).LocalFilesystemPOSIXWorkspaceProvider
@@ -43,6 +57,23 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
         )
         SQLModel.metadata.create_all(self.engine)
         self.db = Session(self.engine)
+        PermissionService(self.db).seed_defaults()
+        user_role = self.db.exec(select(Role).where(Role.key == "user")).one()
+        self.alice = User(
+            username="alice",
+            password_hash="hash",
+            role_id=user_role.id or 0,
+        )
+        self.bob = User(
+            username="bob",
+            password_hash="hash",
+            role_id=user_role.id or 0,
+        )
+        self.db.add(self.alice)
+        self.db.add(self.bob)
+        self.db.commit()
+        self.db.refresh(self.alice)
+        self.db.refresh(self.bob)
         self.tmpdir = tempfile.TemporaryDirectory()
         self.workspace_root = Path(self.tmpdir.name) / "workspace"
         self.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -189,3 +220,65 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
         self.assertEqual(read_result.content, image_bytes)
         self.assertEqual(read_result.mime_type, "image/png")
         self.assertEqual(read_result.size_bytes, len(image_bytes))
+
+    def test_workspace_use_grant_reads_but_does_not_write(self) -> None:
+        """Workspace grants should distinguish use from edit access."""
+        workspace = WorkspaceService(self.db).create_workspace(
+            agent_id=7,
+            username="alice",
+            scope="session_private",
+            session_id="session-5",
+        )
+        service = WorkspaceFileService(self.db)
+        service.write_text_file(
+            workspace_id=workspace.workspace_id,
+            username="alice",
+            path="notes.txt",
+            content="hello",
+        )
+        AccessService(self.db).grant_access(
+            resource_type=ResourceType.WORKSPACE,
+            resource_id=workspace.workspace_id,
+            principal_type=PrincipalType.USER,
+            principal_id=self.bob.id or 0,
+            access_level=AccessLevel.USE,
+        )
+
+        content = service.read_text_file(
+            workspace_id=workspace.workspace_id,
+            username="bob",
+            path="notes.txt",
+        )
+
+        self.assertEqual(content, "hello")
+        with self.assertRaises(WorkspaceFilePermissionError):
+            service.write_text_file(
+                workspace_id=workspace.workspace_id,
+                username="bob",
+                path="notes.txt",
+                content="updated",
+            )
+
+        AccessService(self.db).grant_access(
+            resource_type=ResourceType.WORKSPACE,
+            resource_id=workspace.workspace_id,
+            principal_type=PrincipalType.USER,
+            principal_id=self.bob.id or 0,
+            access_level=AccessLevel.EDIT,
+        )
+
+        service.write_text_file(
+            workspace_id=workspace.workspace_id,
+            username="bob",
+            path="notes.txt",
+            content="updated",
+        )
+
+        self.assertEqual(
+            service.read_text_file(
+                workspace_id=workspace.workspace_id,
+                username="alice",
+                path="notes.txt",
+            ),
+            "updated",
+        )

@@ -51,8 +51,8 @@ class SkillServiceTestCase(unittest.TestCase):
         self.workspace_patch.start()
         self.builtin_patch.start()
 
-        self.alice = User(username="alice", password_hash="hash")
-        self.bob = User(username="bob", password_hash="hash")
+        self.alice = User(username="alice", password_hash="hash", role_id=1)
+        self.bob = User(username="bob", password_hash="hash", role_id=1)
         self.session.add(self.alice)
         self.session.add(self.bob)
         self.session.commit()

@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { toast } from 'sonner';
 import { Info, Plus, Trash2 } from "@/lib/lucide";
 import {
   Dialog,
@@ -25,6 +26,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import {
+  getLLMAccess,
+  getLLMAccessOptions,
+  getLLMCreateAccessOptions,
+  type LLMAccess,
+} from '@/utils/api';
+import ResourceAuthTab from '@/components/ResourceAuthTab';
 import {
   THINKING_PROVIDER_OPTIONS,
   buildThinkingPolicyFromEditorState,
@@ -58,9 +66,11 @@ export interface LLMFormData {
 interface LLMModalProps {
   isOpen: boolean;
   mode: 'create' | 'edit';
+  llmId?: number | null;
+  creatorUserId?: number | null;
   initialData?: Partial<LLMFormData>;
   onClose: () => void;
-  onSave: (data: LLMFormData) => Promise<void>;
+  onSave: (data: LLMFormData, access: LLMAccess) => Promise<void>;
 }
 
 interface ExtraConfigEntry {
@@ -69,7 +79,16 @@ interface ExtraConfigEntry {
   value: string;
 }
 
-type LLMTabValue = 'general' | 'advanced';
+type LLMTabValue = 'general' | 'advanced' | 'auth';
+
+const EMPTY_LLM_ACCESS: LLMAccess = {
+  llm_id: 0,
+  use_scope: 'all',
+  use_user_ids: [],
+  use_group_ids: [],
+  edit_user_ids: [],
+  edit_group_ids: [],
+};
 
 interface FormLabelProps {
   htmlFor?: string;
@@ -288,7 +307,15 @@ function CapabilityToggle({
  * Modal for creating or editing an LLM configuration.
  * Uses shadcn Dialog with tabbed sections for the main LLM properties.
  */
-function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps) {
+function LLMModal({
+  isOpen,
+  mode,
+  llmId,
+  creatorUserId,
+  initialData,
+  onClose,
+  onSave,
+}: LLMModalProps) {
   const [formData, setFormData] = useState<LLMFormData>({
     name: '',
     endpoint: '',
@@ -308,6 +335,14 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
   const [activeTab, setActiveTab] = useState<LLMTabValue>('general');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [access, setAccess] = useState<LLMAccess>(EMPTY_LLM_ACCESS);
+  const [accessUsers, setAccessUsers] = useState<
+    Awaited<ReturnType<typeof getLLMAccessOptions>>['users']
+  >([]);
+  const [accessGroups, setAccessGroups] = useState<
+    Awaited<ReturnType<typeof getLLMAccessOptions>>['groups']
+  >([]);
+  const [isAccessLoading, setIsAccessLoading] = useState(false);
   const [extraConfigEntries, setExtraConfigEntries] = useState<ExtraConfigEntry[]>([
     createExtraConfigEntry(),
   ]);
@@ -359,6 +394,47 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
 
     setServerError(null);
   }, [initialData, isOpen, mode]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setAccess(EMPTY_LLM_ACCESS);
+      setAccessUsers([]);
+      setAccessGroups([]);
+      return;
+    }
+
+    let isCancelled = false;
+    setIsAccessLoading(true);
+    const accessRequest =
+      mode === 'edit' && llmId
+        ? Promise.all([getLLMAccess(llmId), getLLMAccessOptions(llmId)])
+        : Promise.all([
+            Promise.resolve(EMPTY_LLM_ACCESS),
+            getLLMCreateAccessOptions(),
+          ]);
+
+    void accessRequest
+      .then(([nextAccess, options]) => {
+        if (isCancelled) {
+          return;
+        }
+        setAccess(nextAccess);
+        setAccessUsers(options.users);
+        setAccessGroups(options.groups);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : 'Failed to load auth');
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsAccessLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, llmId, mode]);
 
   useEffect(() => {
     const options = CACHE_POLICY_OPTIONS[formData.protocol] ?? [{ value: 'none', label: 'None' }];
@@ -446,6 +522,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     formData.thinking_effort,
     formData.thinking_budget_tokens,
   );
+  const activeTabIndex = activeTab === 'general' ? 0 : activeTab === 'advanced' ? 1 : 2;
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
@@ -480,10 +557,13 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
     setServerError(null);
 
     try {
-      await onSave({
-        ...formData,
-        extra_config: normalized,
-      });
+      await onSave(
+        {
+          ...formData,
+          extra_config: normalized,
+        },
+        access,
+      );
       onClose();
     } catch (err) {
       const error = err as Error;
@@ -516,7 +596,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[480px]">
+      <DialogContent className="flex max-h-[90vh] min-h-0 flex-col overflow-hidden sm:max-w-[860px]">
         <DialogHeader>
           <DialogTitle>{mode === 'create' ? 'New LLM' : 'Edit LLM'}</DialogTitle>
         </DialogHeader>
@@ -531,14 +611,43 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as LLMTabValue)}
-            className="py-2"
+            orientation="vertical"
+            className="flex min-h-0 flex-1 gap-3 py-2"
           >
-            <TabsList className="grid h-auto w-full grid-cols-2">
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="advanced">Advanced</TabsTrigger>
+            <TabsList className="relative flex h-[560px] max-h-[calc(90vh-150px)] w-24 shrink-0 flex-col items-stretch justify-start gap-1 bg-transparent p-0">
+              <span
+                className="absolute left-0 top-1.5 h-6 w-0.5 bg-foreground transition-transform duration-200 ease-out"
+                style={{
+                  transform: `translateY(${activeTabIndex * 40}px)`,
+                }}
+                aria-hidden="true"
+              />
+              <TabsTrigger
+                value="general"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                General
+              </TabsTrigger>
+              <TabsTrigger
+                value="advanced"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                Advanced
+              </TabsTrigger>
+              <TabsTrigger
+                value="auth"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                Auth
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="general" className="space-y-4 pt-4">
+            <div className="min-w-0 flex-1">
+            <TabsContent
+              value="general"
+              className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+            >
+              <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <FormLabel
@@ -638,9 +747,14 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                   </SelectContent>
                 </Select>
               </div>
+              </div>
             </TabsContent>
 
-            <TabsContent value="advanced" className="space-y-4 pt-4">
+            <TabsContent
+              value="advanced"
+              className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+            >
+              <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <FormLabel
@@ -1006,7 +1120,34 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
                   ))}
                 </div>
               </div>
+              </div>
             </TabsContent>
+
+            <TabsContent
+              value="auth"
+              className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+            >
+              <ResourceAuthTab
+                access={access}
+                users={accessUsers}
+                groups={accessGroups}
+                loading={isAccessLoading}
+                lockedEditUserIds={
+                  mode === 'edit' &&
+                  creatorUserId !== null &&
+                  creatorUserId !== undefined
+                    ? [creatorUserId]
+                    : []
+                }
+                onAccessChange={(nextAccess) =>
+                  setAccess((current) => ({
+                    ...current,
+                    ...nextAccess,
+                  }))
+                }
+              />
+            </TabsContent>
+            </div>
 
           </Tabs>
         </TooltipProvider>
@@ -1025,6 +1166,7 @@ function LLMModal({ isOpen, mode, initialData, onClose, onSave }: LLMModalProps)
             onClick={() => void handleSubmit()}
             disabled={
               isSubmitting ||
+              isAccessLoading ||
               !formData.name.trim() ||
               !formData.endpoint.trim() ||
               !formData.model.trim() ||

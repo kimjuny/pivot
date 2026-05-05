@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Bot, Plus } from "@/lib/lucide";
 import { useNavigate } from 'react-router-dom';
-import { getLLMs } from '../utils/api';
-import type { LLM } from '../types';
+import { getUsableLLMs } from '../utils/api';
+import type { LLMUsable } from '../types';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
 import {
   Dialog,
@@ -74,7 +74,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
   const [activeTab, setActiveTab] = useState<AgentTabValue>('general');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [availableLLMs, setAvailableLLMs] = useState<LLM[]>([]);
+  const [availableLLMs, setAvailableLLMs] = useState<LLMUsable[]>([]);
   const [loadingLLMs, setLoadingLLMs] = useState<boolean>(false);
 
   useEffect(() => {
@@ -103,7 +103,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
   const loadLLMs = async () => {
     setLoadingLLMs(true);
     try {
-      const llms = await getLLMs();
+      const llms = await getUsableLLMs();
       setAvailableLLMs(llms);
     } catch (err) {
       const error = err as Error;

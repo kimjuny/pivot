@@ -63,12 +63,15 @@ import {
   Server as ServerIcon,
   Settings2 as Settings2Icon,
   Share2 as Share2Icon,
+  ShieldCheck as ShieldCheckIcon,
+  SlidersHorizontal as SlidersHorizontalIcon,
   Square as SquareIcon,
   SquarePen as SquarePenIcon,
   Sun as SunIcon,
   Trash2 as Trash2Icon,
   Upload as UploadIcon,
   User as UserIcon,
+  Users as UsersIcon,
   Wrench as WrenchIcon,
   X as XIcon,
   XCircle as XCircleIcon,
@@ -154,12 +157,15 @@ export const Search = withDefaultStroke(SearchIcon);
 export const Server = withDefaultStroke(ServerIcon);
 export const Settings2 = withDefaultStroke(Settings2Icon);
 export const Share2 = withDefaultStroke(Share2Icon);
+export const ShieldCheck = withDefaultStroke(ShieldCheckIcon);
+export const SlidersHorizontal = withDefaultStroke(SlidersHorizontalIcon);
 export const Square = withDefaultStroke(SquareIcon);
 export const SquarePen = withDefaultStroke(SquarePenIcon);
 export const Sun = withDefaultStroke(SunIcon);
 export const Trash2 = withDefaultStroke(Trash2Icon);
 export const Upload = withDefaultStroke(UploadIcon);
 export const User = withDefaultStroke(UserIcon);
+export const Users = withDefaultStroke(UsersIcon);
 export const Wrench = withDefaultStroke(WrenchIcon);
 export const X = withDefaultStroke(XIcon);
 export const XCircle = withDefaultStroke(XCircleIcon);

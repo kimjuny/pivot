@@ -78,7 +78,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.session.refresh(agent)
         self.agent = agent
 
-        user = User(username="alice", password_hash="hash")
+        user = User(username="alice", password_hash="hash", role_id=1)
         self.session.add(user)
         self.session.commit()
 

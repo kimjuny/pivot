@@ -17,7 +17,7 @@ import StudioDashboardPage from './components/StudioDashboardPage'
 import Navigation from './components/Navigation'
 import { StorageStatusBanner } from './components/StorageStatusBanner'
 import { AuthProvider } from './contexts/AuthContext'
-import { getStoredUser, isTokenValid, useAuth } from './contexts/auth-core'
+import { getStoredUser, hasPermission, isTokenValid, useAuth } from './contexts/auth-core'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import ConsumerEntryPage from '@/consumer/ConsumerEntryPage'
@@ -26,7 +26,58 @@ import ConsumerAgentPage from '@/consumer/ConsumerAgentPage'
 import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator'
 import SessionHistoryPage from '@/studio/operations/SessionHistoryPage'
 import SessionDetailPage from '@/studio/operations/SessionDetailPage'
+import UsersPage from '@/studio/operations/UsersPage'
+import RolesPage from '@/studio/operations/RolesPage'
+import GroupsPage from '@/studio/operations/GroupsPage'
 import './index.css'
+
+interface PermissionTarget {
+  permission: string;
+  to: string;
+}
+
+const studioTargets: PermissionTarget[] = [
+  { permission: 'studio.access', to: '/studio/dashboard' },
+  { permission: 'agents.manage', to: '/studio/agents' },
+  { permission: 'llms.manage', to: '/studio/assets/models' },
+  { permission: 'tools.manage', to: '/studio/assets/tools' },
+  { permission: 'skills.manage', to: '/studio/assets/skills' },
+  { permission: 'extensions.manage', to: '/studio/assets/extensions' },
+  { permission: 'channels.manage', to: '/studio/connections/channels' },
+  { permission: 'media_generation.manage', to: '/studio/connections/media-generation' },
+  { permission: 'web_search.manage', to: '/studio/connections/web-search' },
+  { permission: 'operations.view', to: '/studio/operations/sessions' },
+  { permission: 'users.manage', to: '/studio/operations/users' },
+  { permission: 'groups.manage', to: '/studio/operations/groups' },
+  { permission: 'roles.manage', to: '/studio/operations/roles' },
+];
+
+const assetTargets: PermissionTarget[] = [
+  { permission: 'llms.manage', to: '/studio/assets/models' },
+  { permission: 'tools.manage', to: '/studio/assets/tools' },
+  { permission: 'skills.manage', to: '/studio/assets/skills' },
+  { permission: 'extensions.manage', to: '/studio/assets/extensions' },
+];
+
+const connectionTargets: PermissionTarget[] = [
+  { permission: 'channels.manage', to: '/studio/connections/channels' },
+  { permission: 'media_generation.manage', to: '/studio/connections/media-generation' },
+  { permission: 'web_search.manage', to: '/studio/connections/web-search' },
+];
+
+const operationTargets: PermissionTarget[] = [
+  { permission: 'operations.view', to: '/studio/operations/sessions' },
+  { permission: 'users.manage', to: '/studio/operations/users' },
+  { permission: 'groups.manage', to: '/studio/operations/groups' },
+  { permission: 'roles.manage', to: '/studio/operations/roles' },
+];
+
+function firstAllowedTarget(
+  user: ReturnType<typeof getStoredUser>,
+  targets: PermissionTarget[],
+): string | null {
+  return targets.find((target) => hasPermission(user, target.permission))?.to ?? null;
+}
 
 /**
  * Protected route wrapper.
@@ -48,6 +99,70 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
+}
+
+export function PermissionRoute({
+  permission,
+  fallback = '/access-denied',
+  children,
+}: {
+  permission: string;
+  fallback?: string;
+  children: React.ReactNode;
+}) {
+  const { user, isLoading } = useAuth();
+  const activeUser = user ?? getStoredUser();
+
+  if (isLoading) {
+    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
+  }
+
+  if (!activeUser || !isTokenValid()) {
+    return <Navigate to="/" replace />;
+  }
+
+  if (!hasPermission(activeUser, permission)) {
+    return <Navigate to={fallback} replace />;
+  }
+
+  return <>{children}</>;
+}
+
+export function PermissionRedirect({
+  targets,
+  fallback = '/access-denied',
+}: {
+  targets: PermissionTarget[];
+  fallback?: string;
+}) {
+  const { user, isLoading } = useAuth();
+  const activeUser = user ?? getStoredUser();
+
+  if (isLoading) {
+    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
+  }
+
+  if (!activeUser || !isTokenValid()) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Navigate to={firstAllowedTarget(activeUser, targets) ?? fallback} replace />;
+}
+
+export function AccessDeniedPage() {
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-background text-foreground">
+        <Navigation />
+        <main className="mx-auto flex min-h-[calc(100vh-48px)] max-w-xl flex-col items-center justify-center px-6 text-center">
+          <h1 className="text-2xl font-semibold">Access unavailable</h1>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Your account is active, but this role does not include an available Pivot surface yet.
+          </p>
+        </main>
+      </div>
+    </ProtectedRoute>
+  );
 }
 
 /**
@@ -180,9 +295,9 @@ export function StudioDashboardRoute() {
  */
 export function ConsumerRouteLayout() {
   return (
-    <ProtectedRoute>
+    <PermissionRoute permission="client.access" fallback="/studio">
       <Outlet />
-    </ProtectedRoute>
+    </PermissionRoute>
   );
 }
 
@@ -194,6 +309,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Routes>
             {/* Public route - Login page */}
             <Route path="/" element={<LoginPage />} />
+            <Route path="/access-denied" element={<AccessDeniedPage />} />
 
             {/* Protected routes */}
             <Route path="/app" element={<ConsumerRouteLayout />}>
@@ -202,34 +318,37 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="agents/:agentId" element={<ConsumerAgentPage />} />
             </Route>
 
-            <Route path="/studio" element={<Navigate to="/studio/dashboard" replace />} />
-            <Route path="/studio/dashboard" element={<StudioDashboardRoute />} />
-            <Route path="/studio/agents" element={<AgentListPage />} />
-            <Route path="/studio/agents/:agentId" element={<AgentDetailPage />} />
-            <Route path="/studio/assets" element={<Navigate to="/studio/assets/models" replace />} />
-            <Route path="/studio/assets/models" element={<LLMListPage />} />
-            <Route path="/studio/assets/tools" element={<ToolsListPage />} />
-            <Route path="/studio/assets/skills" element={<SkillsListPage />} />
-            <Route path="/studio/assets/extensions" element={<ExtensionsListPage />} />
-            <Route path="/studio/assets/extensions/:scope/:name" element={<ExtensionDetailRoute />} />
-            <Route path="/studio/connections" element={<Navigate to="/studio/connections/channels" replace />} />
-            <Route path="/studio/connections/channels" element={<ChannelsListPage />} />
-            <Route path="/studio/connections/media-generation" element={<MediaGenerationProvidersListPage />} />
-            <Route path="/studio/connections/web-search" element={<WebSearchProvidersListPage />} />
-            <Route path="/studio/operations" element={<Navigate to="/studio/operations/sessions" replace />} />
-            <Route path="/studio/operations/sessions" element={<AuthenticatedLayout><SessionHistoryPage /></AuthenticatedLayout>} />
-            <Route path="/studio/operations/sessions/:sessionId" element={<AuthenticatedLayout><SessionDetailPage /></AuthenticatedLayout>} />
+            <Route path="/studio" element={<PermissionRedirect targets={studioTargets} />} />
+            <Route path="/studio/dashboard" element={<PermissionRoute permission="studio.access"><StudioDashboardRoute /></PermissionRoute>} />
+            <Route path="/studio/agents" element={<PermissionRoute permission="agents.manage"><AgentListPage /></PermissionRoute>} />
+            <Route path="/studio/agents/:agentId" element={<PermissionRoute permission="agents.manage"><AgentDetailPage /></PermissionRoute>} />
+            <Route path="/studio/assets" element={<PermissionRedirect targets={assetTargets} />} />
+            <Route path="/studio/assets/models" element={<PermissionRoute permission="llms.manage"><LLMListPage /></PermissionRoute>} />
+            <Route path="/studio/assets/tools" element={<PermissionRoute permission="tools.manage"><ToolsListPage /></PermissionRoute>} />
+            <Route path="/studio/assets/skills" element={<PermissionRoute permission="skills.manage"><SkillsListPage /></PermissionRoute>} />
+            <Route path="/studio/assets/extensions" element={<PermissionRoute permission="extensions.manage"><ExtensionsListPage /></PermissionRoute>} />
+            <Route path="/studio/assets/extensions/:scope/:name" element={<PermissionRoute permission="extensions.manage"><ExtensionDetailRoute /></PermissionRoute>} />
+            <Route path="/studio/connections" element={<PermissionRedirect targets={connectionTargets} />} />
+            <Route path="/studio/connections/channels" element={<PermissionRoute permission="channels.manage"><ChannelsListPage /></PermissionRoute>} />
+            <Route path="/studio/connections/media-generation" element={<PermissionRoute permission="media_generation.manage"><MediaGenerationProvidersListPage /></PermissionRoute>} />
+            <Route path="/studio/connections/web-search" element={<PermissionRoute permission="web_search.manage"><WebSearchProvidersListPage /></PermissionRoute>} />
+            <Route path="/studio/operations" element={<PermissionRedirect targets={operationTargets} />} />
+            <Route path="/studio/operations/sessions" element={<PermissionRoute permission="operations.view"><AuthenticatedLayout><SessionHistoryPage /></AuthenticatedLayout></PermissionRoute>} />
+            <Route path="/studio/operations/sessions/:sessionId" element={<PermissionRoute permission="operations.view"><AuthenticatedLayout><SessionDetailPage /></AuthenticatedLayout></PermissionRoute>} />
+            <Route path="/studio/operations/users" element={<PermissionRoute permission="users.manage"><AuthenticatedLayout><UsersPage /></AuthenticatedLayout></PermissionRoute>} />
+            <Route path="/studio/operations/groups" element={<PermissionRoute permission="groups.manage"><AuthenticatedLayout><GroupsPage /></AuthenticatedLayout></PermissionRoute>} />
+            <Route path="/studio/operations/roles" element={<PermissionRoute permission="roles.manage"><AuthenticatedLayout><RolesPage /></AuthenticatedLayout></PermissionRoute>} />
 
-            <Route path="/agents" element={<AgentListPage />} />
-            <Route path="/agent/:agentId" element={<AgentDetailPage />} />
-            <Route path="/llms" element={<LLMListPage />} />
-            <Route path="/tools" element={<ToolsListPage />} />
-            <Route path="/skills" element={<SkillsListPage />} />
-            <Route path="/extensions" element={<ExtensionsListPage />} />
-            <Route path="/extensions/:scope/:name" element={<ExtensionDetailRoute />} />
-            <Route path="/channels" element={<ChannelsListPage />} />
-            <Route path="/media-providers" element={<MediaGenerationProvidersListPage />} />
-            <Route path="/web-search-providers" element={<WebSearchProvidersListPage />} />
+            <Route path="/agents" element={<PermissionRoute permission="agents.manage"><AgentListPage /></PermissionRoute>} />
+            <Route path="/agent/:agentId" element={<PermissionRoute permission="agents.manage"><AgentDetailPage /></PermissionRoute>} />
+            <Route path="/llms" element={<PermissionRoute permission="llms.manage"><LLMListPage /></PermissionRoute>} />
+            <Route path="/tools" element={<PermissionRoute permission="tools.manage"><ToolsListPage /></PermissionRoute>} />
+            <Route path="/skills" element={<PermissionRoute permission="skills.manage"><SkillsListPage /></PermissionRoute>} />
+            <Route path="/extensions" element={<PermissionRoute permission="extensions.manage"><ExtensionsListPage /></PermissionRoute>} />
+            <Route path="/extensions/:scope/:name" element={<PermissionRoute permission="extensions.manage"><ExtensionDetailRoute /></PermissionRoute>} />
+            <Route path="/channels" element={<PermissionRoute permission="channels.manage"><ChannelsListPage /></PermissionRoute>} />
+            <Route path="/media-providers" element={<PermissionRoute permission="media_generation.manage"><MediaGenerationProvidersListPage /></PermissionRoute>} />
+            <Route path="/web-search-providers" element={<PermissionRoute permission="web_search.manage"><WebSearchProvidersListPage /></PermissionRoute>} />
             <Route path="/channel-link/:token" element={<ChannelLinkPage />} />
 
             {/* Catch-all redirect */}

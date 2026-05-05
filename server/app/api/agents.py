@@ -2,15 +2,21 @@
 
 import logging
 from datetime import UTC
-from typing import Any
+from typing import Any, Literal, cast
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.crud.agent import agent as agent_crud
 from app.crud.llm import llm as llm_crud
+from app.models.access import AccessLevel, PrincipalType, ResourceAccess, ResourceType
 from app.models.agent_release import AgentRelease
 from app.models.user import User
 from app.schemas.schemas import (
+    AgentAccessGroupOption,
+    AgentAccessOptionsResponse,
+    AgentAccessResponse,
+    AgentAccessUpdate,
+    AgentAccessUserOption,
     AgentCreate,
     AgentDraftStateResponse,
     AgentPublishRequest,
@@ -19,8 +25,12 @@ from app.schemas.schemas import (
     AgentServingUpdate,
     AgentUpdate,
 )
+from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.agent_snapshot_service import AgentSnapshotService
+from app.services.group_service import GroupService
+from app.services.user_service import UserService
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
@@ -40,6 +50,8 @@ def _serialize_agent_response(
         "id": agent.id,
         "name": agent.name,
         "description": agent.description,
+        "created_by_user_id": agent.created_by_user_id,
+        "use_scope": agent.use_scope,
         "llm_id": agent.llm_id,
         "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
         "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
@@ -67,16 +79,82 @@ def _resolve_model_display(agent: Any, db: Session) -> str:
     return model_display
 
 
+def _grant_principal_ids(
+    grants: list[ResourceAccess],
+    principal_type: PrincipalType,
+) -> list[int]:
+    """Return integer principal IDs for one principal type."""
+    principal_ids: list[int] = []
+    for grant in grants:
+        if grant.principal_type != principal_type:
+            continue
+        principal_ids.append(int(grant.principal_id))
+    return sorted(principal_ids)
+
+
+def _serialize_agent_access(
+    agent_id: int,
+    use_scope: str,
+    grants: list[ResourceAccess],
+) -> AgentAccessResponse:
+    """Serialize direct grants for one agent."""
+    use_grants = [grant for grant in grants if grant.access_level == AccessLevel.USE]
+    edit_grants = [grant for grant in grants if grant.access_level == AccessLevel.EDIT]
+    return AgentAccessResponse(
+        agent_id=agent_id,
+        use_scope=cast(Literal["all", "selected"], use_scope),
+        use_user_ids=_grant_principal_ids(use_grants, PrincipalType.USER),
+        use_group_ids=_grant_principal_ids(use_grants, PrincipalType.GROUP),
+        edit_user_ids=_grant_principal_ids(edit_grants, PrincipalType.USER),
+        edit_group_ids=_grant_principal_ids(edit_grants, PrincipalType.GROUP),
+    )
+
+
+def _serialize_agent_access_options(
+    db: Session,
+    users: list[User],
+) -> AgentAccessOptionsResponse:
+    """Serialize selectable users for one agent access editor."""
+    group_service = GroupService(db)
+    member_counts = group_service.get_member_count_by_group_id()
+    return AgentAccessOptionsResponse(
+        users=[
+            AgentAccessUserOption(
+                id=user.id or 0,
+                username=user.username,
+                display_name=user.display_name,
+                email=user.email,
+            )
+            for user in users
+            if user.id is not None and user.status == "active"
+        ],
+        groups=[
+            AgentAccessGroupOption(
+                id=group.id or 0,
+                name=group.name,
+                description=group.description,
+                member_count=member_counts.get(group.id or 0, 0),
+            )
+            for group in group_service.list_groups()
+            if group.id is not None
+        ],
+    )
+
+
 @router.get("/agents", response_model=list[AgentResponse])
 async def get_agents(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
     skip: int = 0,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     """Get all agents with pagination."""
-    del current_user
-    agents = agent_crud.get_all(db, skip=skip, limit=limit)
+    agents = AccessService(db).list_accessible_agents(
+        user=current_user,
+        access_level=AccessLevel.EDIT,
+        skip=skip,
+        limit=limit,
+    )
     result = []
     for agent in agents:
         release_version = None
@@ -99,7 +177,7 @@ async def get_agents(
 async def create_agent(
     agent_data: AgentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Create a new agent."""
     llm = llm_crud.get(agent_data.llm_id, db)
@@ -118,6 +196,7 @@ async def create_agent(
         db,
         name=agent_data.name,
         description=agent_data.description,
+        created_by_user_id=current_user.id,
         llm_id=agent_data.llm_id,
         session_idle_timeout_minutes=agent_data.session_idle_timeout_minutes,
         sandbox_timeout_seconds=agent_data.sandbox_timeout_seconds,
@@ -125,6 +204,7 @@ async def create_agent(
         is_active=agent_data.is_active,
         max_iteration=agent_data.max_iteration,
     )
+    AccessService(db).grant_creator_edit(agent=agent, user=current_user)
     AgentSnapshotService(db).save_draft(
         agent.id or 0,
         saved_by=current_user.username,
@@ -143,10 +223,17 @@ async def create_agent(
 async def get_agent_draft_state(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Return saved-draft and release metadata for one agent editor."""
-    del current_user
+    agent = agent_crud.get(agent_id, db)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
     try:
         return AgentSnapshotService(db).get_draft_state(agent_id)
     except ValueError as exc:
@@ -160,9 +247,17 @@ async def get_agent_draft_state(
 async def save_agent_draft(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Persist the current normalized agent state as the saved draft."""
+    agent = agent_crud.get(agent_id, db)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
     snapshot_service = AgentSnapshotService(db)
     try:
         snapshot_service.save_draft(agent_id, saved_by=current_user.username)
@@ -178,10 +273,17 @@ async def save_agent_draft(
 async def list_agent_releases(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """List immutable releases for one agent."""
-    del current_user
+    agent = agent_crud.get(agent_id, db)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
     try:
         return AgentSnapshotService(db).list_releases(agent_id)
     except ValueError as exc:
@@ -196,9 +298,17 @@ async def publish_agent_release(
     agent_id: int,
     payload: AgentPublishRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Publish the current saved draft as the next immutable release."""
+    agent = agent_crud.get(agent_id, db)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
     try:
         return AgentSnapshotService(db).publish_saved_draft(
             agent_id,
@@ -216,10 +326,17 @@ async def update_agent_serving_state(
     agent_id: int,
     payload: AgentServingUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Enable or disable one agent for end-user traffic."""
-    del current_user
+    agent = agent_crud.get(agent_id, db)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
     try:
         updated_agent = AgentService(db).set_serving_enabled(
             agent_id,
@@ -239,13 +356,17 @@ async def update_agent(
     agent_id: int,
     agent_data: AgentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Update an existing agent."""
-    del current_user
     agent = agent_crud.get(agent_id, db)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
 
     if agent_data.llm_id is not None:
         llm = llm_crud.get(agent_data.llm_id, db)
@@ -295,17 +416,103 @@ async def update_agent(
     )
 
 
+@router.get(
+    "/agents/{agent_id}/access-options",
+    response_model=AgentAccessOptionsResponse,
+)
+async def get_agent_access_options(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> AgentAccessOptionsResponse:
+    """Return selectable principals for one agent access editor."""
+    agent = agent_crud.get(agent_id, db)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
+    return _serialize_agent_access_options(db, UserService(db).list_users())
+
+
+@router.get("/agents/{agent_id}/access", response_model=AgentAccessResponse)
+async def get_agent_access(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> AgentAccessResponse:
+    """Return direct use/edit grants for one agent."""
+    agent = agent_crud.get(agent_id, db)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    access_service = AccessService(db)
+    access_service.require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
+    return _serialize_agent_access(
+        agent_id=agent_id,
+        use_scope=agent.use_scope,
+        grants=access_service.list_resource_grants(
+            resource_type=ResourceType.AGENT,
+            resource_id=agent_id,
+        ),
+    )
+
+
+@router.put("/agents/{agent_id}/access", response_model=AgentAccessResponse)
+async def update_agent_access(
+    agent_id: int,
+    payload: AgentAccessUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> AgentAccessResponse:
+    """Replace direct use/edit grants for one agent."""
+    agent = agent_crud.get(agent_id, db)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    access_service = AccessService(db)
+    access_service.require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
+    access_service.set_agent_access(
+        agent=agent,
+        use_scope=payload.use_scope,
+        use_user_ids=set(payload.use_user_ids),
+        use_group_ids=set(payload.use_group_ids),
+        edit_user_ids=set(payload.edit_user_ids),
+        edit_group_ids=set(payload.edit_group_ids),
+    )
+    return _serialize_agent_access(
+        agent_id=agent_id,
+        use_scope=agent.use_scope,
+        grants=access_service.list_resource_grants(
+            resource_type=ResourceType.AGENT,
+            resource_id=agent_id,
+        ),
+    )
+
+
 @router.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
     """Get a single agent by ID."""
-    del current_user
     agent = agent_crud.get(agent_id, db)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
 
     return _serialize_agent_response(
         agent,
@@ -317,13 +524,17 @@ async def get_agent(
 async def delete_agent(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ):
     """Delete an agent and all associated saved state."""
-    del current_user
     agent = agent_crud.get(agent_id, db)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
 
     AgentSnapshotService(db).delete_agent_state(agent_id)
     db.delete(agent)

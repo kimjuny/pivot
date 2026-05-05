@@ -7,8 +7,8 @@ import mimetypes
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.models.extension import (
     AgentExtensionBinding,
     ExtensionHookExecution,
@@ -36,6 +36,7 @@ from app.schemas.extension import (
     ExtensionReferenceSummaryResponse,
     ExtensionUninstallResponse,
 )
+from app.security.permission_catalog import Permission
 from app.services.agent_service import AgentService
 from app.services.extension_hook_execution_service import ExtensionHookExecutionService
 from app.services.extension_hook_replay_service import ExtensionHookReplayService
@@ -485,7 +486,7 @@ def _serialize_agent_package(
 )
 async def list_extension_packages(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[ExtensionPackageResponse]:
     """List installed extensions grouped by package name."""
     del current_user
@@ -501,7 +502,7 @@ async def list_extension_packages(
 )
 async def list_extension_installations(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[ExtensionInstallationResponse]:
     """List all installed extension versions."""
     del current_user
@@ -547,7 +548,7 @@ async def get_extension_installation_logo(
 async def get_extension_installation_configuration(
     installation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationConfigResponse:
     """Return manifest-declared configuration schema and values for one installation."""
     del current_user
@@ -575,7 +576,7 @@ async def update_extension_installation_configuration(
     installation_id: int,
     payload: ExtensionInstallationConfigRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationConfigResponse:
     """Validate and persist installation-scoped configuration values."""
     del current_user
@@ -612,7 +613,7 @@ async def list_extension_hook_executions(
     hook_event: str | None = None,
     limit: int = 200,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[ExtensionHookExecutionResponse]:
     """List recorded hook execution logs with optional filters."""
     del current_user
@@ -635,7 +636,7 @@ async def list_extension_hook_executions(
 async def replay_hook_execution(
     execution_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionHookReplayResponse:
     """Safely replay one historical packaged hook execution."""
     del current_user
@@ -656,7 +657,7 @@ async def replay_hook_execution(
 async def install_extension(
     body: ExtensionInstallRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationResponse:
     """Install one extension folder into the workspace registry."""
     service = ExtensionService(db)
@@ -681,7 +682,7 @@ async def preview_bundle_extension(
     relative_paths: list[str] = Form(...),
     bundle_name: str = Form(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionImportPreviewResponse:
     """Preview one local extension bundle before the operator trusts it."""
     del current_user
@@ -720,7 +721,7 @@ async def import_bundle_extension(
     trust_confirmed: bool = Form(False),
     overwrite_confirmed: bool = Form(False),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationResponse:
     """Install one extension bundle uploaded from the local machine."""
     if len(files) != len(relative_paths):
@@ -759,7 +760,7 @@ async def update_extension_installation_status(
     installation_id: int,
     body: ExtensionInstallationStatusRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationResponse:
     """Enable or disable one installed extension version."""
     del current_user
@@ -781,7 +782,7 @@ async def update_extension_installation_status(
 async def get_extension_installation_references(
     installation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionReferenceSummaryResponse:
     """Return persisted references that still rely on one extension version."""
     del current_user
@@ -800,7 +801,7 @@ async def get_extension_installation_references(
 async def uninstall_extension(
     installation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionUninstallResponse:
     """Uninstall one extension version with logical fallback when referenced."""
     del current_user
@@ -833,7 +834,7 @@ async def uninstall_extension(
 async def list_agent_extensions(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[AgentExtensionBindingResponse]:
     """List every configured extension binding for one agent."""
     del current_user
@@ -862,7 +863,7 @@ async def list_agent_extensions(
 async def list_agent_extension_packages(
     agent_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[AgentExtensionPackageResponse]:
     """List extension packages with agent-specific version selection state."""
     del current_user
@@ -882,7 +883,7 @@ async def replace_agent_extension_bindings(
     agent_id: int,
     body: AgentExtensionBindingBatchRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[AgentExtensionBindingResponse]:
     """Replace the full extension binding set for one agent."""
     del current_user
@@ -937,7 +938,7 @@ async def upsert_agent_extension_binding(
     extension_installation_id: int,
     body: AgentExtensionBindingRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> AgentExtensionBindingResponse:
     """Create or update one agent-extension binding."""
     del current_user
@@ -968,7 +969,7 @@ async def delete_agent_extension_binding(
     agent_id: int,
     extension_installation_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> Response:
     """Delete one agent-extension binding."""
     del current_user

@@ -23,6 +23,10 @@ class User(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     username: str = Field(index=True, unique=True, max_length=50)
     password_hash: str = Field(max_length=255)
+    role_id: int = Field(foreign_key="userrole.id", index=True)
+    status: str = Field(default="active", index=True, max_length=32)
+    display_name: str | None = Field(default=None, max_length=120)
+    email: str | None = Field(default=None, index=True, unique=True, max_length=255)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -51,5 +55,16 @@ class UserResponse(SQLModel):
 
     id: int
     username: str
+    role: str
+    permissions: list[str]
     access_token: str
     token_type: str = "bearer"
+
+
+class CurrentUserResponse(SQLModel):
+    """Schema for the current authenticated user."""
+
+    id: int
+    username: str
+    role: str
+    permissions: list[str]

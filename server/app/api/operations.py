@@ -3,8 +3,8 @@
 from datetime import UTC, datetime
 from typing import Any
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.models.agent import Agent
 from app.models.agent_release import AgentRelease
 from app.models.react import ReactTask
@@ -16,6 +16,7 @@ from app.schemas.session import (
     RecursionDetail,
     TaskMessage,
 )
+from app.security.permission_catalog import Permission
 from app.services.session_service import SessionService
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session as DBSession, col, func, select
@@ -112,7 +113,7 @@ async def list_operations_sessions(
     page: int = 1,
     page_size: int = 20,
     db: DBSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.OPERATIONS_VIEW)),
 ) -> dict[str, Any]:
     """List all sessions across users for Studio Operations.
 
@@ -188,7 +189,7 @@ async def list_operations_sessions(
 async def get_operations_session_detail(
     session_id: str,
     db: DBSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.OPERATIONS_VIEW)),
 ) -> dict[str, Any]:
     """Get a single session with its full conversation history for Operations.
 

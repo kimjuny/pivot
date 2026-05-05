@@ -20,6 +20,8 @@ vi.mock("@/contexts/auth-core", () => ({
     user: {
       id: 1,
       username: "shadcn",
+      role: "user",
+      permissions: ["client.access"],
     },
   }),
 }));

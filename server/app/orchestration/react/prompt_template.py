@@ -1,9 +1,12 @@
 """ReAct prompt template builders."""
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.config import get_settings
 from app.orchestration.tool.manager import ToolManager
 
 _TEMPLATE_DIR = Path(__file__).parent
@@ -42,6 +45,28 @@ def build_runtime_system_prompt() -> str:
     return _REACT_SYSTEM_PROMPT
 
 
+def _format_task_start_time(
+    now: datetime | None = None,
+    *,
+    timezone_name: str | None = None,
+) -> str:
+    """Format the task-start time for prompt injection."""
+    selected_timezone_name = timezone_name or get_settings().SYSTEM_TIME_ZONE
+    try:
+        timezone = ZoneInfo(selected_timezone_name)
+    except ZoneInfoNotFoundError:
+        selected_timezone_name = "UTC"
+        timezone = ZoneInfo(selected_timezone_name)
+
+    task_start_time = (now or datetime.now(timezone)).astimezone(timezone)
+    offset = task_start_time.strftime("%z")
+    formatted_offset = f"{offset[:3]}:{offset[3:]}" if offset else "+00:00"
+    return (
+        f"{task_start_time:%Y-%m-%d %H:%M:%S} "
+        f"{selected_timezone_name} (UTC{formatted_offset})"
+    )
+
+
 def build_runtime_user_prompt(
     tool_manager: ToolManager | None = None,
     skills: str = "",
@@ -73,6 +98,7 @@ def build_runtime_user_prompt(
 
     rendered_prompt = (
         _REACT_USER_PROMPT.replace("{{tools_description}}", tools_description)
+        .replace("{{system_time}}", _format_task_start_time())
         .replace("{{skills}}", skills)
         .replace("{{mandatory_skills}}", mandatory_skills)
         .replace("{{workspace_guidance}}", workspace_guidance)

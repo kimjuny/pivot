@@ -3,6 +3,7 @@
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
 
@@ -85,6 +86,25 @@ class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
         self.assertIn("# /workspace/AGENTS.md", rendered)
         self.assertIn("Use uv run.", rendered)
         self.assertNotIn("{{workspace_guidance}}", rendered)
+
+    def test_task_start_time_uses_configured_timezone_format(self) -> None:
+        """Task-start time should render in local IANA timezone format."""
+        rendered_time = prompt_template._format_task_start_time(
+            datetime(2026, 5, 1, 6, 32, 10, tzinfo=UTC),
+            timezone_name="Asia/Shanghai",
+        )
+
+        self.assertEqual(
+            rendered_time,
+            "2026-05-01 14:32:10 Asia/Shanghai (UTC+08:00)",
+        )
+
+    def test_runtime_user_prompt_injects_task_start_time(self) -> None:
+        """The task bootstrap prompt should replace the system time placeholder."""
+        rendered = prompt_template.build_runtime_user_prompt()
+
+        self.assertIn("task start time:", rendered)
+        self.assertNotIn("{{system_time}}", rendered)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ class ChannelServiceTestCase(unittest.TestCase):
         self.session = Session(self.engine)
         self.service = channel_service_module.ChannelService(self.session)
 
-        self.user = User(username="alice", password_hash="hash")
+        self.user = User(username="alice", password_hash="hash", role_id=1)
         self.agent = Agent(name="support-bot", is_active=True, max_iteration=5)
         self.session.add(self.user)
         self.session.add(self.agent)

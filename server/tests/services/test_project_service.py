@@ -18,12 +18,21 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 Agent = import_module("app.models.agent").Agent
+AccessLevel = import_module("app.models.access").AccessLevel
+ResourceAccess = import_module("app.models.access").ResourceAccess
+ResourceType = import_module("app.models.access").ResourceType
 LocalFilesystemPOSIXWorkspaceProvider = import_module(
     "app.storage.providers.local_fs"
 ).LocalFilesystemPOSIXWorkspaceProvider
 ProjectService = import_module("app.services.project_service").ProjectService
 SessionModel = import_module("app.models.session").Session
 User = import_module("app.models.user").User
+WorkspaceFilePermissionError = import_module(
+    "app.services.workspace_file_service"
+).WorkspaceFilePermissionError
+WorkspaceFileService = import_module(
+    "app.services.workspace_file_service"
+).WorkspaceFileService
 workspace_service = import_module("app.services.workspace_service")
 
 
@@ -62,9 +71,12 @@ class ProjectServiceTestCase(unittest.TestCase):
 
         agent = Agent(name="agent-1", llm_id=None)
         self.db.add(agent)
-        self.db.add(User(username="alice", password_hash="hash"))
+        self.db.add(User(username="alice", password_hash="hash", role_id=1))
+        self.db.add(User(username="bob", password_hash="hash", role_id=1))
         self.db.commit()
         self.db.refresh(agent)
+        self.alice = self.db.exec(select(User).where(User.username == "alice")).one()
+        self.bob = self.db.exec(select(User).where(User.username == "bob")).one()
         self.agent = agent
         self.service = ProjectService(self.db)
 
@@ -126,7 +138,7 @@ class ProjectServiceTestCase(unittest.TestCase):
         )
         self.db.commit()
 
-        deleted = self.service.delete_project(project.project_id, username="alice")
+        deleted = self.service.delete_project(project.project_id, user=self.alice)
 
         self.assertTrue(deleted)
         self.assertIsNone(self.service.get_project(project.project_id))
@@ -160,10 +172,7 @@ class ProjectServiceTestCase(unittest.TestCase):
                 "app.services.project_service.get_sandbox_service",
                 return_value=sandbox_service,
             ):
-                deleted = self.service.delete_project(
-                    project.project_id,
-                    username="alice",
-                )
+                deleted = self.service.delete_project(project.project_id, user=self.alice)
 
         self.assertTrue(deleted)
         sandbox_service.destroy.assert_called_once_with(
@@ -174,6 +183,115 @@ class ProjectServiceTestCase(unittest.TestCase):
                 f"{self.agent.id or 0}/projects/{project.project_id}/workspace"
             ),
         )
+
+    def test_project_use_grant_allows_listing_without_edit(self) -> None:
+        """A use grant should make a project visible without allowing metadata edits."""
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=self.resolved_profile,
+        ):
+            project = self.service.create_project(
+                agent_id=self.agent.id or 0,
+                username="alice",
+                name="Shared repo",
+            )
+
+        self.service.set_project_access(
+            project=project,
+            use_user_ids={self.bob.id or 0},
+            use_group_ids=set(),
+            edit_user_ids={self.alice.id or 0},
+            edit_group_ids=set(),
+        )
+
+        self.assertEqual(
+            [
+                visible.project_id
+                for visible in self.service.list_projects(
+                    user=self.bob,
+                    agent_id=self.agent.id or 0,
+                )
+            ],
+            [project.project_id],
+        )
+        self.assertTrue(
+            self.service.has_project_access(
+                user=self.bob,
+                project=project,
+                access_level=AccessLevel.USE,
+            )
+        )
+        self.assertFalse(
+            self.service.has_project_access(
+                user=self.bob,
+                project=project,
+                access_level=AccessLevel.EDIT,
+            )
+        )
+
+    def test_project_edit_grant_syncs_workspace_write_access(self) -> None:
+        """Project edit access should mirror to the backing workspace."""
+        with patch.object(
+            cast(Any, workspace_service),
+            "get_resolved_storage_profile",
+            return_value=self.resolved_profile,
+        ):
+            project = self.service.create_project(
+                agent_id=self.agent.id or 0,
+                username="alice",
+                name="Shared repo",
+            )
+
+            self.service.set_project_access(
+                project=project,
+                use_user_ids={self.bob.id or 0},
+                use_group_ids=set(),
+                edit_user_ids=set(),
+                edit_group_ids=set(),
+            )
+            file_service = WorkspaceFileService(self.db)
+            with self.assertRaises(WorkspaceFilePermissionError):
+                file_service.write_text_file(
+                    workspace_id=project.workspace_id,
+                    username="bob",
+                    path="notes.md",
+                    content="draft",
+                )
+
+            self.service.set_project_access(
+                project=project,
+                use_user_ids={self.bob.id or 0},
+                use_group_ids=set(),
+                edit_user_ids={self.bob.id or 0},
+                edit_group_ids=set(),
+            )
+            file_service.write_text_file(
+                workspace_id=project.workspace_id,
+                username="bob",
+                path="notes.md",
+                content="draft",
+            )
+
+            self.assertEqual(
+                file_service.read_text_file(
+                    workspace_id=project.workspace_id,
+                    username="bob",
+                    path="notes.md",
+                ),
+                "draft",
+            )
+            workspace_grants = self.db.exec(
+                select(ResourceAccess).where(
+                    ResourceAccess.resource_type == ResourceType.WORKSPACE,
+                    ResourceAccess.resource_id == project.workspace_id,
+                    ResourceAccess.access_level == AccessLevel.EDIT,
+                )
+            ).all()
+            self.assertIn(
+                str(self.bob.id or 0),
+                {grant.principal_id for grant in workspace_grants},
+            )
 
 
 if __name__ == "__main__":

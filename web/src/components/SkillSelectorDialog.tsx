@@ -3,11 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { User as UserIcon, Search, Loader2, Globe2, Inbox, Plus } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
-  getSharedSkills,
-  getPrivateSkills,
+  getUsableSkills,
   type SkillSource,
-  type SharedSkill,
-  type UserSkill,
+  type UsableSkill,
 } from '../utils/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -71,20 +69,12 @@ function SkillSelectorDialog({
   const loadSkills = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [shared, priv] = await Promise.all([getSharedSkills(), getPrivateSkills()]);
+      const skills = await getUsableSkills();
       const merged: SkillEntry[] = [
-        ...shared.map((s: SharedSkill): SkillEntry => ({
+        ...skills.map((s: UsableSkill): SkillEntry => ({
           name: s.name,
           summary: s.description,
-          kind: 'shared',
-          source: s.source,
-          creator: s.creator,
-          readOnly: s.read_only,
-        })),
-        ...priv.map((s: UserSkill): SkillEntry => ({
-          name: s.name,
-          summary: s.description,
-          kind: 'private',
+          kind: s.kind,
           source: s.source,
           creator: s.creator,
           readOnly: s.read_only,

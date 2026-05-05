@@ -41,6 +41,7 @@ class Skill(SQLModel, table=True):
     name: str = Field(index=True, unique=True, max_length=255)
     description: str = Field(default="")
     kind: str = Field(max_length=20)
+    use_scope: str = Field(default="all", max_length=20)
     source: str = Field(max_length=20)
     creator_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     location: str = Field(unique=True, max_length=1024)

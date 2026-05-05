@@ -22,19 +22,25 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "channelsession",
     "externalidentitybinding",
     "fileasset",
+    "groupmember",
     "imagegenerationusagelog",
     "llm",
+    "permissionrecord",
     "project",
     "reactplanstep",
     "reactrecursion",
     "reactrecursionstate",
     "reacttask",
     "reacttaskevent",
+    "resourceaccess",
+    "rolepermission",
     "session",
     "skill",
     "skillchangesubmission",
     "taskattachment",
     "user",
+    "usergroup",
+    "userrole",
     "workspace",
 }
 
@@ -134,11 +140,13 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_task_attachment_schema_compatibility()
     ensure_skill_schema_compatibility()
 
-    from app.api.auth import init_default_user
+    from app.services.permission_service import PermissionService
     from app.services.skill_service import sync_skill_registry
+    from app.services.user_service import UserService
 
     with Session(engine) as session:
-        init_default_user(session)
+        PermissionService(session).seed_defaults()
+        UserService(session).ensure_default_admin()
         sync_skill_registry(session)
 
 

@@ -12,6 +12,7 @@ import {
     Settings2,
     PanelLeft,
     Globe,
+    ShieldCheck,
 } from "@/lib/lucide";
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -46,6 +47,7 @@ import ChannelBindingDialog from './ChannelBindingDialog';
 import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
 import MediaGenerationBindingDialog from './MediaGenerationBindingDialog';
+import AgentAccessDialog from './AgentAccessDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
 import ConfirmationModal from './ConfirmationModal';
 import { ExtensionLogoAvatar } from './ExtensionLogoAvatar';
@@ -60,8 +62,7 @@ import type { Agent } from '../types';
 import {
     getSharedTools,
     getPrivateTools,
-    getSharedSkills,
-    getPrivateSkills,
+    getUsableSkills,
     getChannels,
     getAgentChannels,
     getAgentExtensionPackages,
@@ -77,8 +78,7 @@ import {
     type SharedTool,
     type PrivateTool,
     type SkillSource,
-    type SharedSkill,
-    type UserSkill,
+    type UsableSkill,
     type ChannelBinding,
     type ChannelCatalogItem,
     type MediaProviderBinding,
@@ -305,6 +305,7 @@ function AgentDetailSidebar({
     const [isWebSearchOpen, setIsWebSearchOpen] = useState(false);
     const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [isAccessDialogOpen, setIsAccessDialogOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
@@ -376,6 +377,7 @@ function AgentDetailSidebar({
         setIsWebSearchDialogOpen(false);
         setIsExtensionDialogOpen(false);
         setIsDeleteExtensionDialogOpen(false);
+        setIsAccessDialogOpen(false);
     }, [agent?.id]);
 
     /**
@@ -597,7 +599,7 @@ function AgentDetailSidebar({
     }, []);
 
     /**
-     * Fetch both shared and private user skills.
+     * Fetch skills this Studio user may select for agents.
      */
     useEffect(() => {
         if (hasFetchedSkillsRef.current) return;
@@ -606,23 +608,12 @@ function AgentDetailSidebar({
             hasFetchedSkillsRef.current = true;
             setSkillsLoading(true);
             try {
-                const [shared, priv] = await Promise.all([
-                    getSharedSkills(),
-                    getPrivateSkills(),
-                ]);
+                const usableSkills = await getUsableSkills();
                 const merged: SidebarSkill[] = [
-                    ...shared.map((s: SharedSkill) => ({
+                    ...usableSkills.map((s: UsableSkill) => ({
                         name: s.name,
                         description: s.description,
-                        kind: 'shared' as const,
-                        source: s.source,
-                        creator: s.creator,
-                        readOnly: s.read_only,
-                    })),
-                    ...priv.map((s: UserSkill) => ({
-                        name: s.name,
-                        description: s.description,
-                        kind: 'private' as const,
+                        kind: s.kind,
                         source: s.source,
                         creator: s.creator,
                         readOnly: s.read_only,
@@ -1216,6 +1207,24 @@ function AgentDetailSidebar({
                                             </span>
                                         </div>
                                     </SidebarMenuButton>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => setIsAccessDialogOpen(true)}
+                                                disabled={!agent?.id}
+                                                className="h-7 w-7 shrink-0 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                                aria-label="Manage access"
+                                            >
+                                                <ShieldCheck className="size-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right">
+                                            Manage access
+                                        </TooltipContent>
+                                    </Tooltip>
                                     <Tooltip>
                                         <TooltipTrigger asChild>
                                             <Button
@@ -2148,6 +2157,15 @@ function AgentDetailSidebar({
                         ]);
                         await onExtensionBindingsChanged?.();
                     }}
+                />
+            )}
+
+            {agent?.id && (
+                <AgentAccessDialog
+                    open={isAccessDialogOpen}
+                    onOpenChange={setIsAccessDialogOpen}
+                    agentId={agent.id}
+                    creatorUserId={agent.created_by_user_id}
                 />
             )}
 

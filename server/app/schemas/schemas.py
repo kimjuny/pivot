@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import Literal
 
 from app.schemas.base import AppBaseModel
 from pydantic import Field, field_validator
@@ -83,10 +84,58 @@ class AgentServingUpdate(AppBaseModel):
     )
 
 
+class AgentAccessUpdate(AppBaseModel):
+    """Payload for replacing one agent's resource access."""
+
+    use_scope: Literal["all", "selected"] = "selected"
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class AgentAccessResponse(AppBaseModel):
+    """Direct use/edit grants for one agent."""
+
+    agent_id: int
+    use_scope: Literal["all", "selected"]
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class AgentAccessUserOption(AppBaseModel):
+    """User option shown in one agent's access editor."""
+
+    id: int
+    username: str
+    display_name: str | None
+    email: str | None
+
+
+class AgentAccessGroupOption(AppBaseModel):
+    """Group option shown in one agent's access editor."""
+
+    id: int
+    name: str
+    description: str
+    member_count: int
+
+
+class AgentAccessOptionsResponse(AppBaseModel):
+    """Assignable principals for one agent's access editor."""
+
+    users: list[AgentAccessUserOption] = Field(default_factory=list)
+    groups: list[AgentAccessGroupOption] = Field(default_factory=list)
+
+
 class AgentResponse(AppBaseModel):
     id: int
     name: str
     description: str | None
+    created_by_user_id: int | None
+    use_scope: str
     llm_id: int | None
     session_idle_timeout_minutes: int
     sandbox_timeout_seconds: int
@@ -182,6 +231,11 @@ class LLMCreate(AppBaseModel):
         default=None,
         description="Additional kwargs for API calls (JSON format). E.g.: {'extra_body': {'reasoning_split': true}}",
     )
+    use_scope: Literal["all", "selected"] = "all"
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
 
     @field_validator("extra_config")
     @classmethod
@@ -226,6 +280,8 @@ class LLMResponse(AppBaseModel):
 
     id: int
     name: str
+    created_by_user_id: int | None
+    use_scope: Literal["all", "selected"]
     endpoint: str
     model: str
     api_key: str
@@ -241,3 +297,62 @@ class LLMResponse(AppBaseModel):
     extra_config: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class LLMUsableResponse(AppBaseModel):
+    """Safe LLM option exposed to Studio builders when configuring agents."""
+
+    id: int
+    name: str
+    model: str
+    protocol: str
+    streaming: bool
+    image_input: bool
+    image_output: bool
+    max_context: int
+
+
+class LLMAccessUpdate(AppBaseModel):
+    """Payload for replacing one LLM config's selected access."""
+
+    use_scope: Literal["all", "selected"] = "all"
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class LLMAccessResponse(AppBaseModel):
+    """Direct use/edit grants for one LLM config."""
+
+    llm_id: int
+    use_scope: Literal["all", "selected"]
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class LLMAccessUserOption(AppBaseModel):
+    """User option shown in one LLM access editor."""
+
+    id: int
+    username: str
+    display_name: str | None
+    email: str | None
+
+
+class LLMAccessGroupOption(AppBaseModel):
+    """Group option shown in one LLM access editor."""
+
+    id: int
+    name: str
+    description: str
+    member_count: int
+
+
+class LLMAccessOptionsResponse(AppBaseModel):
+    """Assignable principals for one LLM access editor."""
+
+    users: list[LLMAccessUserOption] = Field(default_factory=list)
+    groups: list[LLMAccessGroupOption] = Field(default_factory=list)

@@ -28,6 +28,10 @@ export interface Agent {
   active_release_id?: number | null;
   /** Version number of the active release, if any. */
   active_release_version?: number | null;
+  /** User ID that originally created this agent. */
+  created_by_user_id?: number | null;
+  /** Whether use access is granted to all users or selected principals. */
+  use_scope?: string;
   /** Whether this agent currently accepts end-user traffic. */
   serving_enabled?: boolean;
   /** Deprecated: Name of the LLM model used by this agent */
@@ -61,6 +65,10 @@ export interface LLM {
   id: number;
   /** Unique logical name for the LLM in the platform */
   name: string;
+  /** User ID that originally created this LLM config. */
+  created_by_user_id?: number | null;
+  /** Whether use access is granted to all users or selected principals. */
+  use_scope?: 'all' | 'selected';
   /** HTTP API Base URL for the LLM service */
   endpoint: string;
   /** Model identifier passed to the API */
@@ -91,4 +99,27 @@ export interface LLM {
   created_at: string;
   /** UTC timestamp when LLM was last updated */
   updated_at: string;
+}
+
+/**
+ * Safe LLM option visible in Studio selectors.
+ * This deliberately excludes provider secrets and endpoint configuration.
+ */
+export interface LLMUsable {
+  /** Unique identifier of the LLM */
+  id: number;
+  /** Unique logical name for the LLM in the platform */
+  name: string;
+  /** Model identifier passed to the API */
+  model: string;
+  /** Protocol specification */
+  protocol: string;
+  /** Whether the model supports streaming responses */
+  streaming: boolean;
+  /** Whether the model accepts user-supplied image inputs */
+  image_input: boolean;
+  /** Whether the model can produce image outputs */
+  image_output: boolean;
+  /** Maximum context token limit */
+  max_context: number;
 }

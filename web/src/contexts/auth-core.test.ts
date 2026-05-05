@@ -31,14 +31,25 @@ describe('auth-core', () => {
       nickname: 'Test/User+One',
     });
 
-    saveAuthSession({ id: 1, username: 'default' }, token);
+    saveAuthSession(
+      { id: 1, username: 'default', role: 'admin', permissions: ['studio.access'] },
+      token,
+    );
 
     expect(isTokenValid()).toBe(true);
-    expect(getStoredUser()).toEqual({ id: 1, username: 'default' });
+    expect(getStoredUser()).toEqual({
+      id: 1,
+      username: 'default',
+      role: 'admin',
+      permissions: ['studio.access'],
+    });
   });
 
   it('clears invalid sessions cleanly', () => {
-    saveAuthSession({ id: 1, username: 'default' }, 'invalid.token.value');
+    saveAuthSession(
+      { id: 1, username: 'default', role: 'admin', permissions: [] },
+      'invalid.token.value',
+    );
 
     expect(isTokenValid()).toBe(false);
     expect(getStoredUser()).toBeNull();

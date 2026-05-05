@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from app.api.permissions import permissions
+from app.security.permission_catalog import Permission
 from app.services.storage_status_service import StorageStatusService
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -27,8 +29,11 @@ class StorageStatusResponse(BaseModel):
 
 
 @router.get("/system/storage-status", response_model=StorageStatusResponse)
-async def get_storage_status() -> StorageStatusResponse:
+async def get_storage_status(
+    current_user=Depends(permissions(Permission.STORAGE_VIEW)),
+) -> StorageStatusResponse:
     """Return the active storage profile plus fallback state."""
+    del current_user
     snapshot = StorageStatusService().get_status()
     return StorageStatusResponse(
         requested_profile=snapshot.requested_profile,

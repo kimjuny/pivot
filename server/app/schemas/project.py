@@ -28,6 +28,7 @@ class ProjectResponse(AppBaseModel):
     name: str
     description: str | None = None
     workspace_id: str
+    can_edit: bool
     created_at: str
     updated_at: str
 
@@ -37,3 +38,47 @@ class ProjectListResponse(AppBaseModel):
 
     projects: list[ProjectResponse]
     total: int
+
+
+class ProjectAccessUpdate(AppBaseModel):
+    """Payload for replacing one project's selected access."""
+
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class ProjectAccessResponse(AppBaseModel):
+    """Direct use/edit grants for one project."""
+
+    project_id: str
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class ProjectAccessUserOption(AppBaseModel):
+    """User option shown in one project's access editor."""
+
+    id: int
+    username: str
+    display_name: str | None
+    email: str | None
+
+
+class ProjectAccessGroupOption(AppBaseModel):
+    """Group option shown in one project's access editor."""
+
+    id: int
+    name: str
+    description: str
+    member_count: int
+
+
+class ProjectAccessOptionsResponse(AppBaseModel):
+    """Assignable principals for one project's access editor."""
+
+    users: list[ProjectAccessUserOption] = Field(default_factory=list)
+    groups: list[ProjectAccessGroupOption] = Field(default_factory=list)

@@ -56,6 +56,7 @@ import { ConversationView } from "./components/ConversationView";
 import { ExtensionDock } from "./components/ExtensionDock";
 import type { InstalledChatSurfaceDescriptor } from "./components/ExtensionDock";
 import { useRegisterChatDebugPanelSection } from "./components/ChatDebugPanelContext";
+import ProjectAccessDialog from "./components/ProjectAccessDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
 import { useChatUploads } from "./hooks/useChatUploads";
@@ -697,6 +698,7 @@ function ChatContainer({
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [accessProjectId, setAccessProjectId] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -2468,6 +2470,10 @@ function ChatContainer({
     }
   };
 
+  const handleManageProjectAccess = (projectId: string) => {
+    setAccessProjectId(projectId);
+  };
+
   /**
    * Deletes a project and all of its child sessions, then clears any active
    * draft or session that depended on that shared workspace.
@@ -3365,6 +3371,11 @@ function ChatContainer({
       null,
     [currentProjectId, sidebarProjects],
   );
+  const accessProject = useMemo(
+    () =>
+      projects.find((project) => project.project_id === accessProjectId) ?? null,
+    [accessProjectId, projects],
+  );
   const isNewSessionDraftActive =
     currentSessionId === null && currentProjectId === null;
   const chatWorkspacePane = (
@@ -3494,6 +3505,7 @@ function ChatContainer({
         onCreateProject={handleCreateProject}
         onSelectProject={handleSelectProject}
         onRenameProject={handleRenameProject}
+        onManageProjectAccess={handleManageProjectAccess}
         onDeleteProject={handleDeleteProject}
         onSelectSession={handleSelectSession}
         onRenameSession={handleRenameSession}
@@ -3501,6 +3513,20 @@ function ChatContainer({
         onDeleteSession={handleDeleteSession}
         navigationItems={sidebarNavigationItems}
         footer={sidebarFooter}
+      />
+
+      <ProjectAccessDialog
+        open={accessProjectId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAccessProjectId(null);
+          }
+        }}
+        projectId={accessProjectId}
+        projectName={accessProject?.name ?? null}
+        onSaved={async () => {
+          await refreshSidebarData();
+        }}
       />
 
       <SidebarInset className="relative flex flex-1 overflow-hidden bg-background text-foreground">

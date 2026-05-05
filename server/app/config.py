@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     WORK_WECHAT_WS_URL: str = "wss://openws.work.weixin.qq.com"
     WORK_WECHAT_WS_HEARTBEAT_SECONDS: int = 30
     WORK_WECHAT_WS_REQUEST_TIMEOUT_SECONDS: int = 10
+    SYSTEM_TIME_ZONE: str = "Asia/Shanghai"
 
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"

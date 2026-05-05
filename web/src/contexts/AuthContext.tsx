@@ -67,8 +67,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error(errorData.detail || 'Login failed');
     }
 
-    const data = await response.json() as { id: number; username: string; access_token: string };
-    const loggedInUser: User = { id: data.id, username: data.username };
+    const data = await response.json() as {
+      id: number;
+      username: string;
+      role: string;
+      permissions: string[];
+      access_token: string;
+    };
+    const loggedInUser: User = {
+      id: data.id,
+      username: data.username,
+      role: data.role,
+      permissions: data.permissions,
+    };
     saveAuthSession(loggedInUser, data.access_token);
     setUser(loggedInUser);
   }, []);

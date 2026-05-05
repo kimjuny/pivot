@@ -111,6 +111,18 @@ podman compose exec backend bash server/lint.sh
 podman compose exec frontend npm run check-all
 ```
 
+### Reset development database
+
+The default compose stack stores SQLite data at:
+
+```text
+server/data/pivot.db
+```
+
+To reset local development data, stop the backend, delete that file, then start
+the stack again. Startup seeds the default roles (`user`, `builder`, `admin`),
+permissions, and the default admin account (`default` / `123456`).
+
 ## Production
 
 ```bash

@@ -9,7 +9,9 @@ from typing import Any
 
 import bcrypt
 from app.api.dependencies import get_db
-from app.models.user import User, UserLogin, UserResponse
+from app.models.access import Role
+from app.models.user import CurrentUserResponse, User, UserLogin, UserResponse
+from app.services.permission_service import PermissionService
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -118,27 +120,10 @@ def resolve_user_from_access_token(token: str, session: Session) -> User:
     user = session.get(User, user_id)
     if user is None:
         raise credentials_exception
+    if user.status != "active":
+        raise credentials_exception
 
     return user
-
-
-def init_default_user(session: Session) -> None:
-    """Initialize the default user if it doesn't exist.
-
-    This creates a default user with username 'default' and password '123456'.
-
-    Args:
-        session: The database session.
-    """
-    existing_user = session.exec(select(User).where(User.username == "default")).first()
-    if existing_user is None:
-        default_user = User(
-            username="default",
-            password_hash=get_password_hash("123456"),
-        )
-        session.add(default_user)
-        session.commit()
-        print("Default user created: username='default', password='123456'")
 
 
 @router.post("/auth/login", response_model=UserResponse)
@@ -166,11 +151,22 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
+    if user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User is disabled",
+        )
 
     if user.id is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User id is missing",
+        )
+    role = session.get(Role, user.role_id)
+    if role is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User role is missing",
         )
 
     access_token = create_access_token(data={"sub": str(user.id)})
@@ -178,12 +174,17 @@ async def login(
     return UserResponse(
         id=user.id,
         username=user.username,
+        role=role.key,
+        permissions=sorted(PermissionService(session).get_user_permission_keys(user)),
         access_token=access_token,
     )
 
 
-@router.get("/auth/me")
-async def get_me(current_user: User = Depends(get_current_user)) -> User:
+@router.get("/auth/me", response_model=CurrentUserResponse)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> CurrentUserResponse:
     """Get the current authenticated user.
 
     Args:
@@ -192,4 +193,15 @@ async def get_me(current_user: User = Depends(get_current_user)) -> User:
     Returns:
         The current user.
     """
-    return current_user
+    role = session.get(Role, current_user.role_id)
+    if role is None or current_user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User role is missing",
+        )
+    return CurrentUserResponse(
+        id=current_user.id,
+        username=current_user.username,
+        role=role.key,
+        permissions=sorted(PermissionService(session).get_user_permission_keys(current_user)),
+    )

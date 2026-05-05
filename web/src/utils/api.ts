@@ -1,4 +1,4 @@
-import type { Agent, LLM } from '../types';
+import type { Agent, LLM, LLMUsable } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import type {
   ChatSessionType,
@@ -139,6 +139,34 @@ export interface AgentDraftState {
   publish_summary: string[];
   /** Most recent release records for the publish dialog. */
   release_history: AgentReleaseRecord[];
+}
+
+export interface AgentAccess {
+  agent_id: number;
+  use_scope: 'all' | 'selected';
+  use_user_ids: number[];
+  use_group_ids: number[];
+  edit_user_ids: number[];
+  edit_group_ids: number[];
+}
+
+export interface AgentAccessUserOption {
+  id: number;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+export interface AgentAccessGroupOption {
+  id: number;
+  name: string;
+  description: string;
+  member_count: number;
+}
+
+export interface AgentAccessOptions {
+  users: AgentAccessUserOption[];
+  groups: AgentAccessGroupOption[];
 }
 
 /**
@@ -323,6 +351,32 @@ export const updateAgentServing = async (
     method: 'PATCH',
     body: JSON.stringify({ serving_enabled: servingEnabled }),
   }) as Promise<Agent>;
+};
+
+export const getAgentAccess = async (agentId: number): Promise<AgentAccess> => {
+  return apiRequest(`/agents/${agentId}/access`) as Promise<AgentAccess>;
+};
+
+export const getAgentAccessOptions = async (
+  agentId: number,
+): Promise<AgentAccessOptions> => {
+  return apiRequest(`/agents/${agentId}/access-options`) as Promise<AgentAccessOptions>;
+};
+
+export const updateAgentAccess = async (
+  agentId: number,
+  access: AgentAccess,
+): Promise<AgentAccess> => {
+  return apiRequest(`/agents/${agentId}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_scope: access.use_scope,
+      use_user_ids: access.use_user_ids,
+      use_group_ids: access.use_group_ids,
+      edit_user_ids: access.edit_user_ids,
+      edit_group_ids: access.edit_group_ids,
+    }),
+  }) as Promise<AgentAccess>;
 };
 
 /**
@@ -1635,6 +1689,14 @@ export const getLLMs = async (): Promise<LLM[]> => {
 };
 
 /**
+ * Fetch LLM options the current Studio user can select when configuring agents.
+ * The response intentionally excludes provider secrets and endpoint settings.
+ */
+export const getUsableLLMs = async (): Promise<LLMUsable[]> => {
+  return apiRequest('/llms/usable') as Promise<LLMUsable[]>;
+};
+
+/**
  * Create a new LLM.
  * 
  * @param llmData - LLM creation data
@@ -1655,6 +1717,11 @@ export const createLLM = async (llmData: {
   image_output?: boolean;
   max_context?: number;
   extra_config?: string;
+  use_scope?: 'all' | 'selected';
+  use_user_ids?: number[];
+  use_group_ids?: number[];
+  edit_user_ids?: number[];
+  edit_group_ids?: number[];
 }): Promise<LLM> => {
   return apiRequest('/llms', {
     method: 'POST',
@@ -1670,6 +1737,64 @@ export const createLLM = async (llmData: {
  */
 export const getLLMById = async (llmId: number): Promise<LLM> => {
   return apiRequest(`/llms/${llmId}`) as Promise<LLM>;
+};
+
+export interface LLMAccess {
+  llm_id: number;
+  use_scope: 'all' | 'selected';
+  use_user_ids: number[];
+  use_group_ids: number[];
+  edit_user_ids: number[];
+  edit_group_ids: number[];
+}
+
+export interface LLMAccessUserOption {
+  id: number;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+export interface LLMAccessGroupOption {
+  id: number;
+  name: string;
+  description: string;
+  member_count: number;
+}
+
+export interface LLMAccessOptions {
+  users: LLMAccessUserOption[];
+  groups: LLMAccessGroupOption[];
+}
+
+export const getLLMAccess = async (llmId: number): Promise<LLMAccess> => {
+  return apiRequest(`/llms/${llmId}/access`) as Promise<LLMAccess>;
+};
+
+export const getLLMAccessOptions = async (
+  llmId: number,
+): Promise<LLMAccessOptions> => {
+  return apiRequest(`/llms/${llmId}/access-options`) as Promise<LLMAccessOptions>;
+};
+
+export const getLLMCreateAccessOptions = async (): Promise<LLMAccessOptions> => {
+  return apiRequest('/llms/access-options') as Promise<LLMAccessOptions>;
+};
+
+export const updateLLMAccess = async (
+  llmId: number,
+  access: Omit<LLMAccess, 'llm_id'>,
+): Promise<LLMAccess> => {
+  return apiRequest(`/llms/${llmId}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_user_ids: access.use_user_ids,
+      use_scope: access.use_scope,
+      use_group_ids: access.use_group_ids,
+      edit_user_ids: access.edit_user_ids,
+      edit_group_ids: access.edit_group_ids,
+    }),
+  }) as Promise<LLMAccess>;
 };
 
 /**
@@ -1730,8 +1855,36 @@ export interface ProjectResponse {
   name: string;
   description: string | null;
   workspace_id: string;
+  can_edit: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProjectAccess {
+  project_id: string;
+  use_user_ids: number[];
+  use_group_ids: number[];
+  edit_user_ids: number[];
+  edit_group_ids: number[];
+}
+
+export interface ProjectAccessUserOption {
+  id: number;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+export interface ProjectAccessGroupOption {
+  id: number;
+  name: string;
+  description: string;
+  member_count: number;
+}
+
+export interface ProjectAccessOptions {
+  users: ProjectAccessUserOption[];
+  groups: ProjectAccessGroupOption[];
 }
 
 /**
@@ -1879,6 +2032,35 @@ export const deleteProject = async (projectId: string): Promise<void> => {
   await apiRequest(`/projects/${projectId}`, {
     method: 'DELETE',
   });
+};
+
+export const getProjectAccess = async (
+  projectId: string,
+): Promise<ProjectAccess> => {
+  return apiRequest(`/projects/${projectId}/access`) as Promise<ProjectAccess>;
+};
+
+export const getProjectAccessOptions = async (
+  projectId: string,
+): Promise<ProjectAccessOptions> => {
+  return apiRequest(
+    `/projects/${projectId}/access-options`,
+  ) as Promise<ProjectAccessOptions>;
+};
+
+export const updateProjectAccess = async (
+  projectId: string,
+  access: Omit<ProjectAccess, 'project_id'>,
+): Promise<ProjectAccess> => {
+  return apiRequest(`/projects/${projectId}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_user_ids: access.use_user_ids,
+      use_group_ids: access.use_group_ids,
+      edit_user_ids: access.edit_user_ids,
+      edit_group_ids: access.edit_group_ids,
+    }),
+  }) as Promise<ProjectAccess>;
 };
 
 /**
@@ -2609,7 +2791,9 @@ export interface SharedSkill {
   location: string;
   filename: string;
   kind: 'shared';
+  use_scope: 'all' | 'selected';
   source: SkillSource;
+  creator_id: number | null;
   creator: string | null;
   read_only: boolean;
   md5: string;
@@ -2631,7 +2815,9 @@ export interface UserSkill {
   location: string;
   filename: string;
   kind: 'private' | 'shared';
+  use_scope: 'all' | 'selected';
   source: SkillSource;
+  creator_id: number | null;
   creator: string | null;
   read_only: boolean;
   md5: string;
@@ -2643,6 +2829,19 @@ export interface UserSkill {
   created_at: string;
   updated_at: string;
 }
+
+export type UsableSkill = UserSkill;
+
+export interface SkillAccess {
+  skill_name: string;
+  use_scope: 'all' | 'selected';
+  use_user_ids: number[];
+  use_group_ids: number[];
+  edit_user_ids: number[];
+  edit_group_ids: number[];
+}
+
+export type SkillAccessOptions = LLMAccessOptions;
 
 /**
  * One valid skill folder discovered in a GitHub repository.
@@ -2699,6 +2898,48 @@ export const getSharedSkills = async (): Promise<SharedSkill[]> => {
  */
 export const getPrivateSkills = async (): Promise<UserSkill[]> => {
   return apiRequest('/skills/private') as Promise<UserSkill[]>;
+};
+
+/**
+ * Fetch skills the current Studio user can select when configuring agents.
+ */
+export const getUsableSkills = async (): Promise<UsableSkill[]> => {
+  return apiRequest('/skills/usable') as Promise<UsableSkill[]>;
+};
+
+export const getSkillAccess = async (skillName: string): Promise<SkillAccess> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/${encodedSkillName}/access`) as Promise<SkillAccess>;
+};
+
+export const getSkillAccessOptions = async (
+  skillName: string,
+): Promise<SkillAccessOptions> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(
+    `/skills/${encodedSkillName}/access-options`,
+  ) as Promise<SkillAccessOptions>;
+};
+
+export const getSkillCreateAccessOptions = async (): Promise<SkillAccessOptions> => {
+  return apiRequest('/skills/access-options') as Promise<SkillAccessOptions>;
+};
+
+export const updateSkillAccess = async (
+  skillName: string,
+  access: Omit<SkillAccess, 'skill_name'>,
+): Promise<SkillAccess> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/${encodedSkillName}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_scope: access.use_scope,
+      use_user_ids: access.use_user_ids,
+      use_group_ids: access.use_group_ids,
+      edit_user_ids: access.edit_user_ids,
+      edit_group_ids: access.edit_group_ids,
+    }),
+  }) as Promise<SkillAccess>;
 };
 
 /**

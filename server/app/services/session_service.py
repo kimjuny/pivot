@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from app.models.access import AccessLevel
 from app.models.agent_release import AgentTestSnapshot
 from app.models.react import (
     ReactPlanStep,
@@ -15,6 +16,7 @@ from app.models.react import (
     ReactTaskEvent,
 )
 from app.models.session import Session
+from app.models.user import User
 from app.schemas.file import FileAssetListItem
 from app.schemas.task_attachment import TaskAttachmentListItem
 from app.services.agent_service import AgentService
@@ -114,11 +116,20 @@ class SessionService:
             raise ValueError(f"Unsupported session type '{session_type}'.")
 
         if project_id is not None:
-            project = ProjectService(self.db).get_owned_project(project_id, user)
+            project_service = ProjectService(self.db)
+            project = project_service.get_project(project_id)
             if project is None:
                 raise ValueError(f"Project {project_id} not found.")
             if project.agent_id != agent_id:
                 raise ValueError("Project does not belong to the requested agent.")
+            actor = self.db.exec(select(User).where(User.username == user)).first()
+            if actor is None:
+                raise ValueError("User not found.")
+            project_service.require_project_access(
+                user=actor,
+                project=project,
+                access_level=AccessLevel.USE,
+            )
             workspace_id = project.workspace_id
         else:
             workspace_id = (

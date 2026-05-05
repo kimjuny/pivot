@@ -12,10 +12,11 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.api.permissions import permissions
 from app.models.user import User
 from app.orchestration.tool import get_tool_manager
+from app.security.permission_catalog import Permission
 from app.services.workspace_service import (
     check_ast,
     check_pyright,
@@ -40,7 +41,7 @@ router = APIRouter()
 @router.get("/tools/shared")
 async def get_shared_tools(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """Get all shared (built-in) tools available to every user.
 
@@ -95,7 +96,7 @@ def _read_shared_tool_source(tool_name: str) -> str:
 async def get_shared_tool_source(
     tool_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> dict[str, str]:
     """Get source code for a shared (built-in) tool.
 
@@ -129,7 +130,7 @@ class ToolWriteRequest(BaseModel):
 @router.get("/tools/private")
 async def get_private_tools(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """List all private tools belonging to the current user.
 
@@ -143,7 +144,7 @@ async def get_private_tools(
 async def get_private_tool(
     tool_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> dict[str, str]:
     """Get the source code of a private tool.
 
@@ -168,7 +169,7 @@ async def upsert_private_tool(
     tool_name: str,
     body: ToolWriteRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> dict[str, str]:
     """Create or update a private tool source file.
 
@@ -187,7 +188,7 @@ async def upsert_private_tool(
 async def delete_private_tool(
     tool_name: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> dict[str, str]:
     """Delete a private tool source file.
 
@@ -215,7 +216,7 @@ async def delete_private_tool(
 @router.get("/tools")
 async def get_tools(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """Get all registered shared tools (legacy endpoint).
 
@@ -248,7 +249,7 @@ class CodeCheckRequest(BaseModel):
 @router.post("/tools/check/ast")
 async def check_tool_ast(
     body: CodeCheckRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """Parse Python source with the built-in ``ast`` module.
 
@@ -267,7 +268,7 @@ async def check_tool_ast(
 @router.post("/tools/check/ruff")
 async def check_tool_ruff(
     body: CodeCheckRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """Lint Python source with ``ruff`` using the project configuration.
 
@@ -285,7 +286,7 @@ async def check_tool_ruff(
 @router.post("/tools/check/pyright")
 async def check_tool_pyright(
     body: CodeCheckRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """Type-check Python source with ``pyright`` using the project configuration.
 
