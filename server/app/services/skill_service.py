@@ -1090,26 +1090,27 @@ def list_allowed_visible_skills(
     raw_skill_ids: str | None,
     extra_skills: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
-    """Return deterministic visible skill metadata for one runtime.
+    """Return deterministic skill metadata for one runtime.
 
     Args:
         session: Active database session.
-        username: Authenticated username.
+        username: Authenticated username kept for API compatibility.
         raw_skill_ids: Optional JSON allowlist matching the agent row format.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
 
     Returns:
-        Sorted visible skill metadata including storage location for mounting.
+        Sorted runtime skill metadata including storage location for mounting.
     """
     sync_skill_registry(session)
-    visible_skills = _visible_skills_query(session, username)
     allowed_names = _parse_name_allowlist(raw_skill_ids)
     results: list[dict[str, str]] = []
     seen_names: set[str] = set()
 
-    for skill in visible_skills:
-        if skill.name not in allowed_names:
+    del username
+    for skill_name in sorted(allowed_names):
+        skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+        if skill is None:
             continue
         if skill.name in seen_names:
             continue
@@ -1317,11 +1318,11 @@ def build_skill_mounts(
     skill_names: list[str],
     extra_skills: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
-    """Build sandbox mount metadata for visible skills.
+    """Build sandbox mount metadata for runtime-allowed skills.
 
     Args:
         session: Active database session.
-        username: Authenticated username.
+        username: Authenticated username kept for API compatibility.
         skill_names: Allowed globally unique skill names.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
@@ -1330,8 +1331,13 @@ def build_skill_mounts(
         List of ``{"name": ..., "location": ...}`` payloads for sandbox-manager.
     """
     sync_skill_registry(session)
-    visible_skills = _visible_skills_query(session, username)
-    by_name = {skill.name: skill for skill in visible_skills}
+    del username
+    allowed_names = {name for name in skill_names if name}
+    by_name = {
+        skill.name: skill
+        for skill in session.exec(select(Skill)).all()
+        if skill.name in allowed_names
+    }
     extra_by_name = {
         item["name"]: item
         for item in extra_skills or []

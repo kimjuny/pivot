@@ -127,7 +127,9 @@ class SkillAccessServiceTestCase(unittest.TestCase):
             creator_id=self.alice.id or 0,
         )
 
-        self.assertEqual(skill_service_module.list_visible_skills(self.session, "bob"), [])
+        self.assertEqual(
+            skill_service_module.list_visible_skills(self.session, "bob"), []
+        )
 
         AccessService(self.session).grant_access(
             resource_type=ResourceType.SKILL,

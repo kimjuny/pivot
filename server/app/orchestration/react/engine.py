@@ -603,6 +603,9 @@ class ReactEngine:
         response_id = ""
         response_model = getattr(self.llm, "model", "")
         emitted_control_preview = False
+        live_answer_payload_name: str | None = None
+        live_answer_emitted_length = 0
+        live_answer_finalized = False
 
         stream_started_at = perf_counter()
         last_report_at = stream_started_at
@@ -666,6 +669,15 @@ class ReactEngine:
                                     == "CALL_TOOL"
                                 ):
                                     eager_tool_state.decision = preview_decision
+                                if (
+                                    preview_decision.action.action_type == "ANSWER"
+                                    and live_answer_payload_name is None
+                                ):
+                                    live_answer_payload_name = (
+                                        self._extract_answer_payload_ref_name(
+                                            preview_decision.action.output
+                                        )
+                                    )
                                 if token_meter_queue is not None:
                                     await token_meter_queue.put(
                                         {
@@ -695,6 +707,17 @@ class ReactEngine:
                             eager_tool_state,
                             "".join(content_parts),
                             token_meter_queue,
+                        )
+                    if live_answer_payload_name is not None:
+                        (
+                            live_answer_emitted_length,
+                            live_answer_finalized,
+                        ) = await self._emit_live_answer_delta(
+                            content="".join(content_parts),
+                            payload_name=live_answer_payload_name,
+                            emitted_length=live_answer_emitted_length,
+                            finalized=live_answer_finalized,
+                            token_meter_queue=token_meter_queue,
                         )
 
             if token_meter_queue is not None:
@@ -728,6 +751,14 @@ class ReactEngine:
                 eager_tool_state,
                 "".join(content_parts),
                 token_meter_queue,
+            )
+        if live_answer_payload_name is not None:
+            await self._emit_live_answer_delta(
+                content="".join(content_parts),
+                payload_name=live_answer_payload_name,
+                emitted_length=live_answer_emitted_length,
+                finalized=live_answer_finalized,
+                token_meter_queue=token_meter_queue,
             )
 
         # Final flush so UI gets the latest completion estimate before action arrives.
@@ -1161,14 +1192,88 @@ class ReactEngine:
         payload_name: str,
     ) -> str:
         """Hold back only text that could be a partial payload END marker."""
-        end_marker = (
-            f"<<<PIVOT_PAYLOAD:{payload_name}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>"
-        )
+        end_marker = f"<<<PIVOT_PAYLOAD:{payload_name}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>"
         line_start = payload_text.rfind("\n") + 1
         tail = payload_text[line_start:]
         if tail and end_marker.startswith(tail):
             return payload_text[:line_start]
         return payload_text
+
+    @staticmethod
+    def _extract_answer_payload_ref_name(action_output: dict[str, Any]) -> str | None:
+        """Return the payload name used by an ANSWER action, if present."""
+        raw_answer = action_output.get("answer")
+        if not isinstance(raw_answer, dict):
+            return None
+        payload_ref = raw_answer.get(PAYLOAD_REF_KEY)
+        return payload_ref if isinstance(payload_ref, str) and payload_ref else None
+
+    async def _emit_live_answer_delta(
+        self,
+        *,
+        content: str,
+        payload_name: str,
+        emitted_length: int,
+        finalized: bool,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> tuple[int, bool]:
+        """Emit incremental ANSWER payload text for live assistant rendering."""
+        if token_meter_queue is None or finalized:
+            return emitted_length, finalized
+
+        begin_re = re.compile(
+            rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:BEGIN_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
+        )
+        begin_match = begin_re.search(content)
+        if begin_match is None:
+            return emitted_length, finalized
+
+        content_start = begin_match.end()
+        if content_start < len(content) and content[content_start] == "\n":
+            content_start += 1
+
+        end_re = re.compile(
+            rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
+        )
+        end_match = end_re.search(content, content_start)
+        is_final = end_match is not None
+        if is_final:
+            content_end = end_match.start()
+            if content_end > content_start and content[content_end - 1] == "\n":
+                content_end -= 1
+                if content_end > content_start and content[content_end - 1] == "\r":
+                    content_end -= 1
+        else:
+            content_end = len(content)
+
+        if content_end < content_start:
+            return emitted_length, finalized
+
+        payload_text = content[content_start:content_end]
+        if not is_final:
+            payload_text = self._trim_possible_payload_end_marker(
+                payload_text,
+                payload_name,
+            )
+
+        delta = payload_text[emitted_length:]
+        next_emitted_length = emitted_length
+        if delta:
+            next_emitted_length = len(payload_text)
+
+        should_emit_final = is_final and not finalized
+        if not delta and not should_emit_final:
+            return next_emitted_length, finalized
+
+        await token_meter_queue.put(
+            {
+                "type": "answer_delta",
+                "payload_name": payload_name,
+                "delta": delta,
+                "is_final": is_final,
+            }
+        )
+        return next_emitted_length, finalized or is_final
 
     async def _emit_live_payload_deltas(
         self,
@@ -2456,6 +2561,29 @@ class ReactEngine:
                                     "tool_call_id": tool_call_id,
                                     "tool_name": tool_name,
                                     "argument_name": argument_name,
+                                    "payload_name": payload_name,
+                                    "delta": delta,
+                                    "is_final": is_final,
+                                },
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        continue
+
+                    if meter_type == "answer_delta":
+                        payload_name = meter_data.get("payload_name")
+                        delta = meter_data.get("delta")
+                        is_final = meter_data.get("is_final")
+                        if (
+                            isinstance(payload_name, str)
+                            and isinstance(delta, str)
+                            and isinstance(is_final, bool)
+                        ):
+                            yield {
+                                "type": "answer_delta",
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "data": {
                                     "payload_name": payload_name,
                                     "delta": delta,
                                     "is_final": is_final,

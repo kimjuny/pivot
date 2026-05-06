@@ -168,6 +168,66 @@ class ReactParserTestCase(unittest.TestCase):
         )
         self.assertEqual(decision.action.tool_calls[0].batch, 1)
 
+    def test_parse_answer_with_payload_block(self) -> None:
+        """ANSWER payload blocks should resolve into the final markdown body."""
+        content = """
+{
+  "summary": "Task complete",
+  "action": {
+    "action_type": "ANSWER",
+    "output": {
+      "answer": {"$payload_ref": "answer_payload"},
+      "attachments": []
+    }
+  },
+  "task_summary": {
+    "narrative": "Completed successfully.",
+    "key_findings": [],
+    "final_decisions": []
+  }
+}
+<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
+# Final Answer
+
+Everything is ready.
+<<<PIVOT_PAYLOAD:answer_payload:END_6F2D9C1A>>>
+""".strip()
+
+        decision = parse_react_output(content)
+
+        self.assertEqual(decision.action.action_type, "ANSWER")
+        self.assertEqual(
+            decision.action.output["answer"],
+            "# Final Answer\n\nEverything is ready.",
+        )
+        self.assertEqual(decision.task_summary["narrative"], "Completed successfully.")
+
+    def test_parse_answer_control_section_keeps_payload_ref_for_stream_preview(
+        self,
+    ) -> None:
+        """ANSWER previews should remain parseable before the payload is complete."""
+        content = """
+{
+  "summary": "Task complete",
+  "action": {
+    "action_type": "ANSWER",
+    "output": {
+      "answer": {"$payload_ref": "answer_payload"},
+      "attachments": []
+    }
+  }
+}
+<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
+""".strip()
+
+        decision = parse_react_control_section(content)
+
+        self.assertEqual(decision.action.action_type, "ANSWER")
+        self.assertEqual(
+            decision.action.output["answer"],
+            {"$payload_ref": "answer_payload"},
+        )
+
     def test_collect_complete_payload_blocks_ignores_incomplete_tail(self) -> None:
         """Streaming payload collection should return only closed blocks."""
         content = """

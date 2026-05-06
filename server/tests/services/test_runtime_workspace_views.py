@@ -56,13 +56,12 @@ class RuntimeWorkspaceViewsTestCase(unittest.TestCase):
         self,
         *,
         username: str,
-        kind: str,
         name: str,
         description: str,
         body: str,
     ) -> Path:
         """Create one skill in the unified on-disk layout."""
-        skill_dir = self.workspace_root / "users" / username / "skills" / kind / name
+        skill_dir = self.workspace_root / "users" / username / "skills" / name
         skill_dir.mkdir(parents=True, exist_ok=True)
         skill_path = skill_dir / "SKILL.md"
         skill_path.write_text(
@@ -80,14 +79,12 @@ class RuntimeWorkspaceViewsTestCase(unittest.TestCase):
         """Sandbox mounts should use host paths while prompts keep `/workspace` paths."""
         self._write_skill(
             username="alice",
-            kind="private",
             name="research-notes",
             description="Alice private research workflow",
             body="Private notes body.",
         )
         self._write_skill(
             username="bob",
-            kind="shared",
             name="qa-playbook",
             description="Bob shared QA workflow",
             body="Shared QA body.",
@@ -144,6 +141,69 @@ class RuntimeWorkspaceViewsTestCase(unittest.TestCase):
                     "name": "qa-playbook",
                     "description": "Bob shared QA workflow",
                     "path": "/workspace/skills/qa-playbook/SKILL.md",
+                }
+            ],
+        )
+
+    def test_runtime_skill_mounts_ignore_studio_skill_visibility(self) -> None:
+        """End-user runtime should still mount configured skills after Studio access is revoked."""
+        self._write_skill(
+            username="alice",
+            name="research-notes",
+            description="Alice private research workflow",
+            body="Private notes body.",
+        )
+
+        skill_service.sync_skill_registry(self.session)
+        skill = skill_service.get_skill_by_name(self.session, "research-notes")
+        self.assertIsNotNone(skill)
+        skill_service.set_skill_access(
+            self.session,
+            skill=skill,
+            use_scope="selected",
+            use_user_ids={self.alice.id or 0},
+            use_group_ids=set(),
+            edit_user_ids={self.alice.id or 0},
+            edit_group_ids=set(),
+        )
+
+        mounts = skill_service.build_skill_mounts(
+            self.session,
+            "bob",
+            ["research-notes"],
+        )
+        prompt_payload = json.loads(
+            skill_service.build_skills_metadata_prompt_json(
+                self.session,
+                "bob",
+                json.dumps(["research-notes"]),
+            )
+        )
+
+        self.assertEqual(
+            mounts,
+            [
+                {
+                    "name": "research-notes",
+                    "location": str(
+                        (
+                            self.workspace_root
+                            / "users"
+                            / "alice"
+                            / "skills"
+                            / "research-notes"
+                        ).resolve()
+                    ),
+                }
+            ],
+        )
+        self.assertEqual(
+            prompt_payload,
+            [
+                {
+                    "name": "research-notes",
+                    "description": "Alice private research workflow",
+                    "path": "/workspace/skills/research-notes/SKILL.md",
                 }
             ],
         )

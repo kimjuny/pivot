@@ -19,6 +19,7 @@ import {
   formatTokenCount,
   getRecursionStatus,
 } from "../utils/chatSelectors";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { RecursionStateViewer } from "./RecursionStateViewer";
 import { ThinkingWordTicker } from "./ThinkingWordTicker";
 import { TokenUsageLabel } from "./TokenUsageLabel";
@@ -375,7 +376,7 @@ function ToolPayloadSection({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyTextToClipboard(value);
       if (copyResetTimeoutRef.current !== null) {
         window.clearTimeout(copyResetTimeoutRef.current);
       }
@@ -459,7 +460,7 @@ function ToolCodePreview({
           </span>
         ) : null}
       </div>
-      <div className="max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
+      <div className="tool-preview-scroll max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
         {lines.length > 0 ? (
           lines.map((line, index) => (
             <div key={`${index}-${line}`} className="flex min-w-0">
@@ -493,7 +494,7 @@ function ToolDiffPreview({ value }: { value: string }) {
           </span>
         ) : null}
       </div>
-      <div className="max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
+      <div className="tool-preview-scroll max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
         {lines.length > 0 ? (
           lines.map((line, index) => {
             const lineClassName = line.startsWith("+") && !line.startsWith("+++")

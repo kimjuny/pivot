@@ -10,6 +10,7 @@ import {
 } from "@/lib/lucide";
 import { toast } from "sonner";
 
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { formatTimestamp } from "@/utils/timestamp";
 
 import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
@@ -84,7 +85,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
     }
 
     try {
-      await navigator.clipboard.writeText(message.content);
+      await copyTextToClipboard(message.content);
       if (copyResetTimeoutRef.current !== null) {
         window.clearTimeout(copyResetTimeoutRef.current);
       }

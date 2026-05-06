@@ -264,7 +264,10 @@ class FileService:
             extension = next(
                 (
                     candidate_extension
-                    for candidate_extension, (_, candidate_mime_type) in _ALLOWED_VIDEO_FORMATS.items()
+                    for candidate_extension, (
+                        _,
+                        candidate_mime_type,
+                    ) in _ALLOWED_VIDEO_FORMATS.items()
                     if candidate_mime_type == mime_type
                 ),
                 "",
@@ -275,7 +278,10 @@ class FileService:
             raise ValueError(f"Unsupported video format. Allowed formats: {allowed}.")
 
         format_name, normalized_mime_type = _ALLOWED_VIDEO_FORMATS[extension]
-        if mime_type != "application/octet-stream" and mime_type != normalized_mime_type:
+        if (
+            mime_type != "application/octet-stream"
+            and mime_type != normalized_mime_type
+        ):
             raise ValueError(
                 f"Video MIME type '{mime_type}' does not match the '{extension}' extension."
             )

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from app.models.access import AccessLevel
 from app.services.access_service import AccessService
+from app.services.agent_service import AgentService
 from app.services.sandbox_service import get_sandbox_service
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
@@ -60,6 +61,11 @@ class PreviewEndpointRecord:
 
 _PREVIEW_ENDPOINTS: dict[str, PreviewEndpointRecord] = {}
 _PREVIEW_ENDPOINTS_LOCK = RLock()
+
+
+def _required_agent_access_level(session_type: str) -> AccessLevel:
+    """Return the agent access level required for one chat session type."""
+    return AccessLevel.EDIT if session_type == "studio_test" else AccessLevel.USE
 
 
 class PreviewEndpointService:
@@ -245,6 +251,10 @@ class PreviewEndpointService:
             raise PreviewEndpointPermissionError(
                 "Preview endpoint is not owned by the caller."
             )
+        self._resolve_owned_chat_session(
+            username=username,
+            session_id=record.session_id,
+        )
         return record
 
     def build_proxy_url(self, *, record: PreviewEndpointRecord) -> str:
@@ -302,6 +312,19 @@ class PreviewEndpointService:
         workspace = WorkspaceService(self.db).get_workspace(chat_session.workspace_id)
         if workspace is None:
             raise PreviewEndpointNotFoundError("Workspace not found.")
+        user = self._user_by_username(username)
+        if user is None:
+            raise PreviewEndpointPermissionError("Chat session is not accessible.")
+        try:
+            agent = AgentService(self.db).get_required_agent(chat_session.agent_id)
+        except ValueError as exc:
+            raise PreviewEndpointNotFoundError(str(exc)) from exc
+        if not AccessService(self.db).has_agent_access(
+            user=user,
+            agent=agent,
+            access_level=_required_agent_access_level(chat_session.type),
+        ):
+            raise PreviewEndpointPermissionError("Chat session is not accessible.")
         self._require_workspace_access(
             username=username,
             workspace_id=workspace.workspace_id,

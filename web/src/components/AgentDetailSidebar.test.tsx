@@ -17,6 +17,7 @@ vi.mock("@/utils/api", () => ({
   getAgentChannels: vi.fn(),
   getAgentExtensionPackages: vi.fn(),
   getAgentMediaProviderBindings: vi.fn(),
+  getAgentSidebarStats: vi.fn(),
   getAgentWebSearchBindings: vi.fn(),
   getChannels: vi.fn(),
   getMediaGenerationProviders: vi.fn(),
@@ -59,12 +60,14 @@ import {
   getAgentChannels,
   getAgentExtensionPackages,
   getAgentMediaProviderBindings,
+  getAgentSidebarStats,
   getAgentWebSearchBindings,
   getChannels,
   getMediaGenerationProviders,
   getUsableSkills,
   getUsableTools,
   getWebSearchProviders,
+  type UsableTool,
 } from "@/utils/api";
 
 import type { Agent } from "../types";
@@ -73,6 +76,15 @@ import AgentDetailSidebar from "./AgentDetailSidebar";
 
 const LOGO_DATA_URL =
   "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=";
+
+const baseSidebarStats = {
+  tools: { selected_count: 0, total_count: 0 },
+  skills: { selected_count: 0, total_count: 0 },
+  extensions: { selected_count: 0, total_count: 0 },
+  channels: { selected_count: 0, total_count: 0 },
+  media: { selected_count: 0, total_count: 0 },
+  web_search: { selected_count: 0, total_count: 0 },
+};
 
 const baseAgent: Agent = {
   id: 2,
@@ -110,10 +122,80 @@ function createDeferredPromise<T>() {
 }
 
 describe("AgentDetailSidebar", () => {
+  it("shows sidebar stat placeholders, lazy-loads section data, and delays skeleton visibility", async () => {
+    const user = userEvent.setup();
+    const sidebarStats = createDeferredPromise<typeof baseSidebarStats>();
+    const tools = createDeferredPromise<UsableTool[]>();
+    const extensionPackages = createDeferredPromise<[]>();
+
+    vi.mocked(getAgentSidebarStats).mockReturnValue(sidebarStats.promise);
+    vi.mocked(getUsableTools).mockReturnValue(tools.promise);
+    vi.mocked(getAgentExtensionPackages).mockReturnValue(extensionPackages.promise);
+
+    render(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar agent={baseAgent} />
+      </SidebarProvider>,
+    );
+
+    expect(screen.getAllByText("_ / _")).toHaveLength(6);
+    expect(getUsableTools).not.toHaveBeenCalled();
+    expect(getAgentExtensionPackages).not.toHaveBeenCalled();
+
+    sidebarStats.resolve({
+      ...baseSidebarStats,
+      tools: { selected_count: 1, total_count: 3 },
+    });
+
+    expect(await screen.findByText("1 / 3")).toBeInTheDocument();
+
+    await user.click(screen.getAllByText("Tools")[1]);
+
+    await waitFor(() => {
+      expect(getUsableTools).toHaveBeenCalledTimes(1);
+      expect(getAgentExtensionPackages).toHaveBeenCalledWith(2);
+    });
+
+    expect(
+      screen.queryByTestId("agent-sidebar-tools-skeleton"),
+    ).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("agent-sidebar-tools-skeleton"),
+      ).toBeInTheDocument();
+    }, {
+      timeout: 1200,
+    });
+
+    tools.resolve([
+      {
+        name: "search_docs",
+        description: "Search docs",
+        parameters: {},
+        tool_type: "normal",
+        source_type: "builtin",
+        read_only: true,
+        creator_id: null,
+      },
+    ]);
+    extensionPackages.resolve([]);
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("agent-sidebar-tools-skeleton"),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("persists extension removals into the parent draft workflow", async () => {
     const user = userEvent.setup();
     const onExtensionBindingsChanged = vi.fn().mockResolvedValue(undefined);
 
+    vi.mocked(getAgentSidebarStats).mockResolvedValue({
+      ...baseSidebarStats,
+      extensions: { selected_count: 1, total_count: 1 },
+    });
     vi.mocked(getUsableTools).mockResolvedValue([]);
     vi.mocked(getUsableSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
@@ -225,11 +307,11 @@ describe("AgentDetailSidebar", () => {
       </SidebarProvider>,
     );
 
+    await user.click(screen.getAllByText("Extensions")[1]);
+
     await waitFor(() => {
       expect(getAgentExtensionPackages).toHaveBeenCalledWith(2);
     });
-
-    await user.click(screen.getAllByText("Extensions")[1]);
 
     await user.click(screen.getByRole("button", { name: "Delete extension" }));
     await user.click(screen.getByRole("button", { name: "Remove" }));
@@ -241,6 +323,11 @@ describe("AgentDetailSidebar", () => {
   });
 
   it("renders the extension logo in the sidebar when one is available", async () => {
+    vi.mocked(getAgentSidebarStats).mockResolvedValue({
+      ...baseSidebarStats,
+      extensions: { selected_count: 1, total_count: 1 },
+      media: { selected_count: 1, total_count: 1 },
+    });
     vi.mocked(getUsableTools).mockResolvedValue([]);
     vi.mocked(getUsableSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
@@ -386,18 +473,18 @@ describe("AgentDetailSidebar", () => {
       </SidebarProvider>,
     );
 
+    await userEvent.setup().click(screen.getAllByText("Extensions")[1]);
+
     await waitFor(() => {
       expect(getAgentExtensionPackages).toHaveBeenCalledWith(2);
     });
-
-    await userEvent.setup().click(screen.getAllByText("Extensions")[1]);
 
     expect(screen.getByAltText("Wasp Plugin logo")).toHaveAttribute(
       "src",
       LOGO_DATA_URL,
     );
 
-    await userEvent.setup().click(screen.getAllByText("Media Providers")[1]);
+    await userEvent.setup().click(screen.getAllByText("Media")[1]);
 
     expect(screen.getAllByAltText("Wasp Image logo")[0]).toHaveAttribute(
       "src",
@@ -405,7 +492,7 @@ describe("AgentDetailSidebar", () => {
     );
   });
 
-  it("clears the previous agent's web search bindings before the next agent finishes loading", async () => {
+  it("clears stale web search bindings and keeps the next agent lazy-loaded", async () => {
     const user = userEvent.setup();
     const nextAgentBindings = createDeferredPromise<[]>();
     const nextAgent: Agent = {
@@ -414,6 +501,10 @@ describe("AgentDetailSidebar", () => {
       name: "Claude Agent",
     };
 
+    vi.mocked(getAgentSidebarStats).mockResolvedValue({
+      ...baseSidebarStats,
+      web_search: { selected_count: 1, total_count: 1 },
+    });
     vi.mocked(getUsableTools).mockResolvedValue([]);
     vi.mocked(getUsableSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
@@ -484,6 +575,10 @@ describe("AgentDetailSidebar", () => {
     await waitFor(() => {
       expect(screen.queryAllByText("Baidu Search")).toHaveLength(0);
     });
+
+    expect(getAgentWebSearchBindings).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getAllByText("Web Search")[1]);
 
     nextAgentBindings.resolve([]);
 

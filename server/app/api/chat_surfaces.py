@@ -18,6 +18,7 @@ from app.schemas.chat_surface import (
     CreateDevSurfaceSessionRequest,
     CreateInstalledSurfaceSessionRequest,
     CreatePreviewEndpointRequest,
+    CreateWorkspaceDirectoryRequest,
     DevSurfaceBootstrapResponse,
     DevSurfaceSessionResponse,
     InstalledSurfaceBootstrapResponse,
@@ -524,6 +525,72 @@ def write_dev_surface_workspace_text_file(
     return Response(status_code=204)
 
 
+@router.post(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/directory",
+    status_code=204,
+)
+def create_dev_surface_workspace_directory(
+    surface_session_id: str,
+    request: CreateWorkspaceDirectoryRequest,
+    http_request: FastAPIRequest,
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Create one workspace directory for an owned development surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=http_request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        service.create_directory(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=request.path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(status_code=204)
+
+
+@router.delete(
+    "/chat-surfaces/dev-sessions/{surface_session_id}/files/path",
+    status_code=204,
+)
+def delete_dev_surface_workspace_path(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str = Query(...),
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Delete one workspace file or directory for an owned development surface."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        service.delete_path(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(status_code=204)
+
+
 @router.get("/chat-surfaces/dev-sessions/{surface_session_id}/files/blob")
 def read_dev_surface_workspace_blob(
     surface_session_id: str,
@@ -804,6 +871,72 @@ def write_installed_surface_workspace_text_file(
             username=record.username,
             path=request.path,
             content=request.content,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(status_code=204)
+
+
+@router.post(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/files/directory",
+    status_code=204,
+)
+def create_installed_surface_workspace_directory(
+    surface_session_id: str,
+    request: CreateWorkspaceDirectoryRequest,
+    http_request: FastAPIRequest,
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Create one workspace directory for an owned installed surface session."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=http_request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        service.create_directory(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=request.path,
+        )
+    except WorkspaceFileNotFoundError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+    except WorkspaceFilePermissionError as err:
+        raise HTTPException(status_code=403, detail=str(err)) from err
+    except WorkspaceFileValidationError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+    return Response(status_code=204)
+
+
+@router.delete(
+    "/chat-surfaces/installed-sessions/{surface_session_id}/files/path",
+    status_code=204,
+)
+def delete_installed_surface_workspace_path(
+    surface_session_id: str,
+    request: FastAPIRequest,
+    path: str = Query(...),
+    db: DBSession = Depends(get_db),
+) -> Response:
+    """Delete one workspace file or directory for an owned installed surface."""
+    record = _authenticate_surface_request(
+        db=db,
+        request=request,
+        surface_session_id=surface_session_id,
+    )
+    service = WorkspaceFileService(db)
+    try:
+        service.delete_path(
+            workspace_id=record.workspace_id,
+            username=record.username,
+            path=path,
         )
     except WorkspaceFileNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -1753,6 +1886,12 @@ def _serialize_bootstrap(
             content_url=(
                 str(files_api["content_url"]) if isinstance(files_api, dict) else ""
             ),
+            create_directory_url=(
+                str(files_api["create_directory_url"])
+                if isinstance(files_api, dict)
+                else ""
+            ),
+            path_url=str(files_api["path_url"]) if isinstance(files_api, dict) else "",
         ),
         theme=theme,
     )
@@ -1806,6 +1945,12 @@ def _serialize_installed_bootstrap(
             content_url=(
                 str(files_api["content_url"]) if isinstance(files_api, dict) else ""
             ),
+            create_directory_url=(
+                str(files_api["create_directory_url"])
+                if isinstance(files_api, dict)
+                else ""
+            ),
+            path_url=str(files_api["path_url"]) if isinstance(files_api, dict) else "",
         ),
         theme=theme,
     )

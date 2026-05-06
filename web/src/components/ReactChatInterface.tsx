@@ -58,14 +58,16 @@ function formatCompactPayload(
 function CompactDebugButton({
   debugState,
   debugSections,
+  closeSignal,
 }: {
   debugState: ChatRuntimeDebugState;
   debugSections: Array<{
     key: string;
-    title: string;
-    description?: string;
+    title: ReactNode;
+    description?: ReactNode;
     content: ReactNode;
   }>;
+  closeSignal: number;
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"compact" | "surface">("compact");
@@ -79,6 +81,12 @@ function CompactDebugButton({
   );
   const isLoading = debugState.loadState === "loading";
   const hasError = debugState.loadState === "error";
+
+  useEffect(() => {
+    if (closeSignal > 0) {
+      setIsOpen(false);
+    }
+  }, [closeSignal]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -235,15 +243,23 @@ function ReactChatInterfaceShell({
 }: ReactChatInterfaceProps) {
   const [debugState, setDebugState] =
     useState<ChatRuntimeDebugState>(EMPTY_DEBUG_STATE);
+  const [debugPanelCloseSignal, setDebugPanelCloseSignal] = useState(0);
   const debugSections = useChatDebugPanelSections();
 
   return (
     <div className="relative h-full">
-      <ChatPage {...props} onRuntimeDebugChange={setDebugState} />
+      <ChatPage
+        {...props}
+        onRuntimeDebugChange={setDebugState}
+        onSurfaceDevAttached={() => {
+          setDebugPanelCloseSignal((current) => current + 1);
+        }}
+      />
       {showCompactDebug ? (
         <CompactDebugButton
           debugState={debugState}
           debugSections={debugSections}
+          closeSignal={debugPanelCloseSignal}
         />
       ) : null}
     </div>

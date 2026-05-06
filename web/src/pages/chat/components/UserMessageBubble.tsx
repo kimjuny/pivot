@@ -3,6 +3,7 @@ import { Check, Copy } from "@/lib/lucide";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { copyTextToClipboard } from "@/utils/clipboard";
 import { formatTimestamp } from "@/utils/timestamp";
 
 import type { ChatMessage } from "../types";
@@ -38,7 +39,7 @@ export const UserMessageBubble = memo(function UserMessageBubble({
     }
 
     try {
-      await navigator.clipboard.writeText(message.content);
+      await copyTextToClipboard(message.content);
       if (copyResetTimeoutRef.current !== null) {
         window.clearTimeout(copyResetTimeoutRef.current);
       }

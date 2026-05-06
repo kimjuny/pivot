@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
     Bot,
-    ChevronDown,
+    ChevronRight,
     Layers,
     Server,
     Wrench,
@@ -39,6 +39,7 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
@@ -71,9 +72,12 @@ import {
     getWebSearchProviders,
     getAgentWebSearchBindings,
     deleteAgentWebSearchBinding,
+    getAgentSidebarStats,
     updateAgentAccess,
     type AgentAccess,
     type AgentExtensionPackage,
+    type AgentSidebarSectionStats,
+    type AgentSidebarStats,
     type UsableTool,
     type SkillSource,
     type UsableSkill,
@@ -227,6 +231,108 @@ function parseSkillIds(skillIds: string | null | undefined): Set<string> {
     }
 }
 
+function formatSidebarCountLabel(
+    stats: AgentSidebarSectionStats | null | undefined,
+): string {
+    if (!stats) {
+        return '_ / _';
+    }
+    return `${stats.selected_count} / ${stats.total_count}`;
+}
+
+function SidebarCountBadge({
+    stats,
+    animationIndex,
+}: {
+    stats: AgentSidebarSectionStats | null | undefined;
+    animationIndex: number;
+}) {
+    const [animateIn, setAnimateIn] = useState(false);
+    const label = formatSidebarCountLabel(stats);
+    const prefersLeftToRight = animationIndex % 2 === 0;
+    const transitionDelayMs = animationIndex * 24;
+
+    useEffect(() => {
+        if (!stats) {
+            setAnimateIn(false);
+            return;
+        }
+        setAnimateIn(false);
+        const frame = window.requestAnimationFrame(() => {
+            setAnimateIn(true);
+        });
+        return () => {
+            window.cancelAnimationFrame(frame);
+        };
+    }, [label, stats]);
+
+    return (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
+            <span
+                style={{
+                    transitionDuration: '80ms',
+                    transitionDelay: stats ? `${transitionDelayMs}ms` : '0ms',
+                }}
+                className={`inline-block transition-all duration-150 ${
+                    stats
+                        ? animateIn
+                            ? 'translate-x-0 opacity-100'
+                            : prefersLeftToRight
+                                ? '-translate-x-2 opacity-0'
+                                : 'translate-x-2 opacity-0'
+                        : 'translate-x-0 opacity-100'
+                }`}
+            >
+                {label}
+            </span>
+        </span>
+    );
+}
+
+function SidebarItemSkeleton({
+    testId,
+}: {
+    testId: string;
+}) {
+    return (
+        <SidebarMenuItem data-testid={testId}>
+            <div className="px-2" role="status" aria-live="polite">
+                <Skeleton
+                    className="h-7 w-full rounded-md bg-sidebar-accent"
+                    aria-hidden="true"
+                />
+            </div>
+        </SidebarMenuItem>
+    );
+}
+
+function useDelayedLoadingVisibility(
+    isLoading: boolean,
+    delayMs = 500,
+): boolean {
+    const [shouldShow, setShouldShow] = useState(false);
+
+    useEffect(() => {
+        if (isLoading) {
+            const timeout = window.setTimeout(() => {
+                setShouldShow(true);
+            }, delayMs);
+
+            return () => {
+                window.clearTimeout(timeout);
+            };
+        }
+
+        setShouldShow(false);
+
+        return () => {
+            setShouldShow(false);
+        };
+    }, [delayMs, isLoading]);
+
+    return shouldShow;
+}
+
 /**
  * Summarize extension contributions that will disappear with one binding.
  */
@@ -284,7 +390,7 @@ function AgentDetailSidebar({
     onWebSearchBindingsChanged,
 }: AgentDetailSidebarProps) {
     const { state, setOpen } = useSidebar();
-    const [isToolsOpen, setIsToolsOpen] = useState(true);
+    const [isToolsOpen, setIsToolsOpen] = useState(false);
     const [isSkillsOpen, setIsSkillsOpen] = useState(false);
     const [isChannelsOpen, setIsChannelsOpen] = useState(false);
     const [isMediaProvidersOpen, setIsMediaProvidersOpen] = useState(false);
@@ -312,6 +418,7 @@ function AgentDetailSidebar({
     const [channelCatalog, setChannelCatalog] = useState<ChannelCatalogItem[]>([]);
     const [imageProviderCatalog, setMediaProviderCatalog] = useState<MediaProviderCatalogItem[]>([]);
     const [webSearchCatalog, setWebSearchCatalog] = useState<WebSearchCatalogItem[]>([]);
+    const [sidebarStats, setSidebarStats] = useState<AgentSidebarStats | null>(null);
     const [toolsLoading, setToolsLoading] = useState(false);
     const [skillsLoading, setSkillsLoading] = useState(false);
     const [channelsLoading, setChannelsLoading] = useState(false);
@@ -322,9 +429,16 @@ function AgentDetailSidebar({
     const [localToolIds, setLocalToolIds] = useState<string | null | undefined>(agent?.tool_ids);
     // Local copy of the agent's skill_ids so it updates without a page reload
     const [localSkillIds, setLocalSkillIds] = useState<string | null | undefined>(agent?.skill_ids);
+    const currentAgentId = agent?.id ?? null;
     const hasFetchedToolsRef = useRef(false);
     const hasFetchedSkillsRef = useRef(false);
-    const latestAgentIdRef = useRef<number | null>(agent?.id ?? null);
+    const hasFetchedExtensionPackagesRef = useRef(false);
+    const hasFetchedChannelsRef = useRef(false);
+    const hasFetchedMediaProvidersRef = useRef(false);
+    const hasFetchedWebSearchRef = useRef(false);
+    const latestAgentIdRef = useRef<number | null>(currentAgentId);
+    const previousAgentIdRef = useRef<number | null>(currentAgentId);
+    const agentChangedSinceLastRender = previousAgentIdRef.current !== currentAgentId;
     const { openTab, activeTabId } = useAgentTabStore();
     const selectedExtensionPackages = useMemo(
         () => extensionPackages.filter((pkg) => pkg.selected_binding !== null),
@@ -341,6 +455,10 @@ function AgentDetailSidebar({
         setLocalSkillIds(agent?.skill_ids);
     }, [agent?.skill_ids]);
 
+    useEffect(() => {
+        previousAgentIdRef.current = currentAgentId;
+    }, [currentAgentId]);
+
     /**
      * Reset agent-scoped sidebar projections when the inspected agent changes.
      * Why: the detail page reuses one sidebar instance across agents, so the
@@ -352,16 +470,30 @@ function AgentDetailSidebar({
         setMediaProviderBindings([]);
         setWebSearchBindings([]);
         setExtensionPackages([]);
+        setChannelCatalog([]);
+        setMediaProviderCatalog([]);
+        setWebSearchCatalog([]);
+        setSidebarStats(null);
         setEditingChannel(null);
         setEditingMediaProviderBinding(null);
         setEditingWebSearchBinding(null);
         setEditingExtensionPackage(null);
         setDeletingExtensionPackage(null);
+        setIsToolsOpen(false);
+        setIsSkillsOpen(false);
+        setIsExtensionsOpen(false);
+        setIsChannelsOpen(false);
+        setIsMediaProvidersOpen(false);
+        setIsWebSearchOpen(false);
         setIsChannelDialogOpen(false);
         setIsMediaProviderDialogOpen(false);
         setIsWebSearchDialogOpen(false);
         setIsExtensionDialogOpen(false);
         setIsDeleteExtensionDialogOpen(false);
+        hasFetchedExtensionPackagesRef.current = false;
+        hasFetchedChannelsRef.current = false;
+        hasFetchedMediaProvidersRef.current = false;
+        hasFetchedWebSearchRef.current = false;
     }, [agent?.id]);
 
     /**
@@ -423,10 +555,6 @@ function AgentDetailSidebar({
         return [...baseTools, ...extensionTools];
     }, [tools, extensionTools, enabledToolNameSet]);
 
-    const enabledCount = useMemo(() => {
-        return displayedTools.length;
-    }, [displayedTools.length]);
-
     /**
      * Sidebar should display skills that are currently configured for this
      * agent, instead of the global skill catalog.
@@ -435,10 +563,6 @@ function AgentDetailSidebar({
         const baseSkills = skills.filter((skill) => enabledSkillNameSet.has(skill.name));
         return [...baseSkills, ...extensionSkills];
     }, [skills, extensionSkills, enabledSkillNameSet]);
-
-    const enabledSkillCount = useMemo(() => {
-        return displayedSkills.length;
-    }, [displayedSkills.length]);
 
     /**
      * Prefer installation-backed branding because one package card may point at
@@ -520,143 +644,135 @@ function AgentDetailSidebar({
     );
 
     /**
-     * Fetch tools this Studio user may select for agents.
+     * Load compact sidebar counts before any section-specific data.
      */
-    useEffect(() => {
-        if (hasFetchedToolsRef.current) return;
-
-        const fetchTools = async () => {
-            hasFetchedToolsRef.current = true;
-            setToolsLoading(true);
-            try {
-                const usableTools = await getUsableTools();
-                const merged: SidebarTool[] = usableTools.map((tool: UsableTool) => ({
-                    name: tool.name,
-                    description: tool.description,
-                    source: tool.source_type === 'builtin' ? 'builtin' : 'user',
-                    readOnly: tool.read_only,
-                }));
-                setTools(merged);
-            } catch (err) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                console.error('Failed to fetch tools:', error);
-                toast.error('Failed to load tools');
-            } finally {
-                setToolsLoading(false);
-            }
-        };
-
-        void fetchTools();
-    }, []);
-
-    /**
-     * Fetch skills this Studio user may select for agents.
-     */
-    useEffect(() => {
-        if (hasFetchedSkillsRef.current) return;
-
-        const fetchSkills = async () => {
-            hasFetchedSkillsRef.current = true;
-            setSkillsLoading(true);
-            try {
-                const usableSkills = await getUsableSkills();
-                const merged: SidebarSkill[] = [
-                    ...usableSkills.map((s: UsableSkill) => ({
-                        name: s.name,
-                        description: s.description,
-                        source: s.source,
-                        creator: s.creator,
-                        readOnly: s.read_only,
-                    })),
-                ];
-                setSkills(merged);
-            } catch (err) {
-                const error = err instanceof Error ? err : new Error(String(err));
-                console.error('Failed to fetch skills:', error);
-                toast.error('Failed to load skills');
-            } finally {
-                setSkillsLoading(false);
-            }
-        };
-
-        void fetchSkills();
-    }, []);
-
-    /**
-     * Agent-scoped provider catalogs depend on which extensions are installed
-     * and enabled for the current agent, so reload them with the agent context.
-     */
-    const loadChannelCatalog = useCallback(async () => {
-        const requestedAgentId = agent?.id;
-        try {
-            const catalog = await getChannels(requestedAgentId);
-            if (latestAgentIdRef.current !== (requestedAgentId ?? null)) {
-                return;
-            }
-            setChannelCatalog(catalog);
-        } catch (err) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch channel catalog:', error);
-            toast.error('Failed to load channels');
-        }
-    }, [agent?.id]);
-
-    const loadMediaProviderCatalog = useCallback(async () => {
-        const requestedAgentId = agent?.id;
-        try {
-            const catalog = await getMediaGenerationProviders(requestedAgentId);
-            if (latestAgentIdRef.current !== (requestedAgentId ?? null)) {
-                return;
-            }
-            setMediaProviderCatalog(catalog);
-        } catch (err) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch media provider catalog:', error);
-            toast.error('Failed to load media providers');
-        }
-    }, [agent?.id]);
-
-    const loadWebSearchCatalog = useCallback(async () => {
-        const requestedAgentId = agent?.id;
-        try {
-            const catalog = await getWebSearchProviders(requestedAgentId);
-            if (latestAgentIdRef.current !== (requestedAgentId ?? null)) {
-                return;
-            }
-            setWebSearchCatalog(catalog);
-        } catch (err) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch web search catalog:', error);
-            toast.error('Failed to load web search providers');
-        }
-    }, [agent?.id]);
-
-    useEffect(() => {
-        void loadChannelCatalog();
-    }, [loadChannelCatalog]);
-
-    useEffect(() => {
-        void loadMediaProviderCatalog();
-    }, [loadMediaProviderCatalog]);
-
-    useEffect(() => {
-        void loadWebSearchCatalog();
-    }, [loadWebSearchCatalog]);
-
-    /**
-     * Channel bindings are agent-specific, so reload them whenever the current
-     * agent changes or after any binding mutation.
-     */
-    const loadChannels = useCallback(async () => {
+    const loadSidebarStats = useCallback(async () => {
         const requestedAgentId = agent?.id ?? null;
         if (!requestedAgentId) {
+            setSidebarStats(null);
+            return;
+        }
+
+        setSidebarStats(null);
+        try {
+            const stats = await getAgentSidebarStats(requestedAgentId);
+            if (latestAgentIdRef.current !== requestedAgentId) {
+                return;
+            }
+            setSidebarStats(stats);
+        } catch (err) {
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch sidebar stats:', error);
+            toast.error('Failed to load sidebar statistics');
+        }
+    }, [agent?.id]);
+
+    useEffect(() => {
+        void loadSidebarStats();
+    }, [loadSidebarStats]);
+
+    const loadTools = useCallback(async (force = false) => {
+        if (hasFetchedToolsRef.current && !force) {
+            return;
+        }
+
+        setToolsLoading(true);
+        try {
+            const usableTools = await getUsableTools();
+            const merged: SidebarTool[] = usableTools.map((tool: UsableTool) => ({
+                name: tool.name,
+                description: tool.description,
+                source: tool.source_type === 'builtin' ? 'builtin' : 'user',
+                readOnly: tool.read_only,
+            }));
+            hasFetchedToolsRef.current = true;
+            setTools(merged);
+        } catch (err) {
+            hasFetchedToolsRef.current = false;
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch tools:', error);
+            toast.error('Failed to load tools');
+        } finally {
+            setToolsLoading(false);
+        }
+    }, []);
+
+    const loadSkills = useCallback(async (force = false) => {
+        if (hasFetchedSkillsRef.current && !force) {
+            return;
+        }
+
+        setSkillsLoading(true);
+        try {
+            const usableSkills = await getUsableSkills();
+            const merged: SidebarSkill[] = usableSkills.map((s: UsableSkill) => ({
+                name: s.name,
+                description: s.description,
+                source: s.source,
+                creator: s.creator,
+                readOnly: s.read_only,
+            }));
+            hasFetchedSkillsRef.current = true;
+            setSkills(merged);
+        } catch (err) {
+            hasFetchedSkillsRef.current = false;
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch skills:', error);
+            toast.error('Failed to load skills');
+        } finally {
+            setSkillsLoading(false);
+        }
+    }, []);
+
+    const loadExtensionPackages = useCallback(async (force = false) => {
+        if (hasFetchedExtensionPackagesRef.current && !force) {
+            return;
+        }
+
+        const requestedAgentId = agent?.id ?? null;
+        if (!requestedAgentId) {
+            setExtensionPackages([]);
+            return;
+        }
+
+        setExtensionsLoading(true);
+        try {
+            const packages = await getAgentExtensionPackages(requestedAgentId);
+            if (latestAgentIdRef.current !== requestedAgentId) {
+                return;
+            }
+            hasFetchedExtensionPackagesRef.current = true;
+            setExtensionPackages(packages);
+        } catch (err) {
+            hasFetchedExtensionPackagesRef.current = false;
+            const error = err instanceof Error ? err : new Error(String(err));
+            console.error('Failed to fetch extension packages:', error);
+            toast.error('Failed to load extensions');
+        } finally {
+            if (latestAgentIdRef.current === requestedAgentId) {
+                setExtensionsLoading(false);
+            }
+        }
+    }, [agent?.id]);
+
+    const loadChannels = useCallback(async (force = false) => {
+        if (hasFetchedChannelsRef.current && !force) {
+            return;
+        }
+
+        const requestedAgentId = agent?.id ?? null;
+        if (!requestedAgentId) {
+            setChannelCatalog([]);
             setChannels([]);
             return;
         }
 
         setChannelsLoading(true);
         try {
-            const bindings = await getAgentChannels(requestedAgentId);
+            const [catalog, bindings] = await Promise.all([
+                getChannels(requestedAgentId),
+                getAgentChannels(requestedAgentId),
+            ]);
             if (latestAgentIdRef.current !== requestedAgentId) {
                 return;
             }
@@ -677,12 +793,15 @@ function AgentDetailSidebar({
                 transportMode: binding.manifest.transport_mode,
                 lastHealthStatus: binding.last_health_status,
             }));
+            hasFetchedChannelsRef.current = true;
+            setChannelCatalog(catalog);
             setChannels(nextBindings);
             onChannelBindingsLoaded?.(nextBindings);
         } catch (err) {
+            hasFetchedChannelsRef.current = false;
             const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch channel bindings:', error);
-            toast.error('Failed to load agent channels');
+            console.error('Failed to fetch channel data:', error);
+            toast.error('Failed to load channels');
         } finally {
             if (latestAgentIdRef.current === requestedAgentId) {
                 setChannelsLoading(false);
@@ -690,24 +809,24 @@ function AgentDetailSidebar({
         }
     }, [agent?.id, onChannelBindingsLoaded]);
 
-    useEffect(() => {
-        void loadChannels();
-    }, [loadChannels]);
+    const loadMediaProviderBindings = useCallback(async (force = false) => {
+        if (hasFetchedMediaProvidersRef.current && !force) {
+            return;
+        }
 
-    /**
-     * Media-provider bindings are agent-specific, so reload them whenever the
-     * current agent changes or after any binding mutation.
-     */
-    const loadMediaProviderBindings = useCallback(async () => {
         const requestedAgentId = agent?.id ?? null;
         if (!requestedAgentId) {
+            setMediaProviderCatalog([]);
             setMediaProviderBindings([]);
             return;
         }
 
         setMediaProvidersLoading(true);
         try {
-            const bindings = await getAgentMediaProviderBindings(requestedAgentId);
+            const [catalog, bindings] = await Promise.all([
+                getMediaGenerationProviders(requestedAgentId),
+                getAgentMediaProviderBindings(requestedAgentId),
+            ]);
             if (latestAgentIdRef.current !== requestedAgentId) {
                 return;
             }
@@ -727,11 +846,14 @@ function AgentDetailSidebar({
                 disabledReason: binding.disabled_reason ?? null,
                 lastHealthStatus: binding.last_health_status,
             }));
+            hasFetchedMediaProvidersRef.current = true;
+            setMediaProviderCatalog(catalog);
             setMediaProviderBindings(nextBindings);
             onMediaProviderBindingsLoaded?.(nextBindings);
         } catch (err) {
+            hasFetchedMediaProvidersRef.current = false;
             const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch media provider bindings:', error);
+            console.error('Failed to fetch media provider data:', error);
             toast.error('Failed to load media providers');
         } finally {
             if (latestAgentIdRef.current === requestedAgentId) {
@@ -740,24 +862,24 @@ function AgentDetailSidebar({
         }
     }, [agent?.id, onMediaProviderBindingsLoaded]);
 
-    useEffect(() => {
-        void loadMediaProviderBindings();
-    }, [loadMediaProviderBindings]);
+    const loadWebSearchBindings = useCallback(async (force = false) => {
+        if (hasFetchedWebSearchRef.current && !force) {
+            return;
+        }
 
-    /**
-     * Web-search bindings are agent-specific, so reload them whenever the
-     * current agent changes or after any binding mutation.
-     */
-    const loadWebSearchBindings = useCallback(async () => {
         const requestedAgentId = agent?.id ?? null;
         if (!requestedAgentId) {
+            setWebSearchCatalog([]);
             setWebSearchBindings([]);
             return;
         }
 
         setWebSearchLoading(true);
         try {
-            const bindings = await getAgentWebSearchBindings(requestedAgentId);
+            const [catalog, bindings] = await Promise.all([
+                getWebSearchProviders(requestedAgentId),
+                getAgentWebSearchBindings(requestedAgentId),
+            ]);
             if (latestAgentIdRef.current !== requestedAgentId) {
                 return;
             }
@@ -776,11 +898,14 @@ function AgentDetailSidebar({
                 disabledReason: binding.disabled_reason ?? null,
                 lastHealthStatus: binding.last_health_status,
             }));
+            hasFetchedWebSearchRef.current = true;
+            setWebSearchCatalog(catalog);
             setWebSearchBindings(nextBindings);
             onWebSearchBindingsLoaded?.(nextBindings);
         } catch (err) {
+            hasFetchedWebSearchRef.current = false;
             const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch web search bindings:', error);
+            console.error('Failed to fetch web search data:', error);
             toast.error('Failed to load web search providers');
         } finally {
             if (latestAgentIdRef.current === requestedAgentId) {
@@ -790,8 +915,46 @@ function AgentDetailSidebar({
     }, [agent?.id, onWebSearchBindingsLoaded]);
 
     useEffect(() => {
+        if (!isToolsOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void Promise.all([loadTools(), loadExtensionPackages()]);
+    }, [agentChangedSinceLastRender, isToolsOpen, loadExtensionPackages, loadTools]);
+
+    useEffect(() => {
+        if (!isSkillsOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void Promise.all([loadSkills(), loadExtensionPackages()]);
+    }, [agentChangedSinceLastRender, isSkillsOpen, loadExtensionPackages, loadSkills]);
+
+    useEffect(() => {
+        if (!isExtensionsOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void loadExtensionPackages();
+    }, [agentChangedSinceLastRender, isExtensionsOpen, loadExtensionPackages]);
+
+    useEffect(() => {
+        if (!isChannelsOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void loadChannels();
+    }, [agentChangedSinceLastRender, isChannelsOpen, loadChannels]);
+
+    useEffect(() => {
+        if (!isMediaProvidersOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void loadMediaProviderBindings();
+    }, [agentChangedSinceLastRender, isMediaProvidersOpen, loadMediaProviderBindings]);
+
+    useEffect(() => {
+        if (!isWebSearchOpen || agentChangedSinceLastRender) {
+            return;
+        }
         void loadWebSearchBindings();
-    }, [loadWebSearchBindings]);
+    }, [agentChangedSinceLastRender, isWebSearchOpen, loadWebSearchBindings]);
 
     const handleEditAgent = async (data: AgentFormData): Promise<void> => {
         if (!agent) {
@@ -885,7 +1048,8 @@ function AgentDetailSidebar({
     /**
      * Open the channel binding dialog in create mode.
      */
-    const handleAddChannel = () => {
+    const handleAddChannel = async () => {
+        await loadChannels();
         setEditingChannel(null);
         setIsChannelDialogOpen(true);
     };
@@ -915,7 +1079,10 @@ function AgentDetailSidebar({
         try {
             await deleteAgentChannel(bindingId);
             toast.success('Channel binding removed');
-            await loadChannels();
+            await Promise.all([
+                loadChannels(true),
+                loadSidebarStats(),
+            ]);
             await onChannelBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
@@ -926,7 +1093,8 @@ function AgentDetailSidebar({
     /**
      * Open the web-search binding dialog in create mode.
      */
-    const handleAddWebSearchBinding = () => {
+    const handleAddWebSearchBinding = async () => {
+        await loadWebSearchBindings();
         setEditingWebSearchBinding(null);
         setIsWebSearchDialogOpen(true);
     };
@@ -934,7 +1102,8 @@ function AgentDetailSidebar({
     /**
      * Open the media-provider binding dialog in create mode.
      */
-    const handleAddMediaProviderBinding = () => {
+    const handleAddMediaProviderBinding = async () => {
+        await loadMediaProviderBindings();
         setEditingMediaProviderBinding(null);
         setIsMediaProviderDialogOpen(true);
     };
@@ -963,7 +1132,10 @@ function AgentDetailSidebar({
         try {
             await deleteAgentMediaProviderBinding(bindingId);
             toast.success('Media provider removed');
-            await loadMediaProviderBindings();
+            await Promise.all([
+                loadMediaProviderBindings(true),
+                loadSidebarStats(),
+            ]);
             await onMediaProviderBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
@@ -995,7 +1167,10 @@ function AgentDetailSidebar({
         try {
             await deleteAgentWebSearchBinding(bindingId);
             toast.success('Web search provider removed');
-            await loadWebSearchBindings();
+            await Promise.all([
+                loadWebSearchBindings(true),
+                loadSidebarStats(),
+            ]);
             await onWebSearchBindingsChanged?.();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
@@ -1004,42 +1179,10 @@ function AgentDetailSidebar({
     };
 
     /**
-     * Extension bindings are package-scoped selections, so reload them whenever
-     * the current agent changes or after any extension mutation.
-     */
-    const loadExtensionPackages = useCallback(async () => {
-        const requestedAgentId = agent?.id ?? null;
-        if (!requestedAgentId) {
-            setExtensionPackages([]);
-            return;
-        }
-
-        setExtensionsLoading(true);
-        try {
-            const packages = await getAgentExtensionPackages(requestedAgentId);
-            if (latestAgentIdRef.current !== requestedAgentId) {
-                return;
-            }
-            setExtensionPackages(packages);
-        } catch (err) {
-            const error = err instanceof Error ? err : new Error(String(err));
-            console.error('Failed to fetch extension packages:', error);
-            toast.error('Failed to load extensions');
-        } finally {
-            if (latestAgentIdRef.current === requestedAgentId) {
-                setExtensionsLoading(false);
-            }
-        }
-    }, [agent?.id]);
-
-    useEffect(() => {
-        void loadExtensionPackages();
-    }, [loadExtensionPackages]);
-
-    /**
      * Open the extension dialog in create mode.
      */
-    const handleAddExtension = () => {
+    const handleAddExtension = async () => {
+        await loadExtensionPackages();
         setEditingExtensionPackage(null);
         setIsExtensionDialogOpen(true);
     };
@@ -1079,14 +1222,16 @@ function AgentDetailSidebar({
             toast.success('Extension removed');
             setIsDeleteExtensionDialogOpen(false);
             setDeletingExtensionPackage(null);
-            await loadExtensionPackages();
+            await loadSidebarStats();
             await Promise.all([
-                loadChannelCatalog(),
-                loadMediaProviderCatalog(),
-                loadWebSearchCatalog(),
-                loadChannels(),
-                loadMediaProviderBindings(),
-                loadWebSearchBindings(),
+                loadExtensionPackages(true),
+                hasFetchedChannelsRef.current ? loadChannels(true) : Promise.resolve(),
+                hasFetchedMediaProvidersRef.current
+                    ? loadMediaProviderBindings(true)
+                    : Promise.resolve(),
+                hasFetchedWebSearchRef.current
+                    ? loadWebSearchBindings(true)
+                    : Promise.resolve(),
             ]);
             await onExtensionBindingsChanged?.();
         } catch (err) {
@@ -1094,6 +1239,15 @@ function AgentDetailSidebar({
             toast.error(error.message);
         }
     };
+
+    const toolsSectionLoading = toolsLoading || extensionsLoading;
+    const skillsSectionLoading = skillsLoading || extensionsLoading;
+    const visibleToolsSectionLoading = useDelayedLoadingVisibility(toolsSectionLoading);
+    const visibleSkillsSectionLoading = useDelayedLoadingVisibility(skillsSectionLoading);
+    const visibleExtensionsLoading = useDelayedLoadingVisibility(extensionsLoading);
+    const visibleChannelsLoading = useDelayedLoadingVisibility(channelsLoading);
+    const visibleMediaProvidersLoading = useDelayedLoadingVisibility(imageProvidersLoading);
+    const visibleWebSearchLoading = useDelayedLoadingVisibility(webSearchLoading);
 
     return (
         <>
@@ -1218,16 +1372,12 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('tools')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
                                     {/* Count badge: shows enabled / total */}
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {toolsLoading ? '…' : enabledCount}
-                                        {' / '}
-                                        {toolsLoading ? '…' : tools.length + extensionTools.length}
-                                    </span>
+                                    <SidebarCountBadge stats={sidebarStats?.tools} animationIndex={0} />
                                     {/* Configure button */}
                                     {agent?.id && (
                                         <Tooltip>
@@ -1246,15 +1396,15 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Configure tools</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {toolsLoading ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            Loading tools…
-                                        </div>
+                                    {visibleToolsSectionLoading ? (
+                                        <SidebarMenu>
+                                            <SidebarItemSkeleton testId="agent-sidebar-tools-skeleton" />
+                                        </SidebarMenu>
                                     ) : tools.length + extensionTools.length === 0 || displayedTools.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
@@ -1348,15 +1498,11 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('skills')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
                                     <Zap className="size-4" />
                                     <span className="flex-1 text-left">Skills</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {skillsLoading ? '…' : enabledSkillCount}
-                                        {' / '}
-                                        {skillsLoading ? '…' : skills.length + extensionSkills.length}
-                                    </span>
+                                    <SidebarCountBadge stats={sidebarStats?.skills} animationIndex={1} />
                                     {agent?.id && (
                                         <Tooltip>
                                             <TooltipTrigger asChild>
@@ -1374,15 +1520,15 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Configure skills</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {skillsLoading ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            Loading skills…
-                                        </div>
+                                    {visibleSkillsSectionLoading ? (
+                                        <SidebarMenu>
+                                            <SidebarItemSkeleton testId="agent-sidebar-skills-skeleton" />
+                                        </SidebarMenu>
                                     ) : skills.length + extensionSkills.length === 0 || displayedSkills.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
@@ -1479,21 +1625,19 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('extensions')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
                                     <Server className="size-4" />
                                     <span className="flex-1 text-left">Extensions</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {extensionsLoading ? '…' : selectedExtensionPackages.length}
-                                    </span>
+                                    <SidebarCountBadge stats={sidebarStats?.extensions} animationIndex={2} />
                                     {agent?.id && (
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
-                                                    onClick={(e) => { e.stopPropagation(); handleAddExtension(); }}
-                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddExtension(); } }}
+                                                    onClick={(e) => { e.stopPropagation(); void handleAddExtension(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void handleAddExtension(); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
                                                     aria-label="Add extension"
                                                 >
@@ -1503,20 +1647,20 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add extension</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {extensionsLoading ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            Loading extensions…
-                                        </div>
+                                    {visibleExtensionsLoading ? (
+                                        <SidebarMenu>
+                                            <SidebarItemSkeleton testId="agent-sidebar-extensions-skeleton" />
+                                        </SidebarMenu>
                                     ) : selectedExtensionPackages.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
-                                                onClick={handleAddExtension}
+                                                onClick={() => { void handleAddExtension(); }}
                                                 disabled={!agent?.id}
                                                 className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                             >
@@ -1613,21 +1757,19 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('channels')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
                                     <Radio className="size-4" />
                                     <span className="flex-1 text-left">Channels</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {channelsLoading ? '…' : channels.length}
-                                    </span>
+                                    <SidebarCountBadge stats={sidebarStats?.channels} animationIndex={3} />
                                     {agent?.id && (
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
-                                                    onClick={(e) => { e.stopPropagation(); handleAddChannel(); }}
-                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddChannel(); } }}
+                                                    onClick={(e) => { e.stopPropagation(); void handleAddChannel(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void handleAddChannel(); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
                                                     aria-label="Add channel"
                                                 >
@@ -1637,20 +1779,20 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add channel</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {channelsLoading ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            Loading channels…
-                                        </div>
+                                    {visibleChannelsLoading ? (
+                                        <SidebarMenu>
+                                            <SidebarItemSkeleton testId="agent-sidebar-channels-skeleton" />
+                                        </SidebarMenu>
                                     ) : channels.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
-                                                onClick={handleAddChannel}
+                                                onClick={() => { void handleAddChannel(); }}
                                                 disabled={!agent?.id}
                                                 className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                             >
@@ -1734,12 +1876,12 @@ function AgentDetailSidebar({
                                 <SidebarMenuItem>
                                     <SidebarMenuButton
                                         onClick={() => handleSectionClick('imageProviders')}
-                                        tooltip="Media Providers"
+                                        tooltip="Media"
                                         isActive={isMediaProvidersOpen}
                                         className="text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent data-[active=true]:text-sidebar-foreground data-[active=true]:bg-sidebar-accent"
                                     >
                                         <Layers className="size-4" />
-                                        <span>Media Providers</span>
+                                        <span>Media</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -1747,21 +1889,19 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('imageProviders')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
                                     <Layers className="size-4" />
-                                    <span className="flex-1 text-left">Media Providers</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {imageProvidersLoading ? '…' : imageProviderBindings.length}
-                                    </span>
+                                    <span className="flex-1 text-left">Media</span>
+                                    <SidebarCountBadge stats={sidebarStats?.media} animationIndex={4} />
                                     {agent?.id && (
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
-                                                    onClick={(e) => { e.stopPropagation(); handleAddMediaProviderBinding(); }}
-                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddMediaProviderBinding(); } }}
+                                                    onClick={(e) => { e.stopPropagation(); void handleAddMediaProviderBinding(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void handleAddMediaProviderBinding(); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
                                                     aria-label="Add media provider"
                                                 >
@@ -1771,20 +1911,20 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add media provider</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {imageProvidersLoading ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            Loading media providers…
-                                        </div>
+                                    {visibleMediaProvidersLoading ? (
+                                        <SidebarMenu>
+                                            <SidebarItemSkeleton testId="agent-sidebar-media-skeleton" />
+                                        </SidebarMenu>
                                     ) : imageProviderBindings.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
-                                                onClick={handleAddMediaProviderBinding}
+                                                onClick={() => { void handleAddMediaProviderBinding(); }}
                                                 disabled={!agent?.id}
                                                 className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                             >
@@ -1884,21 +2024,19 @@ function AgentDetailSidebar({
                             <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
                                 <CollapsibleTrigger
                                     onClick={() => handleSectionClick('webSearch')}
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent rounded-md transition-colors data-[state=open]:text-sidebar-foreground data-[state=open]:bg-sidebar-accent"
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
                                     <Globe className="size-4" />
                                     <span className="flex-1 text-left">Web Search</span>
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-sidebar-accent/50 text-sidebar-foreground/70">
-                                        {webSearchLoading ? '…' : webSearchBindings.length}
-                                    </span>
+                                    <SidebarCountBadge stats={sidebarStats?.web_search} animationIndex={5} />
                                     {agent?.id && (
                                         <Tooltip>
                                             <TooltipTrigger asChild>
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
-                                                    onClick={(e) => { e.stopPropagation(); handleAddWebSearchBinding(); }}
-                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleAddWebSearchBinding(); } }}
+                                                    onClick={(e) => { e.stopPropagation(); void handleAddWebSearchBinding(); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void handleAddWebSearchBinding(); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
                                                     aria-label="Add web search provider"
                                                 >
@@ -1908,20 +2046,20 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add web search provider</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronDown className="size-3.5 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
-                                    {webSearchLoading ? (
-                                        <div className="px-2 py-3 text-xs text-sidebar-foreground/50 text-center">
-                                            Loading web search providers…
-                                        </div>
+                                    {visibleWebSearchLoading ? (
+                                        <SidebarMenu>
+                                            <SidebarItemSkeleton testId="agent-sidebar-web-search-skeleton" />
+                                        </SidebarMenu>
                                     ) : webSearchBindings.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
-                                                onClick={handleAddWebSearchBinding}
+                                                onClick={() => { void handleAddWebSearchBinding(); }}
                                                 disabled={!agent?.id}
                                                 className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                             >
@@ -2037,6 +2175,7 @@ function AgentDetailSidebar({
                         if (onAgentDraftUpdate && agent) {
                             onAgentDraftUpdate({ ...agent, tool_ids: newToolIds });
                         }
+                        void loadSidebarStats();
                     }}
                 />
             )}
@@ -2053,6 +2192,7 @@ function AgentDetailSidebar({
                         if (onAgentDraftUpdate && agent) {
                             onAgentDraftUpdate({ ...agent, skill_ids: newSkillIds });
                         }
+                        void loadSidebarStats();
                     }}
                 />
             )}
@@ -2066,14 +2206,16 @@ function AgentDetailSidebar({
                     packages={extensionPackages}
                     initialPackage={editingExtensionPackage}
                     onSaved={async () => {
-                        await loadExtensionPackages();
+                        await loadSidebarStats();
                         await Promise.all([
-                            loadChannelCatalog(),
-                            loadMediaProviderCatalog(),
-                            loadWebSearchCatalog(),
-                            loadChannels(),
-                            loadMediaProviderBindings(),
-                            loadWebSearchBindings(),
+                            loadExtensionPackages(true),
+                            hasFetchedChannelsRef.current ? loadChannels(true) : Promise.resolve(),
+                            hasFetchedMediaProvidersRef.current
+                                ? loadMediaProviderBindings(true)
+                                : Promise.resolve(),
+                            hasFetchedWebSearchRef.current
+                                ? loadWebSearchBindings(true)
+                                : Promise.resolve(),
                         ]);
                         await onExtensionBindingsChanged?.();
                     }}
@@ -2088,7 +2230,10 @@ function AgentDetailSidebar({
                     catalog={channelCatalog}
                     initialBinding={editingChannel}
                     onSaved={async () => {
-                        await loadChannels();
+                        await Promise.all([
+                            loadChannels(true),
+                            loadSidebarStats(),
+                        ]);
                         await onChannelBindingsChanged?.();
                     }}
                 />
@@ -2104,7 +2249,10 @@ function AgentDetailSidebar({
                     configuredProviderKeys={imageProviderBindings.map((binding) => binding.providerKey)}
                     initialBinding={editingMediaProviderBinding}
                     onSaved={async () => {
-                        await loadMediaProviderBindings();
+                        await Promise.all([
+                            loadMediaProviderBindings(true),
+                            loadSidebarStats(),
+                        ]);
                         await onMediaProviderBindingsChanged?.();
                     }}
                 />
@@ -2119,7 +2267,10 @@ function AgentDetailSidebar({
                     configuredProviderKeys={webSearchBindings.map((binding) => binding.providerKey)}
                     initialBinding={editingWebSearchBinding}
                     onSaved={async () => {
-                        await loadWebSearchBindings();
+                        await Promise.all([
+                            loadWebSearchBindings(true),
+                            loadSidebarStats(),
+                        ]);
                         await onWebSearchBindingsChanged?.();
                     }}
                 />

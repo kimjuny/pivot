@@ -25,6 +25,7 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 import_module("app.models")
+Agent = import_module("app.models.agent").Agent
 SessionModel = import_module("app.models.session").Session
 User = import_module("app.models.user").User
 auth_module = import_module("app.api.auth")
@@ -79,12 +80,21 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.workspace_profile_patch.start()
 
         self.user = User(username="alice", password_hash="hash", role_id=1)
+        self.owner = User(username="owner", password_hash="hash", role_id=1)
+        self.agent = Agent(name="surface-agent", llm_id=None, created_by_user_id=None)
         self.session.add(self.user)
+        self.session.add(self.owner)
+        self.session.add(self.agent)
         self.session.commit()
         self.session.refresh(self.user)
+        self.session.refresh(self.owner)
+        self.agent.created_by_user_id = self.user.id
+        self.session.add(self.agent)
+        self.session.commit()
+        self.session.refresh(self.agent)
 
         self.workspace = WorkspaceService(self.session).create_workspace(
-            agent_id=7,
+            agent_id=self.agent.id or 0,
             username="alice",
             scope="session_private",
             session_id="session-1",
@@ -92,7 +102,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.session.add(
             SessionModel(
                 session_id="session-1",
-                agent_id=7,
+                agent_id=self.agent.id or 0,
                 user="alice",
                 workspace_id=self.workspace.workspace_id,
                 chat_history='{"version": 1, "messages": []}',
@@ -144,7 +154,10 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["surface_key"], "workspace-editor")
         self.assertEqual(payload["session_id"], "session-1")
         self.assertEqual(payload["workspace_id"], self.workspace.workspace_id)
-        self.assertIn("users/alice/agents/7", payload["workspace_logical_root"])
+        self.assertIn(
+            f"users/alice/agents/{self.agent.id}",
+            payload["workspace_logical_root"],
+        )
         self.assertIsInstance(payload["surface_token"], str)
         self.assertEqual(
             payload["bootstrap"]["surface_token"], payload["surface_token"]
@@ -169,6 +182,32 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             payload["bootstrap"]["files_api"]["tree_url"],
             f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/tree",
         )
+        self.assertEqual(
+            payload["bootstrap"]["files_api"]["create_directory_url"],
+            f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/directory",
+        )
+        self.assertEqual(
+            payload["bootstrap"]["files_api"]["path_url"],
+            f"/api/chat-surfaces/dev-sessions/{payload['surface_session_id']}/files/path",
+        )
+
+    def test_create_dev_surface_session_requires_current_agent_use_access(self) -> None:
+        """Surface sessions should not survive outside the current Agent.use boundary."""
+        self.agent.created_by_user_id = self.owner.id
+        self.agent.use_scope = "selected"
+        self.session.add(self.agent)
+        self.session.commit()
+
+        response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:5173",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
 
     def test_create_preview_endpoint_returns_proxy_url(self) -> None:
         """Preview creation should return a stable session-scoped proxy URL."""
@@ -202,7 +241,10 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             payload["proxy_url"],
             f"/api/chat-previews/{payload['preview_id']}/proxy/app",
         )
-        self.assertIn("users/alice/agents/7", payload["workspace_logical_root"])
+        self.assertIn(
+            f"users/alice/agents/{self.agent.id}",
+            payload["workspace_logical_root"],
+        )
 
     def test_list_preview_endpoints_returns_session_registry(self) -> None:
         """Listing previews should return the current session registry in creation order."""
@@ -363,12 +405,74 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.assertEqual(read_blob_response.content, image_bytes)
         self.assertEqual(read_blob_response.headers["content-type"], "image/png")
 
+    def test_surface_workspace_file_contract_supports_create_directory_and_delete_path(
+        self,
+    ) -> None:
+        """Surface sessions should support generic directory creation and path deletion."""
+        create_surface_response = self.client.post(
+            "/api/chat-surfaces/dev-sessions",
+            json={
+                "session_id": "session-1",
+                "surface_key": "workspace-editor",
+                "dev_server_url": "http://127.0.0.1:4173",
+            },
+        )
+        self.assertEqual(create_surface_response.status_code, 201)
+        surface_payload = create_surface_response.json()
+        session_id = surface_payload["surface_session_id"]
+        surface_token = surface_payload["surface_token"]
+
+        create_directory_response = self.client.post(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/directory",
+            params={"surface_token": surface_token},
+            json={"path": "src/components"},
+        )
+        self.assertEqual(create_directory_response.status_code, 204)
+
+        write_text_response = self.client.put(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/text",
+            params={"surface_token": surface_token},
+            json={
+                "path": "src/components/App.tsx",
+                "content": "export const App = () => null;\n",
+            },
+        )
+        self.assertEqual(write_text_response.status_code, 204)
+
+        delete_file_response = self.client.delete(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/path",
+            params={
+                "surface_token": surface_token,
+                "path": "src/components/App.tsx",
+            },
+        )
+        self.assertEqual(delete_file_response.status_code, 204)
+
+        directory_response = self.client.get(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/directory",
+            params={
+                "surface_token": surface_token,
+                "path": "src/components",
+            },
+        )
+        self.assertEqual(directory_response.status_code, 200)
+        self.assertEqual(directory_response.json()["entries"], [])
+
+        delete_directory_response = self.client.delete(
+            f"/api/chat-surfaces/dev-sessions/{session_id}/files/path",
+            params={
+                "surface_token": surface_token,
+                "path": "src/components",
+            },
+        )
+        self.assertEqual(delete_directory_response.status_code, 204)
+
     def test_reconnect_surface_preview_can_restore_recipe_from_earlier_session(
         self,
     ) -> None:
         """Surface reconnect should copy a historical preview recipe into the active session."""
         second_workspace = WorkspaceService(self.session).create_workspace(
-            agent_id=7,
+            agent_id=self.agent.id or 0,
             username="alice",
             scope="session_private",
             session_id="session-2",
@@ -376,7 +480,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.session.add(
             SessionModel(
                 session_id="session-2",
-                agent_id=7,
+                agent_id=self.agent.id or 0,
                 user="alice",
                 workspace_id=second_workspace.workspace_id,
                 chat_history='{"version": 1, "messages": []}',
@@ -487,7 +591,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         self.session.refresh(installation)
         self.session.add(
             AgentExtensionBinding(
-                agent_id=7,
+                agent_id=self.agent.id or 0,
                 extension_installation_id=installation.id,
                 enabled=True,
                 priority=100,

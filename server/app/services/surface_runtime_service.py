@@ -68,7 +68,9 @@ class SurfaceRuntimeService:
         if not target_path.is_file():
             raise SurfaceRuntimeNotFoundError("Installed surface asset not found.")
 
-        content_type = mimetypes.guess_type(target_path.name)[0] or "application/octet-stream"
+        content_type = (
+            mimetypes.guess_type(target_path.name)[0] or "application/octet-stream"
+        )
         return SurfaceRuntimeAsset(
             content=target_path.read_bytes(),
             content_type=content_type,

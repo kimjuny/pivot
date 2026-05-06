@@ -49,6 +49,7 @@ from app.services.provider_registry_service import (
     load_media_generation_provider_from_file,
     load_web_search_provider_from_file,
 )
+from app.services.tool_service import load_runtime_manual_tool_metadata
 from app.services.workspace_service import ensure_agent_workspace
 from sqlmodel import Session, col, select
 
@@ -2712,10 +2713,12 @@ class ExtensionService:
         for metadata in shared_manager.list_tools():
             request_tool_manager.add_entry(metadata)
 
-        from app.services.workspace_service import load_all_user_tool_metadata
-
-        private_metas = load_all_user_tool_metadata(username)
-        for metadata in private_metas:
+        allowed_tools = _parse_name_allowlist(raw_tool_ids)
+        manual_metas = load_runtime_manual_tool_metadata(
+            self.db,
+            tool_names=allowed_tools,
+        )
+        for metadata in manual_metas:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
 
@@ -2730,7 +2733,6 @@ class ExtensionService:
             full_callables = {m.name: m.func for m in request_tool_manager.list_tools()}
             ptc_meta.func = make_programmatic_tool_call(full_callables)
 
-        allowed_tools = _parse_name_allowlist(raw_tool_ids)
         filtered_manager = ToolManager()
         for metadata in request_tool_manager.list_tools():
             if metadata.name in allowed_tools or metadata.name in bundle_tool_names:

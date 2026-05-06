@@ -23,7 +23,7 @@
 - 第一段必须是一个完整且可解析的JSON对象。
 - JSON必须严格合法：不能写注释，不能写尾随逗号，不能使用Markdown代码围栏。
 - 禁止输出Markdown代码围栏，包括标注为json或text的代码围栏。
-- 当`action_type = CALL_TOOL`时，必须在JSON后直接追加payload区块。
+- 当`action_type = CALL_TOOL`或`action_type = ANSWER`时，必须在JSON后直接追加payload区块。
 - 除JSON和必要的payload区块外，禁止输出任何额外文本。
 
 ### 3.1. 统一外层结构
@@ -157,14 +157,44 @@ CLARIFY的`action.output`形态：
 ### 3.6. action_type = ANSWER
 - 信息已充分或任务完成。
 - 有能力回答时必须立即ANSWER，禁止无意义recursion。
-- `answer`内容建议使用markdown格式。
+- `answer`内容必须payload化：`action.output.answer`必须是`{"$payload_ref":"answer_payload"}`。
+- `answer_payload`中写最终输出给用户的完整内容，建议使用markdown格式。
+- `answer_payload`不要包Markdown代码围栏；它本身就是最终答案正文。
 
 ANSWER的`action.output`形态：
 
 {
-  "answer": "最终输出给用户的结论",
+  "answer": {
+    "$payload_ref": "answer_payload"
+  },
   "attachments": []
 }
+
+ANSWER输出示例。实际输出时从`{`开始，到最后一个payload END标记结束，不要添加其它文字：
+
+{
+  "trace_id": "trace_id_here",
+  "iteration": 3,
+  "summary": "任务已完成。",
+  "thinking_next_turn": false,
+  "action": {
+    "action_type": "ANSWER",
+    "output": {
+      "answer": {
+        "$payload_ref": "answer_payload"
+      },
+      "attachments": []
+    }
+  },
+  "task_summary": {
+    "narrative": "本次任务已完成。",
+    "key_findings": [],
+    "final_decisions": []
+  }
+}
+<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
+这里是最终输出给用户的完整答案，可以是多行Markdown。
+<<<PIVOT_PAYLOAD:answer_payload:END_6F2D9C1A>>>
 
 当`action_type = ANSWER`时，顶层必须返回`task_summary`：
 

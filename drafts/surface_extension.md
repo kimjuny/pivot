@@ -412,6 +412,8 @@ GET  /api/chat-surfaces/sessions/{surface_session_id}/bootstrap
 GET  /api/chat-surfaces/sessions/{surface_session_id}/files/tree
 GET  /api/chat-surfaces/sessions/{surface_session_id}/files/content
 PUT  /api/chat-surfaces/sessions/{surface_session_id}/files/content
+POST /api/chat-surfaces/sessions/{surface_session_id}/files/directory
+DELETE /api/chat-surfaces/sessions/{surface_session_id}/files/path
 GET  /api/chat-surfaces/sessions/{surface_session_id}/files/watch
 GET  /api/chat-surfaces/sessions/{surface_session_id}/events
 ```
@@ -545,6 +547,8 @@ surface.shell.setTitle("Workspace Editor");
 const directory = await surface.workspace.listDirectory(".");
 const file = await surface.workspace.readTextFile("src/App.tsx");
 await surface.workspace.writeTextFile("src/App.tsx", file.content);
+await surface.workspace.createDirectory("src/components");
+await surface.workspace.deletePath("src/legacy");
 
 surface.events.subscribe((event) => {
   console.log(event.type, event.data);

@@ -37,6 +37,13 @@ from sqlmodel import Session as DBSession
 router = APIRouter()
 
 
+def _session_access_level(
+    session_type: Literal["consumer", "studio_test"],
+) -> AccessLevel:
+    """Return the agent access level required for one session type."""
+    return AccessLevel.EDIT if session_type == "studio_test" else AccessLevel.USE
+
+
 def _require_session_permission(
     db: DBSession,
     user: User,
@@ -48,6 +55,22 @@ def _require_session_permission(
         else Permission.CLIENT_ACCESS
     )
     PermissionService(db).require_permissions(user, (required_permission,))
+
+
+def _require_session_access(
+    db: DBSession,
+    user: User,
+    session: Session,
+) -> None:
+    """Require both entry permission and agent access for one session row."""
+    session_type = cast(Literal["consumer", "studio_test"], session.type)
+    _require_session_permission(db, user, session_type)
+    agent = AgentService(db).get_required_agent(session.agent_id)
+    AccessService(db).require_agent_access(
+        user=user,
+        agent=agent,
+        access_level=_session_access_level(session_type),
+    )
 
 
 def _build_session_response(
@@ -177,15 +200,24 @@ async def list_sessions(
         session_type=session_type,
         limit=limit,
     )
+    visible_sessions: list[Session] = []
+    for session in sessions:
+        try:
+            _require_session_access(db, current_user, session)
+        except HTTPException as exc:
+            if exc.status_code == 403:
+                continue
+            raise
+        visible_sessions.append(session)
     test_snapshot_hashes = service.get_test_workspace_hashes(
         [
             session.test_snapshot_id
-            for session in sessions
+            for session in visible_sessions
             if session.test_snapshot_id is not None
         ]
     )
     session_items = []
-    for session in sessions:
+    for session in visible_sessions:
         session_items.append(
             SessionListItem(
                 session_id=session.session_id,
@@ -242,9 +274,7 @@ async def get_session(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
-    _require_session_permission(
-        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
-    )
+    _require_session_access(db, current_user, session)
 
     test_workspace_hash = None
     if session.test_snapshot_id is not None:
@@ -286,9 +316,7 @@ async def update_session(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
-    _require_session_permission(
-        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
-    )
+    _require_session_access(db, current_user, session)
 
     updated_session = service.update_session_metadata(
         session_id,
@@ -345,9 +373,7 @@ async def get_session_history(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
-    _require_session_permission(
-        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
-    )
+    _require_session_access(db, current_user, session)
 
     messages = service.get_chat_history(session_id)
 
@@ -391,9 +417,7 @@ async def get_full_session_history(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
-    _require_session_permission(
-        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
-    )
+    _require_session_access(db, current_user, session)
 
     tasks_data = service.get_full_session_history(session_id)
 
@@ -500,9 +524,7 @@ async def delete_session(
 
     if session.user != current_user.username:
         raise HTTPException(status_code=403, detail="Access denied")
-    _require_session_permission(
-        db, current_user, cast(Literal["consumer", "studio_test"], session.type)
-    )
+    _require_session_access(db, current_user, session)
 
     if service.delete_session(session_id):
         return {"status": "deleted", "session_id": session_id}

@@ -14,7 +14,9 @@ SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-list_directories_module = import_module("app.orchestration.tool.builtin.list_directories")
+list_directories_module = import_module(
+    "app.orchestration.tool.builtin.list_directories"
+)
 
 
 class ListDirectoriesToolTestCase(unittest.TestCase):
@@ -43,5 +45,6 @@ class ListDirectoriesToolTestCase(unittest.TestCase):
             )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout.strip().splitlines(), ["alpha.txt", "nested/"])
-
+        self.assertEqual(
+            completed.stdout.strip().splitlines(), ["alpha.txt", "nested/"]
+        )

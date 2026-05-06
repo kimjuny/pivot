@@ -395,12 +395,23 @@ describe("ChatContainer session rollover", () => {
 
     await user.click(screen.getByRole("tab", { name: "Surface" }));
     expect(await screen.findByText("Surface Dev")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "Attach one local surface runtime to this chat session and open it from the chat header.",
+      ),
+    ).not.toBeInTheDocument();
+    await user.hover(screen.getByRole("button", { name: "Surface Dev details" }));
+    expect(
+      (
+        await screen.findAllByText(
+          "Attach one local surface runtime to this chat session and open it from the chat header.",
+        )
+      ).length,
+    ).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Attach Dev Surface" }),
-      ).not.toBeDisabled();
+      expect(screen.getByRole("button", { name: "Attatch" })).not.toBeDisabled();
     });
-    await user.click(screen.getByRole("button", { name: "Attach Dev Surface" }));
+    await user.type(screen.getByRole("textbox", { name: "Runtime URL" }), "{enter}");
     await waitFor(() => {
       expect(createDevSurfaceSession).toHaveBeenCalledWith({
         sessionId: "session-1",
@@ -408,14 +419,8 @@ describe("ChatContainer session rollover", () => {
         devServerUrl: "http://127.0.0.1:5173",
       });
     });
-
-    const surfaceButton = await screen.findByRole("button", {
-      name: "Toggle surface workspace-editor",
-    });
-    expect(surfaceButton).toBeInTheDocument();
-
-    await user.click(surfaceButton);
     expect(await screen.findByTitle("Surface runtime preview")).toBeInTheDocument();
+    expect(screen.queryByText("Debug Inspector")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Toggle surface workspace-editor" }),
     ).not.toBeInTheDocument();
@@ -1706,6 +1711,173 @@ describe("ChatContainer session rollover", () => {
     expect(
       await screen.findByText("Recovered and completed successfully."),
     ).toBeInTheDocument();
+  });
+
+  it("streams answer payload deltas into the live assistant message before the final answer event", async () => {
+    vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
+    vi.mocked(createSession).mockResolvedValue({
+      id: 10,
+      session_id: "answer-delta-session",
+      agent_id: 7,
+      user: "alice",
+      status: "active",
+      title: null,
+      is_pinned: false,
+      created_at: "2026-03-20T00:00:00.000Z",
+      updated_at: "2026-03-20T00:00:00.000Z",
+    });
+    vi.mocked(startReactTask).mockResolvedValue({
+      task_id: "task-answer-delta",
+      session_id: "answer-delta-session",
+      status: "pending",
+      cursor_before_start: 0,
+    });
+
+    const encoder = new TextEncoder();
+    vi.mocked(httpClient).mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 1,
+                      type: "recursion_start",
+                      task_id: "task-answer-delta",
+                      trace_id: "trace-answer-delta-1",
+                      iteration: 0,
+                      timestamp: "2026-03-20T00:00:01.000Z",
+                    })}\n\n`,
+                  ),
+                );
+              }, 0);
+
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 2,
+                      type: "action",
+                      task_id: "task-answer-delta",
+                      trace_id: "trace-answer-delta-1",
+                      iteration: 0,
+                      delta: "ANSWER",
+                      timestamp: "2026-03-20T00:00:02.000Z",
+                    })}\n\n`,
+                  ),
+                );
+              }, 10);
+
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 3,
+                      type: "answer_delta",
+                      task_id: "task-answer-delta",
+                      trace_id: "trace-answer-delta-1",
+                      iteration: 0,
+                      timestamp: "2026-03-20T00:00:03.000Z",
+                      data: {
+                        payload_name: "answer_payload",
+                        delta: "Hello",
+                        is_final: false,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+              }, 20);
+
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 4,
+                      type: "answer_delta",
+                      task_id: "task-answer-delta",
+                      trace_id: "trace-answer-delta-1",
+                      iteration: 0,
+                      timestamp: "2026-03-20T00:00:04.000Z",
+                      data: {
+                        payload_name: "answer_payload",
+                        delta: " world",
+                        is_final: true,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+              }, 50);
+
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 5,
+                      type: "answer",
+                      task_id: "task-answer-delta",
+                      trace_id: "trace-answer-delta-1",
+                      iteration: 0,
+                      timestamp: "2026-03-20T00:00:05.000Z",
+                      data: {
+                        answer: "Hello world",
+                      },
+                    })}\n\n`,
+                  ),
+                );
+              }, 80);
+
+              window.setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    `data: ${JSON.stringify({
+                      event_id: 6,
+                      type: "task_complete",
+                      task_id: "task-answer-delta",
+                      iteration: 0,
+                      timestamp: "2026-03-20T00:00:06.000Z",
+                      total_tokens: {
+                        prompt_tokens: 10,
+                        completion_tokens: 5,
+                        total_tokens: 15,
+                        cached_input_tokens: 0,
+                      },
+                    })}\n\n`,
+                  ),
+                );
+                controller.close();
+              }, 100);
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Ask anything"), "Stream the answer");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/^Hello$/)).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Hello world")).toBeInTheDocument();
+    });
   });
 
   it("keeps live tool results attached after a CALL_TOOL action event", async () => {

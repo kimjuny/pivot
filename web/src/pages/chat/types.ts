@@ -109,6 +109,8 @@ export interface ChatRuntimeDebugState {
 export interface ChatPageProps extends ReactChatInterfaceProps {
   /** Optional upward callback used by the outer shell to render debug affordances. */
   onRuntimeDebugChange?: (state: ChatRuntimeDebugState) => void;
+  /** Optional upward callback fired after a dev surface attaches successfully. */
+  onSurfaceDevAttached?: () => void;
 }
 
 /**
@@ -127,6 +129,7 @@ export type ReactStreamEventType =
   | "action"
   | "tool_call"
   | "tool_payload_delta"
+  | "answer_delta"
   | "tool_result"
   | "plan_update"
   | "reflect"

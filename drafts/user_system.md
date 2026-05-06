@@ -936,14 +936,27 @@ web/src/components/Navigation.tsx
 当前进展：
 
 - Agent New/Edit Dialog 已接入 `Auth` tab，用于配置哪些最终用户/用户组可以从 Web、Desktop、Channel 等客户端看到和运行 Agent。
-- Agent `Auth` tab 暂时只开放 `Use` 配置；`Edit` 固定为 creator/admin，以避免被授权编辑者缺少底层 Studio-use 权限时看到不完整 Agent 配置并误保存。
+- Agent `Auth` tab 现已展示 `Use` + `Edit` 两个 tab：`Use` 可配置最终用户范围；`Edit` 第一版固定只读展示 creator/admin，不允许共享给其他 Builder。
 - Agent 创建时可同步写入 `use_scope`、selected users/groups；Agent 编辑保存时同步更新 Agent `use` 授权。
 - 后端 `AccessService.set_agent_access()` 已收敛为 creator-only edit：即使请求传入额外 edit users/groups，也不会授予非 creator 的 Agent edit。
+- Client/User 侧的 Agent 可见性与进入权限已开始收口到 `Agent.use`：`/consumer/agents`、`/consumer/agents/{id}`、`/consumer/sessions` 已按 `Agent.use` 过滤；`/sessions`、`/sessions/{id}`、`/sessions/{id}/history`、`/sessions/{id}/full-history`、`/sessions/{id}` update/delete 也会在 session owner 校验后再次确认当前用户仍拥有该 Agent 的 `use` 或 `edit` 权限。
+- ReAct runtime 入口已补齐同一条边界：`/react/tasks`、`/react/chat/stream`、`/react/context-usage`、`/react/runtime-skills`、`/react/sessions/{id}/events/stream`、`/react/sessions/{id}/runtime-debug`、`/react/tasks/{id}` 及其 recursions/states 查询，都会同时检查系统入口权限（`client.access` 或 `agents.manage`）与当前 Agent 的资源权限（consumer = `use`，studio_test = `edit`）。
+- `chat-surfaces` / `chat-previews` 这一层也已补齐同一条边界：创建、读取、重连 surface session / preview endpoint 时，不只检查 session owner 和 workspace 权限，还会重新确认当前用户对底层 Agent 仍然拥有对应权限（consumer = `use`，studio_test = `edit`）。因此，旧的 surface token、preview id 或已创建 session 不再能绕过后续的 Agent 授权变更。
+- ReAct / Channel runtime 对下挂 Tool / Skill 的解析已从“按当前终端用户的 Studio 可见性筛选”改为“按 Agent 已配置的 allowlist / Extension bundle 解析”：
+  - manual Tool runtime 不再从当前终端用户自己的 `users/{username}/tools` 目录取可用工具，而是按 Agent allowlist 里的全局 tool name 查到对应 `ToolResource` 和 creator，再加载该 Tool 源码；
+  - manual Skill runtime 不再要求当前终端用户同时拥有该 Skill 的 Studio `use`，而是按 Agent allowlist 里的全局 skill name 直接解析 registry row 和 sandbox mount；
+  - extension-contributed Tool / Skill 继续只跟随 Agent 已绑定的 Extension bundle，不受最终用户 Studio `use` 影响。
+- 因而，最终用户一旦拥有某个 Agent 的 `use`，运行该 Agent 时只看：
+  - Agent 自身的 `use`
+  - Agent 当前 pinned runtime config（release / studio_test snapshot / live config）
+  - Agent 显式绑定的 Extension / Tool / Skill / Provider 配置
+  而不会再因为当前终端用户没有底层实体的 Studio `use` 而把这些能力从 runtime 中过滤掉。
 
 注意：
 
 - 文件、数据库、缓存等持久层访问必须继续通过 service 层。
 - Workspace/File 相关接口不能直接依赖前端传入路径判断权限，应先解析业务实体，再由 service 校验权限。
+- 最终用户一旦拥有某个 Agent 的 `use`，该 Agent 运行时不会再递归要求用户同时拥有其下挂 LLM/Skill/Tool/Extension/Provider 的 Studio `use` 权限；底层实体权限只约束 Studio 配置期。
 
 ## 开放问题
 

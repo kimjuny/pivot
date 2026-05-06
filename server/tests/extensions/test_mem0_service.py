@@ -9,9 +9,7 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SERVICE_MAIN_PATH = (
-    PROJECT_ROOT / "extensions" / "mem0" / "service" / "app" / "main.py"
-)
+SERVICE_MAIN_PATH = PROJECT_ROOT / "extensions" / "mem0" / "service" / "app" / "main.py"
 
 
 def _load_mem0_service_module():

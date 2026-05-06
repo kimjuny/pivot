@@ -23,11 +23,13 @@ from app.schemas.schemas import (
     AgentReleaseResponse,
     AgentResponse,
     AgentServingUpdate,
+    AgentSidebarStatsResponse,
     AgentUpdate,
 )
 from app.security.permission_catalog import Permission
 from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
+from app.services.agent_sidebar_service import AgentSidebarService
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.group_service import GroupService
 from app.services.user_service import UserService
@@ -253,6 +255,33 @@ async def get_agent_draft_state(
     )
     try:
         return AgentSnapshotService(db).get_draft_state(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/agents/{agent_id}/sidebar-stats",
+    response_model=AgentSidebarStatsResponse,
+)
+async def get_agent_sidebar_stats(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> dict[str, dict[str, int]]:
+    """Return one compact sidebar count summary for the Agent detail page."""
+    agent = agent_crud.get(agent_id, db)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
+    try:
+        return AgentSidebarService(db).get_sidebar_stats(
+            agent_id=agent_id,
+            user=current_user,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

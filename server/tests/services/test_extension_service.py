@@ -53,6 +53,7 @@ LocalFilesystemObjectStorageProvider = import_module(
 ).LocalFilesystemObjectStorageProvider
 ChannelService = import_module("app.services.channel_service").ChannelService
 skill_service = import_module("app.services.skill_service")
+tool_service = import_module("app.services.tool_service")
 WebSearchService = import_module("app.services.web_search_service").WebSearchService
 WebSearchQueryRequest = import_module(
     "app.orchestration.web_search.types"
@@ -111,10 +112,14 @@ class ExtensionServiceTestCase(unittest.TestCase):
             active_release_id=None,
         )
         self.user = User(username="alice", password_hash="hash", role_id=1)
+        self.bob = User(username="bob", password_hash="hash", role_id=1)
         self.session.add(self.agent)
         self.session.add(self.user)
+        self.session.add(self.bob)
         self.session.commit()
         self.session.refresh(self.agent)
+        self.session.refresh(self.user)
+        self.session.refresh(self.bob)
 
     def tearDown(self) -> None:
         """Release temporary resources after each test."""
@@ -619,6 +624,50 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertTrue(
             any(skill["name"] == "seedream_skill" for skill in visible_skills)
         )
+
+    def test_runtime_manual_tools_ignore_studio_tool_visibility(self) -> None:
+        """End-user runtime should still load configured manual tools after Studio access is revoked."""
+        tool_name = "customer_lookup"
+        workspace_service.write_user_tool(
+            self.user.username,
+            tool_name,
+            (
+                "from app.orchestration.tool.metadata import ToolMetadata\n\n"
+                "def customer_lookup(account_id: str) -> str:\n"
+                '    """Look up one customer."""\n'
+                '    return f"customer:{account_id}"\n\n'
+                "customer_lookup.__tool_metadata__ = ToolMetadata(\n"
+                '    name="customer_lookup",\n'
+                '    description="Look up customer records",\n'
+                '    parameters={"type": "object", "properties": {}},\n'
+                '    tool_type="normal",\n'
+                "    func=customer_lookup,\n"
+                ")\n"
+            ),
+        )
+        tool = tool_service.ensure_manual_tool_resource(
+            self.session,
+            owner=self.user,
+            tool_name=tool_name,
+        )
+        tool_service.set_tool_access(
+            self.session,
+            tool=tool,
+            use_scope="selected",
+            use_user_ids={self.user.id or 0},
+            use_group_ids=set(),
+            edit_user_ids={self.user.id or 0},
+            edit_group_ids=set(),
+        )
+
+        manager = ExtensionService(self.session).build_request_tool_manager(
+            username=self.bob.username,
+            agent_id=self.agent.id or 0,
+            raw_tool_ids=json.dumps([tool_name]),
+            extension_bundle=[],
+        )
+
+        self.assertIsNotNone(manager.get_tool(tool_name))
 
     def test_installation_configuration_defaults_are_persisted(self) -> None:
         """Installations should resolve manifest defaults for setup fields."""
@@ -2225,13 +2274,17 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertFalse(
             any(
                 item["manifest"]["key"] == "acme@chat"
-                for item in ChannelService(self.session).list_catalog(self.agent.id or 0)
+                for item in ChannelService(self.session).list_catalog(
+                    self.agent.id or 0
+                )
             )
         )
         self.assertFalse(
             any(
                 item["manifest"]["key"] == "acme@search"
-                for item in WebSearchService(self.session).list_catalog(self.agent.id or 0)
+                for item in WebSearchService(self.session).list_catalog(
+                    self.agent.id or 0
+                )
             )
         )
 
@@ -2244,13 +2297,17 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertTrue(
             any(
                 item["manifest"]["key"] == "acme@chat"
-                for item in ChannelService(self.session).list_catalog(self.agent.id or 0)
+                for item in ChannelService(self.session).list_catalog(
+                    self.agent.id or 0
+                )
             )
         )
         self.assertTrue(
             any(
                 item["manifest"]["key"] == "acme@search"
-                for item in WebSearchService(self.session).list_catalog(self.agent.id or 0)
+                for item in WebSearchService(self.session).list_catalog(
+                    self.agent.id or 0
+                )
             )
         )
 
@@ -2294,7 +2351,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(result.provider["key"], "acme@search")
         self.assertEqual(result.query, "pivot")
 
-    def test_deleting_agent_extension_binding_cascades_agent_contributions(self) -> None:
+    def test_deleting_agent_extension_binding_cascades_agent_contributions(
+        self,
+    ) -> None:
         """Removing an extension binding should remove its child agent bindings."""
         extension_root = self._write_extension(
             package_name="acme.providers",

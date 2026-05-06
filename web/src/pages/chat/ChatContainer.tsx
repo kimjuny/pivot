@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import { Info } from "@/lib/lucide";
 
 import {
   cancelReactTask,
@@ -34,17 +42,26 @@ import {
   getApiBaseUrl,
   httpClient,
 } from "@/utils/api";
+import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   AUTH_EXPIRED_EVENT,
   getAuthToken,
@@ -327,35 +344,69 @@ function SurfaceDevDebugContent({
   onAttach: (runtimeUrl: string) => void;
 }) {
   const [runtimeUrlInput, setRuntimeUrlInput] = useState(LOCAL_VITE_RUNTIME_URL);
+  const isAttachDisabled = !currentSessionId || isCreatingSurfaceSession;
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isAttachDisabled) {
+      return;
+    }
+
+    onAttach(runtimeUrlInput);
+  };
 
   return (
-    <div className="space-y-3">
-      <label className="block">
-        <div className="mb-1 text-xs font-medium text-muted-foreground">
-          Runtime URL
+    <form className="space-y-3" onSubmit={handleSubmit}>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <Label
+            htmlFor="surface-runtime-url"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Runtime URL
+          </Label>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+                  aria-label="Runtime URL details"
+                >
+                  <Info className="h-3.5 w-3.5 cursor-help" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+                Accepts either a dev server root such as{" "}
+                <span className="font-mono text-foreground/80">
+                  {LOCAL_VITE_RUNTIME_URL}
+                </span>{" "}
+                or a concrete entry page.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
-        <Input
-          type="url"
-          value={runtimeUrlInput}
-          onChange={(event) => setRuntimeUrlInput(event.target.value)}
-        />
-        <div className="mt-2 text-xs leading-5 text-muted-foreground">
-          Accepts either a dev server root such as{" "}
-          <span className="font-mono text-foreground/80">
-            {LOCAL_VITE_RUNTIME_URL}
-          </span>{" "}
-          or a concrete entry page.
-        </div>
-      </label>
 
-      <button
-        type="button"
-        onClick={() => onAttach(runtimeUrlInput)}
-        disabled={!currentSessionId || isCreatingSurfaceSession}
-        className="inline-flex h-9 items-center rounded-lg border border-border/70 bg-foreground px-3 text-sm font-medium text-background transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {isCreatingSurfaceSession ? "Attaching..." : "Attach Dev Surface"}
-      </button>
+        <ButtonGroup className="w-full">
+          <Input
+            id="surface-runtime-url"
+            type="url"
+            value={runtimeUrlInput}
+            onChange={(event) => setRuntimeUrlInput(event.target.value)}
+            aria-label="Runtime URL"
+            autoComplete="off"
+          />
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            disabled={isAttachDisabled}
+            className="h-9 shrink-0"
+          >
+            {isCreatingSurfaceSession ? "Attaching..." : "Attatch"}
+          </Button>
+        </ButtonGroup>
+      </div>
 
       {surfaceCreationError ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -379,7 +430,7 @@ function SurfaceDevDebugContent({
           </div>
         </div>
       ) : null}
-    </div>
+    </form>
   );
 }
 
@@ -686,6 +737,7 @@ function ChatContainer({
   sidebarTitle,
   sidebarFooter,
   onRuntimeDebugChange,
+  onSurfaceDevAttached,
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -1654,6 +1706,7 @@ function ChatContainer({
           (event.type === "tool_call" ||
             event.type === "tool_result" ||
             event.type === "tool_payload_delta" ||
+            event.type === "answer_delta" ||
             ((event.type === "observe" ||
               event.type === "reason" ||
               event.type === "summary" ||
@@ -1755,7 +1808,8 @@ function ChatContainer({
       } else if (
         event.type === "tool_call" ||
         event.type === "tool_result" ||
-        event.type === "tool_payload_delta"
+        event.type === "tool_payload_delta" ||
+        event.type === "answer_delta"
       ) {
         const hasPendingTools = hasPendingToolExecutions(updatedEvents);
         nextRecursion = {
@@ -1780,6 +1834,20 @@ function ChatContainer({
           return {
             ...message,
             recursions: updatedRecursions,
+            content:
+              event.type === "answer_delta"
+                ? `${
+                    message.content ??
+                    ""
+                  }${
+                    typeof event.data === "object" &&
+                    event.data !== null &&
+                    !Array.isArray(event.data) &&
+                    typeof (event.data as { delta?: unknown }).delta === "string"
+                      ? ((event.data as { delta?: string }).delta ?? "")
+                      : ""
+                  }`
+                : message.content,
             currentPlan: nextCurrentPlan ?? message.currentPlan,
           };
         }),
@@ -3070,7 +3138,8 @@ function ChatContainer({
         setActiveInstalledSurface(null);
         setActiveInstalledSurfaceSession(null);
         setActiveSurfaceSession(nextSurfaceSession);
-        handleExtensionDockOpenChange(false);
+        handleExtensionDockOpenChange(true);
+        onSurfaceDevAttached?.();
       } catch (error) {
         setSurfaceCreationError(
           error instanceof Error
@@ -3081,7 +3150,12 @@ function ChatContainer({
         setIsCreatingSurfaceSession(false);
       }
     },
-    [currentSessionId, handleExtensionDockOpenChange, isCreatingSurfaceSession],
+    [
+      currentSessionId,
+      handleExtensionDockOpenChange,
+      isCreatingSurfaceSession,
+      onSurfaceDevAttached,
+    ],
   );
 
   /**
@@ -3245,9 +3319,28 @@ function ChatContainer({
   const surfaceDevDebugSection = useMemo(() => {
     return {
       key: "surface-dev",
-      title: "Surface Dev",
-      description:
-        "Attach one local surface runtime to this chat session and open it from the chat header.",
+      title: (
+        <div className="flex items-center gap-1.5">
+          <span>Surface Dev</span>
+          <TooltipProvider delayDuration={150}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex items-center text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none"
+                  aria-label="Surface Dev details"
+                >
+                  <Info className="h-3.5 w-3.5 cursor-help" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
+                Attach one local surface runtime to this chat session and open it
+                from the chat header.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      ),
       content: (
         <SurfaceDevDebugContent
           activeSurfaceSession={activeSurfaceSession}

@@ -203,5 +203,7 @@ async def get_me(
         id=current_user.id,
         username=current_user.username,
         role=role.key,
-        permissions=sorted(PermissionService(session).get_user_permission_keys(current_user)),
+        permissions=sorted(
+            PermissionService(session).get_user_permission_keys(current_user)
+        ),
     )

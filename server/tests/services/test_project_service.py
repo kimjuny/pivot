@@ -172,7 +172,9 @@ class ProjectServiceTestCase(unittest.TestCase):
                 "app.services.project_service.get_sandbox_service",
                 return_value=sandbox_service,
             ):
-                deleted = self.service.delete_project(project.project_id, user=self.alice)
+                deleted = self.service.delete_project(
+                    project.project_id, user=self.alice
+                )
 
         self.assertTrue(deleted)
         sandbox_service.destroy.assert_called_once_with(

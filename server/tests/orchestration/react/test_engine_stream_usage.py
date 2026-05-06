@@ -428,6 +428,98 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
             ],
         )
 
+    def test_stream_emits_live_answer_payload_deltas(self) -> None:
+        """ANSWER payload bodies should stream as answer_delta events."""
+        control_json = """
+{
+  "summary": "Task complete",
+  "action": {
+    "action_type": "ANSWER",
+    "output": {
+      "answer": {"$payload_ref": "answer_payload"},
+      "attachments": []
+    }
+  },
+  "task_summary": {
+    "narrative": "Completed.",
+    "key_findings": [],
+    "final_decisions": []
+  }
+}
+""".strip()
+        llm = _StreamingLlmStub(
+            [
+                Response(
+                    id="resp-answer-stream",
+                    choices=[
+                        Choice(
+                            index=0,
+                            message=ChatMessage(
+                                role="assistant",
+                                content=(
+                                    control_json
+                                    + "\n<<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>\n"
+                                    "Hello"
+                                ),
+                            ),
+                        )
+                    ],
+                    created=0,
+                    model="stream-model",
+                ),
+                Response(
+                    id="resp-answer-stream",
+                    choices=[
+                        Choice(
+                            index=0,
+                            message=ChatMessage(
+                                role="assistant",
+                                content=(
+                                    " world\n<<<PIVOT_PAYLOAD:answer_payload:END_6F2D9C1A>>>"
+                                ),
+                            ),
+                        )
+                    ],
+                    created=0,
+                    model="stream-model",
+                ),
+            ]
+        )
+        engine = ReactEngine(
+            llm=llm,
+            tool_manager=SimpleNamespace(),
+            db=self.session,
+        )
+        token_counter = engine._new_token_counter()
+        token_meter_queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+
+        asyncio.run(
+            engine._stream_chat_response(
+                messages=[{"role": "user", "content": "hello"}],
+                llm_chat_kwargs={},
+                token_counter=token_counter,
+                token_meter_queue=token_meter_queue,
+            )
+        )
+
+        queued_items: list[dict[str, object]] = []
+        while not token_meter_queue.empty():
+            queued_items.append(token_meter_queue.get_nowait())
+
+        control_items = [
+            item for item in queued_items if item.get("type") == "react_control"
+        ]
+        answer_delta_items = [
+            item for item in queued_items if item.get("type") == "answer_delta"
+        ]
+
+        self.assertEqual(len(control_items), 1)
+        self.assertEqual(control_items[0]["action_type"], "ANSWER")
+        self.assertEqual(len(answer_delta_items), 2)
+        self.assertEqual(answer_delta_items[0]["delta"], "Hello")
+        self.assertEqual(answer_delta_items[1]["delta"], " world")
+        self.assertIs(answer_delta_items[1]["is_final"], True)
+
     def test_stream_starts_tool_when_payload_is_complete_before_stream_end(
         self,
     ) -> None:

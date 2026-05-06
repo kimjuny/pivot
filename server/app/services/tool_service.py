@@ -20,6 +20,7 @@ from app.services.workspace_service import (
 from sqlmodel import select
 
 if TYPE_CHECKING:
+    from app.orchestration.tool.metadata import ToolMetadata
     from sqlmodel import Session
 
 ToolSourceType = Literal["builtin", "manual"]
@@ -171,6 +172,32 @@ def _manual_tool_owner(db: Session, tool: ToolResource) -> User:
     if owner is None:
         raise ValueError("Tool creator not found.")
     return owner
+
+
+def load_runtime_manual_tool_metadata(
+    db: Session,
+    *,
+    tool_names: set[str],
+) -> list[ToolMetadata]:
+    """Load manual tool metadata by globally configured tool names.
+
+    Why: end-user Agent runtime should execute the Agent's configured manual
+    tools even when the current end user does not have Studio `Tool.use` on the
+    underlying Tool entity.
+    """
+    if not tool_names:
+        return []
+
+    statement = select(ToolResource).where(ToolResource.source_type == "manual")
+    results: list[ToolMetadata] = []
+    for tool in db.exec(statement).all():
+        if tool.name not in tool_names:
+            continue
+        owner = _manual_tool_owner(db, tool)
+        metadata = load_user_tool_metadata(owner.username, tool.name)
+        if metadata is not None:
+            results.append(metadata)
+    return results
 
 
 def read_manual_tool_source(

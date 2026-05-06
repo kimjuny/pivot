@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import uuid
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -20,16 +21,21 @@ if str(SERVER_ROOT) not in sys.path:
 import_module("app.models")
 access_models = import_module("app.models.access")
 agent_models = import_module("app.models.agent")
+react_models = import_module("app.models.react")
+session_models = import_module("app.models.session")
 user_models = import_module("app.models.user")
 auth_module = import_module("app.api.auth")
 consumer_api_module = import_module("app.api.consumer")
 projects_api_module = import_module("app.api.projects")
+react_api_module = import_module("app.api.react")
 session_api_module = import_module("app.api.session")
 dependencies_module = import_module("app.api.dependencies")
 permission_service_module = import_module("app.services.permission_service")
 
 Agent = agent_models.Agent
+ReactTask = react_models.ReactTask
 Role = access_models.Role
+SessionModel = session_models.Session
 User = user_models.User
 PermissionService = permission_service_module.PermissionService
 
@@ -82,6 +88,7 @@ class EntryPermissionApiTestCase(unittest.TestCase):
         self.app = FastAPI()
         self.app.include_router(consumer_api_module.router)
         self.app.include_router(projects_api_module.router)
+        self.app.include_router(react_api_module.router)
         self.app.include_router(session_api_module.router)
         self.app.dependency_overrides[dependencies_module.get_db] = self._get_db
         self.app.dependency_overrides[auth_module.get_current_user] = (
@@ -140,6 +147,81 @@ class EntryPermissionApiTestCase(unittest.TestCase):
         self.current_user = self.client_user
 
         response = self.client.get(f"/projects?agent_id={self.locked_agent.id}")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_consumer_session_get_requires_agent_use_access(self) -> None:
+        """Consumer session reads should be blocked after agent use is unavailable."""
+        self.current_user = self.client_user
+        session = SessionModel(
+            session_id=str(uuid.uuid4()),
+            agent_id=self.locked_agent.id or 0,
+            type="consumer",
+            user=self.client_user.username,
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get(f"/sessions/{session.session_id}")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_consumer_session_list_hides_sessions_without_agent_use_access(
+        self,
+    ) -> None:
+        """Session list should omit sessions whose agent is no longer usable."""
+        self.current_user = self.client_user
+        session = SessionModel(
+            session_id=str(uuid.uuid4()),
+            agent_id=self.locked_agent.id or 0,
+            type="consumer",
+            user=self.client_user.username,
+        )
+        self.session.add(session)
+        self.session.commit()
+
+        response = self.client.get("/sessions?session_type=consumer")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sessions"], [])
+
+    def test_react_task_start_requires_agent_use_access(self) -> None:
+        """Consumer runtime launch should stay inside the agent use boundary."""
+        self.current_user = self.client_user
+
+        response = self.client.post(
+            "/react/tasks",
+            json={
+                "agent_id": self.locked_agent.id,
+                "message": "hello",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_react_task_lookup_requires_agent_use_access(self) -> None:
+        """Runtime task inspection should also respect current agent use access."""
+        self.current_user = self.client_user
+        session = SessionModel(
+            session_id=str(uuid.uuid4()),
+            agent_id=self.locked_agent.id or 0,
+            type="consumer",
+            user=self.client_user.username,
+        )
+        self.session.add(session)
+        self.session.commit()
+        task = ReactTask(
+            task_id=str(uuid.uuid4()),
+            session_id=session.session_id,
+            agent_id=self.locked_agent.id or 0,
+            user=self.client_user.username,
+            user_message="hello",
+            user_intent="hello",
+        )
+        self.session.add(task)
+        self.session.commit()
+
+        response = self.client.get(f"/react/tasks/{task.task_id}")
 
         self.assertEqual(response.status_code, 403)
 

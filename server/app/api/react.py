@@ -5,6 +5,7 @@ import logging
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
+from app.models.access import AccessLevel
 from app.models.agent import Agent
 from app.models.react import ReactRecursion, ReactTask
 from app.models.session import Session as ConversationSession
@@ -21,7 +22,10 @@ from app.schemas.react import (
     ReactTaskCancelResponse,
     ReactTaskStartResponse,
 )
+from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
+from app.services.permission_service import PermissionService
 from app.services.react_context_service import ReactContextUsageService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
@@ -40,11 +44,76 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _session_access_level(session_type: str) -> AccessLevel:
+    """Return the agent access level required for one runtime session type."""
+    return AccessLevel.EDIT if session_type == "studio_test" else AccessLevel.USE
+
+
+def _require_runtime_permission(
+    *,
+    db: Session,
+    user: User,
+    session_type: str,
+) -> None:
+    """Require the system-level entry permission for one runtime surface."""
+    required_permission = (
+        Permission.AGENTS_MANAGE
+        if session_type == "studio_test"
+        else Permission.CLIENT_ACCESS
+    )
+    PermissionService(db).require_permissions(user, (required_permission,))
+
+
+def _require_agent_runtime_access(
+    *,
+    db: Session,
+    user: User,
+    agent: Agent,
+    session_type: str,
+) -> None:
+    """Require the caller to still have access to the runtime agent surface."""
+    AccessService(db).require_agent_access(
+        user=user,
+        agent=agent,
+        access_level=_session_access_level(session_type),
+    )
+
+
+def _get_owned_task(
+    *,
+    db: Session,
+    task_id: str,
+    user: User,
+) -> ReactTask:
+    """Load one task row and require ownership."""
+    task = db.exec(select(ReactTask).where(ReactTask.task_id == task_id)).first()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user != user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return task
+
+
+def _get_owned_session(
+    *,
+    db: Session,
+    session_id: str,
+    user: User,
+) -> ConversationSession:
+    """Load one session row and require ownership."""
+    session = SessionService(db).get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user != user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return session
+
+
 def _resolve_runtime_agent_for_request(
     *,
     db: Session,
     request: ReactChatRequest,
-    username: str,
+    user: User,
 ) -> tuple[Agent, ConversationSession | None]:
     """Resolve the agent and optional session targeted by one runtime request.
 
@@ -53,37 +122,35 @@ def _resolve_runtime_agent_for_request(
     disabled for end users.
     """
     agent_service = AgentService(db)
-    session_service = SessionService(db)
-
     session_row: ConversationSession | None = None
     if request.session_id is not None:
-        session_row = session_service.get_session(request.session_id)
-        if session_row is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        if session_row.user != username:
-            raise HTTPException(status_code=403, detail="Access denied")
+        session_row = _get_owned_session(
+            db=db,
+            session_id=request.session_id,
+            user=user,
+        )
         if session_row.agent_id != request.agent_id:
             raise HTTPException(
                 status_code=400,
                 detail="Session does not belong to the requested agent",
             )
     elif request.task_id is not None:
-        task = db.exec(
-            select(ReactTask).where(ReactTask.task_id == request.task_id)
-        ).first()
-        if task is None:
-            raise HTTPException(status_code=404, detail="Task not found")
-        if task.user != username:
-            raise HTTPException(status_code=403, detail="Access denied")
+        task = _get_owned_task(
+            db=db,
+            task_id=request.task_id,
+            user=user,
+        )
         if task.agent_id != request.agent_id:
             raise HTTPException(
                 status_code=400,
                 detail="Task does not belong to the requested agent",
             )
         if task.session_id is not None:
-            session_row = session_service.get_session(task.session_id)
-            if session_row is None:
-                raise HTTPException(status_code=404, detail="Session not found")
+            session_row = _get_owned_session(
+                db=db,
+                session_id=task.session_id,
+                user=user,
+            )
 
     try:
         if session_row is not None and session_row.type == "studio_test":
@@ -95,6 +162,17 @@ def _resolve_runtime_agent_for_request(
         status_code = 404 if "not found" in detail else 409
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
+    _require_runtime_permission(
+        db=db,
+        user=user,
+        session_type=session_row.type if session_row is not None else "consumer",
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=user,
+        agent=agent,
+        session_type=session_row.type if session_row is not None else "consumer",
+    )
     return agent, session_row
 
 
@@ -158,7 +236,7 @@ async def start_react_task(
     _resolve_runtime_agent_for_request(
         db=db,
         request=request,
-        username=current_user.username,
+        user=current_user,
     )
 
     supervisor = get_react_task_supervisor()
@@ -193,9 +271,30 @@ async def start_react_task(
 async def submit_react_user_action(
     task_id: str,
     request: ReactPendingUserActionRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ReactTaskStartResponse:
     """Submit one structured approve/reject decision for a waiting task."""
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "consumer"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session_type,
+    )
+
     supervisor = get_react_task_supervisor()
     try:
         launch_result = await supervisor.submit_pending_user_action(
@@ -250,13 +349,19 @@ async def stream_react_session_events(
     current_user: User = Depends(get_current_user),
 ):
     """Stream reconnectable ReAct task events for one session."""
-    from app.services.session_service import SessionService
-
-    session = SessionService(db).get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if session.user != current_user.username:
-        raise HTTPException(status_code=403, detail="Access denied")
+    session = _get_owned_session(db=db, session_id=session_id, user=current_user)
+    agent = AgentService(db).get_required_agent(session.agent_id)
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session.type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session.type,
+    )
 
     return await _stream_supervisor_events(
         raw_request=raw_request,
@@ -283,7 +388,7 @@ async def react_chat_stream(
     _resolve_runtime_agent_for_request(
         db=db,
         request=request,
-        username=current_user.username,
+        user=current_user,
     )
 
     supervisor = get_react_task_supervisor()
@@ -336,6 +441,18 @@ async def estimate_react_context_usage(
     Raises:
         HTTPException: If the agent, task, or uploaded files cannot be resolved.
     """
+    agent = AgentService(db).get_required_agent(request.agent_id)
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=request.session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=request.session_type,
+    )
     service = ReactContextUsageService(db)
     try:
         return service.estimate(
@@ -367,6 +484,18 @@ async def list_react_runtime_skills(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, str]]:
     """List the skills currently visible to one chat runtime."""
+    agent = AgentService(db).get_required_agent(request.agent_id)
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=request.session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=request.session_type,
+    )
     service = ReactContextUsageService(db)
     try:
         return service.list_runtime_skills(
@@ -394,13 +523,19 @@ async def get_react_session_runtime_debug(
     current_user: User = Depends(get_current_user),
 ) -> ReactSessionRuntimeDebugResponse:
     """Return the persisted runtime-window debug snapshot for one session."""
-    from app.services.session_service import SessionService
-
-    session = SessionService(db).get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    if session.user != current_user.username:
-        raise HTTPException(status_code=403, detail="Access denied")
+    session = _get_owned_session(db=db, session_id=session_id, user=current_user)
+    agent = AgentService(db).get_required_agent(session.agent_id)
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session.type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session.type,
+    )
 
     payload = ReactRuntimeService(db).build_runtime_debug_payload(session_id)
     return ReactSessionRuntimeDebugResponse(**payload)
@@ -422,13 +557,25 @@ async def get_react_task(
     Returns:
         ReactTask information
     """
-    from sqlmodel import select
-
-    stmt = select(ReactTask).where(ReactTask.task_id == task_id)
-    task = db.exec(stmt).first()
-
-    if not task:
-        return {"error": "Task not found"}, 404
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "consumer"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session_type,
+    )
 
     payload = jsonable_encoder(task)
     return payload
@@ -450,7 +597,25 @@ async def get_task_recursions(
     Returns:
         List of recursions
     """
-    from sqlmodel import select
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "consumer"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session_type,
+    )
 
     stmt = (
         select(ReactRecursion)
@@ -482,6 +647,26 @@ async def get_task_states(
         List of recursion states with complete state snapshots
     """
     from app.models.react import ReactRecursionState
+
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "consumer"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session_type,
+    )
 
     stmt = (
         select(ReactRecursionState)
@@ -515,6 +700,26 @@ async def get_task_state_at_iteration(
         Recursion state at the specified iteration
     """
     from app.models.react import ReactRecursionState
+
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = "consumer"
+    if task.session_id is not None:
+        session = _get_owned_session(
+            db=db, session_id=task.session_id, user=current_user
+        )
+        session_type = session.type
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session_type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session_type,
+    )
 
     stmt = (
         select(ReactRecursionState)

@@ -8,7 +8,9 @@ from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 
-_SURFACE_TOKEN_SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+_SURFACE_TOKEN_SECRET_KEY = os.getenv(
+    "SECRET_KEY", "your-secret-key-change-in-production"
+)
 _SURFACE_TOKEN_ALGORITHM = "HS256"
 _SURFACE_TOKEN_LIFETIME = timedelta(hours=8)
 _SURFACE_TOKEN_KIND = "surface_session"

@@ -14,6 +14,7 @@ from uuid import uuid4
 from app.models.access import AccessLevel
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
 from app.services.access_service import AccessService
+from app.services.agent_service import AgentService
 from app.services.extension_service import ExtensionService
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
     from sqlmodel import Session as DBSession
 
 _DEFAULT_SURFACE_CAPABILITIES = ["workspace.read", "workspace.write"]
+
+
+def _required_agent_access_level(session_type: str) -> AccessLevel:
+    """Return the agent access level required for one chat session type."""
+    return AccessLevel.EDIT if session_type == "studio_test" else AccessLevel.USE
 
 
 class SurfaceSessionError(Exception):
@@ -286,6 +292,12 @@ class SurfaceSessionService:
             raise SurfaceSessionPermissionError(
                 "Surface session is not owned by the caller."
             )
+        self._resolve_owned_chat_session(
+            username=username,
+            session_id=record.session_id,
+        )
+        if record.mode == "installed":
+            self._require_installed_surface_binding(record=record)
         return record
 
     def build_bootstrap(
@@ -324,6 +336,8 @@ class SurfaceSessionService:
                 "blob_url": f"{files_base_url}/blob",
                 "tree_url": f"{files_base_url}/tree",
                 "content_url": f"{files_base_url}/content",
+                "create_directory_url": f"{files_base_url}/directory",
+                "path_url": f"{files_base_url}/path",
             },
         }
         if record.mode == "dev" and record.dev_server_url is not None:
@@ -400,6 +414,19 @@ class SurfaceSessionService:
         workspace = WorkspaceService(self.db).get_workspace(chat_session.workspace_id)
         if workspace is None:
             raise SurfaceSessionNotFoundError("Workspace not found.")
+        user = self._user_by_username(username)
+        if user is None:
+            raise SurfaceSessionPermissionError("Chat session is not accessible.")
+        try:
+            agent = AgentService(self.db).get_required_agent(chat_session.agent_id)
+        except ValueError as exc:
+            raise SurfaceSessionNotFoundError(str(exc)) from exc
+        if not AccessService(self.db).has_agent_access(
+            user=user,
+            agent=agent,
+            access_level=_required_agent_access_level(chat_session.type),
+        ):
+            raise SurfaceSessionPermissionError("Chat session is not accessible.")
         self._require_workspace_access(
             username=username,
             workspace_id=workspace.workspace_id,
@@ -407,6 +434,34 @@ class SurfaceSessionService:
         )
 
         return chat_session, workspace
+
+    def _require_installed_surface_binding(
+        self,
+        *,
+        record: SurfaceSessionRecord,
+    ) -> None:
+        """Raise unless the installed surface is still enabled for the agent."""
+        if record.extension_installation_id is None:
+            raise SurfaceSessionNotFoundError("Installed surface session is invalid.")
+        statement = (
+            select(AgentExtensionBinding, ExtensionInstallation)
+            .join(
+                ExtensionInstallation,
+                col(AgentExtensionBinding.extension_installation_id)
+                == col(ExtensionInstallation.id),
+            )
+            .where(AgentExtensionBinding.agent_id == record.agent_id)
+            .where(
+                AgentExtensionBinding.extension_installation_id
+                == record.extension_installation_id
+            )
+            .where(col(AgentExtensionBinding.enabled) == True)  # noqa: E712
+            .where(col(ExtensionInstallation.status) == "active")
+        )
+        if self.db.exec(statement).first() is None:
+            raise SurfaceSessionNotFoundError(
+                "Installed surface extension is not enabled for this agent."
+            )
 
     def _require_workspace_access(
         self,

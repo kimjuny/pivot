@@ -28,9 +28,7 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
             username="alice",
             session_id="session-1",
             sandbox_timeout_seconds=90,
-            allowed_skills=(
-                {"name": "alpha", "location": "/workspace/skills/alpha"},
-            ),
+            allowed_skills=({"name": "alpha", "location": "/workspace/skills/alpha"},),
         )
         record = SimpleNamespace(
             preview_id="preview-1",
@@ -59,7 +57,9 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
         session_manager.__exit__.return_value = None
 
         with (
-            patch.object(module, "get_current_tool_execution_context", return_value=context),
+            patch.object(
+                module, "get_current_tool_execution_context", return_value=context
+            ),
             patch.object(module, "managed_session", return_value=session_manager),
             patch.object(module, "PreviewEndpointService", return_value=service),
             patch.object(module, "WorkspaceService", return_value=workspace_service),

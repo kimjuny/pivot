@@ -241,6 +241,7 @@ class ReactStreamEventType(str, Enum):
     ACTION = "action"
     TOOL_CALL = "tool_call"
     TOOL_PAYLOAD_DELTA = "tool_payload_delta"
+    ANSWER_DELTA = "answer_delta"
     TOKEN_RATE = "token_rate"
     COMPACT_START = "compact_start"
     COMPACT_COMPLETE = "compact_complete"

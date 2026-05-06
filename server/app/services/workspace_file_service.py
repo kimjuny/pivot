@@ -534,6 +534,53 @@ class WorkspaceFileService:
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(content, encoding="utf-8")
 
+    def create_directory(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        path: str,
+    ) -> None:
+        """Create one directory inside an editable workspace."""
+        workspace = self._get_workspace_for_user(
+            workspace_id=workspace_id,
+            username=username,
+            access_level=AccessLevel.EDIT,
+        )
+        target_path = self._resolve_workspace_path(
+            workspace=workspace,
+            relative_path=path,
+            allow_root=False,
+        )
+        if target_path.exists():
+            raise WorkspaceFileValidationError("Workspace path already exists.")
+        target_path.mkdir(parents=True)
+
+    def delete_path(
+        self,
+        *,
+        workspace_id: str,
+        username: str,
+        path: str,
+    ) -> None:
+        """Delete one file or directory inside an editable workspace."""
+        workspace = self._get_workspace_for_user(
+            workspace_id=workspace_id,
+            username=username,
+            access_level=AccessLevel.EDIT,
+        )
+        target_path = self._resolve_workspace_path(
+            workspace=workspace,
+            relative_path=path,
+            allow_root=False,
+        )
+        if not target_path.exists():
+            raise WorkspaceFileNotFoundError("Workspace path does not exist.")
+        if target_path.is_dir():
+            shutil.rmtree(target_path)
+            return
+        target_path.unlink()
+
     def read_binary_file(
         self,
         *,

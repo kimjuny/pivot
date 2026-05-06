@@ -324,6 +324,15 @@
 }
 
 /*
+ * Tool code/diff previews can show both axes at once, which makes WebKit draw
+ * a bright default scrollbar corner in the lower-right of the preview panel.
+ * Match the corner to the preview chrome so the panel stays visually clean.
+ */
+.tool-preview-scroll::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/*
  * Blend the bottom of the session list into the anchored footer so the final
  * rows recede gradually instead of ending against a hard divider.
  */

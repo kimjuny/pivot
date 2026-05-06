@@ -18,7 +18,9 @@ if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
 import_module("app.models")
+Agent = import_module("app.models.agent").Agent
 SessionModel = import_module("app.models.session").Session
+User = import_module("app.models.user").User
 WorkspaceService = import_module("app.services.workspace_service").WorkspaceService
 workspace_service_module = import_module("app.services.workspace_service")
 preview_endpoint_service_module = import_module("app.services.preview_endpoint_service")
@@ -45,6 +47,16 @@ class PreviewEndpointServiceTestCase(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.workspace_root = Path(self.tmpdir.name) / "workspace"
         self.workspace_root.mkdir(parents=True, exist_ok=True)
+        self.user = User(username="alice", password_hash="hash", role_id=1)
+        self.agent = Agent(name="preview-agent", llm_id=None, created_by_user_id=None)
+        self.db.add(self.user)
+        self.db.add(self.agent)
+        self.db.commit()
+        self.db.refresh(self.user)
+        self.agent.created_by_user_id = self.user.id
+        self.db.add(self.agent)
+        self.db.commit()
+        self.db.refresh(self.agent)
 
         resolved_profile = type(
             "ResolvedProfile",
@@ -71,10 +83,12 @@ class PreviewEndpointServiceTestCase(unittest.TestCase):
         self.db.close()
         self.tmpdir.cleanup()
 
-    def test_connect_preview_endpoint_recreates_missing_sandbox_from_recipe(self) -> None:
+    def test_connect_preview_endpoint_recreates_missing_sandbox_from_recipe(
+        self,
+    ) -> None:
         """Reconnect should recreate sandbox first, then replay start_server."""
         workspace = WorkspaceService(self.db).create_workspace(
-            agent_id=7,
+            agent_id=self.agent.id or 0,
             username="alice",
             scope="session_private",
             session_id="session-1",
@@ -82,7 +96,7 @@ class PreviewEndpointServiceTestCase(unittest.TestCase):
         self.db.add(
             SessionModel(
                 session_id="session-1",
-                agent_id=7,
+                agent_id=self.agent.id or 0,
                 user="alice",
                 workspace_id=workspace.workspace_id,
             )
@@ -97,14 +111,14 @@ class PreviewEndpointServiceTestCase(unittest.TestCase):
             title="Landing Page",
             cwd="apps/landing-page",
             start_server="bash /workspace/.pivot/previews/landing-page.sh",
-            skills=(
-                {"name": "alpha", "location": "/workspace/skills/alpha"},
-            ),
+            skills=({"name": "alpha", "location": "/workspace/skills/alpha"},),
         )
 
         sandbox_service = MagicMock()
         sandbox_service.proxy_http.side_effect = [
-            RuntimeError("Sandbox preview runtime is unavailable because the original sandbox container no longer exists."),
+            RuntimeError(
+                "Sandbox preview runtime is unavailable because the original sandbox container no longer exists."
+            ),
             object(),
         ]
         sandbox_service.exec.return_value = SandboxExecResult(

@@ -184,6 +184,24 @@ class AgentDraftStateResponse(AppBaseModel):
     release_history: list[AgentReleaseResponse] = Field(default_factory=list)
 
 
+class AgentSidebarSectionStatsResponse(AppBaseModel):
+    """Compact selected/total count summary for one sidebar section."""
+
+    selected_count: int
+    total_count: int
+
+
+class AgentSidebarStatsResponse(AppBaseModel):
+    """Count summary payload for the Agent detail sidebar."""
+
+    tools: AgentSidebarSectionStatsResponse
+    skills: AgentSidebarSectionStatsResponse
+    extensions: AgentSidebarSectionStatsResponse
+    channels: AgentSidebarSectionStatsResponse
+    media: AgentSidebarSectionStatsResponse
+    web_search: AgentSidebarSectionStatsResponse
+
+
 class AgentPublishRequest(AppBaseModel):
     """Payload for publishing the current saved draft as a release."""
 

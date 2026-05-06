@@ -14,9 +14,9 @@ export interface ChatDebugPanelSection {
   /** Stable key used to upsert one section from one child owner. */
   key: string;
   /** Short heading rendered above the section content. */
-  title: string;
+  title: ReactNode;
   /** Optional helper copy that explains why the section exists. */
-  description?: string;
+  description?: ReactNode;
   /** Arbitrary React content rendered inside the debug panel. */
   content: ReactNode;
 }

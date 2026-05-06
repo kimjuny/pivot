@@ -1253,7 +1253,9 @@ def _decode_proxy_body(body_base64: str | None) -> bytes | None:
         ) from exc
 
 
-def _build_preview_target_url(*, container: Any, port: int, path: str, query_string: str) -> str:
+def _build_preview_target_url(
+    *, container: Any, port: int, path: str, query_string: str
+) -> str:
     """Build one concrete upstream preview URL for a sandbox container."""
     container_ip = _container_ipv4_address(container)
     if not container_ip:

@@ -99,6 +99,8 @@ class SurfaceFilesApiResponse(AppBaseModel):
     blob_url: str
     tree_url: str
     content_url: str
+    create_directory_url: str
+    path_url: str
 
 
 class SurfaceThemeResponse(AppBaseModel):
@@ -246,3 +248,9 @@ class WriteWorkspaceFileRequest(AppBaseModel):
 
     path: str = Field(..., description="Workspace-relative file path.")
     content: str = Field(..., description="Full UTF-8 text payload to persist.")
+
+
+class CreateWorkspaceDirectoryRequest(AppBaseModel):
+    """Request payload for creating one workspace directory."""
+
+    path: str = Field(..., description="Workspace-relative directory path.")

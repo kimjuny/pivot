@@ -14,9 +14,10 @@ PARSE_RETRY_INSTRUCTION = (
     "Rules:\n"
     "1) The first block must be a valid JSON object.\n"
     '2) For CALL_TOOL, every argument value must be {"$payload_ref":"<name>"}.\n'
-    "3) Append payload blocks after the JSON when action_type is CALL_TOOL.\n"
-    "4) step_status_update is only allowed at action.step_status_update and must be a list.\n"
-    "5) Do not include markdown fences or any extra commentary."
+    '3) For ANSWER, action.output.answer must be {"$payload_ref":"answer_payload"}.\n'
+    "4) Append payload blocks after the JSON when action_type is CALL_TOOL or ANSWER.\n"
+    "5) step_status_update is only allowed at action.step_status_update and must be a list.\n"
+    "6) Do not include markdown fences or any extra commentary."
 )
 PAYLOAD_SENTINEL_SUFFIX = "6F2D9C1A"
 PAYLOAD_NAME_PATTERN = r"[A-Za-z_][A-Za-z0-9_]{0,63}"
@@ -284,7 +285,7 @@ def parse_react_output(
     payloads = (
         parse_payload_blocks(payload_section) if payload_section is not None else {}
     )
-    resolved_payload = _resolve_tool_payload_references(
+    resolved_payload = _resolve_payload_references(
         raw_payload,
         payloads,
         tool_manager=tool_manager,
@@ -753,13 +754,13 @@ def _decode_payload_value(
         return payload_text
 
 
-def _resolve_tool_payload_references(
+def _resolve_payload_references(
     react_output: dict[str, Any],
     payloads: dict[str, str],
     *,
     tool_manager: Any | None = None,
 ) -> dict[str, Any]:
-    """Resolve named payload blocks referenced by CALL_TOOL arguments.
+    """Resolve named payload blocks referenced by structured action outputs.
 
     Args:
         react_output: Parsed top-level assistant payload.
@@ -777,8 +778,13 @@ def _resolve_tool_payload_references(
     action_type = action.get("action_type", "") if isinstance(action, dict) else ""
     action_output = action.get("output", {}) if isinstance(action, dict) else {}
 
-    if payloads and action_type != "CALL_TOOL":
-        raise ValueError("Payload blocks are only allowed when action_type=CALL_TOOL.")
+    if payloads and action_type not in {"CALL_TOOL", "ANSWER"}:
+        raise ValueError(
+            "Payload blocks are only allowed when action_type=CALL_TOOL or ANSWER."
+        )
+
+    if action_type == "ANSWER":
+        return _resolve_answer_payload_reference(react_output, payloads)
 
     if action_type != "CALL_TOOL":
         return react_output
@@ -836,6 +842,37 @@ def _resolve_tool_payload_references(
         tool_call["arguments"] = resolved_arguments
 
     unused_payloads = sorted(set(payloads) - used_payloads)
+    if unused_payloads:
+        raise ValueError(
+            "Unused payload blocks detected: " + ", ".join(unused_payloads)
+        )
+
+    return react_output
+
+
+def _resolve_answer_payload_reference(
+    react_output: dict[str, Any],
+    payloads: dict[str, str],
+) -> dict[str, Any]:
+    """Resolve the ANSWER markdown body from a named payload block."""
+    action = react_output.get("action")
+    action_output = action.get("output", {}) if isinstance(action, dict) else {}
+    if not isinstance(action_output, dict):
+        raise ValueError("ANSWER action.output must be an object.")
+
+    if not payloads:
+        raise ValueError("ANSWER requires payload blocks after the JSON section.")
+
+    ref_name = _extract_payload_ref_name(
+        action_output.get("answer"),
+        path="action.output.answer",
+    )
+    if ref_name not in payloads:
+        raise ValueError(f"Payload reference '{ref_name}' in answer is not defined.")
+
+    action_output["answer"] = payloads[ref_name]
+
+    unused_payloads = sorted(set(payloads) - {ref_name})
     if unused_payloads:
         raise ValueError(
             "Unused payload blocks detected: " + ", ".join(unused_payloads)

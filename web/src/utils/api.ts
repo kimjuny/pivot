@@ -141,6 +141,20 @@ export interface AgentDraftState {
   release_history: AgentReleaseRecord[];
 }
 
+export interface AgentSidebarSectionStats {
+  selected_count: number;
+  total_count: number;
+}
+
+export interface AgentSidebarStats {
+  tools: AgentSidebarSectionStats;
+  skills: AgentSidebarSectionStats;
+  extensions: AgentSidebarSectionStats;
+  channels: AgentSidebarSectionStats;
+  media: AgentSidebarSectionStats;
+  web_search: AgentSidebarSectionStats;
+}
+
 export interface AgentAccess {
   agent_id: number;
   use_scope: 'all' | 'selected';
@@ -394,6 +408,13 @@ export const updateAgentAccess = async (
  */
 export const getAgentById = async (agentId: number): Promise<Agent> => {
   return apiRequest(`/agents/${agentId}`) as Promise<Agent>;
+};
+
+/**
+ * Fetch compact sidebar counts for one agent detail page.
+ */
+export const getAgentSidebarStats = async (agentId: number): Promise<AgentSidebarStats> => {
+  return apiRequest(`/agents/${agentId}/sidebar-stats`) as Promise<AgentSidebarStats>;
 };
 
 /**

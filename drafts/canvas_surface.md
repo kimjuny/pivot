@@ -362,6 +362,8 @@ Recommended generic file capabilities:
 - `listDirectory(path)`
 - `readTextFile(path)`
 - `writeTextFile(path, content, expectedRevision?)`
+- `createDirectory(path)`
+- `deletePath(path)`
 - `getFileUrl(path)`
 - `writeBinaryFile(path, file)`
 - `watch(path)`
@@ -385,10 +387,12 @@ Recommended endpoints:
 
 ```text
 GET  /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/directory
+POST /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/directory
 GET  /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/text
 PUT  /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/text
 GET  /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/blob
 POST /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/blob
+DELETE /api/chat-surfaces/{mode}-sessions/{surface_session_id}/files/path
 ```
 
 Recommended canvas file contract:

@@ -186,7 +186,9 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
 
         self.assertEqual(result.kind, "image")
         self.assertEqual(result.mime_type, "image/png")
-        self.assertEqual(result.data_base64, base64.b64encode(image_bytes).decode("ascii"))
+        self.assertEqual(
+            result.data_base64, base64.b64encode(image_bytes).decode("ascii")
+        )
 
     def test_write_and_read_binary_file(self) -> None:
         """Binary workspace writes should preserve bytes and MIME metadata."""
