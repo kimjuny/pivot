@@ -329,6 +329,9 @@ export const createAgent = async (agentData: {
   compact_threshold_percent?: number;
   max_iteration?: number;
   is_active?: boolean;
+  use_scope?: 'all' | 'selected';
+  use_user_ids?: number[];
+  use_group_ids?: number[];
 }): Promise<Agent> => {
   return apiRequest('/agents', {
     method: 'POST',
@@ -361,6 +364,10 @@ export const getAgentAccessOptions = async (
   agentId: number,
 ): Promise<AgentAccessOptions> => {
   return apiRequest(`/agents/${agentId}/access-options`) as Promise<AgentAccessOptions>;
+};
+
+export const getAgentCreateAccessOptions = async (): Promise<AgentAccessOptions> => {
+  return apiRequest('/agents/access-options') as Promise<AgentAccessOptions>;
 };
 
 export const updateAgentAccess = async (
@@ -1081,6 +1088,14 @@ export interface ExtensionInstallation {
   hub_artifact_digest: string | null;
   /** Username that installed the package, if known. */
   installed_by: string | null;
+  /** User id that owns this installation's edit grant. */
+  creator_id: number | null;
+  /** Resource use scope for Studio-side extension visibility. */
+  use_scope: 'all' | 'selected';
+  /** Whether the current user can view/use but not edit this installation. */
+  read_only: boolean;
+  /** Whether this installed version declares setup fields. */
+  has_installation_configuration: boolean;
   /** Installation lifecycle status. Expected values currently include active and disabled. */
   status: string;
   /** UTC timestamp when the installation was created. */
@@ -1351,6 +1366,34 @@ export interface ExtensionInstallationConfigurationState {
   config: Record<string, unknown>;
 }
 
+export interface ExtensionInstallationAccess {
+  installation_id: number;
+  use_scope: 'all' | 'selected';
+  use_user_ids: number[];
+  use_group_ids: number[];
+  edit_user_ids: number[];
+  edit_group_ids: number[];
+}
+
+export interface ExtensionInstallationAccessUserOption {
+  id: number;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+export interface ExtensionInstallationAccessGroupOption {
+  id: number;
+  name: string;
+  description: string;
+  member_count: number;
+}
+
+export interface ExtensionInstallationAccessOptions {
+  users: ExtensionInstallationAccessUserOption[];
+  groups: ExtensionInstallationAccessGroupOption[];
+}
+
 /**
  * Agent-scoped extension binding row.
  */
@@ -1505,6 +1548,38 @@ export const uninstallExtensionInstallation = async (
   return apiRequest(`/extensions/installations/${installationId}`, {
     method: 'DELETE',
   }) as Promise<ExtensionUninstallResult>;
+};
+
+export const getExtensionInstallationAccess = async (
+  installationId: number,
+): Promise<ExtensionInstallationAccess> => {
+  return apiRequest(
+    `/extensions/installations/${installationId}/access`,
+  ) as Promise<ExtensionInstallationAccess>;
+};
+
+export const getExtensionInstallationAccessOptions = async (
+  installationId: number,
+): Promise<ExtensionInstallationAccessOptions> => {
+  return apiRequest(
+    `/extensions/installations/${installationId}/access-options`,
+  ) as Promise<ExtensionInstallationAccessOptions>;
+};
+
+export const updateExtensionInstallationAccess = async (
+  installationId: number,
+  access: Omit<ExtensionInstallationAccess, 'installation_id'>,
+): Promise<ExtensionInstallationAccess> => {
+  return apiRequest(`/extensions/installations/${installationId}/access`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      use_scope: access.use_scope,
+      use_user_ids: access.use_user_ids,
+      use_group_ids: access.use_group_ids,
+      edit_user_ids: access.edit_user_ids,
+      edit_group_ids: access.edit_group_ids,
+    }),
+  }) as Promise<ExtensionInstallationAccess>;
 };
 
 /**
@@ -2709,25 +2784,6 @@ export interface ToolParameters {
  */
 export type ToolExecutionType = 'normal' | 'sandbox';
 
-/**
- * A shared (built-in) tool returned by the server.
- */
-export interface SharedTool {
-  name: string;
-  description: string;
-  parameters: ToolParameters;
-  tool_type: ToolExecutionType;
-}
-
-/**
- * A private (user-workspace) tool file entry.
- */
-export interface PrivateTool {
-  name: string;
-  filename: string;
-  tool_type: ToolExecutionType;
-}
-
 export interface UsableTool {
   name: string;
   description: string;
@@ -2735,7 +2791,10 @@ export interface UsableTool {
   tool_type: ToolExecutionType;
   source_type: ToolSourceType;
   read_only: boolean;
+  creator_id: number | null;
 }
+
+export type ManagedTool = UsableTool;
 
 /**
  * Source code payload for a tool read response.
@@ -2761,11 +2820,6 @@ export interface ToolAccess {
 export type ToolAccessOptions = LLMAccessOptions;
 
 /**
- * Backward-compatible alias for private tool source payload.
- */
-export type PrivateToolSource = ToolSourcePayload;
-
-/**
  * A Monaco-compatible editor diagnostic marker.
  */
 export interface ToolDiagnostic {
@@ -2778,9 +2832,6 @@ export interface ToolDiagnostic {
   source: string;
 }
 
-/**
- * Shared skill metadata returned by the server.
- */
 export type SkillSource = 'manual' | 'network' | 'bundle' | 'agent';
 
 /**
@@ -2802,32 +2853,8 @@ export interface SkillImportProgressEvent {
   percent: number;
   status: 'running' | 'complete' | 'failed';
   detail: string | null;
-  metadata: (SharedSkill | UserSkill) | null;
+  metadata: UserSkill | null;
   timestamp: string;
-}
-
-/**
- * Shared skill metadata returned by the server.
- */
-export interface SharedSkill {
-  name: string;
-  description: string;
-  location: string;
-  filename: string;
-  kind: 'shared';
-  use_scope: 'all' | 'selected';
-  source: SkillSource;
-  creator_id: number | null;
-  creator: string | null;
-  read_only: boolean;
-  md5: string;
-  github_repo_url: string | null;
-  github_ref: string | null;
-  github_ref_type: 'branch' | 'tag' | null;
-  github_skill_path: string | null;
-  imported: boolean;
-  created_at: string;
-  updated_at: string;
 }
 
 /**
@@ -2838,7 +2865,6 @@ export interface UserSkill {
   description: string;
   location: string;
   filename: string;
-  kind: 'private' | 'shared';
   use_scope: 'all' | 'selected';
   source: SkillSource;
   creator_id: number | null;
@@ -2855,6 +2881,7 @@ export interface UserSkill {
 }
 
 export type UsableSkill = UserSkill;
+export type ManagedSkill = UserSkill;
 
 export interface SkillAccess {
   skill_name: string;
@@ -2907,28 +2934,37 @@ export interface GitHubSkillProbeResponse {
 export interface SkillSourcePayload {
   name: string;
   source: string;
-  metadata: SharedSkill | UserSkill;
+  metadata: UserSkill;
 }
 
-/**
- * Fetch all shared skills visible to the current user.
- */
-export const getSharedSkills = async (): Promise<SharedSkill[]> => {
-  return apiRequest('/skills/shared') as Promise<SharedSkill[]>;
-};
+export interface SkillFileTreeEntry {
+  path: string;
+  name: string;
+  kind: 'directory' | 'file';
+  parent_path: string | null;
+  size_bytes: number | null;
+}
 
-/**
- * Fetch list of private skills for the current user.
- */
-export const getPrivateSkills = async (): Promise<UserSkill[]> => {
-  return apiRequest('/skills/private') as Promise<UserSkill[]>;
-};
+export interface SkillFileTree {
+  root_path: string;
+  entries: SkillFileTreeEntry[];
+}
+
+export interface SkillFileContent {
+  path: string;
+  content: string;
+  encoding: 'utf-8';
+}
 
 /**
  * Fetch skills the current Studio user can select when configuring agents.
  */
 export const getUsableSkills = async (): Promise<UsableSkill[]> => {
   return apiRequest('/skills/usable') as Promise<UsableSkill[]>;
+};
+
+export const getManageableSkills = async (): Promise<ManagedSkill[]> => {
+  return apiRequest('/skills/manage') as Promise<ManagedSkill[]>;
 };
 
 export const getSkillAccess = async (skillName: string): Promise<SkillAccess> => {
@@ -2966,49 +3002,104 @@ export const updateSkillAccess = async (
   }) as Promise<SkillAccess>;
 };
 
-/**
- * Fetch a creator-owned skill source from private/shared namespace.
- */
-export const getUserSkillSource = async (
-  kind: 'private' | 'shared',
-  skillName: string
-): Promise<SkillSourcePayload> => {
+export const getSkillSource = async (skillName: string): Promise<SkillSourcePayload> => {
   const encodedSkillName = encodeURIComponent(skillName);
-  return apiRequest(`/skills/${kind}/${encodedSkillName}`) as Promise<SkillSourcePayload>;
+  return apiRequest(`/skills/${encodedSkillName}/source`) as Promise<SkillSourcePayload>;
 };
 
-/**
- * Fetch one shared skill source visible to the current user.
- */
-export const getSharedSkillSource = async (skillName: string): Promise<SkillSourcePayload> => {
-  const encodedSkillName = encodeURIComponent(skillName);
-  return apiRequest(`/skills/shared/${encodedSkillName}`) as Promise<SkillSourcePayload>;
-};
-
-/**
- * Create or update a user-owned markdown skill.
- */
-export const upsertUserSkill = async (
-  kind: 'private' | 'shared',
+export const createSkill = async (
   skillName: string,
-  source: string
-): Promise<void> => {
+  source: string,
+): Promise<{ status: string; metadata: ManagedSkill }> => {
+  return apiRequest('/skills', {
+    method: 'POST',
+    body: JSON.stringify({ skill_name: skillName, source }),
+  }) as Promise<{ status: string; metadata: ManagedSkill }>;
+};
+
+export const updateSkillSource = async (
+  skillName: string,
+  source: string,
+): Promise<{ status: string; metadata: ManagedSkill }> => {
   const encodedSkillName = encodeURIComponent(skillName);
-  await apiRequest(`/skills/${kind}/${encodedSkillName}`, {
+  return apiRequest(`/skills/${encodedSkillName}/source`, {
     method: 'PUT',
     body: JSON.stringify({ source }),
-  });
+  }) as Promise<{ status: string; metadata: ManagedSkill }>;
 };
 
-/**
- * Delete a user-owned markdown skill.
- */
-export const deleteUserSkill = async (
-  kind: 'private' | 'shared',
-  skillName: string
+export const getSkillFileTree = async (
+  skillName: string,
+  path?: string | null,
+): Promise<SkillFileTree> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  const query = path ? `?path=${encodeURIComponent(path)}` : '';
+  return apiRequest(`/skills/${encodedSkillName}/files/tree${query}`) as Promise<SkillFileTree>;
+};
+
+export const getSkillFileContent = async (
+  skillName: string,
+  path: string,
+): Promise<SkillFileContent> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(
+    `/skills/${encodedSkillName}/files/content?path=${encodeURIComponent(path)}`,
+  ) as Promise<SkillFileContent>;
+};
+
+export const updateSkillFileContent = async (
+  skillName: string,
+  path: string,
+  content: string,
+): Promise<{ status: string; metadata: ManagedSkill }> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/${encodedSkillName}/files/content`, {
+    method: 'PUT',
+    body: JSON.stringify({ path, content }),
+  }) as Promise<{ status: string; metadata: ManagedSkill }>;
+};
+
+export const createSkillFileContent = async (
+  skillName: string,
+  path: string,
+  content = '',
+): Promise<{ status: string; metadata: ManagedSkill }> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/${encodedSkillName}/files/content`, {
+    method: 'POST',
+    body: JSON.stringify({ path, content }),
+  }) as Promise<{ status: string; metadata: ManagedSkill }>;
+};
+
+export const createSkillDirectory = async (
+  skillName: string,
+  path: string,
+): Promise<{ status: string; metadata: ManagedSkill }> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(`/skills/${encodedSkillName}/files/directory`, {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  }) as Promise<{ status: string; metadata: ManagedSkill }>;
+};
+
+export const deleteSkillPath = async (
+  skillName: string,
+  path: string,
+): Promise<{ status: string; metadata: ManagedSkill }> => {
+  const encodedSkillName = encodeURIComponent(skillName);
+  return apiRequest(
+    `/skills/${encodedSkillName}/files/path?path=${encodeURIComponent(path)}`,
+    {
+      method: 'DELETE',
+    },
+  ) as Promise<{ status: string; metadata: ManagedSkill }>;
+};
+
+export const deleteSkill = async (
+  skillName: string,
 ): Promise<void> => {
   const encodedSkillName = encodeURIComponent(skillName);
-  await apiRequest(`/skills/${kind}/${encodedSkillName}`, {
+  await apiRequest(`/skills/${encodedSkillName}`, {
     method: 'DELETE',
   });
 };
@@ -3036,14 +3127,13 @@ export const importGitHubSkill = async (payload: {
   github_url: string;
   ref: string;
   ref_type: 'branch' | 'tag';
-  kind: 'private' | 'shared';
   remote_directory_name: string;
   skill_name: string;
-}): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
+}): Promise<{ status: string; metadata: UserSkill }> => {
   return apiRequest('/skills/import/github', {
     method: 'POST',
     body: JSON.stringify(payload),
-  }) as Promise<{ status: string; metadata: SharedSkill | UserSkill }>;
+  }) as Promise<{ status: string; metadata: UserSkill }>;
 };
 
 /**
@@ -3051,16 +3141,14 @@ export const importGitHubSkill = async (payload: {
  */
 export const importBundleSkill = async (payload: {
   bundleName: string;
-  kind: 'private' | 'shared';
   skillName: string;
   files: BundleSkillImportFile[];
-}): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
+}): Promise<{ status: string; metadata: UserSkill }> => {
   const url = `${getApiBaseUrl()}/skills/import/bundle`;
   const headers = getAuthorizedHeaders();
   const formData = new FormData();
 
   formData.append('bundle_name', payload.bundleName);
-  formData.append('kind', payload.kind);
   formData.append('skill_name', payload.skillName);
   payload.files.forEach((entry) => {
     formData.append('files', entry.file);
@@ -3084,7 +3172,7 @@ export const importBundleSkill = async (payload: {
       throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
     }
 
-    return await response.json() as { status: string; metadata: SharedSkill | UserSkill };
+    return await response.json() as { status: string; metadata: UserSkill };
   } catch (error) {
     console.error(`Bundle import failed for ${payload.bundleName}:`, error);
     throw error;
@@ -3177,13 +3265,11 @@ export const streamSkillArchiveImportJobEvents = async (
  */
 export const importSkillArchive = async (payload: {
   jobId: string;
-  kind: 'private' | 'shared';
   skillName: string;
   archive: File;
-}): Promise<{ status: string; metadata: SharedSkill | UserSkill }> => {
+}): Promise<{ status: string; metadata: UserSkill }> => {
   const formData = new FormData();
   formData.append('archive', payload.archive);
-  formData.append('kind', payload.kind);
   formData.append('skill_name', payload.skillName);
 
   const response = await httpClient(
@@ -3204,29 +3290,15 @@ export const importSkillArchive = async (payload: {
     throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
   }
 
-  return await response.json() as { status: string; metadata: SharedSkill | UserSkill };
-};
-
-/**
- * Fetch all shared (built-in) tools.
- *
- * @returns Promise resolving to list of shared tools
- */
-export const getSharedTools = async (): Promise<SharedTool[]> => {
-  return apiRequest('/tools/shared') as Promise<SharedTool[]>;
-};
-
-/**
- * Fetch list of private tool files for the current user.
- *
- * @returns Promise resolving to list of private tool entries
- */
-export const getPrivateTools = async (): Promise<PrivateTool[]> => {
-  return apiRequest('/tools/private') as Promise<PrivateTool[]>;
+  return await response.json() as { status: string; metadata: UserSkill };
 };
 
 export const getUsableTools = async (): Promise<UsableTool[]> => {
   return apiRequest('/tools/usable') as Promise<UsableTool[]>;
+};
+
+export const getManageableTools = async (): Promise<ManagedTool[]> => {
+  return apiRequest('/tools/manage') as Promise<ManagedTool[]>;
 };
 
 export const getToolCreateAccessOptions = async (): Promise<ToolAccessOptions> => {
@@ -3531,26 +3603,36 @@ export const reconnectSurfacePreview = async (payload: {
   }) as Promise<ReconnectPreviewEndpointResponse>;
 };
 
-/**
- * Fetch source code of a private tool.
- *
- * @param toolName - Tool name (file stem without .py)
- * @returns Promise resolving to tool source payload
- */
-export const getPrivateToolSource = async (toolName: string): Promise<ToolSourcePayload> => {
+export const getToolSource = async (
+  sourceType: ToolSourceType,
+  toolName: string,
+): Promise<ToolSourcePayload> => {
   const encodedToolName = encodeURIComponent(toolName);
-  return apiRequest(`/tools/private/${encodedToolName}`) as Promise<ToolSourcePayload>;
+  return apiRequest(
+    `/tools/${sourceType}/${encodedToolName}/source`,
+  ) as Promise<ToolSourcePayload>;
 };
 
-/**
- * Fetch source code of a shared (built-in) tool.
- *
- * @param toolName - Tool name from shared catalog
- * @returns Promise resolving to tool source payload
- */
-export const getSharedToolSource = async (toolName: string): Promise<ToolSourcePayload> => {
+export const updateToolSource = async (
+  sourceType: ToolSourceType,
+  toolName: string,
+  source: string,
+): Promise<void> => {
   const encodedToolName = encodeURIComponent(toolName);
-  return apiRequest(`/tools/shared/${encodedToolName}`) as Promise<ToolSourcePayload>;
+  await apiRequest(`/tools/${sourceType}/${encodedToolName}/source`, {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  });
+};
+
+export const deleteToolSource = async (
+  sourceType: ToolSourceType,
+  toolName: string,
+): Promise<void> => {
+  const encodedToolName = encodeURIComponent(toolName);
+  await apiRequest(`/tools/${sourceType}/${encodedToolName}/source`, {
+    method: 'DELETE',
+  });
 };
 
 export const getToolAccess = async (
@@ -3589,30 +3671,6 @@ export const updateToolAccess = async (
       edit_group_ids: access.edit_group_ids,
     }),
   }) as Promise<ToolAccess>;
-};
-
-/**
- * Create or update a private tool source file.
- *
- * @param toolName - Tool name (file stem without .py)
- * @param source - Python source code
- * @returns Promise resolving when saved
- */
-export const upsertPrivateTool = async (toolName: string, source: string): Promise<void> => {
-  await apiRequest(`/tools/private/${toolName}`, {
-    method: 'PUT',
-    body: JSON.stringify({ source }),
-  });
-};
-
-/**
- * Delete a private tool.
- *
- * @param toolName - Tool name (file stem without .py)
- * @returns Promise resolving when deleted
- */
-export const deletePrivateTool = async (toolName: string): Promise<void> => {
-  await apiRequest(`/tools/private/${toolName}`, { method: 'DELETE' });
 };
 
 /**

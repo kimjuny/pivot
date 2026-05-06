@@ -39,18 +39,15 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import {
-  deletePrivateTool,
-  getPrivateTools,
-  getPrivateToolSource,
-  getSharedTools,
-  getSharedToolSource,
+  deleteToolSource,
+  getManageableTools,
   getToolAccess,
   getToolAccessOptions,
   getToolCreateAccessOptions,
+  getToolSource,
   updateToolAccess,
-  upsertPrivateTool,
-  type PrivateTool,
-  type SharedTool,
+  updateToolSource,
+  type ManagedTool,
   type ToolAccess,
   type ToolAccessOptions,
   type ToolSourceType,
@@ -89,9 +86,7 @@ const EMPTY_TOOL_ACCESS: ToolAccess = {
 
 const TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-type ToolRow =
-  | { sourceType: 'builtin'; tool: SharedTool }
-  | { sourceType: 'manual'; tool: PrivateTool };
+type ToolRow = { sourceType: ToolSourceType; tool: ManagedTool };
 
 type ToolDialogTab = 'general' | 'auth';
 
@@ -134,13 +129,8 @@ function extractFunctionName(source: string): string | null {
   return /^def\s+(\w+)\s*\(/m.exec(source)?.[1] ?? null;
 }
 
-function getToolDescription(row: ToolRow): string {
-  return row.sourceType === 'builtin' ? row.tool.description : '—';
-}
-
 function ToolsPage() {
-  const [sharedTools, setSharedTools] = useState<SharedTool[]>([]);
-  const [privateTools, setPrivateTools] = useState<PrivateTool[]>([]);
+  const [tools, setTools] = useState<ManagedTool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -158,8 +148,10 @@ function ToolsPage() {
   const [toolDialogTab, setToolDialogTab] = useState<ToolDialogTab>('general');
   const [toolDialogSourceType, setToolDialogSourceType] =
     useState<ToolSourceType>('manual');
+  const [toolDialogReadOnly, setToolDialogReadOnly] = useState(false);
   const [toolDialogName, setToolDialogName] = useState('my_tool');
   const [toolDialogSource, setToolDialogSource] = useState(NEW_TOOL_TEMPLATE);
+  const [toolDialogSourceDirty, setToolDialogSourceDirty] = useState(false);
   const [toolAccess, setToolAccess] = useState<ToolAccess>(EMPTY_TOOL_ACCESS);
   const [toolAccessUsers, setToolAccessUsers] =
     useState<ToolAccessOptions['users']>([]);
@@ -173,9 +165,7 @@ function ToolsPage() {
   const loadTools = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [shared, manual] = await Promise.all([getSharedTools(), getPrivateTools()]);
-      setSharedTools(shared);
-      setPrivateTools(manual);
+      setTools(await getManageableTools());
     } catch {
       toast.error('Failed to load tools');
     } finally {
@@ -189,10 +179,9 @@ function ToolsPage() {
 
   const allRows: ToolRow[] = useMemo(
     () => [
-      ...sharedTools.map((tool): ToolRow => ({ sourceType: 'builtin', tool })),
-      ...privateTools.map((tool): ToolRow => ({ sourceType: 'manual', tool })),
+      ...tools.map((tool): ToolRow => ({ sourceType: tool.source_type, tool })),
     ],
-    [sharedTools, privateTools],
+    [tools],
   );
 
   const filteredRows = useMemo(() => {
@@ -201,7 +190,7 @@ function ToolsPage() {
       if (!q) return true;
       return (
         row.tool.name.toLowerCase().includes(q) ||
-        getToolDescription(row).toLowerCase().includes(q)
+        row.tool.description.toLowerCase().includes(q)
       );
     });
   }, [allRows, searchQuery]);
@@ -221,8 +210,10 @@ function ToolsPage() {
     setToolDialogMode('create');
     setToolDialogTab('general');
     setToolDialogSourceType('manual');
+    setToolDialogReadOnly(false);
     setToolDialogName('my_tool');
     setToolDialogSource(NEW_TOOL_TEMPLATE);
+    setToolDialogSourceDirty(false);
     setToolAccess(EMPTY_TOOL_ACCESS);
     setToolDialogOpen(true);
     setToolAccessLoading(true);
@@ -242,17 +233,18 @@ function ToolsPage() {
     setToolDialogMode('edit');
     setToolDialogTab('general');
     setToolDialogSourceType(row.sourceType);
+    setToolDialogReadOnly(row.tool.read_only);
     setToolDialogName(toolName);
+    setToolDialogSource('');
+    setToolDialogSourceDirty(false);
     setToolDialogOpen(true);
     setToolAccessLoading(true);
     try {
-      const [access, options, source] = await Promise.all([
-        getToolAccess(row.sourceType, toolName),
-        getToolAccessOptions(row.sourceType, toolName),
-        row.sourceType === 'builtin'
-          ? getSharedToolSource(toolName)
-          : getPrivateToolSource(toolName),
-      ]);
+      const access = await getToolAccess(row.sourceType, toolName);
+      const options = row.tool.read_only
+        ? { users: [], groups: [] }
+        : await getToolAccessOptions(row.sourceType, toolName);
+      const source = await getToolSource(row.sourceType, toolName);
       setToolAccess(access);
       setToolAccessUsers(options.users);
       setToolAccessGroups(options.groups);
@@ -268,15 +260,12 @@ function ToolsPage() {
   const openSourceEditor = useCallback(async (row: ToolRow) => {
     const toolName = row.tool.name;
     try {
-      const result =
-        row.sourceType === 'builtin'
-          ? await getSharedToolSource(toolName)
-          : await getPrivateToolSource(toolName);
+      const result = await getToolSource(row.sourceType, toolName);
       setEditorSaveMode('direct');
       setEditingName(toolName);
       setEditingSourceType(row.sourceType);
       setEditorSource(result.source);
-      setEditorReadOnly(row.sourceType === 'builtin');
+      setEditorReadOnly(row.tool.read_only);
       setEditorOpen(true);
     } catch {
       toast.error(`Failed to load source for "${toolName}"`);
@@ -292,7 +281,7 @@ function ToolsPage() {
     );
     setEditingSourceType(toolDialogSourceType);
     setEditorSource(toolDialogSource);
-    setEditorReadOnly(toolDialogSourceType === 'builtin');
+    setEditorReadOnly(toolDialogReadOnly);
     setToolDialogOpen(false);
     setEditorOpen(true);
   };
@@ -320,7 +309,7 @@ function ToolsPage() {
 
       setIsSaving(true);
       try {
-        await upsertPrivateTool(targetName, source);
+      await updateToolSource(editingSourceType, targetName, source);
         toast.success(`Tool "${targetName}" saved`);
         setEditorOpen(false);
         await loadTools();
@@ -337,6 +326,7 @@ function ToolsPage() {
     async (source: string) => {
       if (editorSaveMode === 'dialog') {
         setToolDialogSource(source);
+        setToolDialogSourceDirty(true);
         if (toolDialogMode === 'create') {
           setToolDialogName(normalizeToolName(extractFunctionName(source) ?? toolDialogName));
         }
@@ -350,8 +340,8 @@ function ToolsPage() {
   );
 
   const handleToolDialogSave = useCallback(async () => {
-    if (toolDialogSourceType === 'builtin') {
-      toast.error('Built-in tools are read-only');
+    if (toolDialogReadOnly) {
+      toast.error('This tool is read-only');
       return;
     }
 
@@ -361,16 +351,22 @@ function ToolsPage() {
       toast.error(nameError);
       return;
     }
-    const sourceFunctionName = extractFunctionName(toolDialogSource);
-    if (sourceFunctionName !== targetName) {
-      toast.error(`Tool source must define function "${targetName}".`);
-      return;
+    if (toolDialogMode === 'create' || toolDialogSourceDirty) {
+      const sourceFunctionName = extractFunctionName(toolDialogSource);
+      if (sourceFunctionName !== targetName) {
+        toast.error(`Tool source must define function "${targetName}".`);
+        return;
+      }
     }
 
     setIsSaving(true);
     try {
-      await upsertPrivateTool(targetName, toolDialogSource);
-      await updateToolAccess('manual', targetName, {
+      if (toolDialogMode === 'create') {
+        await updateToolSource('manual', targetName, toolDialogSource);
+      } else if (toolDialogSourceDirty) {
+        await updateToolSource(toolDialogSourceType, targetName, toolDialogSource);
+      }
+      await updateToolAccess(toolDialogSourceType, targetName, {
         use_scope: toolAccess.use_scope,
         use_user_ids: toolAccess.use_user_ids,
         use_group_ids: toolAccess.use_group_ids,
@@ -385,7 +381,16 @@ function ToolsPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [loadTools, toolAccess, toolDialogName, toolDialogSource, toolDialogSourceType]);
+  }, [
+    loadTools,
+    toolAccess,
+    toolDialogMode,
+    toolDialogName,
+    toolDialogReadOnly,
+    toolDialogSource,
+    toolDialogSourceDirty,
+    toolDialogSourceType,
+  ]);
 
   const handleDelete = useCallback(async (row: ToolRow) => {
     if (row.sourceType === 'builtin') {
@@ -393,7 +398,7 @@ function ToolsPage() {
       return;
     }
     try {
-      await deletePrivateTool(row.tool.name);
+      await deleteToolSource(row.sourceType, row.tool.name);
       toast.success(`Tool "${row.tool.name}" deleted`);
       await loadTools();
     } catch {
@@ -402,6 +407,7 @@ function ToolsPage() {
   }, [loadTools]);
 
   const isBuiltinDialog = toolDialogSourceType === 'builtin';
+  const isReadOnlyDialog = toolDialogReadOnly || isBuiltinDialog;
   const toolDialogTabIndex = toolDialogTab === 'auth' ? 1 : 0;
 
   return (
@@ -470,7 +476,7 @@ function ToolsPage() {
               </TableHeader>
               <TableBody>
                 {pagedRows.map((row) => {
-                  const description = getToolDescription(row);
+                  const description = row.tool.description || '—';
                   return (
                     <TableRow key={`${row.sourceType}-${row.tool.name}`}>
                       <TableCell className="font-mono text-xs font-medium">
@@ -518,7 +524,7 @@ function ToolsPage() {
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          {row.sourceType === 'manual' ? (
+                          {!row.tool.read_only ? (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -661,7 +667,7 @@ function ToolsPage() {
                     <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
                       <div className="min-w-0">
                         <div className="text-sm font-medium">
-                          {isBuiltinDialog
+                          {isReadOnlyDialog
                             ? `View ${toolDialogFileName} file`
                             : `Edit ${toolDialogFileName} file`}
                         </div>
@@ -676,7 +682,7 @@ function ToolsPage() {
                         onClick={openDialogSourceEditor}
                         disabled={isSaving}
                       >
-                        {isBuiltinDialog ? 'View' : 'Edit'}
+                        {isReadOnlyDialog ? 'View' : 'Edit'}
                       </Button>
                     </div>
                   </div>
@@ -690,7 +696,7 @@ function ToolsPage() {
                     users={toolAccessUsers}
                     groups={toolAccessGroups}
                     loading={toolAccessLoading}
-                    disabled={isBuiltinDialog || isSaving}
+                    disabled={isReadOnlyDialog || isSaving}
                     onAccessChange={(access) =>
                       setToolAccess((current) => ({ ...current, ...access }))
                     }
@@ -705,9 +711,9 @@ function ToolsPage() {
                 onClick={() => setToolDialogOpen(false)}
                 disabled={isSaving}
               >
-                {isBuiltinDialog ? 'Close' : 'Cancel'}
+                {isReadOnlyDialog ? 'Close' : 'Cancel'}
               </Button>
-              {!isBuiltinDialog ? (
+              {!isReadOnlyDialog ? (
                 <Button
                   type="button"
                   onClick={() => void handleToolDialogSave()}

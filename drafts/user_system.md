@@ -892,20 +892,53 @@ web/src/components/Navigation.tsx
 - Project access API 已支持读取、更新 selected users/groups。
 - Project access 更新会同步到 `ResourceType.WORKSPACE`，从而统一控制项目 workspace 的文件读写。
 - Project response 返回 `can_edit`，前端可以隐藏 use-only 协作者不应看到的编辑动作。
+- Workspace 授权判断已收敛到 `AccessService.has_workspace_access()`；Workspace file CRUD、Preview endpoint 和 Surface session 对共享 Project workspace 不再只认 workspace owner，而是通过 `ResourceType.WORKSPACE` 的 `use/edit` 授权判断协作者是否能读写文件、启动/连接预览和 surface 会话。
 - LLM 配置已接入 `ResourceType.LLM` 的 `edit` 权限；创建者默认获得 edit，列表/读取/更新/删除只对有 edit 的用户开放。
 - LLM 已新增 Studio 侧 usable selector API：Agent 配置选择 LLM 时只读取当前用户有 `LLM.use` 或 `LLM.edit` 的安全字段，不暴露 `api_key`、endpoint、extra config 等管理信息。
 - LLM 编辑 dialog 已增加 `Auth` tab，可通过同一套 user/group 选择器管理 `use/edit` 授权。
-- Skill 已新增 Studio 侧 usable selector API：Agent 技能选择器和 Agent 侧边栏只读取当前用户有 `Skill.use` 或 `Skill.edit` 的技能；use-only 的 private skill 可以被配置进 Agent，但不会开放 Skill 源码编辑能力。
-- Skill 已开始从 `private/shared` 操作模型收敛到统一 Auth：Skill registry 增加 `use_scope`，Skills 列表新增实体设置入口，实体编辑 dialog 使用左侧 vertical tabs + 右侧固定高度内容的 `General/Auth` 结构；原 pencil 入口保留为直接编辑 `SKILL.md`。
-- Tool 已开始从 `private/shared` 操作模型收敛到统一 Auth：Tools 列表移除 `Type/private/shared` 操作表达，新增实体设置入口；Tool 编辑 dialog 使用左侧 vertical tabs + 右侧固定高度内容的 `General/Auth` 结构；原 pencil 入口保留为直接编辑 `tool.py`。
+- Skill 已新增 Studio 侧 usable selector API：Agent 技能选择器和 Agent 侧边栏只读取当前用户有 `Skill.use` 或 `Skill.edit` 的技能；use-only Skill 可以被配置进 Agent，但不会开放 Skill 源码编辑能力。
+- Skill 已从旧 `private/shared` 产品语义收敛到统一 Auth：Skill registry 增加 `use_scope`，Skills 列表新增实体设置入口，实体编辑 dialog 使用左侧 vertical tabs + 右侧固定高度内容的 `General/Auth` 结构；原 pencil 入口保留为直接编辑 Skill 目录文件。
+- Tool 已从旧 `private/shared` 产品语义收敛到统一 Auth：Tools 列表移除 `Type/private/shared` 操作表达，新增实体设置入口；Tool 编辑 dialog 使用左侧 vertical tabs + 右侧固定高度内容的 `General/Auth` 结构；原 pencil 入口保留为直接编辑 `tool.py`。
 - Tool 已新增 `ToolResource` auth metadata，不存源码，只持久化 Tool 的 `use_scope` 和 ResourceAccess 关联键；源码文件仍通过 workspace service 管理。
 - User-created Tool 默认 `use_scope = all`，创建者默认拥有 `edit`；Tool name 必须同时满足 `.py` 文件名 stem 和 Python function name 规则，并要求源码中定义同名 decorated function。
 - Built-in Tool 固定为所有人可 `use`、无人可 `edit`；可以打开 settings/source 查看，但不能修改 Auth 或源码。
 - Tool 已新增 Studio 侧 usable selector API：Agent Tool 选择器和 Agent 侧边栏只读取当前用户有 `Tool.use` 或 `Tool.edit` 的工具；builtin tools 始终可用。
+- Skill/Tool 管理页已从旧的文件作用域列表切换到实体权限视角：列表展示当前用户有 `use` 或 `edit` 的实体；`use-only` 实体可见、源码只读、不能保存 Auth 或删除；`edit` 实体可改源码、Auth 和删除。
+- Skill/Tool 源码读取已通过实体级 `use` 判断；源码更新、删除已通过实体级 `edit` 判断，避免再依赖“只能操作当前用户自己文件”的旧入口语义。
+- Manual Tool 新建入口已收敛到 `ToolService.create_manual_tool_source()`，由 service 同时负责写入源码、创建 `ToolResource`、授予创建者 `edit`，API 层不再拼装文件写入和授权初始化。
 - `Auth` tab 的 `Use` 权限支持 `Everyone` / `Selected Members`，实体新建默认 `Everyone`。
-- Skill/Tool 的源码编辑器是实体设置 dialog 的子流程：从 `General` 打开 Monaco 时先隐藏设置 dialog，Monaco 保存只回填当前 draft source，最终创建/保存仍由设置 dialog 的主 `Save` 完成，避免 modal overlay/focus trap 与 Monaco 交互冲突。
+- Skill Import 不再暴露 `private/shared`；导入只确认来源与 Skill Name，导入后默认 `Use = Selected Members` 且只包含创建者本人，`Edit` 默认包含创建者本人。需要共享时再进入 Skill Settings 的 `Auth` tab 调整。
+- Skill 源码编辑器升级为目录级编辑器：左侧是 collapsible 文件树，右侧是 Monaco；`SKILL.md` 是默认打开文件，Skill 目录内的其他文本文件也应可查看和编辑。目录树读取通过实体级 `use` 判断，文件更新通过实体级 `edit` 判断。
+- Skill 文件树必须渐进式读取：根目录只加载直接 children；所有文件夹默认闭合；点击展开某个文件夹时才通过 Skill service 复用 `LocalDirectoryFileService` 读取该目录的直接 children，避免一次性加载大型 Skill 目录。
+- Skill 源码编辑器已补齐目录级 CRUD 闭环：File Tree 根区域和每个文件夹都可新增 file/folder；文件和文件夹都可通过 `...` 菜单删除，删除前必须 Alert 确认；新增/删除都通过 Skill service 复用 `LocalDirectoryFileService` 并在成功后重新 restage Skill artifact。
+- Skill 源码编辑器对不支持预览的文件不触发 toast，而是在 Monaco 区域内显示英文不可预览提示；加载状态统一使用 spinner。AlertDialog 层级需要高于 DraggableDialog，避免删除确认被 Monaco/浮窗遮挡。
+- Skill/Tool 的源码编辑器是实体设置 dialog 的子流程：从 `General` 打开 Monaco 时先隐藏设置 dialog，避免 modal overlay/focus trap 与 Monaco 交互冲突。新建 Skill/Tool 的未落库源码仍先回填当前 draft，已有实体的源码文件保存直接落到对应 service。
+- ExtensionInstallation 已接入 `ResourceType.EXTENSION` 的 `use/edit` 权限：安装者默认获得 `edit`，列表/详情只展示当前用户有 `use` 或 `edit` 的安装版本，状态切换、卸载、Setup 配置读取/保存都需要 `edit`。
+- Extension 详情页新增 `Auth` tab，复用统一 `ResourceAuthTab`，按 installed version 管理 `use/edit` 授权；如果当前用户只有 `use` 没有 `edit`，可看到只读提示但不能修改 Auth。
+- Extension 详情页的 `Setup` 和 `Hook Replay` tab 应动态展示：没有 installation setup fields 的版本不渲染 Setup tab；没有 lifecycle hooks 的 package 不渲染 Hook Replay tab，避免空 tab 干扰操作。
+- Extension hook execution 列表只展示当前用户拥有所属 Extension `use` 的 package 日志；Hook Replay 和 installation references 属于管理动作，必须拥有对应 installed version 的 `edit` 权限。
+- Agent 绑定 Extension 的选择器已接入 `Extension.use/edit`：Agent 配置扩展时只展示当前 Studio 用户可用的 ExtensionInstallation；保存绑定时后端再次校验 `Extension.use`，避免绕过前端选择器。
+- Agent 子配置统一继承 `Agent.edit` 管理边界：Extension binding 和 Channel binding 的列表、创建、更新、删除、测试、轮询等 Studio 管理动作都必须先校验当前用户能编辑父 Agent；Channel webhook / external link 等运行时入口不递归检查 Studio 侧底层实体授权。
+- Channel Provider、Media Generation Provider 和 Web Search Provider 当前没有独立导入/创建入口，provider definition 不单独设计 Auth；extension-backed provider 跟随所属 ExtensionInstallation，provider catalog、单项读取、draft test 和创建 binding 都必须先确认当前 Studio 用户拥有所属 Extension 的 `use` 权限；provider binding 作为 Agent 子配置继承 `Agent.edit`。对应 binding 的列表、创建、更新、删除、测试等 Studio 管理动作都必须先校验父 Agent 可编辑。
+- `chat_surfaces.py` 的 workspace 文件入口已确认全部通过 `WorkspaceFileService`；preview/surface proxy 和 websocket 在取得 workspace backend path 之前，会先通过 `SurfaceSessionService` / `PreviewEndpointService` 校验 session、surface token 和 `Workspace.edit`，不在 API 层用裸路径绕过授权。
 - 前端已抽出可复用的 `ResourceAuthTab`，后续实体可以复用同一套 Auth tab 交互。
 - 已对齐权限边界：LLM/Skill/Tool/Extension 等底层实体的 `use` 是 Studio 侧配置权限；Agent 对外开放后，最终用户运行 Agent 时只检查 `Agent.use`，不会因为缺少底层实体 `use` 权限而失败。
+- 已对齐配置边界：实体 `use` 只代表 Studio 配置候选可见、可选择，不代表自动绑定到既有 Agent。新建/导入 Skill、Tool、Extension 后，只会出现在 Agent 配置弹窗的候选列表中；只有用户显式保存 Tool/Skill selection 或 Extension binding 后，才算进入该 Agent 的已配置能力集。`agent.tool_ids` / `agent.skill_ids` 的 `null` 也按“未选择任何手动 Tool/Skill”处理，不再表示“未来所有可用 Tool/Skill 自动启用”。Extension 贡献的 Tool/Skill 只随显式 Extension binding 进入 Agent。
+
+### Phase 7：Agent Auth 产品化
+
+目标：
+
+- Agent New/Edit Dialog 增加标准 `Auth` tab，和 General/Advanced 使用同一个保存入口。
+- Agent `use` 明确面向 Client/User 端，不是 Studio Builder/Admin 的配置可见性。
+- Agent `edit` 第一版只允许 creator/admin，不开放 Builder 协作编辑。
+
+当前进展：
+
+- Agent New/Edit Dialog 已接入 `Auth` tab，用于配置哪些最终用户/用户组可以从 Web、Desktop、Channel 等客户端看到和运行 Agent。
+- Agent `Auth` tab 暂时只开放 `Use` 配置；`Edit` 固定为 creator/admin，以避免被授权编辑者缺少底层 Studio-use 权限时看到不完整 Agent 配置并误保存。
+- Agent 创建时可同步写入 `use_scope`、selected users/groups；Agent 编辑保存时同步更新 Agent `use` 授权。
+- 后端 `AccessService.set_agent_access()` 已收敛为 creator-only edit：即使请求传入额外 edit users/groups，也不会授予非 creator 的 Agent edit。
 
 注意：
 
@@ -918,18 +951,7 @@ web/src/components/Navigation.tsx
 
    这些权限涉及 secret、外部通道和 extension trust。建议第一版不默认给 builder，等产品使用反馈后再决定。
 
-2. `tools.manage` 和 `skills.manage` 是否应拆成 private/shared？
-
-   当前可以先不拆。等 Skill/Tool 的共享边界稳定后，再考虑：
-
-   ```text
-   skills.manage.private
-   skills.manage.shared
-   tools.manage.private
-   tools.manage.shared
-   ```
-
-3. Agent 发布是否需要独立 permission？
+2. Agent 发布是否需要独立 permission？
 
    第一版可以归入 `agents.manage` + `agent.edit`。如果未来发布成为强治理动作，可以新增：
 
@@ -937,7 +959,7 @@ web/src/components/Navigation.tsx
    agents.publish
    ```
 
-4. Operations Sessions 是否需要只读和 replay 分开？
+3. Operations Sessions 是否需要只读和 replay 分开？
 
    当前先用：
 

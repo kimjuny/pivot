@@ -1,9 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Bot, Plus } from "@/lib/lucide";
 import { useNavigate } from 'react-router-dom';
-import { getUsableLLMs } from '../utils/api';
+import { useAuth } from '@/contexts/auth-core';
+import {
+  getAgentAccess,
+  getAgentAccessOptions,
+  getAgentCreateAccessOptions,
+  getUsableLLMs,
+} from '../utils/api';
+import type {
+  AgentAccess,
+  AgentAccessGroupOption,
+  AgentAccessUserOption,
+} from '../utils/api';
 import type { LLMUsable } from '../types';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
+import ResourceAuthTab from '@/components/ResourceAuthTab';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +29,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import {
   Select,
   SelectContent,
@@ -40,17 +53,30 @@ export interface AgentFormData {
   compact_threshold_percent: number;
   /** Maximum ReAct iterations allowed for one task. */
   max_iteration: number;
+  /** End-user access rules for Web, Desktop, and Channel clients. */
+  access: AgentAccess;
 }
 
 interface AgentModalProps {
   isOpen: boolean;
   mode: 'create' | 'edit';
+  agentId?: number;
+  creatorUserId?: number | null;
   initialData?: Partial<AgentFormData>;
   onClose: () => void;
   onSave: (data: AgentFormData) => Promise<void>;
 }
 
-type AgentTabValue = 'general' | 'advanced';
+type AgentTabValue = 'general' | 'advanced' | 'auth';
+
+const EMPTY_AGENT_ACCESS: AgentAccess = {
+  agent_id: 0,
+  use_scope: 'selected',
+  use_user_ids: [],
+  use_group_ids: [],
+  edit_user_ids: [],
+  edit_group_ids: [],
+};
 
 function createDefaultFormData(): AgentFormData {
   return {
@@ -61,6 +87,7 @@ function createDefaultFormData(): AgentFormData {
     sandbox_timeout_seconds: 60,
     compact_threshold_percent: 60,
     max_iteration: 50,
+    access: { ...EMPTY_AGENT_ACCESS },
   };
 }
 
@@ -68,14 +95,79 @@ function createDefaultFormData(): AgentFormData {
  * Modal for creating or editing an agent.
  * Uses shadcn Dialog with form inputs for agent properties.
  */
-function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalProps) {
+function AgentModal({
+  isOpen,
+  mode,
+  agentId,
+  creatorUserId,
+  initialData,
+  onClose,
+  onSave,
+}: AgentModalProps) {
   const navigate = useNavigate();
+  const { user: currentUser } = useAuth();
   const [formData, setFormData] = useState<AgentFormData>(createDefaultFormData());
   const [activeTab, setActiveTab] = useState<AgentTabValue>('general');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [availableLLMs, setAvailableLLMs] = useState<LLMUsable[]>([]);
   const [loadingLLMs, setLoadingLLMs] = useState<boolean>(false);
+  const [accessUsers, setAccessUsers] = useState<AgentAccessUserOption[]>([]);
+  const [accessGroups, setAccessGroups] = useState<AgentAccessGroupOption[]>([]);
+  const [loadingAccess, setLoadingAccess] = useState<boolean>(false);
+  const activeTabIndex = activeTab === 'general' ? 0 : activeTab === 'advanced' ? 1 : 2;
+  const effectiveCreatorUserId =
+    creatorUserId !== null && creatorUserId !== undefined
+      ? creatorUserId
+      : currentUser?.id;
+
+  const loadLLMs = useCallback(async () => {
+    setLoadingLLMs(true);
+    try {
+      const llms = await getUsableLLMs();
+      setAvailableLLMs(llms);
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to load LLMs:', error);
+    } finally {
+      setLoadingLLMs(false);
+    }
+  }, []);
+
+  const loadAccess = useCallback(async () => {
+    setLoadingAccess(true);
+    try {
+      if (mode === 'edit' && agentId) {
+        const [access, options] = await Promise.all([
+          getAgentAccess(agentId),
+          getAgentAccessOptions(agentId),
+        ]);
+        setFormData((current) => ({ ...current, access }));
+        setAccessUsers(options.users);
+        setAccessGroups(options.groups);
+        return;
+      }
+
+      const options = await getAgentCreateAccessOptions();
+      setAccessUsers(options.users);
+      setAccessGroups(options.groups);
+      setFormData((current) => ({
+        ...current,
+        access: {
+          ...EMPTY_AGENT_ACCESS,
+          edit_user_ids:
+            effectiveCreatorUserId !== null && effectiveCreatorUserId !== undefined
+              ? [effectiveCreatorUserId]
+              : [],
+        },
+      }));
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to load agent access:', error);
+    } finally {
+      setLoadingAccess(false);
+    }
+  }, [agentId, effectiveCreatorUserId, mode]);
 
   useEffect(() => {
     if (isOpen) {
@@ -90,6 +182,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           compact_threshold_percent:
             initialData.compact_threshold_percent ?? 60,
           max_iteration: initialData.max_iteration ?? 50,
+          access: initialData.access ?? { ...EMPTY_AGENT_ACCESS },
         });
       } else {
         setFormData(createDefaultFormData());
@@ -97,21 +190,9 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
       setActiveTab('general');
       setServerError(null);
       void loadLLMs();
+      void loadAccess();
     }
-  }, [isOpen, mode, initialData]);
-
-  const loadLLMs = async () => {
-    setLoadingLLMs(true);
-    try {
-      const llms = await getUsableLLMs();
-      setAvailableLLMs(llms);
-    } catch (err) {
-      const error = err as Error;
-      console.error('Failed to load LLMs:', error);
-    } finally {
-      setLoadingLLMs(false);
-    }
-  };
+  }, [isOpen, mode, initialData, loadLLMs, loadAccess]);
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
@@ -170,6 +251,15 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
         sandbox_timeout_seconds: formData.sandbox_timeout_seconds,
         compact_threshold_percent: formData.compact_threshold_percent,
         max_iteration: formData.max_iteration,
+        access: {
+          ...formData.access,
+          use_user_ids:
+            formData.access.use_scope === 'all' ? [] : formData.access.use_user_ids,
+          use_group_ids:
+            formData.access.use_scope === 'all' ? [] : formData.access.use_group_ids,
+          edit_user_ids: [],
+          edit_group_ids: [],
+        },
       });
       onClose();
     } catch (err) {
@@ -182,7 +272,7 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[480px]">
+      <DialogContent className="flex max-h-[90vh] min-h-0 flex-col overflow-hidden sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle>
             {mode === 'create' ? 'New Agent' : 'Edit Agent'}
@@ -195,17 +285,47 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
           </div>
         )}
 
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as AgentTabValue)}
-          className="py-2"
-        >
-          <TabsList className="grid h-auto w-full grid-cols-2">
-            <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="advanced">Advanced</TabsTrigger>
-          </TabsList>
+        <TooltipProvider>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as AgentTabValue)}
+            orientation="vertical"
+            className="flex min-h-0 flex-1 gap-3 py-2"
+          >
+            <TabsList className="relative flex h-[560px] max-h-[calc(90vh-150px)] w-24 shrink-0 flex-col items-stretch justify-start gap-1 bg-transparent p-0">
+              <span
+                className="absolute left-0 top-1.5 h-6 w-0.5 bg-foreground transition-transform duration-200 ease-out"
+                style={{
+                  transform: `translateY(${activeTabIndex * 40}px)`,
+                }}
+                aria-hidden="true"
+              />
+              <TabsTrigger
+                value="general"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                General
+              </TabsTrigger>
+              <TabsTrigger
+                value="advanced"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                Advanced
+              </TabsTrigger>
+              <TabsTrigger
+                value="auth"
+                className="h-9 justify-start rounded-none bg-transparent px-3 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+              >
+                Auth
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="general" className="min-w-0 space-y-4 pt-4">
+            <div className="min-w-0 flex-1">
+          <TabsContent
+            value="general"
+            className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+          >
+            <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">
                 Agent Name <span className="text-destructive">*</span>
@@ -297,9 +417,14 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
               )}
             </div>
 
+            </div>
           </TabsContent>
 
-          <TabsContent value="advanced" className="space-y-4 pt-4">
+          <TabsContent
+            value="advanced"
+            className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+          >
+            <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="session_idle_timeout_minutes">
                 Session Idle Timeout
@@ -415,8 +540,45 @@ function AgentModal({ isOpen, mode, initialData, onClose, onSave }: AgentModalPr
                 Automatically compact the runtime context when usage reaches this percentage.
               </p>
             </div>
+            </div>
           </TabsContent>
+          <TabsContent
+            value="auth"
+            className="mt-0 h-[560px] max-h-[calc(90vh-150px)] overflow-y-auto pr-2"
+          >
+            <ResourceAuthTab
+              access={formData.access}
+              users={accessUsers}
+              groups={accessGroups}
+              loading={loadingAccess}
+              editDisabled
+              editTooltip="Agent Edit is limited to the creator and admins in this version. Client Use does not require Studio Use on the Agent's configured LLM, Skills, Tools, Extensions, or Providers."
+              editDisabledMessage="Only the creator can edit this Agent. Admins can manage it through system-level permissions."
+              lockedEditUserIds={
+                effectiveCreatorUserId !== null && effectiveCreatorUserId !== undefined
+                  ? [effectiveCreatorUserId]
+                  : []
+              }
+              useTitle="Who can use this Agent"
+              useEveryoneDescription="All active client users can see and run this Agent from Web, Desktop, and Channel clients."
+              useSelectedDescription="Only selected users and groups can see and run this Agent from client surfaces."
+              useEveryoneMessage="Everyone can see and run this Agent from client surfaces. Studio-only resource permissions on its LLM, Skills, Tools, Extensions, and Providers are not checked again at runtime."
+              onAccessChange={(nextAccess) =>
+                setFormData((current) => ({
+                  ...current,
+                  access: {
+                    ...current.access,
+                    ...nextAccess,
+                    edit_user_ids: current.access.edit_user_ids,
+                    edit_group_ids: [],
+                  },
+                }))
+              }
+            />
+          </TabsContent>
+            </div>
         </Tabs>
+        </TooltipProvider>
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button

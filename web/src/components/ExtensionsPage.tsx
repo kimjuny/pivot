@@ -68,7 +68,7 @@ import {
   type ExtensionReferenceSummary,
 } from '@/utils/api';
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 10;
 
 interface PendingUninstallState {
   installation: ExtensionInstallation;
@@ -80,7 +80,15 @@ interface PendingImportState {
   preview: ExtensionImportPreview;
 }
 
-type ExtensionStatusFilter = 'all' | 'enabled' | 'disabled';
+type ContributorFilter =
+  | 'all'
+  | 'media'
+  | 'surface'
+  | 'web_search'
+  | 'tool'
+  | 'skill'
+  | 'channel'
+  | 'hook';
 
 /**
  * Build a paginated page number list with ellipsis slots.
@@ -111,6 +119,23 @@ interface ContributionGroup {
   values: string[];
   tone: 'provider' | 'runtime' | 'lightweight';
 }
+
+interface ContributorCategory {
+  key: Exclude<ContributorFilter, 'all'>;
+  label: string;
+  values: string[];
+  tone: ContributionGroup['tone'];
+}
+
+const CONTRIBUTOR_FILTERS: Array<Pick<ContributorCategory, 'key' | 'label'>> = [
+  { key: 'media', label: 'Media' },
+  { key: 'surface', label: 'Surface' },
+  { key: 'web_search', label: 'Web Search' },
+  { key: 'tool', label: 'Tool' },
+  { key: 'skill', label: 'Skill' },
+  { key: 'channel', label: 'Channel' },
+  { key: 'hook', label: 'Hook' },
+];
 
 /**
  * Build stable contribution groups for one installed extension version.
@@ -160,6 +185,62 @@ function buildContributionGroups(
     },
   ];
   return groups.filter((group) => group.values.length > 0);
+}
+
+function uniqueValues(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+/**
+ * Collapse all installed versions into contribution-type tags for one package.
+ */
+function getPackageContributorCategories(pkg: ExtensionPackage): ContributorCategory[] {
+  const summaries = pkg.versions.map((version) => version.contribution_summary);
+  const categories: ContributorCategory[] = [
+    {
+      key: 'media',
+      label: 'Media',
+      values: uniqueValues(summaries.flatMap((summary) => summary.media_providers ?? [])),
+      tone: 'provider',
+    },
+    {
+      key: 'surface',
+      label: 'Surface',
+      values: uniqueValues(summaries.flatMap((summary) => summary.chat_surfaces ?? [])),
+      tone: 'runtime',
+    },
+    {
+      key: 'web_search',
+      label: 'Web Search',
+      values: uniqueValues(summaries.flatMap((summary) => summary.web_search_providers)),
+      tone: 'provider',
+    },
+    {
+      key: 'tool',
+      label: 'Tool',
+      values: uniqueValues(summaries.flatMap((summary) => summary.tools)),
+      tone: 'lightweight',
+    },
+    {
+      key: 'skill',
+      label: 'Skill',
+      values: uniqueValues(summaries.flatMap((summary) => summary.skills)),
+      tone: 'lightweight',
+    },
+    {
+      key: 'channel',
+      label: 'Channel',
+      values: uniqueValues(summaries.flatMap((summary) => summary.channel_providers)),
+      tone: 'provider',
+    },
+    {
+      key: 'hook',
+      label: 'Hook',
+      values: uniqueValues(summaries.flatMap((summary) => summary.hooks)),
+      tone: 'runtime',
+    },
+  ];
+  return categories.filter((category) => category.values.length > 0);
 }
 
 /**
@@ -221,7 +302,7 @@ function ExtensionsPage() {
   const [packages, setPackages] = useState<ExtensionPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ExtensionStatusFilter>('all');
+  const [contributorFilter, setContributorFilter] = useState<ContributorFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
@@ -256,24 +337,29 @@ function ExtensionsPage() {
     void loadPackages();
   }, [loadPackages]);
 
-  const enabledCount = useMemo(
-    () => packages.filter((pkg) => pkg.active_version_count > 0).length,
-    [packages],
-  );
-  const disabledCount = useMemo(
-    () => packages.filter((pkg) => pkg.active_version_count === 0).length,
-    [packages],
-  );
+  const contributorFilterItems = useMemo(() => {
+    const items = CONTRIBUTOR_FILTERS.map((filter) => ({
+      ...filter,
+      count: packages.filter((pkg) => (
+        getPackageContributorCategories(pkg).some((category) => category.key === filter.key)
+      )).length,
+    })).filter((filter) => filter.count > 0);
+
+    return [
+      { key: 'all' as const, label: 'All', count: packages.length },
+      ...items,
+    ];
+  }, [packages]);
 
   const filteredPackages = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     return packages.filter((pkg) => {
-      const matchesStatus = (
-        statusFilter === 'all'
-        || (statusFilter === 'enabled' && pkg.active_version_count > 0)
-        || (statusFilter === 'disabled' && pkg.active_version_count === 0)
+      const contributorCategories = getPackageContributorCategories(pkg);
+      const matchesContributor = (
+        contributorFilter === 'all'
+        || contributorCategories.some((category) => category.key === contributorFilter)
       );
-      if (!matchesStatus) {
+      if (!matchesContributor) {
         return false;
       }
       if (!query) {
@@ -297,14 +383,19 @@ function ExtensionsPage() {
         || pkg.package_id.toLowerCase().includes(query)
         || pkg.description.toLowerCase().includes(query)
         || versionText.toLowerCase().includes(query)
+        || contributorCategories
+          .map((category) => category.label)
+          .join(' ')
+          .toLowerCase()
+          .includes(query)
         || contributionText.toLowerCase().includes(query)
       );
     });
-  }, [packages, searchQuery, statusFilter]);
+  }, [packages, searchQuery, contributorFilter]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
+  }, [searchQuery, contributorFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredPackages.length / PAGE_SIZE));
   const pagedPackages = useMemo(() => {
@@ -468,34 +559,28 @@ function ExtensionsPage() {
 
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-1.5">
-            {(
-              [
-                { value: 'all', label: 'All', count: packages.length },
-                { value: 'enabled', label: 'Enabled', count: enabledCount },
-                { value: 'disabled', label: 'Disabled', count: disabledCount },
-              ] as const
-            ).map(({ value, label, count }) => (
+            {contributorFilterItems.map(({ key, label, count }) => (
               <button
-                key={value}
-                onClick={() => setStatusFilter(value)}
+                key={key}
+                onClick={() => setContributorFilter(key)}
                 className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Badge
-                  variant={statusFilter === value ? 'default' : 'outline'}
+                  variant={contributorFilter === key ? 'default' : 'outline'}
                   className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
-                    statusFilter === value ? 'list-filter-badge-active' : ''
+                    contributorFilter === key ? 'list-filter-badge-active' : ''
                   }`}
                 >
                   {label}
-                  <span className={statusFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                  <span className={contributorFilter === key ? 'opacity-70' : 'text-muted-foreground'}>
                     {count}
                   </span>
                 </Badge>
               </button>
             ))}
-            {statusFilter !== 'all' ? (
+            {contributorFilter !== 'all' ? (
               <button
-                onClick={() => setStatusFilter('all')}
+                onClick={() => setContributorFilter('all')}
                 className="text-muted-foreground transition-colors hover:text-foreground"
                 aria-label="Clear extension filter"
               >
@@ -505,7 +590,7 @@ function ExtensionsPage() {
           </div>
           <ButtonGroup className="list-search-group">
             <Input
-              placeholder="Search by package, description, or version…"
+              placeholder="Search by package, description, or contribution…"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               aria-label="Search extensions"
@@ -527,7 +612,7 @@ function ExtensionsPage() {
             <p className="text-sm">
               {packages.length === 0
                 ? 'No extensions installed yet.'
-                : searchQuery || statusFilter !== 'all'
+                : searchQuery || contributorFilter !== 'all'
                   ? 'No extensions match your current filters.'
                   : 'No extensions match your search.'}
             </p>
@@ -818,6 +903,13 @@ function ExtensionPackageCard({
   const navigate = useNavigate();
   const detailPath = `${detailBasePath}/${pkg.scope}/${pkg.name}`;
   const primaryInstallation = getMostRecentInstallation(pkg);
+  const latestInstallation = (
+    pkg.versions.find((installation) => installation.version === pkg.latest_version)
+    ?? pkg.versions[0]
+    ?? primaryInstallation
+  );
+  const latestIsDisabled = latestInstallation?.status === 'disabled';
+  const contributorCategories = getPackageContributorCategories(pkg);
 
   const handleCardClick = () => {
     navigate(detailPath);
@@ -857,6 +949,14 @@ function ExtensionPackageCard({
             <div className="min-w-0 flex-1">
               <div className="flex h-10 flex-col justify-between">
                 <div className="flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      latestIsDisabled
+                        ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.75)]'
+                        : 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.75)]'
+                    }`}
+                    aria-label={latestIsDisabled ? 'Latest version disabled' : 'Latest version active'}
+                  />
                   <span className="truncate text-sm font-medium leading-[1.1rem] text-foreground">
                     {pkg.display_name}
                   </span>
@@ -920,26 +1020,21 @@ function ExtensionPackageCard({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <Badge variant="default" className="h-4 px-1.5 py-0 text-[10px]">
-              v{pkg.latest_version}
-            </Badge>
-            <Badge
-              variant="outline"
-              className="h-4 border-emerald-500/30 px-1.5 py-0 text-[10px] text-emerald-700 dark:text-emerald-300"
-            >
-              Enabled {pkg.active_version_count}
-            </Badge>
-            <Badge
-              variant="outline"
-              className="h-4 border-amber-500/30 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
-            >
-              Disabled {pkg.disabled_version_count}
-            </Badge>
-            {pkg.versions.length > 1 ? (
-              <Badge variant="outline" className="h-4 px-1.5 py-0 text-[10px]">
-                {pkg.versions.length} versions
+            {contributorCategories.length > 0 ? (
+              contributorCategories.map((category) => (
+                <Badge
+                  key={category.key}
+                  variant="secondary"
+                  className="h-4 px-1.5 py-0 text-[10px]"
+                >
+                  {category.label}
+                </Badge>
+              ))
+            ) : (
+              <Badge variant="outline" className="h-4 px-1.5 py-0 text-[10px] text-muted-foreground">
+                No contributors
               </Badge>
-            ) : null}
+            )}
           </div>
         </div>
       </div>

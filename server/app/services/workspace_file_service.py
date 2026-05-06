@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import base64
 import mimetypes
+import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
-from app.models.access import AccessLevel, ResourceType
+from app.models.access import AccessLevel
 from app.models.user import User
 from app.services.access_service import AccessService
 from app.services.workspace_service import WorkspaceService
@@ -75,6 +76,189 @@ class WorkspaceBinaryFileWriteResult:
     size_bytes: int
 
 
+class LocalDirectoryFileService:
+    """CRUD helpers for a trusted local directory root.
+
+    This intentionally contains no permission logic. Callers such as workspace
+    and skill services enforce their own resource access, then reuse these path
+    safety and file IO helpers.
+    """
+
+    @staticmethod
+    def resolve_path(
+        *,
+        root_path: Path,
+        relative_path: str | None = None,
+        allow_root: bool,
+    ) -> Path:
+        """Resolve one root-relative path without allowing traversal."""
+        root = root_path.resolve()
+        if relative_path is None or relative_path.strip() in {"", "."}:
+            if allow_root:
+                return root
+            raise WorkspaceFileValidationError("File path is required.")
+
+        normalized = relative_path.strip().replace("\\", "/")
+        parts = PurePosixPath(normalized).parts
+        if not parts or any(part in {"", ".", ".."} for part in parts):
+            raise WorkspaceFileValidationError("File path is invalid.")
+        if normalized.startswith("/"):
+            raise WorkspaceFileValidationError("File path must be relative.")
+
+        target_path = root.joinpath(*parts).resolve()
+        if target_path != root and root not in target_path.parents:
+            raise WorkspaceFileValidationError("File path is outside the root.")
+        return target_path
+
+    def list_directory(
+        self,
+        *,
+        root_path: Path,
+        path: str | None = None,
+    ) -> list[WorkspaceFileTreeEntry]:
+        """Return direct children for one local directory."""
+        root = root_path.resolve()
+        target_dir = self.resolve_path(
+            root_path=root,
+            relative_path=path,
+            allow_root=True,
+        )
+        if not target_dir.exists():
+            raise WorkspaceFileNotFoundError("Directory path does not exist.")
+        if not target_dir.is_dir():
+            raise WorkspaceFileValidationError("Path must be a directory.")
+
+        entries: list[WorkspaceFileTreeEntry] = []
+        for entry_path in sorted(
+            target_dir.iterdir(),
+            key=lambda item: (not item.is_dir(), item.name.lower(), item.name),
+        ):
+            relative_path = entry_path.relative_to(root).as_posix()
+            parent_path = entry_path.parent.relative_to(root).as_posix()
+            if parent_path == ".":
+                parent_path = None
+            entries.append(
+                WorkspaceFileTreeEntry(
+                    path=relative_path,
+                    name=entry_path.name,
+                    kind="directory" if entry_path.is_dir() else "file",
+                    parent_path=parent_path,
+                    size_bytes=(
+                        None if entry_path.is_dir() else entry_path.stat().st_size
+                    ),
+                )
+            )
+        return entries
+
+    def list_tree(
+        self,
+        *,
+        root_path: Path,
+        path: str | None = None,
+    ) -> list[WorkspaceFileTreeEntry]:
+        """Return a recursive flat listing for one local directory."""
+        root = root_path.resolve()
+        target_dir = self.resolve_path(
+            root_path=root,
+            relative_path=path,
+            allow_root=True,
+        )
+        if not target_dir.exists():
+            raise WorkspaceFileNotFoundError("Directory path does not exist.")
+        if not target_dir.is_dir():
+            raise WorkspaceFileValidationError("Path must be a directory.")
+
+        entries: list[WorkspaceFileTreeEntry] = []
+        for entry_path in sorted(
+            target_dir.rglob("*"), key=lambda item: item.as_posix()
+        ):
+            relative_path = entry_path.relative_to(root).as_posix()
+            parent_path = entry_path.parent.relative_to(root).as_posix()
+            if parent_path == ".":
+                parent_path = None
+            entries.append(
+                WorkspaceFileTreeEntry(
+                    path=relative_path,
+                    name=entry_path.name,
+                    kind="directory" if entry_path.is_dir() else "file",
+                    parent_path=parent_path,
+                    size_bytes=(
+                        None if entry_path.is_dir() else entry_path.stat().st_size
+                    ),
+                )
+            )
+        return entries
+
+    def read_text_file(
+        self,
+        *,
+        root_path: Path,
+        path: str,
+    ) -> str:
+        """Read one UTF-8 text file from a local directory."""
+        target_path = self.resolve_path(
+            root_path=root_path,
+            relative_path=path,
+            allow_root=False,
+        )
+        if not target_path.exists():
+            raise WorkspaceFileNotFoundError("File does not exist.")
+        if not target_path.is_file():
+            raise WorkspaceFileValidationError("Path must be a file.")
+        return target_path.read_text(encoding="utf-8")
+
+    def write_text_file(
+        self,
+        *,
+        root_path: Path,
+        path: str,
+        content: str,
+    ) -> None:
+        """Write one UTF-8 text file inside a local directory."""
+        target_path = self.resolve_path(
+            root_path=root_path,
+            relative_path=path,
+            allow_root=False,
+        )
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8")
+
+    def create_directory(
+        self,
+        *,
+        root_path: Path,
+        path: str,
+    ) -> None:
+        """Create one directory inside a local directory root."""
+        target_path = self.resolve_path(
+            root_path=root_path,
+            relative_path=path,
+            allow_root=False,
+        )
+        if target_path.exists():
+            raise WorkspaceFileValidationError("Path already exists.")
+        target_path.mkdir(parents=True)
+
+    def delete_path(
+        self,
+        *,
+        root_path: Path,
+        path: str,
+    ) -> None:
+        """Delete one file or directory inside a local directory root."""
+        target_path = self.resolve_path(
+            root_path=root_path,
+            relative_path=path,
+            allow_root=False,
+        )
+        if not target_path.exists():
+            raise WorkspaceFileNotFoundError("Path does not exist.")
+        if target_path.is_dir():
+            shutil.rmtree(target_path)
+            return
+        target_path.unlink()
+
+
 class WorkspaceFileService:
     """CRUD-style file access scoped to one owned runtime workspace."""
 
@@ -113,7 +297,9 @@ class WorkspaceFileService:
             username=username,
             access_level=AccessLevel.USE,
         )
-        workspace_root = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        workspace_root = (
+            WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        )
         target_dir = self._resolve_workspace_path(
             workspace=workspace,
             relative_path=root_path,
@@ -122,11 +308,15 @@ class WorkspaceFileService:
         if not target_dir.exists():
             raise WorkspaceFileNotFoundError("Workspace path does not exist.")
         if not target_dir.is_dir():
-            raise WorkspaceFileValidationError("Workspace tree path must be a directory.")
+            raise WorkspaceFileValidationError(
+                "Workspace tree path must be a directory."
+            )
 
         entries: list[WorkspaceFileTreeEntry] = []
         if target_dir == workspace_root:
-            iterator = sorted(workspace_root.rglob("*"), key=lambda path: path.as_posix())
+            iterator = sorted(
+                workspace_root.rglob("*"), key=lambda path: path.as_posix()
+            )
         else:
             iterator = sorted(target_dir.rglob("*"), key=lambda path: path.as_posix())
 
@@ -178,7 +368,9 @@ class WorkspaceFileService:
             username=username,
             access_level=AccessLevel.USE,
         )
-        workspace_root = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        workspace_root = (
+            WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        )
         target_dir = self._resolve_workspace_path(
             workspace=workspace,
             relative_path=path,
@@ -459,13 +651,10 @@ class WorkspaceFileService:
         user = self.db.exec(select(User).where(User.username == username)).first()
         if user is None:
             raise WorkspaceFilePermissionError("Workspace is not accessible.")
-        creator = self.db.exec(select(User).where(User.username == workspace.user)).first()
-        if not AccessService(self.db).has_resource_access(
+        if not AccessService(self.db).has_workspace_access(
             user=user,
-            resource_type=ResourceType.WORKSPACE,
-            resource_id=workspace.workspace_id,
+            workspace=workspace,
             access_level=access_level,
-            creator_user_id=creator.id if creator is not None else None,
         ):
             raise WorkspaceFilePermissionError("Workspace is not accessible.")
         return workspace
@@ -494,7 +683,9 @@ class WorkspaceFileService:
             relative_path=relative_path,
             allow_root=allow_root,
         )
-        workspace_root = WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        workspace_root = (
+            WorkspaceService(self.db).get_workspace_path(workspace).resolve()
+        )
         if normalized == PurePosixPath("."):
             return workspace_root
 
@@ -538,7 +729,9 @@ class WorkspaceFileService:
         if any(part == ".." for part in pure_path.parts):
             raise WorkspaceFileValidationError("Workspace path cannot escape root.")
         if any(part == "" for part in pure_path.parts):
-            raise WorkspaceFileValidationError("Workspace path contains empty segments.")
+            raise WorkspaceFileValidationError(
+                "Workspace path contains empty segments."
+            )
         return pure_path
 
     @staticmethod

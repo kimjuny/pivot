@@ -14,6 +14,7 @@ from app.services.provider_registry_service import ProviderRegistryService
 from sqlmodel import Session, col, select
 
 if TYPE_CHECKING:
+    from app.models.user import User
     from app.orchestration.web_search.types import (
         WebSearchExecutionResult,
         WebSearchProvider,
@@ -69,9 +70,33 @@ class WebSearchService:
             enabled_only=enabled_only,
         )
 
-    def list_catalog(self, agent_id: int | None = None) -> list[dict[str, Any]]:
+    def is_provider_usable_by_user(
+        self,
+        *,
+        user: User | None,
+        provider: WebSearchProvider,
+    ) -> bool:
+        """Return whether one provider is selectable by the current Studio user."""
+        extension_package_id = provider.manifest.extension_name
+        if not extension_package_id or user is None:
+            return True
+        return ExtensionService(self.db).is_package_usable_by_user(
+            user=user,
+            package_id=extension_package_id,
+        )
+
+    def list_catalog(
+        self,
+        agent_id: int | None = None,
+        user: User | None = None,
+    ) -> list[dict[str, Any]]:
         """Return installed web-search providers visible to the current agent."""
         providers = self._list_web_search_providers()
+        providers = [
+            provider
+            for provider in providers
+            if self.is_provider_usable_by_user(user=user, provider=provider)
+        ]
         if agent_id is not None:
             providers = [
                 provider
@@ -146,9 +171,12 @@ class WebSearchService:
         enabled: bool,
         auth_config: dict[str, Any],
         runtime_config: dict[str, Any],
+        user: User | None = None,
     ) -> WebSearchBindingResponse:
         """Create a new agent web-search binding after provider validation."""
         provider = self._get_web_search_provider(provider_key)
+        if not self.is_provider_usable_by_user(user=user, provider=provider):
+            raise ValueError("Web search provider is not available to the caller.")
         if not self._is_provider_available_to_agent(
             agent_id=agent_id,
             provider=provider,
@@ -256,9 +284,12 @@ class WebSearchService:
         provider_key: str,
         auth_config: dict[str, Any],
         runtime_config: dict[str, Any],
+        user: User | None = None,
     ) -> dict[str, Any]:
         """Run a provider health check against unsaved form values."""
         provider = self._get_web_search_provider(provider_key)
+        if not self.is_provider_usable_by_user(user=user, provider=provider):
+            raise ValueError("Web search provider is not available to the caller.")
         provider.validate_config(auth_config, runtime_config)
         result = provider.test_connection(
             auth_config=auth_config,

@@ -12,10 +12,10 @@ class SkillChangeSubmission(SQLModel, table=True):
 
     Attributes:
         id: Primary key of the submission row.
-        creator_id: User who owns the target private skill namespace.
+        creator_id: User who owns the target Skill.
         agent_id: Agent workspace that produced the draft.
         skill_name: Target globally unique skill identifier.
-        target_kind: Destination scope. V1 only supports ``private``.
+        target_kind: Destination source category.
         change_type: Whether the submission creates or updates a skill.
         status: Lifecycle state such as ``pending`` or ``applied``.
         sandbox_draft_path: Original sandbox-local draft directory path.
@@ -31,7 +31,7 @@ class SkillChangeSubmission(SQLModel, table=True):
     creator_id: int = Field(foreign_key="user.id", index=True)
     agent_id: int = Field(index=True)
     skill_name: str = Field(index=True, max_length=255)
-    target_kind: str = Field(default="private", max_length=20)
+    target_kind: str = Field(default="manual", max_length=20)
     change_type: str = Field(max_length=20)
     status: str = Field(default="pending", max_length=32, index=True)
     sandbox_draft_path: str = Field(max_length=1024)

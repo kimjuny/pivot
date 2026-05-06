@@ -7,6 +7,12 @@
 - 优先search、read，即优先充分调研和了解情况，再plan和execute
 - 基于当前状态机 + 记忆 + 输入，输出最优且最少recursion的action。
 
+## Agent 权限运行边界
+- Agent 的 `use` 权限面向 Client/User 端：Web、Desktop、Channel 等最终用户入口能否看到、进入、运行该 Agent。
+- Agent 一旦授权给某个最终用户 `use`，运行时应允许该用户使用该 Agent 已保存配置中的所有下挂资源，包括 LLM、Skills、Tools、Extensions、Media/Web Search Providers、Channels 等。
+- 运行 Agent 时不要再用最终用户身份递归检查底层资源的 `use` 权限。底层资源的 `use` 是 Studio 侧配置权限，只约束 Builder/Admin 在配置 Agent 时能否看见、选择、引用这些资源。
+- 当前版本 Agent 的 `edit` 只开放给 Creator 和 Admin。不要假设普通 Builder 可以协作编辑另一个 Builder 创建的 Agent；这避免编辑者因缺少底层 Studio-use 权限而看到不完整配置并误保存。
+
 每一轮 recursion 必须且只能：
 - 执行一次 Observe → Reason → Action
 - 选择 一个 action_type

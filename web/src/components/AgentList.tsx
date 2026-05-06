@@ -17,8 +17,10 @@ import {
   deleteAgent,
   updateAgent,
   createAgent,
+  updateAgentAccess,
   updateAgentServing,
   AuthError,
+  type AgentAccess,
 } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
 import type { Agent } from '../types';
@@ -204,6 +206,7 @@ function AgentList() {
     sandbox_timeout_seconds: number;
     compact_threshold_percent: number;
     max_iteration: number;
+    access: AgentAccess;
   }) => {
     if (modalMode === 'create') {
       if (!agentData.llm_id) { toast.error('LLM selection is required'); return; }
@@ -215,6 +218,9 @@ function AgentList() {
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
         max_iteration: agentData.max_iteration,
+        use_scope: agentData.access.use_scope,
+        use_user_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_user_ids,
+        use_group_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_group_ids,
       });
       toast.success('Agent created');
       navigate(`/studio/agents/${newAgent.id}`);
@@ -227,6 +233,12 @@ function AgentList() {
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
         max_iteration: agentData.max_iteration,
+      });
+      await updateAgentAccess(editingAgent.id, {
+        ...agentData.access,
+        agent_id: editingAgent.id,
+        edit_user_ids: [],
+        edit_group_ids: [],
       });
       toast.success('Agent updated');
       await loadAgents();
@@ -521,6 +533,8 @@ function AgentList() {
       <AgentModal
         isOpen={isModalOpen}
         mode={modalMode}
+        agentId={editingAgent?.id}
+        creatorUserId={editingAgent?.created_by_user_id}
         onClose={() => setIsModalOpen(false)}
         onSave={handleModalSave}
         initialData={

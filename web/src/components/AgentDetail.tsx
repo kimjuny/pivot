@@ -19,14 +19,12 @@ import SkillEditor from './SkillEditor';
 import {
   updateAgent,
   getAgentDraftState,
-  getPrivateToolSource,
   publishAgentRelease,
   saveAgentDraft,
-  getSharedToolSource,
-  upsertPrivateTool,
-  getSharedSkillSource,
-  getUserSkillSource,
-  upsertUserSkill,
+  getToolSource,
+  updateToolSource,
+  getSkillSource,
+  updateSkillSource,
   type SkillSource,
   type AgentDraftState,
 } from '../utils/api';
@@ -47,14 +45,12 @@ interface AgentDetailProps {
 }
 
 interface ToolTabDescriptor {
-  kind: 'private' | 'shared';
   source: 'builtin' | 'user';
   readOnly: boolean;
   toolName: string;
 }
 
 interface SkillTabDescriptor {
-  kind: 'private' | 'shared';
   source: SkillSource;
   readOnly: boolean;
   skillName: string;
@@ -70,25 +66,15 @@ interface TabEditorState {
 
 /**
  * Parse tool tab metadata/resourceId into a normalized descriptor.
- * Falls back to private/user editable for legacy tabs that only carry a name.
  */
 function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
-  const rawResourceId = String(tab.resourceId);
-  const separator = rawResourceId.indexOf(':');
-  const parsedKind =
-    separator > -1 ? rawResourceId.slice(0, separator) : undefined;
-  const normalizedKind: 'private' | 'shared' =
-    parsedKind === 'shared' ? 'shared' : 'private';
-  const readOnly = tab.meta?.readOnly ?? normalizedKind === 'shared';
   const source: 'builtin' | 'user' =
     tab.meta?.source === 'builtin' || tab.meta?.source === 'user'
       ? tab.meta.source
-      : normalizedKind === 'shared'
-        ? 'builtin'
-        : 'user';
+      : 'user';
+  const readOnly = tab.meta?.readOnly ?? source === 'builtin';
 
   return {
-    kind: tab.meta?.kind ?? normalizedKind,
     source,
     readOnly,
     toolName: tab.name,
@@ -97,21 +83,13 @@ function parseToolTabDescriptor(tab: AgentTab): ToolTabDescriptor {
 
 /**
  * Parse skill tab metadata/resourceId into a normalized descriptor.
- * Falls back to shared/manual read-only for legacy tabs without metadata.
  */
 function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
   const rawResourceId = String(tab.resourceId);
-  const firstSeparator = rawResourceId.indexOf(':');
-  const secondSeparator =
-    firstSeparator > -1 ? rawResourceId.indexOf(':', firstSeparator + 1) : -1;
-  const parsedKind =
-    firstSeparator > -1 ? rawResourceId.slice(0, firstSeparator) : undefined;
   const parsedSource =
-    secondSeparator > -1
-      ? rawResourceId.slice(firstSeparator + 1, secondSeparator)
+    rawResourceId.includes(':')
+      ? rawResourceId.slice(0, rawResourceId.indexOf(':'))
       : undefined;
-  const normalizedKind: 'private' | 'shared' =
-    parsedKind === 'private' ? 'private' : 'shared';
   const normalizedSource: SkillSource =
     parsedSource === 'manual' ||
     parsedSource === 'network' ||
@@ -119,10 +97,9 @@ function parseSkillTabDescriptor(tab: AgentTab): SkillTabDescriptor {
     parsedSource === 'agent'
       ? parsedSource
       : 'manual';
-  const readOnly = tab.meta?.readOnly ?? normalizedKind === 'shared';
+  const readOnly = tab.meta?.readOnly ?? false;
 
   return {
-    kind: tab.meta?.kind ?? normalizedKind,
     source:
       tab.meta?.source === 'manual' ||
       tab.meta?.source === 'network' ||
@@ -354,10 +331,10 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
 
         void (async () => {
           try {
-            const result =
-              descriptor.kind === 'shared'
-                ? await getSharedToolSource(descriptor.toolName)
-                : await getPrivateToolSource(descriptor.toolName);
+            const result = await getToolSource(
+              descriptor.source === 'builtin' ? 'builtin' : 'manual',
+              descriptor.toolName,
+            );
             setToolEditors((prev) => ({
               ...prev,
               [tab.id]: {
@@ -411,12 +388,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
 
         void (async () => {
           try {
-            const result =
-              descriptor.kind === 'private'
-                ? await getUserSkillSource('private', descriptor.skillName)
-                : !descriptor.readOnly
-                  ? await getUserSkillSource('shared', descriptor.skillName)
-                  : await getSharedSkillSource(descriptor.skillName);
+            const result = await getSkillSource(descriptor.skillName);
             setSkillEditors((prev) => ({
               ...prev,
               [tab.id]: {
@@ -446,12 +418,12 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
 
   /**
    * Save handler for tool tabs.
-   * Only private tools can be updated; shared tools remain read-only.
+   * Built-in tools remain read-only.
    */
   const handleToolTabSave = useCallback(async (tab: AgentTab, source: string) => {
     const descriptor = parseToolTabDescriptor(tab);
-    if (descriptor.readOnly || descriptor.kind !== 'private') {
-      toast.error('Built-in shared tools are read-only');
+    if (descriptor.readOnly || descriptor.source === 'builtin') {
+      toast.error('Built-in tools are read-only');
       return;
     }
 
@@ -467,7 +439,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
     }));
 
     try {
-      await upsertPrivateTool(descriptor.toolName, source);
+      await updateToolSource('manual', descriptor.toolName, source);
       toast.success(`Tool "${descriptor.toolName}" saved`);
       setToolEditors((prev) => ({
         ...prev,
@@ -497,7 +469,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
 
   /**
    * Save handler for skill tabs.
-   * Editable scopes match Skills page: private + user shared only.
+   * Skill editability follows unified Auth metadata.
    */
   const handleSkillTabSave = useCallback(async (tab: AgentTab, source: string) => {
     const descriptor = parseSkillTabDescriptor(tab);
@@ -506,7 +478,6 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
       return;
     }
 
-    const saveKind = descriptor.kind === 'private' ? 'private' : 'shared';
     setSkillEditors((prev) => ({
       ...prev,
       [tab.id]: {
@@ -519,7 +490,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
     }));
 
     try {
-      await upsertUserSkill(saveKind, descriptor.skillName, source);
+      await updateSkillSource(descriptor.skillName, source);
       toast.success(`Skill "${descriptor.skillName}" saved`);
       setSkillEditors((prev) => ({
         ...prev,

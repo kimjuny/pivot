@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
 class ToolResource(SQLModel, table=True):
     """Registry row for one built-in or user-created tool's auth metadata."""
+
+    __table_args__ = (UniqueConstraint("source_type", "name"),)
 
     id: int | None = Field(default=None, primary_key=True)
     key: str = Field(index=True, unique=True, max_length=255)

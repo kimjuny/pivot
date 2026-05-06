@@ -29,10 +29,15 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getExtensionInstallationConfiguration,
+  getExtensionInstallationAccess,
+  getExtensionInstallationAccessOptions,
   getExtensionPackages,
   uninstallExtensionInstallation,
+  updateExtensionInstallationAccess,
   updateExtensionInstallationConfiguration,
   updateExtensionInstallationStatus,
+  type ExtensionInstallationAccess,
+  type ExtensionInstallationAccessOptions,
   type ExtensionConfigurationField,
   type ExtensionContributionItem,
   type ExtensionContributionSummary,
@@ -41,6 +46,7 @@ import {
   type ExtensionUninstallResult,
   type ExtensionPackage,
 } from "@/utils/api";
+import ResourceAuthTab, { type ResourceAuthAccess } from "@/components/ResourceAuthTab";
 import { formatTimestamp } from "@/utils/timestamp";
 import { MarkdownRenderer } from "@/pages/chat/components/MarkdownRenderer";
 
@@ -88,6 +94,16 @@ interface SetupStateMap {
 interface SetupDraftMap {
   /** Draft editable values keyed by installation id. */
   [installationId: number]: Record<string, unknown> | undefined;
+}
+
+interface AuthStateMap {
+  /** Direct Auth grants keyed by installation id. */
+  [installationId: number]: ExtensionInstallationAccess | undefined;
+}
+
+interface AuthOptionsMap {
+  /** Selectable Auth principals keyed by installation id. */
+  [installationId: number]: ExtensionInstallationAccessOptions | undefined;
 }
 
 /**
@@ -406,8 +422,12 @@ export default function ExtensionDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [setupStates, setSetupStates] = useState<SetupStateMap>({});
   const [setupDrafts, setSetupDrafts] = useState<SetupDraftMap>({});
+  const [authStates, setAuthStates] = useState<AuthStateMap>({});
+  const [authOptions, setAuthOptions] = useState<AuthOptionsMap>({});
   const [loadingSetupIds, setLoadingSetupIds] = useState<number[]>([]);
   const [savingSetupIds, setSavingSetupIds] = useState<number[]>([]);
+  const [loadingAuthIds, setLoadingAuthIds] = useState<number[]>([]);
+  const [savingAuthIds, setSavingAuthIds] = useState<number[]>([]);
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<ExtensionInstallation | null>(null);
   const [uninstallingId, setUninstallingId] = useState<number | null>(null);
@@ -456,17 +476,55 @@ export default function ExtensionDetailPage() {
     }
   }, []);
 
+  const loadAuthState = useCallback(async (installationId: number) => {
+    setLoadingAuthIds((current) => [...new Set([...current, installationId])]);
+    try {
+      const [access, options] = await Promise.all([
+        getExtensionInstallationAccess(installationId),
+        getExtensionInstallationAccessOptions(installationId),
+      ]);
+      setAuthStates((current) => ({
+        ...current,
+        [installationId]: access,
+      }));
+      setAuthOptions((current) => ({
+        ...current,
+        [installationId]: options,
+      }));
+    } catch (error) {
+      console.error("Failed to load extension auth state:", error);
+      toast.error("Failed to load extension auth");
+    } finally {
+      setLoadingAuthIds((current) => current.filter((item) => item !== installationId));
+    }
+  }, []);
+
   useEffect(() => {
     if (!pkg) {
       return;
     }
     pkg.versions.forEach((installation) => {
+      if (!installation.has_installation_configuration) {
+        return;
+      }
       if (setupStates[installation.id]) {
         return;
       }
       void loadSetupState(installation.id);
     });
   }, [loadSetupState, pkg, setupStates]);
+
+  useEffect(() => {
+    if (!pkg) {
+      return;
+    }
+    pkg.versions.forEach((installation) => {
+      if (installation.read_only || authStates[installation.id]) {
+        return;
+      }
+      void loadAuthState(installation.id);
+    });
+  }, [authStates, loadAuthState, pkg]);
 
   const latestInstallation = pkg?.versions[0] ?? null;
   const isLatestStatusUpdating = latestInstallation?.id === statusUpdatingId;
@@ -498,6 +556,15 @@ export default function ExtensionDetailPage() {
     () => (pkg ? buildPackageContributionItems(pkg) : []),
     [pkg],
   );
+  const hasSetupTab = Boolean(
+    pkg?.versions.some((installation) => installation.has_installation_configuration),
+  );
+  const hasHookReplayTab = Boolean(
+    pkg?.versions.some(
+      (installation) => installation.contribution_summary.hooks.length > 0,
+    ),
+  );
+  const detailTabCount = 3 + (hasSetupTab ? 1 : 0) + (hasHookReplayTab ? 1 : 0);
 
   const updateDraftValue = useCallback(
     (installationId: number, field: ExtensionConfigurationField, rawValue: string | boolean) => {
@@ -508,6 +575,29 @@ export default function ExtensionDetailPage() {
           [field.key]: parseConfigInputValue(field, rawValue),
         },
       }));
+    },
+    [],
+  );
+
+  const updateAuthDraft = useCallback(
+    (installationId: number, access: ResourceAuthAccess) => {
+      setAuthStates((current) => {
+        const existing = current[installationId];
+        if (!existing) {
+          return current;
+        }
+        return {
+          ...current,
+          [installationId]: {
+            ...existing,
+            use_scope: access.use_scope,
+            use_user_ids: access.use_user_ids,
+            use_group_ids: access.use_group_ids,
+            edit_user_ids: access.edit_user_ids,
+            edit_group_ids: access.edit_group_ids,
+          },
+        };
+      });
     },
     [],
   );
@@ -537,6 +627,34 @@ export default function ExtensionDetailPage() {
       }
     },
     [setupDrafts],
+  );
+
+  const saveAuth = useCallback(
+    async (installation: ExtensionInstallation) => {
+      const access = authStates[installation.id];
+      if (!access) {
+        return;
+      }
+      setSavingAuthIds((current) => [...new Set([...current, installation.id])]);
+      try {
+        const nextAccess = await updateExtensionInstallationAccess(
+          installation.id,
+          access,
+        );
+        setAuthStates((current) => ({
+          ...current,
+          [installation.id]: nextAccess,
+        }));
+        toast.success(`Saved Auth for ${installation.package_id}@${installation.version}`);
+        await loadPackages();
+      } catch (error) {
+        console.error("Failed to save extension auth:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to save extension auth");
+      } finally {
+        setSavingAuthIds((current) => current.filter((item) => item !== installation.id));
+      }
+    },
+    [authStates, loadPackages],
   );
 
   const handleStatusToggle = useCallback(
@@ -645,7 +763,9 @@ export default function ExtensionDetailPage() {
               onClick={() => {
                 void handleStatusToggle(latestInstallation);
               }}
-              disabled={isLatestStatusUpdating || isLatestUninstalling}
+              disabled={
+                latestInstallation.read_only || isLatestStatusUpdating || isLatestUninstalling
+              }
             >
               {isLatestStatusUpdating ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -664,7 +784,9 @@ export default function ExtensionDetailPage() {
               onClick={() => {
                 setPendingUninstall(latestInstallation);
               }}
-              disabled={isLatestStatusUpdating || isLatestUninstalling}
+              disabled={
+                latestInstallation.read_only || isLatestStatusUpdating || isLatestUninstalling
+              }
             >
               {isLatestUninstalling ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -718,11 +840,19 @@ export default function ExtensionDetailPage() {
       </div>
 
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="grid h-auto w-full grid-cols-4">
+        <TabsList
+          className="grid h-auto w-full"
+          style={{
+            gridTemplateColumns: `repeat(${detailTabCount}, minmax(0, 1fr))`,
+          }}
+        >
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="setup">Setup</TabsTrigger>
+          {hasSetupTab ? <TabsTrigger value="setup">Setup</TabsTrigger> : null}
+          <TabsTrigger value="auth">Auth</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
-          <TabsTrigger value="hook-replay">Hook Replay</TabsTrigger>
+          {hasHookReplayTab ? (
+            <TabsTrigger value="hook-replay">Hook Replay</TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -848,8 +978,12 @@ export default function ExtensionDetailPage() {
           </section>
         </TabsContent>
 
+        {hasSetupTab ? (
         <TabsContent value="setup" className="space-y-4">
           {pkg.versions.map((installation) => {
+            if (!installation.has_installation_configuration) {
+              return null;
+            }
             const setupState = setupStates[installation.id];
             const setupDraft = setupDrafts[installation.id] ?? {};
             const installationFields =
@@ -963,6 +1097,80 @@ export default function ExtensionDetailPage() {
             );
           })}
         </TabsContent>
+        ) : null}
+
+        <TabsContent value="auth" className="space-y-4">
+          {pkg.versions.map((installation) => {
+            const access = authStates[installation.id];
+            const options = authOptions[installation.id];
+            const isLoadingAuth = loadingAuthIds.includes(installation.id);
+            const isSavingAuth = savingAuthIds.includes(installation.id);
+
+            return (
+              <Card key={`auth-${installation.id}`}>
+                <CardHeader className="space-y-3">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base">{installation.version}</CardTitle>
+                        <Badge variant={installation.status === "active" ? "default" : "outline"}>
+                          {installation.status}
+                        </Badge>
+                        {installation.read_only ? (
+                          <Badge variant="outline">Read only</Badge>
+                        ) : null}
+                      </div>
+                      <CardDescription className="mt-1">
+                        Control who can use or edit this installed extension version in Studio.
+                      </CardDescription>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Installed {formatTimestamp(installation.created_at)}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {installation.read_only ? (
+                    <div className="rounded-md border bg-muted/30 px-3 py-6 text-sm text-muted-foreground">
+                      You can use this extension version, but you do not have permission to edit
+                      its Auth settings.
+                    </div>
+                  ) : isLoadingAuth || !access || !options ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      Loading Auth…
+                    </div>
+                  ) : (
+                    <>
+                      <ResourceAuthTab
+                        access={access}
+                        users={options.users}
+                        groups={options.groups}
+                        lockedEditUserIds={
+                          installation.creator_id === null ? [] : [installation.creator_id]
+                        }
+                        disabled={isSavingAuth}
+                        onAccessChange={(nextAccess) => {
+                          updateAuthDraft(installation.id, nextAccess);
+                        }}
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          onClick={() => {
+                            void saveAuth(installation);
+                          }}
+                          disabled={isSavingAuth}
+                        >
+                          {isSavingAuth ? "Saving…" : "Save Auth"}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TabsContent>
 
         <TabsContent value="versions" className="space-y-4">
           {pkg.versions.map((installation) => (
@@ -1035,9 +1243,11 @@ export default function ExtensionDetailPage() {
           ))}
         </TabsContent>
 
+        {hasHookReplayTab ? (
         <TabsContent value="hook-replay">
           <ExtensionHookReplayPanel packageId={pkg.package_id} />
         </TabsContent>
+        ) : null}
       </Tabs>
 
       <ConfirmationModal

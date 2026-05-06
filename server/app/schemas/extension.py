@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from app.schemas.base import AppBaseModel
 from pydantic import Field
@@ -144,6 +144,10 @@ class ExtensionInstallationResponse(AppBaseModel):
     hub_package_version_id: str | None = None
     hub_artifact_digest: str | None = None
     installed_by: str | None = None
+    creator_id: int | None = None
+    use_scope: str
+    read_only: bool
+    has_installation_configuration: bool
     status: str
     created_at: str
     updated_at: str
@@ -160,6 +164,47 @@ class ExtensionInstallationConfigRequest(AppBaseModel):
     """Request payload for saving installation-scoped extension configuration."""
 
     config: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtensionInstallationAccessUpdate(AppBaseModel):
+    """Payload for replacing one extension installation's direct access grants."""
+
+    use_scope: Literal["all", "selected"] = "selected"
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
+    edit_user_ids: list[int] = Field(default_factory=list)
+    edit_group_ids: list[int] = Field(default_factory=list)
+
+
+class ExtensionInstallationAccessResponse(ExtensionInstallationAccessUpdate):
+    """Direct use/edit grants for one installed extension version."""
+
+    installation_id: int
+
+
+class ExtensionInstallationAccessUserOption(AppBaseModel):
+    """Selectable user in an extension auth editor."""
+
+    id: int
+    username: str
+    display_name: str | None
+    email: str | None
+
+
+class ExtensionInstallationAccessGroupOption(AppBaseModel):
+    """Selectable group in an extension auth editor."""
+
+    id: int
+    name: str
+    description: str
+    member_count: int
+
+
+class ExtensionInstallationAccessOptionsResponse(AppBaseModel):
+    """Selectable users and groups for an extension auth editor."""
+
+    users: list[ExtensionInstallationAccessUserOption]
+    groups: list[ExtensionInstallationAccessGroupOption]
 
 
 class ExtensionInstallationConfigResponse(AppBaseModel):

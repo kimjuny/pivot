@@ -103,10 +103,14 @@ class ExtensionHookExecutionService:
         trace_id: str | None = None,
         iteration: int | None = None,
         extension_package_id: str | None = None,
+        extension_package_ids: set[str] | None = None,
         hook_event: str | None = None,
         limit: int = 200,
     ) -> list[ExtensionHookExecution]:
         """List recent hook execution records using optional filters."""
+        if extension_package_ids is not None and not extension_package_ids:
+            return []
+
         statement = select(ExtensionHookExecution)
         if session_id is not None:
             statement = statement.where(ExtensionHookExecution.session_id == session_id)
@@ -119,6 +123,12 @@ class ExtensionHookExecutionService:
         if extension_package_id is not None:
             statement = statement.where(
                 ExtensionHookExecution.extension_package_id == extension_package_id
+            )
+        if extension_package_ids is not None:
+            statement = statement.where(
+                col(ExtensionHookExecution.extension_package_id).in_(
+                    extension_package_ids
+                )
             )
         if hook_event is not None:
             statement = statement.where(ExtensionHookExecution.hook_event == hook_event)

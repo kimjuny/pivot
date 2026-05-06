@@ -17,17 +17,17 @@ if TYPE_CHECKING:
     from app.models.react import ReactTask
 
 
-def _dump_allowlist_json(names: list[str] | None) -> str | None:
+def _dump_allowlist_json(names: list[str] | None) -> str:
     """Serialize one normalized name allowlist into the agent JSON format.
 
     Args:
         names: Optional normalized list of names from a release snapshot.
 
     Returns:
-        Canonical JSON array text, or ``None`` when the runtime is unrestricted.
+        Canonical JSON array text. ``None`` is normalized to an empty list.
     """
     if names is None:
-        return None
+        return "[]"
     return json.dumps(names, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -335,20 +335,20 @@ class AgentReleaseRuntimeService:
         return session
 
     @staticmethod
-    def _normalize_allowlist(raw_value: Any) -> list[str] | None:
+    def _normalize_allowlist(raw_value: Any) -> list[str]:
         """Normalize optional release allowlists into sorted unique strings.
 
         Args:
             raw_value: Parsed ``tool_ids`` or ``skill_ids`` snapshot value.
 
         Returns:
-            ``None`` for unrestricted access, otherwise a sorted unique list.
+            A sorted unique list. ``None`` is normalized to an empty list.
 
         Raises:
             ValueError: If the release snapshot contains an invalid allowlist type.
         """
         if raw_value is None:
-            return None
+            return []
         if not isinstance(raw_value, list):
             raise ValueError("Release snapshot contains an invalid allowlist.")
 

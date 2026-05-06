@@ -58,6 +58,9 @@ class AgentCreate(AppBaseModel):
     max_iteration: int = Field(
         default=50, ge=1, description="Maximum iterations for ReAct recursion"
     )
+    use_scope: Literal["all", "selected"] = "selected"
+    use_user_ids: list[int] = Field(default_factory=list)
+    use_group_ids: list[int] = Field(default_factory=list)
 
 
 class AgentUpdate(AppBaseModel):

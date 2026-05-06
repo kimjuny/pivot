@@ -55,13 +55,13 @@ class Agent(SQLModel, table=True):
     )
     tool_ids: str | None = Field(
         default=None,
-        description="JSON array of allowed tool names. None = all tools; '[]' = none.",
+        description="JSON array of explicitly configured tool names. None = none.",
     )
     skill_ids: str | None = Field(
         default=None,
         description=(
-            "JSON array of allowed globally unique skill names. "
-            "None = all visible skills; '[]' = none."
+            "JSON array of explicitly configured globally unique skill names. "
+            "None = none."
         ),
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

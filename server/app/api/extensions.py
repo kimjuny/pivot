@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.api.dependencies import get_db
 from app.api.permissions import permissions
+from app.models.access import AccessLevel, PrincipalType, ResourceAccess, ResourceType
 from app.models.extension import (
     AgentExtensionBinding,
     ExtensionHookExecution,
@@ -27,6 +28,11 @@ from app.schemas.extension import (
     ExtensionHookExecutionResponse,
     ExtensionHookReplayResponse,
     ExtensionImportPreviewResponse,
+    ExtensionInstallationAccessGroupOption,
+    ExtensionInstallationAccessOptionsResponse,
+    ExtensionInstallationAccessResponse,
+    ExtensionInstallationAccessUpdate,
+    ExtensionInstallationAccessUserOption,
     ExtensionInstallationConfigRequest,
     ExtensionInstallationConfigResponse,
     ExtensionInstallationResponse,
@@ -37,6 +43,7 @@ from app.schemas.extension import (
     ExtensionUninstallResponse,
 )
 from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.extension_hook_execution_service import ExtensionHookExecutionService
 from app.services.extension_hook_replay_service import ExtensionHookReplayService
@@ -45,6 +52,8 @@ from app.services.extension_service import (
     ExtensionInstallPreview,
     ExtensionService,
 )
+from app.services.group_service import GroupService
+from app.services.user_service import UserService
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import Session, col, select
@@ -146,6 +155,7 @@ def _serialize_installation(
     installation: ExtensionInstallation,
     *,
     service: ExtensionService,
+    current_user: User | None = None,
 ) -> ExtensionInstallationResponse:
     """Convert one installed extension row into an API response."""
     return ExtensionInstallationResponse(
@@ -171,6 +181,19 @@ def _serialize_installation(
         hub_package_version_id=installation.hub_package_version_id,
         hub_artifact_digest=installation.hub_artifact_digest,
         installed_by=installation.installed_by,
+        creator_id=installation.creator_id,
+        use_scope=installation.use_scope,
+        read_only=(
+            not service.can_edit_installation(
+                user=current_user,
+                installation=installation,
+            )
+            if current_user is not None
+            else False
+        ),
+        has_installation_configuration=service.installation_has_setup_fields(
+            installation
+        ),
         status=installation.status,
         created_at=_serialize_utc_timestamp(installation.created_at),
         updated_at=_serialize_utc_timestamp(installation.updated_at),
@@ -186,6 +209,65 @@ def _serialize_installation(
                 installation_id=installation.id or 0
             ).to_dict()
         ),
+    )
+
+
+def _grant_principal_ids(
+    grants: list[ResourceAccess],
+    principal_type: PrincipalType,
+) -> list[int]:
+    """Return integer principal IDs for one principal type."""
+    principal_ids: list[int] = []
+    for grant in grants:
+        if grant.principal_type == principal_type:
+            principal_ids.append(int(grant.principal_id))
+    return sorted(principal_ids)
+
+
+def _serialize_installation_access(
+    installation: ExtensionInstallation,
+    grants: list[ResourceAccess],
+) -> ExtensionInstallationAccessResponse:
+    """Serialize direct grants for one extension installation."""
+    use_grants = [grant for grant in grants if grant.access_level == AccessLevel.USE]
+    edit_grants = [grant for grant in grants if grant.access_level == AccessLevel.EDIT]
+    return ExtensionInstallationAccessResponse(
+        installation_id=installation.id or 0,
+        use_scope="selected" if installation.use_scope == "selected" else "all",
+        use_user_ids=_grant_principal_ids(use_grants, PrincipalType.USER),
+        use_group_ids=_grant_principal_ids(use_grants, PrincipalType.GROUP),
+        edit_user_ids=_grant_principal_ids(edit_grants, PrincipalType.USER),
+        edit_group_ids=_grant_principal_ids(edit_grants, PrincipalType.GROUP),
+    )
+
+
+def _serialize_installation_access_options(
+    db: Session,
+) -> ExtensionInstallationAccessOptionsResponse:
+    """Serialize selectable users and groups for one extension auth editor."""
+    group_service = GroupService(db)
+    member_counts = group_service.get_member_count_by_group_id()
+    return ExtensionInstallationAccessOptionsResponse(
+        users=[
+            ExtensionInstallationAccessUserOption(
+                id=user.id or 0,
+                username=user.username,
+                display_name=user.display_name,
+                email=user.email,
+            )
+            for user in UserService(db).list_users()
+            if user.id is not None and user.status == "active"
+        ],
+        groups=[
+            ExtensionInstallationAccessGroupOption(
+                id=group.id or 0,
+                name=group.name,
+                description=group.description,
+                member_count=member_counts.get(group.id or 0, 0),
+            )
+            for group in group_service.list_groups()
+            if group.id is not None
+        ],
     )
 
 
@@ -396,6 +478,7 @@ def _serialize_package(
     payload: dict[str, object],
     *,
     service: ExtensionService,
+    current_user: User | None = None,
 ) -> ExtensionPackageResponse:
     """Convert one grouped package payload into an API response."""
     raw_versions = payload.get("versions", [])
@@ -403,7 +486,7 @@ def _serialize_package(
     disabled_version_count = payload.get("disabled_version_count", 0)
     versions = (
         [
-            _serialize_installation(item, service=service)
+            _serialize_installation(item, service=service, current_user=current_user)
             for item in raw_versions
             if isinstance(item, ExtensionInstallation)
         ]
@@ -436,9 +519,14 @@ def _serialize_agent_package(
     payload: dict[str, object],
     *,
     service: ExtensionService,
+    current_user: User | None = None,
 ) -> AgentExtensionPackageResponse:
     """Convert one agent-scoped package payload into an API response."""
-    package_response = _serialize_package(payload, service=service)
+    package_response = _serialize_package(
+        payload,
+        service=service,
+        current_user=current_user,
+    )
     raw_selected_binding = payload.get("selected_binding")
     raw_versions = payload.get("versions", [])
     selected_binding = None
@@ -480,6 +568,46 @@ def _serialize_agent_package(
     )
 
 
+def _require_extension_use(
+    *,
+    db: Session,
+    service: ExtensionService,
+    current_user: User,
+    installation_id: int,
+) -> ExtensionInstallation:
+    """Return an installation after checking the current user can select it."""
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Installed extension not found")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.EXTENSION,
+        resource_id=installation.id,
+        access_level=AccessLevel.USE,
+        creator_user_id=installation.creator_id,
+        use_scope=installation.use_scope,
+    )
+    return installation
+
+
+def _require_agent_edit(
+    *,
+    db: Session,
+    current_user: User,
+    agent_id: int,
+) -> None:
+    """Check that the current Studio user can edit one agent child config."""
+    try:
+        agent = AgentService(db).get_required_agent(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Agent not found") from exc
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
+
+
 @router.get(
     "/extensions/packages",
     response_model=list[ExtensionPackageResponse],
@@ -489,10 +617,10 @@ async def list_extension_packages(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[ExtensionPackageResponse]:
     """List installed extensions grouped by package name."""
-    del current_user
     service = ExtensionService(db)
     return [
-        _serialize_package(item, service=service) for item in service.list_packages()
+        _serialize_package(item, service=service, current_user=current_user)
+        for item in service.list_visible_packages(current_user)
     ]
 
 
@@ -505,11 +633,10 @@ async def list_extension_installations(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[ExtensionInstallationResponse]:
     """List all installed extension versions."""
-    del current_user
     service = ExtensionService(db)
     return [
-        _serialize_installation(item, service=service)
-        for item in service.list_installations()
+        _serialize_installation(item, service=service, current_user=current_user)
+        for item in service.list_visible_installations(current_user)
     ]
 
 
@@ -542,6 +669,105 @@ async def get_extension_installation_logo(
 
 
 @router.get(
+    "/extensions/installations/{installation_id}/access-options",
+    response_model=ExtensionInstallationAccessOptionsResponse,
+)
+async def get_extension_installation_access_options(
+    installation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionInstallationAccessOptionsResponse:
+    """Return selectable principals for one extension auth editor."""
+    service = ExtensionService(db)
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Extension installation not found")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.EXTENSION,
+        resource_id=installation.id,
+        access_level=AccessLevel.EDIT,
+        creator_user_id=installation.creator_id,
+        use_scope=installation.use_scope,
+    )
+    return _serialize_installation_access_options(db)
+
+
+@router.get(
+    "/extensions/installations/{installation_id}/access",
+    response_model=ExtensionInstallationAccessResponse,
+)
+async def get_extension_installation_access(
+    installation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionInstallationAccessResponse:
+    """Return direct use/edit grants for one extension installation."""
+    service = ExtensionService(db)
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Extension installation not found")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.EXTENSION,
+        resource_id=installation.id,
+        access_level=AccessLevel.EDIT,
+        creator_user_id=installation.creator_id,
+        use_scope=installation.use_scope,
+    )
+    return _serialize_installation_access(
+        installation,
+        AccessService(db).list_resource_grants(
+            resource_type=ResourceType.EXTENSION,
+            resource_id=installation.id or 0,
+        ),
+    )
+
+
+@router.put(
+    "/extensions/installations/{installation_id}/access",
+    response_model=ExtensionInstallationAccessResponse,
+)
+async def update_extension_installation_access(
+    installation_id: int,
+    payload: ExtensionInstallationAccessUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionInstallationAccessResponse:
+    """Replace direct use/edit grants for one extension installation."""
+    service = ExtensionService(db)
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Extension installation not found")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.EXTENSION,
+        resource_id=installation.id,
+        access_level=AccessLevel.EDIT,
+        creator_user_id=installation.creator_id,
+        use_scope=installation.use_scope,
+    )
+    try:
+        service.set_installation_access(
+            installation=installation,
+            use_scope=payload.use_scope,
+            use_user_ids=set(payload.use_user_ids),
+            use_group_ids=set(payload.use_group_ids),
+            edit_user_ids=set(payload.edit_user_ids),
+            edit_group_ids=set(payload.edit_group_ids),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _serialize_installation_access(
+        installation,
+        AccessService(db).list_resource_grants(
+            resource_type=ResourceType.EXTENSION,
+            resource_id=installation.id or 0,
+        ),
+    )
+
+
+@router.get(
     "/extensions/installations/{installation_id}/configuration",
     response_model=ExtensionInstallationConfigResponse,
 )
@@ -551,8 +777,12 @@ async def get_extension_installation_configuration(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationConfigResponse:
     """Return manifest-declared configuration schema and values for one installation."""
-    del current_user
     service = ExtensionService(db)
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Extension installation not found")
+    if not service.can_edit_installation(user=current_user, installation=installation):
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         state = service.get_installation_configuration_state(
             installation_id=installation_id
@@ -579,8 +809,12 @@ async def update_extension_installation_configuration(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationConfigResponse:
     """Validate and persist installation-scoped configuration values."""
-    del current_user
     service = ExtensionService(db)
+    installation = service.get_installation(installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Extension installation not found")
+    if not service.can_edit_installation(user=current_user, installation=installation):
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         service.update_installation_config(
             installation_id=installation_id,
@@ -616,13 +850,18 @@ async def list_extension_hook_executions(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[ExtensionHookExecutionResponse]:
     """List recorded hook execution logs with optional filters."""
-    del current_user
+    service = ExtensionService(db)
+    visible_package_ids = {
+        installation.package_id
+        for installation in service.list_visible_installations(current_user)
+    }
     rows = ExtensionHookExecutionService(db).list_executions(
         session_id=session_id,
         task_id=task_id,
         trace_id=trace_id,
         iteration=iteration,
         extension_package_id=extension_package_id,
+        extension_package_ids=visible_package_ids,
         hook_event=hook_event,
         limit=limit,
     )
@@ -639,7 +878,21 @@ async def replay_hook_execution(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionHookReplayResponse:
     """Safely replay one historical packaged hook execution."""
-    del current_user
+    execution = ExtensionHookExecutionService(db).get_execution(execution_id)
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Hook execution record not found.")
+    service = ExtensionService(db)
+    installation = service.get_installation_by_package_version(
+        package_id=execution.extension_package_id,
+        version=execution.extension_version,
+    )
+    if installation is None:
+        raise HTTPException(
+            status_code=404,
+            detail="The recorded extension version is no longer installed locally.",
+        )
+    if not service.can_edit_installation(user=current_user, installation=installation):
+        raise HTTPException(status_code=403, detail="Access denied")
     try:
         payload = await ExtensionHookReplayService(db).replay_execution(
             execution_id=execution_id
@@ -670,7 +923,11 @@ async def install_extension(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_installation(installation, service=service)
+    return _serialize_installation(
+        installation,
+        service=service,
+        current_user=current_user,
+    )
 
 
 @router.post(
@@ -749,7 +1006,11 @@ async def import_bundle_extension(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_installation(installation, service=service)
+    return _serialize_installation(
+        installation,
+        service=service,
+        current_user=current_user,
+    )
 
 
 @router.put(
@@ -763,16 +1024,27 @@ async def update_extension_installation_status(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationResponse:
     """Enable or disable one installed extension version."""
-    del current_user
     service = ExtensionService(db)
     try:
+        installation = service.get_installation(installation_id)
+        if installation is None:
+            raise ValueError("Installed extension version not found.")
+        if not service.can_edit_installation(
+            user=current_user,
+            installation=installation,
+        ):
+            raise HTTPException(status_code=403, detail="Access denied")
         installation = service.set_installation_status(
             installation_id=installation_id,
             status=body.status,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _serialize_installation(installation, service=service)
+    return _serialize_installation(
+        installation,
+        service=service,
+        current_user=current_user,
+    )
 
 
 @router.get(
@@ -785,9 +1057,16 @@ async def get_extension_installation_references(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionReferenceSummaryResponse:
     """Return persisted references that still rely on one extension version."""
-    del current_user
     service = ExtensionService(db)
     try:
+        installation = service.get_installation(installation_id)
+        if installation is None:
+            raise ValueError("Installed extension version not found.")
+        if not service.can_edit_installation(
+            user=current_user,
+            installation=installation,
+        ):
+            raise HTTPException(status_code=403, detail="Access denied")
         summary = service.get_reference_summary(installation_id=installation_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -804,9 +1083,16 @@ async def uninstall_extension(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionUninstallResponse:
     """Uninstall one extension version with logical fallback when referenced."""
-    del current_user
     service = ExtensionService(db)
     try:
+        installation = service.get_installation(installation_id)
+        if installation is None:
+            raise ValueError("Installed extension version not found.")
+        if not service.can_edit_installation(
+            user=current_user,
+            installation=installation,
+        ):
+            raise HTTPException(status_code=403, detail="Access denied")
         result = service.uninstall_installation(installation_id=installation_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -820,7 +1106,11 @@ async def uninstall_extension(
             else {}
         ),
         installation=(
-            _serialize_installation(installation, service=service)
+            _serialize_installation(
+                installation,
+                service=service,
+                current_user=current_user,
+            )
             if isinstance(installation, ExtensionInstallation)
             else None
         ),
@@ -837,8 +1127,7 @@ async def list_agent_extensions(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[AgentExtensionBindingResponse]:
     """List every configured extension binding for one agent."""
-    del current_user
-    AgentService(db).get_required_agent(agent_id)
+    _require_agent_edit(db=db, current_user=current_user, agent_id=agent_id)
     service = ExtensionService(db)
     statement = (
         select(AgentExtensionBinding, ExtensionInstallation)
@@ -866,12 +1155,11 @@ async def list_agent_extension_packages(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[AgentExtensionPackageResponse]:
     """List extension packages with agent-specific version selection state."""
-    del current_user
-    AgentService(db).get_required_agent(agent_id)
+    _require_agent_edit(db=db, current_user=current_user, agent_id=agent_id)
     service = ExtensionService(db)
     return [
-        _serialize_agent_package(item, service=service)
-        for item in service.list_agent_package_choices(agent_id)
+        _serialize_agent_package(item, service=service, current_user=current_user)
+        for item in service.list_agent_package_choices(agent_id, current_user)
     ]
 
 
@@ -886,9 +1174,15 @@ async def replace_agent_extension_bindings(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> list[AgentExtensionBindingResponse]:
     """Replace the full extension binding set for one agent."""
-    del current_user
-    AgentService(db).get_required_agent(agent_id)
+    _require_agent_edit(db=db, current_user=current_user, agent_id=agent_id)
     service = ExtensionService(db)
+    for item in body.bindings:
+        _require_extension_use(
+            db=db,
+            service=service,
+            current_user=current_user,
+            installation_id=item.extension_installation_id,
+        )
     try:
         bindings = service.replace_agent_bindings(
             agent_id=agent_id,
@@ -941,9 +1235,14 @@ async def upsert_agent_extension_binding(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> AgentExtensionBindingResponse:
     """Create or update one agent-extension binding."""
-    del current_user
-    AgentService(db).get_required_agent(agent_id)
+    _require_agent_edit(db=db, current_user=current_user, agent_id=agent_id)
     service = ExtensionService(db)
+    _require_extension_use(
+        db=db,
+        service=service,
+        current_user=current_user,
+        installation_id=extension_installation_id,
+    )
     try:
         binding = service.upsert_agent_binding(
             agent_id=agent_id,
@@ -972,8 +1271,7 @@ async def delete_agent_extension_binding(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> Response:
     """Delete one agent-extension binding."""
-    del current_user
-    AgentService(db).get_required_agent(agent_id)
+    _require_agent_edit(db=db, current_user=current_user, agent_id=agent_id)
     service = ExtensionService(db)
     try:
         service.delete_agent_binding(

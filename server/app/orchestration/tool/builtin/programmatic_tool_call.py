@@ -141,15 +141,15 @@ def make_programmatic_tool_call(tool_callables: dict[str, Any]):
     """Return a bound implementation of programmatic_tool_call.
 
     This factory is called once per ReAct request by ``react.py`` after the
-    full request-scoped ToolManager (shared + private tools) has been built.
+    full request-scoped ToolManager (built-in + user-authored tools) has been built.
     The returned function is used to **replace** the ``func`` on the
     ToolMetadata for ``programmatic_tool_call``, giving the snippet access to
-    private workspace tools without exposing them as extra parameters in the
+    user-authored workspace tools without exposing them as extra parameters in the
     LLM-facing schema.
 
     Args:
         tool_callables: Mapping of tool name → callable from the request-scoped
-            ToolManager (includes both shared and private tools).
+            ToolManager (includes both built-in and user-authored tools).
 
     Returns:
         A callable with the same signature as ``programmatic_tool_call``.
@@ -162,7 +162,7 @@ def make_programmatic_tool_call(tool_callables: dict[str, Any]):
 
 
 # ---------------------------------------------------------------------------
-# Registered @tool stub - uses only the global singleton (shared tools).
+# Registered @tool stub - uses only the global singleton (built-in tools).
 # react.py replaces .func at request time via make_programmatic_tool_call().
 # ---------------------------------------------------------------------------
 

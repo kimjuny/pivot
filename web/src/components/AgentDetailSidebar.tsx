@@ -12,7 +12,6 @@ import {
     Settings2,
     PanelLeft,
     Globe,
-    ShieldCheck,
 } from "@/lib/lucide";
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -47,7 +46,6 @@ import ChannelBindingDialog from './ChannelBindingDialog';
 import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
 import MediaGenerationBindingDialog from './MediaGenerationBindingDialog';
-import AgentAccessDialog from './AgentAccessDialog';
 import { ChannelProviderBadge } from './ChannelProviderBadge';
 import ConfirmationModal from './ConfirmationModal';
 import { ExtensionLogoAvatar } from './ExtensionLogoAvatar';
@@ -73,6 +71,8 @@ import {
     getWebSearchProviders,
     getAgentWebSearchBindings,
     deleteAgentWebSearchBinding,
+    updateAgentAccess,
+    type AgentAccess,
     type AgentExtensionPackage,
     type UsableTool,
     type SkillSource,
@@ -91,7 +91,6 @@ import { useAgentTabStore } from '../store/agentTabStore';
 interface SidebarTool {
     name: string;
     description: string;
-    kind: 'shared' | 'private';
     source: 'builtin' | 'user' | 'extension';
     extensionLabel?: string | null;
     readOnly: boolean;
@@ -101,7 +100,6 @@ interface SidebarTool {
 interface SidebarSkill {
     name: string;
     description: string;
-    kind: 'shared' | 'private';
     source: SkillSource | 'extension';
     extensionLabel?: string | null;
     creator: string | null;
@@ -169,30 +167,24 @@ function formatChannelStatus(status: string | null): string {
 
 /**
  * Build a unique resource ID for tool tabs.
- * Why: shared/private tools can have the same name, so name alone collides.
  */
 function buildToolResourceId(tool: SidebarTool): string {
-    return `${tool.kind}:${tool.name}`;
+    return `${tool.source}:${tool.name}`;
 }
 
 /**
  * Build a unique resource ID for skill tabs.
- * Why: shared/private descriptors may share names across saved UI tabs.
  */
 function buildSkillResourceId(skill: SidebarSkill): string {
-    return `${skill.kind}:${skill.source}:${skill.name}`;
+    return `${skill.source}:${skill.name}`;
 }
 
 /**
- * Parses the serialized tool allowlist from agent.tool_ids.
- *
- * Returns:
- * - null: unrestricted (all tools allowed)
- * - Set<string>: explicit enabled tool names
+ * Parses the serialized tool selection from agent.tool_ids.
  */
-function parseToolIds(toolIds: string | null | undefined): Set<string> | null {
+function parseToolIds(toolIds: string | null | undefined): Set<string> {
     if (toolIds === null || toolIds === undefined) {
-        return null;
+        return new Set<string>();
     }
 
     try {
@@ -212,15 +204,11 @@ function parseToolIds(toolIds: string | null | undefined): Set<string> | null {
 }
 
 /**
- * Parses the serialized skill allowlist from agent.skill_ids.
- *
- * Returns:
- * - null: unrestricted (all skills allowed)
- * - Set<string>: explicit enabled skill names
+ * Parses the serialized skill selection from agent.skill_ids.
  */
-function parseSkillIds(skillIds: string | null | undefined): Set<string> | null {
+function parseSkillIds(skillIds: string | null | undefined): Set<string> {
     if (skillIds === null || skillIds === undefined) {
-        return null;
+        return new Set<string>();
     }
 
     try {
@@ -303,7 +291,6 @@ function AgentDetailSidebar({
     const [isWebSearchOpen, setIsWebSearchOpen] = useState(false);
     const [isExtensionsOpen, setIsExtensionsOpen] = useState(false);
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-    const [isAccessDialogOpen, setIsAccessDialogOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
@@ -375,7 +362,6 @@ function AgentDetailSidebar({
         setIsWebSearchDialogOpen(false);
         setIsExtensionDialogOpen(false);
         setIsDeleteExtensionDialogOpen(false);
-        setIsAccessDialogOpen(false);
     }, [agent?.id]);
 
     /**
@@ -405,7 +391,6 @@ function AgentDetailSidebar({
                 .map((item) => ({
                     name: item.name,
                     description: item.description,
-                    kind: 'shared' as const,
                     source: 'extension' as const,
                     extensionLabel: pkg.display_name,
                     readOnly: true,
@@ -424,7 +409,6 @@ function AgentDetailSidebar({
                 .map((item) => ({
                     name: item.name,
                     description: item.description,
-                    kind: 'shared' as const,
                     source: 'extension' as const,
                     extensionLabel: pkg.display_name,
                     creator: null,
@@ -435,42 +419,26 @@ function AgentDetailSidebar({
     );
 
     const displayedTools = useMemo(() => {
-        const baseTools = enabledToolNameSet === null
-            ? tools
-            : tools.filter((tool) => enabledToolNameSet.has(tool.name));
-        if (enabledToolNameSet === null) {
-            return [...baseTools, ...extensionTools];
-        }
+        const baseTools = tools.filter((tool) => enabledToolNameSet.has(tool.name));
         return [...baseTools, ...extensionTools];
     }, [tools, extensionTools, enabledToolNameSet]);
 
     const enabledCount = useMemo(() => {
-        if (enabledToolNameSet === null) {
-            return tools.length + extensionTools.length;
-        }
         return displayedTools.length;
-    }, [tools.length, extensionTools.length, displayedTools.length, enabledToolNameSet]);
+    }, [displayedTools.length]);
 
     /**
      * Sidebar should display skills that are currently configured for this
      * agent, instead of the global skill catalog.
      */
     const displayedSkills = useMemo(() => {
-        const baseSkills = enabledSkillNameSet === null
-            ? skills
-            : skills.filter((skill) => enabledSkillNameSet.has(skill.name));
-        if (enabledSkillNameSet === null) {
-            return [...baseSkills, ...extensionSkills];
-        }
+        const baseSkills = skills.filter((skill) => enabledSkillNameSet.has(skill.name));
         return [...baseSkills, ...extensionSkills];
     }, [skills, extensionSkills, enabledSkillNameSet]);
 
     const enabledSkillCount = useMemo(() => {
-        if (enabledSkillNameSet === null) {
-            return skills.length + extensionSkills.length;
-        }
         return displayedSkills.length;
-    }, [skills.length, extensionSkills.length, displayedSkills.length, enabledSkillNameSet]);
+    }, [displayedSkills.length]);
 
     /**
      * Prefer installation-backed branding because one package card may point at
@@ -552,9 +520,7 @@ function AgentDetailSidebar({
     );
 
     /**
-     * Fetch both shared (built-in) and private (user-workspace) tools in parallel.
-     * Merges them into a unified list for display.
-     * Uses useRef to prevent duplicate fetches in React Strict Mode.
+     * Fetch tools this Studio user may select for agents.
      */
     useEffect(() => {
         if (hasFetchedToolsRef.current) return;
@@ -567,7 +533,6 @@ function AgentDetailSidebar({
                 const merged: SidebarTool[] = usableTools.map((tool: UsableTool) => ({
                     name: tool.name,
                     description: tool.description,
-                    kind: tool.source_type === 'builtin' ? 'shared' : 'private',
                     source: tool.source_type === 'builtin' ? 'builtin' : 'user',
                     readOnly: tool.read_only,
                 }));
@@ -599,7 +564,6 @@ function AgentDetailSidebar({
                     ...usableSkills.map((s: UsableSkill) => ({
                         name: s.name,
                         description: s.description,
-                        kind: s.kind,
                         source: s.source,
                         creator: s.creator,
                         readOnly: s.read_only,
@@ -829,7 +793,7 @@ function AgentDetailSidebar({
         void loadWebSearchBindings();
     }, [loadWebSearchBindings]);
 
-    const handleEditAgent = (data: AgentFormData): Promise<void> => {
+    const handleEditAgent = async (data: AgentFormData): Promise<void> => {
         if (!agent) {
             return Promise.resolve();
         }
@@ -838,12 +802,17 @@ function AgentDetailSidebar({
             if (onAgentDraftUpdate) {
                 onAgentDraftUpdate({ ...agent, ...data });
             }
+            await updateAgentAccess(agent.id, {
+                ...data.access,
+                agent_id: agent.id,
+                edit_user_ids: [],
+                edit_group_ids: [],
+            } satisfies AgentAccess);
             toast.success('Agent changes staged in draft');
-            return Promise.resolve();
         } catch (err) {
             const error = err instanceof Error ? err : new Error(String(err));
             toast.error(`Failed to update agent: ${error.message}`);
-            return Promise.reject(error);
+            throw error;
         }
     };
 
@@ -888,7 +857,6 @@ function AgentDetailSidebar({
             name: tool.name,
             resourceId: buildToolResourceId(tool),
             meta: {
-                kind: tool.kind,
                 source: tool.source,
                 readOnly: tool.readOnly,
             },
@@ -908,7 +876,6 @@ function AgentDetailSidebar({
             name: skill.name,
             resourceId: buildSkillResourceId(skill),
             meta: {
-                kind: skill.kind,
                 source: skill.source,
                 readOnly: skill.readOnly,
             },
@@ -1199,24 +1166,6 @@ function AgentDetailSidebar({
                                                 type="button"
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={() => setIsAccessDialogOpen(true)}
-                                                disabled={!agent?.id}
-                                                className="h-7 w-7 shrink-0 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
-                                                aria-label="Manage access"
-                                            >
-                                                <ShieldCheck className="size-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="right">
-                                            Manage access
-                                        </TooltipContent>
-                                    </Tooltip>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
                                                 onClick={() => setOpen(false)}
                                                 className="h-7 w-7 shrink-0 text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                                 aria-label="Collapse sidebar"
@@ -1324,7 +1273,7 @@ function AgentDetailSidebar({
                                                 const toolResourceId = buildToolResourceId(t);
                                                 const toolTabId = `tool-${toolResourceId}`;
                                                 return (
-                                                <SidebarMenuItem key={`${t.kind}-${t.source}-${t.name}`}>
+                                                <SidebarMenuItem key={`${t.source}-${t.name}`}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
@@ -1336,11 +1285,6 @@ function AgentDetailSidebar({
                                                                 {/* Reserved icon slot */}
                                                                 <span className="w-4 shrink-0" />
                                                                 <span className="truncate flex-1">{t.name}</span>
-                                                                {t.kind === 'private' && (
-                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                        me
-                                                                    </span>
-                                                                )}
                                                                 {t.source === 'extension' && (
                                                                     <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                         ext
@@ -1355,9 +1299,9 @@ function AgentDetailSidebar({
                                                                     <span className="text-[10px] text-muted-foreground">
                                                                         {t.source === 'extension'
                                                                             ? `· extension · ${t.extensionLabel ?? 'unknown'}`
-                                                                            : t.kind === 'shared'
-                                                                              ? '· shared'
-                                                                              : '· private'}
+                                                                            : t.source === 'builtin'
+                                                                              ? '· builtin'
+                                                                              : '· manual'}
                                                                     </span>
                                                                 </div>
                                                                 {t.description && (
@@ -1457,7 +1401,7 @@ function AgentDetailSidebar({
                                                 const skillResourceId = buildSkillResourceId(s);
                                                 const skillTabId = `skill-${skillResourceId}`;
                                                 return (
-                                                <SidebarMenuItem key={`${s.kind}-${s.source}-${s.name}`}>
+                                                <SidebarMenuItem key={`${s.source}-${s.name}`}>
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
                                                             <SidebarMenuButton
@@ -1468,19 +1412,9 @@ function AgentDetailSidebar({
                                                             >
                                                                 <span className="w-4 shrink-0" />
                                                                 <span className="truncate flex-1">{s.name}</span>
-                                                                {s.kind === 'private' && (
-                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                        me
-                                                                    </span>
-                                                                )}
                                                                 {s.source === 'extension' && (
                                                                     <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                         ext
-                                                                    </span>
-                                                                )}
-                                                                {s.kind === 'shared' && !s.readOnly && (
-                                                                    <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
-                                                                        you
                                                                     </span>
                                                                 )}
                                                             </SidebarMenuButton>
@@ -1492,11 +1426,9 @@ function AgentDetailSidebar({
                                                                     <span className="text-[10px] text-muted-foreground">
                                                                         {s.source === 'extension'
                                                                             ? `· extension · ${s.extensionLabel ?? 'unknown'}`
-                                                                            : s.kind === 'shared'
-                                                                            ? s.readOnly
-                                                                              ? `· shared · ${s.creator ?? 'unknown'}`
-                                                                              : '· shared · you'
-                                                                            : '· private'}
+                                                                            : s.readOnly
+                                                                              ? `· read-only · ${s.creator ?? 'unknown'}`
+                                                                              : '· editable'}
                                                                     </span>
                                                                 </div>
                                                                 {s.description && (
@@ -2071,6 +2003,8 @@ function AgentDetailSidebar({
             <AgentModal
                 isOpen={isEditModalOpen}
                 mode="edit"
+                agentId={agent?.id}
+                creatorUserId={agent?.created_by_user_id}
                 initialData={
                     agent
                         ? {
@@ -2143,15 +2077,6 @@ function AgentDetailSidebar({
                         ]);
                         await onExtensionBindingsChanged?.();
                     }}
-                />
-            )}
-
-            {agent?.id && (
-                <AgentAccessDialog
-                    open={isAccessDialogOpen}
-                    onOpenChange={setIsAccessDialogOpen}
-                    agentId={agent.id}
-                    creatorUserId={agent.created_by_user_id}
                 />
             )}
 

@@ -19,6 +19,7 @@ from sqlmodel import col, select
 
 if TYPE_CHECKING:
     from app.models.user import User
+    from app.models.workspace import Workspace
     from sqlmodel import Session as DBSession
 
 
@@ -213,12 +214,11 @@ class AccessService:
             raise ValueError("use_scope must be 'all' or 'selected'.")
 
         creator_id = agent.created_by_user_id
-        if creator_id is not None:
-            edit_user_ids = set(edit_user_ids)
-            edit_user_ids.add(creator_id)
-            if use_scope == "selected":
-                use_user_ids = set(use_user_ids)
-                use_user_ids.add(creator_id)
+        edit_user_ids = {creator_id} if creator_id is not None else set()
+        edit_group_ids = set()
+        if creator_id is not None and use_scope == "selected":
+            use_user_ids = set(use_user_ids)
+            use_user_ids.add(creator_id)
 
         agent.use_scope = use_scope
         agent.updated_at = datetime.now(UTC)
@@ -289,6 +289,31 @@ class AccessService:
             access_level=access_level,
             creator_user_id=agent.created_by_user_id,
             use_scope=agent.use_scope,
+        )
+
+    def _workspace_owner_user_id(self, workspace: Workspace) -> int | None:
+        """Return the creator user id for one workspace owner username."""
+        from app.models.user import User
+
+        owner = self.db.exec(
+            select(User).where(User.username == workspace.user)
+        ).first()
+        return owner.id if owner is not None else None
+
+    def has_workspace_access(
+        self,
+        *,
+        user: User,
+        workspace: Workspace,
+        access_level: AccessLevel,
+    ) -> bool:
+        """Return whether a user may use or edit one workspace."""
+        return self.has_resource_access(
+            user=user,
+            resource_type=ResourceType.WORKSPACE,
+            resource_id=workspace.workspace_id,
+            access_level=access_level,
+            creator_user_id=self._workspace_owner_user_id(workspace),
         )
 
     def has_resource_access(

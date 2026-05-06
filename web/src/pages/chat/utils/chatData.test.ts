@@ -269,7 +269,7 @@ describe("buildMessagesFromHistory", () => {
             summary: null,
             action_type: "CLARIFY",
             action_output:
-              '{"question":"Approve the request to create private skill `planning-kit`?"}',
+              '{"question":"Approve the request to create Skill `planning-kit`?"}',
             tool_call_results: null,
             status: "done",
             error_log: null,
@@ -291,7 +291,7 @@ describe("buildMessagesFromHistory", () => {
     );
     expect(assistantMessages[0]?.status).toBe("completed");
     expect(assistantMessages[0]?.content).toBe(
-      "Approve the request to create private skill `planning-kit`?",
+      "Approve the request to create Skill `planning-kit`?",
     );
     expect(assistantMessages[1]?.status).toBe("running");
     expect(assistantMessages[1]?.content).toBe("");

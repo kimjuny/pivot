@@ -1,9 +1,15 @@
-import { useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Info } from '@/lib/lucide';
 
 export interface ResourceAuthAccess {
   use_scope: 'all' | 'selected';
@@ -33,6 +39,14 @@ interface ResourceAuthTabProps {
   groups: ResourceAuthGroupOption[];
   loading?: boolean;
   disabled?: boolean;
+  hideEdit?: boolean;
+  editDisabled?: boolean;
+  editTooltip?: ReactNode;
+  editDisabledMessage?: string;
+  useTitle?: string;
+  useEveryoneDescription?: string;
+  useSelectedDescription?: string;
+  useEveryoneMessage?: string;
   lockedEditUserIds?: number[];
   onAccessChange: (access: ResourceAuthAccess) => void;
 }
@@ -59,6 +73,14 @@ function ResourceAuthTab({
   groups,
   loading = false,
   disabled = false,
+  hideEdit = false,
+  editDisabled = false,
+  editTooltip,
+  editDisabledMessage,
+  useTitle = 'Who can use',
+  useEveryoneDescription = 'All active users can use this entity.',
+  useSelectedDescription = 'Only selected users and groups can use this entity.',
+  useEveryoneMessage = 'Everyone can use this entity. Switch to Selected Members to choose specific users or groups.',
   lockedEditUserIds = [],
   onAccessChange,
 }: ResourceAuthTabProps) {
@@ -69,6 +91,12 @@ function ResourceAuthTab({
   const [activeSection, setActiveSection] = useState<AccessSection>('use');
   const filteredUsers = users;
   const filteredGroups = groups;
+
+  useEffect(() => {
+    if (hideEdit && activeSection === 'edit') {
+      setActiveSection('use');
+    }
+  }, [activeSection, hideEdit]);
 
   const selectedUseCountLabel =
     access.use_scope === 'all'
@@ -82,6 +110,7 @@ function ResourceAuthTab({
     checked: boolean,
   ) {
     if (disabled) return;
+    if (section === 'edit' && editDisabled) return;
     if (section === 'edit' && lockedEditUsers.has(userId) && !checked) {
       return;
     }
@@ -101,6 +130,7 @@ function ResourceAuthTab({
     checked: boolean,
   ) {
     if (disabled) return;
+    if (section === 'edit' && editDisabled) return;
     onAccessChange({
       ...access,
       [section === 'use' ? 'use_group_ids' : 'edit_group_ids']: toggleId(
@@ -131,11 +161,15 @@ function ResourceAuthTab({
             return (
               <label
                 key={`${section}-user-${user.id}`}
-                className="flex cursor-pointer items-center gap-3 border-b px-3 py-2 last:border-b-0"
+                className={`flex items-center gap-3 border-b px-3 py-2 last:border-b-0 ${
+                  disabled || (section === 'edit' && editDisabled)
+                    ? 'cursor-default'
+                    : 'cursor-pointer'
+                }`}
               >
                 <Checkbox
                   checked={selectedIds.includes(user.id) || isLocked}
-                  disabled={disabled || isLocked}
+                  disabled={disabled || isLocked || (section === 'edit' && editDisabled)}
                   onCheckedChange={(value) =>
                     updateUserGrant(section, user.id, value === true)
                   }
@@ -190,11 +224,15 @@ function ResourceAuthTab({
           filteredGroups.map((group) => (
             <label
               key={`${section}-group-${group.id}`}
-              className="flex cursor-pointer items-center gap-3 border-b px-3 py-2 last:border-b-0"
+              className={`flex items-center gap-3 border-b px-3 py-2 last:border-b-0 ${
+                disabled || (section === 'edit' && editDisabled)
+                  ? 'cursor-default'
+                  : 'cursor-pointer'
+              }`}
             >
               <Checkbox
                 checked={selectedIds.includes(group.id)}
-                disabled={disabled}
+                disabled={disabled || (section === 'edit' && editDisabled)}
                 onCheckedChange={(value) =>
                   updateGroupGrant(section, group.id, value === true)
                 }
@@ -218,7 +256,7 @@ function ResourceAuthTab({
   return (
     <div className="space-y-4">
       <div className="rounded-md border p-3">
-        <div className="mb-3 text-sm font-medium">Who can use</div>
+        <div className="mb-3 text-sm font-medium">{useTitle}</div>
         <RadioGroup
           value={access.use_scope}
           disabled={disabled}
@@ -232,7 +270,7 @@ function ResourceAuthTab({
             <span className="min-w-0">
               <span className="block text-sm font-medium">Everyone</span>
               <span className="block text-xs text-muted-foreground">
-                All active users can use this entity.
+                {useEveryoneDescription}
               </span>
             </span>
           </Label>
@@ -241,7 +279,7 @@ function ResourceAuthTab({
             <span className="min-w-0">
               <span className="block text-sm font-medium">Selected Members</span>
               <span className="block text-xs text-muted-foreground">
-                Only selected users and groups can use this entity.
+                {useSelectedDescription}
               </span>
             </span>
           </Label>
@@ -253,9 +291,14 @@ function ResourceAuthTab({
         onValueChange={(value) => setActiveSection(value as AccessSection)}
         className="space-y-4"
       >
-        <TabsList variant="line" className="relative grid w-full grid-cols-2">
+        <TabsList
+          variant="line"
+          className={`relative grid w-full ${hideEdit ? 'grid-cols-1' : 'grid-cols-2'}`}
+        >
           <span
-            className="absolute bottom-[-1px] left-0 flex w-1/2 justify-center transition-transform duration-200 ease-out"
+            className={`absolute bottom-[-1px] left-0 flex justify-center transition-transform duration-200 ease-out ${
+              hideEdit ? 'w-full' : 'w-1/2'
+            }`}
             style={{
               transform:
                 activeSection === 'edit' ? 'translateX(100%)' : 'translateX(0)',
@@ -270,19 +313,32 @@ function ResourceAuthTab({
           >
             Use ({selectedUseCountLabel})
           </TabsTrigger>
-          <TabsTrigger
-            value="edit"
-            className="rounded-none bg-transparent px-0 pb-2 pt-0 shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none"
-          >
-            Edit ({selectedEditCount})
-          </TabsTrigger>
+          {!hideEdit ? (
+            <TabsTrigger
+              value="edit"
+              className="rounded-none bg-transparent px-0 pb-2 pt-0 shadow-none data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              <span className="flex items-center gap-1.5">
+                Edit ({selectedEditCount})
+                {editTooltip ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-xs">
+                      {typeof editTooltip === 'string' ? <p>{editTooltip}</p> : editTooltip}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </span>
+            </TabsTrigger>
+          ) : null}
         </TabsList>
 
         <TabsContent value="use" className="space-y-3">
           {access.use_scope === 'all' ? (
             <div className="rounded-md border bg-muted/30 px-3 py-6 text-sm text-muted-foreground">
-              Everyone can use this entity. Switch to Selected Members to choose
-              specific users or groups.
+              {useEveryoneMessage}
             </div>
           ) : (
             <>
@@ -298,16 +354,23 @@ function ResourceAuthTab({
           )}
         </TabsContent>
 
-        <TabsContent value="edit" className="space-y-3">
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Users</p>
-            {renderUserList('edit')}
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Groups</p>
-            {renderGroupList('edit')}
-          </div>
-        </TabsContent>
+        {!hideEdit ? (
+          <TabsContent value="edit" className="space-y-3">
+            {editDisabledMessage ? (
+              <div className="rounded-md border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
+                {editDisabledMessage}
+              </div>
+            ) : null}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Users</p>
+              {renderUserList('edit')}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Groups</p>
+              {renderGroupList('edit')}
+            </div>
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );

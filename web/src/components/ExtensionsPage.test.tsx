@@ -60,6 +60,10 @@ describe("ExtensionsPage", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
             status: "active",
             created_at: "2026-04-01T00:00:00Z",
             updated_at: "2026-04-01T00:00:00Z",
@@ -114,7 +118,7 @@ describe("ExtensionsPage", () => {
     });
   });
 
-  it("filters packages by enabled and disabled status", async () => {
+  it("filters packages by contributor type", async () => {
     vi.mocked(getExtensionPackages).mockResolvedValue([
       {
         scope: "acme",
@@ -151,15 +155,20 @@ describe("ExtensionsPage", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
             status: "active",
             created_at: "2026-04-01T00:00:00Z",
             updated_at: "2026-04-01T00:00:00Z",
             reference_summary: null,
             contribution_summary: {
               channel_providers: [],
+              media_providers: ["acme_media"],
               web_search_providers: [],
               hooks: [],
-              tools: [],
+              tools: ["search_accounts"],
               skills: [],
             },
             contribution_items: [],
@@ -201,6 +210,10 @@ describe("ExtensionsPage", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
             status: "disabled",
             created_at: "2026-04-01T00:00:00Z",
             updated_at: "2026-04-01T00:00:00Z",
@@ -210,7 +223,7 @@ describe("ExtensionsPage", () => {
               web_search_providers: [],
               hooks: [],
               tools: [],
-              skills: [],
+              skills: ["memory_recall"],
             },
             contribution_items: [],
           },
@@ -229,12 +242,12 @@ describe("ExtensionsPage", () => {
       expect(screen.getByText("Mem0 Memory")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /enabled/i }));
+    fireEvent.click(screen.getByRole("button", { name: /media/i }));
 
     expect(screen.getByText("ACME Providers")).toBeInTheDocument();
     expect(screen.queryByText("Mem0 Memory")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /disabled/i }));
+    fireEvent.click(screen.getByRole("button", { name: /skill/i }));
 
     expect(screen.getByText("Mem0 Memory")).toBeInTheDocument();
     expect(screen.queryByText("ACME Providers")).not.toBeInTheDocument();
@@ -297,6 +310,10 @@ describe("ExtensionsPage", () => {
       hub_package_version_id: null,
       hub_artifact_digest: null,
       installed_by: "alice",
+      creator_id: 1,
+      use_scope: "selected",
+      read_only: false,
+      has_installation_configuration: false,
       status: "active",
       created_at: "2026-04-01T00:00:00Z",
       updated_at: "2026-04-01T00:00:00Z",
@@ -408,6 +425,10 @@ describe("ExtensionsPage", () => {
       hub_package_version_id: null,
       hub_artifact_digest: null,
       installed_by: "alice",
+      creator_id: 1,
+      use_scope: "selected",
+      read_only: false,
+      has_installation_configuration: false,
       status: "active",
       created_at: "2026-04-01T00:00:00Z",
       updated_at: "2026-04-01T00:00:00Z",

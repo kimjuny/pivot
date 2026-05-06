@@ -22,9 +22,12 @@ import {
   ExternalLink as ExternalLinkIcon,
   Eye as EyeIcon,
   EyeOff as EyeOffIcon,
+  FilePlus as FilePlusIcon,
   FileSpreadsheet as FileSpreadsheetIcon,
   FileText as FileTextIcon,
   Folder as FolderIcon,
+  FolderOpen as FolderOpenIcon,
+  FolderPlus as FolderPlusIcon,
   FolderUp as FolderUpIcon,
   Github as GithubIcon,
   History as HistoryIcon,
@@ -116,9 +119,12 @@ export const Expand = withDefaultStroke(ExpandIcon);
 export const ExternalLink = withDefaultStroke(ExternalLinkIcon);
 export const Eye = withDefaultStroke(EyeIcon);
 export const EyeOff = withDefaultStroke(EyeOffIcon);
+export const FilePlus = withDefaultStroke(FilePlusIcon);
 export const FileSpreadsheet = withDefaultStroke(FileSpreadsheetIcon);
 export const FileText = withDefaultStroke(FileTextIcon);
 export const Folder = withDefaultStroke(FolderIcon);
+export const FolderOpen = withDefaultStroke(FolderOpenIcon);
+export const FolderPlus = withDefaultStroke(FolderPlusIcon);
 export const FolderUp = withDefaultStroke(FolderUpIcon);
 export const Github = withDefaultStroke(GithubIcon);
 export const History = withDefaultStroke(HistoryIcon);

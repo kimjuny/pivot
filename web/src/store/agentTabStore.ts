@@ -11,7 +11,6 @@ export type AgentTabType = 'tool' | 'skill' | 'function';
  * Used by AgentDetail to resolve source loading and edit permissions.
  */
 export interface AgentTabMeta {
-    kind?: 'private' | 'shared';
     source?: 'builtin' | 'user' | 'manual' | 'network' | 'bundle' | 'agent';
     readOnly?: boolean;
 }

@@ -1,4 +1,4 @@
-import { AlertTriangle } from "@/lib/lucide";
+import { AlertTriangle, Loader2 } from "@/lib/lucide";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -31,6 +31,8 @@ interface ConfirmationModalProps {
     onCancel: () => void;
     /** Visual variant for the modal */
     variant?: 'danger' | 'warning';
+    /** Whether the confirm action is still running */
+    isLoading?: boolean;
 }
 
 /**
@@ -46,6 +48,7 @@ function ConfirmationModal({
     onConfirm,
     onCancel,
     variant = 'danger',
+    isLoading = false,
 }: ConfirmationModalProps) {
     const variantStyles = {
         danger: {
@@ -63,7 +66,11 @@ function ConfirmationModal({
     const styles = variantStyles[variant];
 
     return (
-        <AlertDialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
+        <AlertDialog open={isOpen} onOpenChange={(open) => {
+            if (!open && !isLoading) {
+                onCancel();
+            }
+        }}>
             <AlertDialogContent>
                 <AlertDialogHeader>
                     <div className="flex items-center space-x-3">
@@ -77,14 +84,27 @@ function ConfirmationModal({
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                    <AlertDialogCancel onClick={onCancel}>
+                    <AlertDialogCancel onClick={onCancel} disabled={isLoading}>
                         {cancelText}
                     </AlertDialogCancel>
                     <AlertDialogAction
-                        onClick={onConfirm}
+                        disabled={isLoading}
+                        onClick={(event) => {
+                            event.preventDefault();
+                            if (!isLoading) {
+                                onConfirm();
+                            }
+                        }}
                         className={styles.button}
                     >
-                        {confirmText}
+                        {isLoading ? (
+                            <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                {confirmText}
+                            </>
+                        ) : (
+                            confirmText
+                        )}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>

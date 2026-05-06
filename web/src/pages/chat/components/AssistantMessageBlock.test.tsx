@@ -96,7 +96,7 @@ describe("AssistantMessageBlock", () => {
           role: "assistant",
           task_id: "task-approval",
           content:
-            "Approve the request to create private skill `planning-kit`?\n\nAdds a reusable planning workflow.",
+            "Approve the request to create Skill `planning-kit`?\n\nAdds a reusable planning workflow.",
           timestamp: "2026-03-17T00:00:00.000Z",
           status: "waiting_input",
           pendingUserAction: {
@@ -106,7 +106,7 @@ describe("AssistantMessageBlock", () => {
               skill_name: "planning-kit",
               change_type: "create",
               question:
-                "Approve the request to create private skill `planning-kit`?",
+                "Approve the request to create Skill `planning-kit`?",
               message: "Adds a reusable planning workflow.",
             },
           },
@@ -124,13 +124,13 @@ describe("AssistantMessageBlock", () => {
                   timestamp: "2026-03-17T00:00:00.000Z",
                   data: {
                     question:
-                      "Approve the request to create private skill `planning-kit`?",
+                      "Approve the request to create Skill `planning-kit`?",
                     approval_request: {
                       submission_id: 42,
                       skill_name: "planning-kit",
                       change_type: "create",
                       question:
-                        "Approve the request to create private skill `planning-kit`?",
+                        "Approve the request to create Skill `planning-kit`?",
                     },
                   },
                 },
@@ -159,7 +159,7 @@ describe("AssistantMessageBlock", () => {
       submission_id: 42,
       skill_name: "planning-kit",
       change_type: "create",
-      question: "Approve the request to create private skill `planning-kit`?",
+      question: "Approve the request to create Skill `planning-kit`?",
       message: "Adds a reusable planning workflow.",
       file_count: undefined,
       total_bytes: undefined,

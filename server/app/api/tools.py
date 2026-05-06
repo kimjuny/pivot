@@ -1,12 +1,4 @@
-"""API endpoints for tool management.
-
-Provides two categories of tools:
-- **Shared tools**: built-in tools loaded at startup, available to all users.
-- **Private tools**: per-user Python source files stored under
-  ``users/{username}/tools/`` in the active POSIX storage root.
-
-All endpoints require authentication.
-"""
+"""API endpoints for tool management."""
 
 import inspect
 from pathlib import Path
@@ -22,20 +14,20 @@ from app.services.access_service import AccessService
 from app.services.group_service import GroupService
 from app.services.tool_service import (
     ToolSourceType,
-    delete_manual_tool_resource,
+    create_manual_tool_source,
+    delete_manual_tool,
     get_tool_resource,
     list_usable_tools,
+    read_manual_tool_source,
+    require_tool_access,
     set_tool_access,
+    update_manual_tool_source,
 )
 from app.services.user_service import UserService
 from app.services.workspace_service import (
     check_ast,
     check_pyright,
     check_ruff,
-    delete_user_tool,
-    list_user_tools,
-    read_user_tool,
-    write_user_tool,
 )
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -44,39 +36,11 @@ from sqlmodel import Session
 router = APIRouter()
 
 
-# ---------------------------------------------------------------------------
-# Shared (built-in) tools
-# ---------------------------------------------------------------------------
-
-
-@router.get("/tools/shared")
-async def get_shared_tools(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> list[dict[str, Any]]:
-    """Get all shared (built-in) tools available to every user.
-
-    Returns:
-        List of tool metadata dicts with ``name``, ``description``,
-        and ``parameters`` fields.
-    """
-    tool_manager = get_tool_manager()
-    return [
-        {
-            "name": t.name,
-            "description": t.description,
-            "parameters": t.parameters,
-            "tool_type": t.tool_type,
-        }
-        for t in tool_manager.list_tools()
-    ]
-
-
-def _read_shared_tool_source(tool_name: str) -> str:
-    """Read source code for a shared tool by name.
+def _read_builtin_tool_source(tool_name: str) -> str:
+    """Read source code for a built-in tool by name.
 
     Args:
-        tool_name: Tool name in the shared tool catalog.
+        tool_name: Tool name in the built-in tool catalog.
 
     Returns:
         Full Python source code for the module that defines the tool.
@@ -87,7 +51,7 @@ def _read_shared_tool_source(tool_name: str) -> str:
     tool_manager = get_tool_manager()
     tool_metadata = tool_manager.get_tool(tool_name)
     if tool_metadata is None:
-        raise FileNotFoundError(f"Shared tool '{tool_name}' not found.")
+        raise FileNotFoundError(f"Built-in tool '{tool_name}' not found.")
 
     source_file = inspect.getsourcefile(tool_metadata.func)
     if source_file is not None:
@@ -99,41 +63,12 @@ def _read_shared_tool_source(tool_name: str) -> str:
         return inspect.getsource(tool_metadata.func)
     except (OSError, TypeError) as exc:
         raise FileNotFoundError(
-            f"Shared tool '{tool_name}' source is unavailable."
+            f"Built-in tool '{tool_name}' source is unavailable."
         ) from exc
 
 
-@router.get("/tools/shared/{tool_name}")
-async def get_shared_tool_source(
-    tool_name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> dict[str, str]:
-    """Get source code for a shared (built-in) tool.
-
-    Args:
-        tool_name: Stem of the shared tool.
-
-    Returns:
-        Dict with ``name`` and ``source`` keys.
-
-    Raises:
-        404: If the shared tool does not exist.
-    """
-    try:
-        source = _read_shared_tool_source(tool_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"name": tool_name, "source": source}
-
-
-# ---------------------------------------------------------------------------
-# Private (user-workspace) tools
-# ---------------------------------------------------------------------------
-
-
 class ToolWriteRequest(BaseModel):
-    """Request body for creating or updating a private tool."""
+    """Request body for creating or updating a tool."""
 
     source: str
 
@@ -243,25 +178,21 @@ def _serialize_tool_access_options(db: Session) -> ToolAccessOptionsResponse:
     )
 
 
-@router.get("/tools/private")
-async def get_private_tools(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> list[dict[str, Any]]:
-    """List all private tools belonging to the current user.
-
-    Returns:
-        List of dicts with ``name``, ``filename``, and ``tool_type`` keys.
-    """
-    return list_user_tools(current_user.username)
-
-
 @router.get("/tools/usable")
 async def get_usable_tools(
     db: Session = Depends(get_db),
     current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> list[dict[str, object]]:
     """List tools the current Studio user can select for agents."""
+    return list_usable_tools(db, current_user=current_user)
+
+
+@router.get("/tools/manage")
+async def get_manageable_tools(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
+) -> list[dict[str, object]]:
+    """List tools visible in the Studio management page."""
     return list_usable_tools(db, current_user=current_user)
 
 
@@ -308,7 +239,9 @@ async def get_tool_access_options(
     return _serialize_tool_access_options(db)
 
 
-@router.get("/tools/{source_type}/{tool_name}/access", response_model=ToolAccessResponse)
+@router.get(
+    "/tools/{source_type}/{tool_name}/access", response_model=ToolAccessResponse
+)
 async def get_tool_access(
     source_type: ToolSourceType,
     tool_name: str,
@@ -327,9 +260,22 @@ async def get_tool_access(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    grants = [] if tool.source_type == "builtin" else AccessService(db).list_resource_grants(
-        resource_type=ResourceType.TOOL,
-        resource_id=tool.key,
+    try:
+        require_tool_access(
+            db,
+            current_user=current_user,
+            tool=tool,
+            access_level=AccessLevel.USE,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    grants = (
+        []
+        if tool.source_type == "builtin"
+        else AccessService(db).list_resource_grants(
+            resource_type=ResourceType.TOOL,
+            resource_id=tool.key,
+        )
     )
     return _serialize_tool_access(
         tool_name=tool.name,
@@ -339,7 +285,111 @@ async def get_tool_access(
     )
 
 
-@router.put("/tools/{source_type}/{tool_name}/access", response_model=ToolAccessResponse)
+@router.get("/tools/{source_type}/{tool_name}/source")
+async def get_tool_source(
+    source_type: ToolSourceType,
+    tool_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
+) -> dict[str, str]:
+    """Read one tool source when the current user has use access."""
+    try:
+        if source_type == "builtin":
+            return {"name": tool_name, "source": _read_builtin_tool_source(tool_name)}
+        tool = get_tool_resource(
+            db,
+            current_user=current_user,
+            source_type=source_type,
+            tool_name=tool_name,
+        )
+        return {
+            "name": tool.name,
+            "source": read_manual_tool_source(
+                db,
+                current_user=current_user,
+                tool=tool,
+            ),
+        }
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/tools/{source_type}/{tool_name}/source")
+async def update_tool_source(
+    source_type: ToolSourceType,
+    tool_name: str,
+    body: ToolWriteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
+) -> dict[str, str]:
+    """Update one manual tool source when the current user has edit access."""
+    if source_type == "builtin":
+        raise HTTPException(status_code=403, detail="Built-in tools are read-only.")
+    try:
+        try:
+            tool = get_tool_resource(
+                db,
+                current_user=current_user,
+                source_type=source_type,
+                tool_name=tool_name,
+            )
+        except FileNotFoundError:
+            tool = create_manual_tool_source(
+                db,
+                current_user=current_user,
+                tool_name=tool_name,
+                source=body.source,
+            )
+            return {"name": tool.name, "status": "ok"}
+        update_manual_tool_source(
+            db,
+            current_user=current_user,
+            tool=tool,
+            source=body.source,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"name": tool_name, "status": "ok"}
+
+
+@router.delete("/tools/{source_type}/{tool_name}/source")
+async def delete_tool_source(
+    source_type: ToolSourceType,
+    tool_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
+) -> dict[str, str]:
+    """Delete one manual tool source when the current user has edit access."""
+    if source_type == "builtin":
+        raise HTTPException(status_code=403, detail="Built-in tools are read-only.")
+    try:
+        tool = get_tool_resource(
+            db,
+            current_user=current_user,
+            source_type=source_type,
+            tool_name=tool_name,
+        )
+        delete_manual_tool(db, current_user=current_user, tool=tool)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"name": tool_name, "status": "deleted"}
+
+
+@router.put(
+    "/tools/{source_type}/{tool_name}/access", response_model=ToolAccessResponse
+)
 async def update_tool_access(
     source_type: ToolSourceType,
     tool_name: str,
@@ -388,115 +438,6 @@ async def update_tool_access(
             resource_id=tool.key,
         ),
     )
-
-
-@router.get("/tools/private/{tool_name}")
-async def get_private_tool(
-    tool_name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> dict[str, str]:
-    """Get the source code of a private tool.
-
-    Args:
-        tool_name: Stem of the tool file (without ``.py``).
-
-    Returns:
-        Dict with ``name`` and ``source`` keys.
-
-    Raises:
-        404: If the tool file does not exist.
-    """
-    try:
-        source = read_user_tool(current_user.username, tool_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"name": tool_name, "source": source}
-
-
-@router.put("/tools/private/{tool_name}")
-async def upsert_private_tool(
-    tool_name: str,
-    body: ToolWriteRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> dict[str, str]:
-    """Create or update a private tool source file.
-
-    Args:
-        tool_name: Stem of the tool file (without ``.py``).
-        body: Request body containing the Python ``source`` code.
-
-    Returns:
-        Confirmation dict with ``name`` and ``status`` keys.
-    """
-    try:
-        write_user_tool(current_user.username, tool_name, body.source)
-        get_tool_resource(
-            db,
-            current_user=current_user,
-            source_type="manual",
-            tool_name=tool_name,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"name": tool_name, "status": "ok"}
-
-
-@router.delete("/tools/private/{tool_name}")
-async def delete_private_tool(
-    tool_name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> dict[str, str]:
-    """Delete a private tool source file.
-
-    Args:
-        tool_name: Stem of the tool file (without ``.py``).
-
-    Returns:
-        Confirmation dict with ``name`` and ``status`` keys.
-
-    Raises:
-        404: If the tool file does not exist.
-    """
-    try:
-        delete_user_tool(current_user.username, tool_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    delete_manual_tool_resource(db, owner=current_user, tool_name=tool_name)
-    return {"name": tool_name, "status": "deleted"}
-
-
-# ---------------------------------------------------------------------------
-# Legacy endpoint - kept for backward compatibility
-# ---------------------------------------------------------------------------
-
-
-@router.get("/tools")
-async def get_tools(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
-) -> list[dict[str, Any]]:
-    """Get all registered shared tools (legacy endpoint).
-
-    Returns:
-        List of tool metadata including name, description, and parameters.
-    """
-    tool_manager = get_tool_manager()
-    return [
-        {
-            "name": t.name,
-            "description": t.description,
-            "parameters": t.parameters,
-            "tool_type": t.tool_type,
-        }
-        for t in tool_manager.list_tools()
-    ]
 
 
 # ---------------------------------------------------------------------------

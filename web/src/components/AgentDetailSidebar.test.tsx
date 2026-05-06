@@ -20,10 +20,8 @@ vi.mock("@/utils/api", () => ({
   getAgentWebSearchBindings: vi.fn(),
   getChannels: vi.fn(),
   getMediaGenerationProviders: vi.fn(),
-  getPrivateSkills: vi.fn(),
-  getPrivateTools: vi.fn(),
-  getSharedSkills: vi.fn(),
-  getSharedTools: vi.fn(),
+  getUsableSkills: vi.fn(),
+  getUsableTools: vi.fn(),
   getWebSearchProviders: vi.fn(),
 }));
 
@@ -64,10 +62,8 @@ import {
   getAgentWebSearchBindings,
   getChannels,
   getMediaGenerationProviders,
-  getPrivateSkills,
-  getPrivateTools,
-  getSharedSkills,
-  getSharedTools,
+  getUsableSkills,
+  getUsableTools,
   getWebSearchProviders,
 } from "@/utils/api";
 
@@ -118,10 +114,8 @@ describe("AgentDetailSidebar", () => {
     const user = userEvent.setup();
     const onExtensionBindingsChanged = vi.fn().mockResolvedValue(undefined);
 
-    vi.mocked(getSharedTools).mockResolvedValue([]);
-    vi.mocked(getPrivateTools).mockResolvedValue([]);
-    vi.mocked(getSharedSkills).mockResolvedValue([]);
-    vi.mocked(getPrivateSkills).mockResolvedValue([]);
+    vi.mocked(getUsableTools).mockResolvedValue([]);
+    vi.mocked(getUsableSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
     vi.mocked(getMediaGenerationProviders).mockResolvedValue([]);
@@ -173,6 +167,10 @@ describe("AgentDetailSidebar", () => {
               hub_package_version_id: null,
               hub_artifact_digest: null,
               installed_by: "alice",
+              creator_id: 1,
+              use_scope: "selected",
+              read_only: false,
+              has_installation_configuration: false,
               status: "active",
               created_at: "2026-04-03T00:00:00+00:00",
               updated_at: "2026-04-03T00:00:00+00:00",
@@ -243,10 +241,8 @@ describe("AgentDetailSidebar", () => {
   });
 
   it("renders the extension logo in the sidebar when one is available", async () => {
-    vi.mocked(getSharedTools).mockResolvedValue([]);
-    vi.mocked(getPrivateTools).mockResolvedValue([]);
-    vi.mocked(getSharedSkills).mockResolvedValue([]);
-    vi.mocked(getPrivateSkills).mockResolvedValue([]);
+    vi.mocked(getUsableTools).mockResolvedValue([]);
+    vi.mocked(getUsableSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
     vi.mocked(getMediaGenerationProviders).mockResolvedValue([
@@ -349,6 +345,10 @@ describe("AgentDetailSidebar", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
             status: "active",
             created_at: "2026-04-03T00:00:00+00:00",
             updated_at: "2026-04-03T00:00:00+00:00",
@@ -414,10 +414,8 @@ describe("AgentDetailSidebar", () => {
       name: "Claude Agent",
     };
 
-    vi.mocked(getSharedTools).mockResolvedValue([]);
-    vi.mocked(getPrivateTools).mockResolvedValue([]);
-    vi.mocked(getSharedSkills).mockResolvedValue([]);
-    vi.mocked(getPrivateSkills).mockResolvedValue([]);
+    vi.mocked(getUsableTools).mockResolvedValue([]);
+    vi.mocked(getUsableSkills).mockResolvedValue([]);
     vi.mocked(getChannels).mockResolvedValue([]);
     vi.mocked(getAgentChannels).mockResolvedValue([]);
     vi.mocked(getMediaGenerationProviders).mockResolvedValue([]);

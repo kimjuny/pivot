@@ -173,6 +173,15 @@ async def get_agents(
     return result
 
 
+@router.get("/agents/access-options", response_model=AgentAccessOptionsResponse)
+async def get_agent_create_access_options(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> AgentAccessOptionsResponse:
+    """Return selectable principals for a new agent access editor."""
+    return _serialize_agent_access_options(db, UserService(db).list_users())
+
+
 @router.post("/agents", response_model=AgentResponse, status_code=201)
 async def create_agent(
     agent_data: AgentCreate,
@@ -205,6 +214,14 @@ async def create_agent(
         max_iteration=agent_data.max_iteration,
     )
     AccessService(db).grant_creator_edit(agent=agent, user=current_user)
+    AccessService(db).set_agent_access(
+        agent=agent,
+        use_scope=agent_data.use_scope,
+        use_user_ids=set(agent_data.use_user_ids),
+        use_group_ids=set(agent_data.use_group_ids),
+        edit_user_ids=set(),
+        edit_group_ids=set(),
+    )
     AgentSnapshotService(db).save_draft(
         agent.id or 0,
         saved_by=current_user.username,
@@ -485,8 +502,8 @@ async def update_agent_access(
         use_scope=payload.use_scope,
         use_user_ids=set(payload.use_user_ids),
         use_group_ids=set(payload.use_group_ids),
-        edit_user_ids=set(payload.edit_user_ids),
-        edit_group_ids=set(payload.edit_group_ids),
+        edit_user_ids=set(),
+        edit_group_ids=set(),
     )
     return _serialize_agent_access(
         agent_id=agent_id,

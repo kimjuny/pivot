@@ -68,7 +68,7 @@ class ReactContextUsageService:
 
         Args:
             agent_id: Agent whose prompt should be estimated.
-            username: Authenticated username used for private tool and file access.
+            username: Authenticated username used for user-authored tool and file access.
             session_id: Optional conversation session for session-memory lookup.
             task_id: Optional active task whose runtime messages should be measured.
             draft_message: Current unsent composer text.
@@ -436,14 +436,14 @@ class ReactContextUsageService:
         return runtime_config
 
     @staticmethod
-    def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
-        """Parse an optional JSON string allowlist into a set of names."""
+    def _parse_name_allowlist(raw_json: str | None) -> set[str]:
+        """Parse an optional JSON string selection into a set of names."""
         if raw_json is None:
-            return None
+            return set()
 
         text = raw_json.strip()
         if not text:
-            return None
+            return set()
 
         try:
             parsed = json.loads(text)

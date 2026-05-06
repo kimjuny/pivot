@@ -10,7 +10,13 @@ from app.models.tool import ToolResource
 from app.models.user import User
 from app.orchestration.tool import get_tool_manager
 from app.services.access_service import AccessService
-from app.services.workspace_service import load_user_tool_metadata, read_user_tool
+from app.services.workspace_service import (
+    delete_user_tool,
+    list_user_tools,
+    load_user_tool_metadata,
+    read_user_tool,
+    write_user_tool,
+)
 from sqlmodel import select
 
 if TYPE_CHECKING:
@@ -31,6 +37,20 @@ def manual_tool_key(user_id: int, tool_name: str) -> str:
 
 def _get_by_key(db: Session, key: str) -> ToolResource | None:
     return db.exec(select(ToolResource).where(ToolResource.key == key)).first()
+
+
+def _get_by_name(
+    db: Session,
+    *,
+    source_type: ToolSourceType,
+    tool_name: str,
+) -> ToolResource | None:
+    return db.exec(
+        select(ToolResource).where(
+            ToolResource.source_type == source_type,
+            ToolResource.name == tool_name,
+        )
+    ).first()
 
 
 def ensure_builtin_tool_resource(db: Session, tool_name: str) -> ToolResource:
@@ -73,6 +93,13 @@ def ensure_manual_tool_resource(
 
     key = manual_tool_key(owner.id, tool_name)
     tool = _get_by_key(db, key)
+    existing_by_name = _get_by_name(db, source_type="manual", tool_name=tool_name)
+    if (
+        existing_by_name is not None
+        and existing_by_name.key != key
+        and existing_by_name.creator_id != owner.id
+    ):
+        raise ValueError(f"Tool '{tool_name}' already exists.")
     if tool is None:
         tool = ToolResource(
             key=key,
@@ -109,7 +136,115 @@ def get_tool_resource(
     """Return auth metadata for one tool visible in the management UI."""
     if source_type == "builtin":
         return ensure_builtin_tool_resource(db, tool_name)
+    tool = _get_by_name(db, source_type="manual", tool_name=tool_name)
+    if tool is not None:
+        return tool
     return ensure_manual_tool_resource(db, owner=current_user, tool_name=tool_name)
+
+
+def require_tool_access(
+    db: Session,
+    *,
+    current_user: User,
+    tool: ToolResource,
+    access_level: AccessLevel,
+) -> None:
+    """Raise unless the current user has the requested tool access."""
+    if tool.source_type == "builtin":
+        if access_level == AccessLevel.USE:
+            return
+        raise PermissionError("Built-in tools are read-only.")
+    AccessService(db).require_resource_access(
+        user=current_user,
+        resource_type=ResourceType.TOOL,
+        resource_id=tool.key,
+        access_level=access_level,
+        creator_user_id=tool.creator_id,
+        use_scope=tool.use_scope,
+    )
+
+
+def _manual_tool_owner(db: Session, tool: ToolResource) -> User:
+    if tool.creator_id is None:
+        raise ValueError("Manual tools require a creator.")
+    owner = db.get(User, tool.creator_id)
+    if owner is None:
+        raise ValueError("Tool creator not found.")
+    return owner
+
+
+def read_manual_tool_source(
+    db: Session,
+    *,
+    current_user: User,
+    tool: ToolResource,
+) -> str:
+    """Read one manual tool source when the current user has use access."""
+    require_tool_access(
+        db,
+        current_user=current_user,
+        tool=tool,
+        access_level=AccessLevel.USE,
+    )
+    owner = _manual_tool_owner(db, tool)
+    return read_user_tool(owner.username, tool.name)
+
+
+def update_manual_tool_source(
+    db: Session,
+    *,
+    current_user: User,
+    tool: ToolResource,
+    source: str,
+) -> None:
+    """Update one manual tool source when the current user has edit access."""
+    require_tool_access(
+        db,
+        current_user=current_user,
+        tool=tool,
+        access_level=AccessLevel.EDIT,
+    )
+    owner = _manual_tool_owner(db, tool)
+    write_user_tool(owner.username, tool.name, source)
+    tool.updated_at = datetime.now(UTC)
+    db.add(tool)
+    db.commit()
+    db.refresh(tool)
+
+
+def create_manual_tool_source(
+    db: Session,
+    *,
+    current_user: User,
+    tool_name: str,
+    source: str,
+) -> ToolResource:
+    """Create one manual tool source and initialize auth metadata."""
+    write_user_tool(current_user.username, tool_name, source)
+    return ensure_manual_tool_resource(db, owner=current_user, tool_name=tool_name)
+
+
+def delete_manual_tool(
+    db: Session,
+    *,
+    current_user: User,
+    tool: ToolResource,
+) -> None:
+    """Delete one manual tool source and auth metadata with edit access."""
+    require_tool_access(
+        db,
+        current_user=current_user,
+        tool=tool,
+        access_level=AccessLevel.EDIT,
+    )
+    owner = _manual_tool_owner(db, tool)
+    delete_user_tool(owner.username, tool.name)
+    AccessService(db)._delete_resource_grants_in_session(
+        resource_type=ResourceType.TOOL,
+        resource_id=tool.key,
+    )
+    db.delete(tool)
+    db.commit()
 
 
 def set_tool_access(
@@ -185,6 +320,11 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
     access_service = AccessService(db)
     rows: list[dict[str, object]] = []
 
+    for entry in list_user_tools(current_user.username):
+        tool_name = entry.get("name")
+        if isinstance(tool_name, str):
+            ensure_manual_tool_resource(db, owner=current_user, tool_name=tool_name)
+
     for metadata in get_tool_manager().list_tools():
         ensure_builtin_tool_resource(db, metadata.name)
         rows.append(
@@ -195,6 +335,7 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
                 "tool_type": metadata.tool_type,
                 "source_type": "builtin",
                 "read_only": True,
+                "creator_id": None,
             }
         )
 
@@ -215,6 +356,14 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
         if owner is None:
             continue
         metadata = load_user_tool_metadata(owner.username, tool.name)
+        can_edit = access_service.has_resource_access(
+            user=current_user,
+            resource_type=ResourceType.TOOL,
+            resource_id=tool.key,
+            access_level=AccessLevel.EDIT,
+            creator_user_id=tool.creator_id,
+            use_scope=tool.use_scope,
+        )
         rows.append(
             {
                 "name": tool.name,
@@ -222,7 +371,8 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
                 "parameters": metadata.parameters if metadata is not None else {},
                 "tool_type": metadata.tool_type if metadata is not None else "normal",
                 "source_type": "manual",
-                "read_only": tool.creator_id != current_user.id,
+                "read_only": not can_edit,
+                "creator_id": tool.creator_id,
             }
         )
 

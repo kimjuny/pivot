@@ -25,8 +25,8 @@ def submit_skill_change(
        resume the task automatically after the user decides.
 
     Notes:
-        - V1 only syncs to creator-owned private skills.
-        - Built-in, foreign-owned, and shared skill targets are rejected.
+        - V1 syncs to creator-owned Skills only.
+        - Built-in and foreign-owned Skill targets are rejected.
 
     Args:
         skill_path (optional, str): Sandbox-local skill directory under

@@ -20,19 +20,23 @@ from app.services.skill_import_progress_service import (
 )
 from app.services.skill_service import (
     BundleImportFile,
-    delete_user_skill,
+    create_skill_directory,
+    create_skill_file,
+    delete_skill_path,
+    delete_skill_source,
     get_skill_by_name,
     install_archive_skill,
     install_bundle_skill,
     install_github_skill,
-    list_private_skills,
-    list_shared_skills,
+    list_visible_skill_directory,
     list_visible_skills,
     probe_github_skill_import,
-    read_shared_skill,
-    read_user_skill,
+    read_visible_skill_file,
+    read_visible_skill_source,
+    save_user_skill_source,
     set_skill_access,
-    upsert_user_skill,
+    update_skill_file,
+    update_skill_source,
 )
 from app.services.user_service import UserService
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -52,6 +56,12 @@ class SkillWriteRequest(BaseModel):
     source: str
 
 
+class SkillCreateRequest(SkillWriteRequest):
+    """Request payload for creating one Skill."""
+
+    skill_name: str
+
+
 class GitHubSkillProbeRequest(BaseModel):
     """Request payload for probing a GitHub repository for skills."""
 
@@ -65,7 +75,6 @@ class GitHubSkillImportRequest(BaseModel):
     github_url: str
     ref: str
     ref_type: Literal["branch", "tag"]
-    kind: Literal["private", "shared"]
     remote_directory_name: str
     skill_name: str
 
@@ -75,8 +84,52 @@ class BundleSkillImportRequest(BaseModel):
 
     relative_paths: list[str]
     bundle_name: str
-    kind: Literal["private", "shared"]
     skill_name: str
+
+
+class SkillFileWriteRequest(BaseModel):
+    """Payload for updating one file inside a skill directory."""
+
+    path: str
+    content: str
+
+
+class SkillFileCreateRequest(BaseModel):
+    """Payload for creating one file inside a skill directory."""
+
+    path: str
+    content: str = ""
+
+
+class SkillDirectoryCreateRequest(BaseModel):
+    """Payload for creating one directory inside a skill directory."""
+
+    path: str
+
+
+class SkillFileTreeEntryResponse(BaseModel):
+    """One file or directory entry inside a skill bundle."""
+
+    path: str
+    name: str
+    kind: Literal["directory", "file"]
+    parent_path: str | None = None
+    size_bytes: int | None = None
+
+
+class SkillFileTreeResponse(BaseModel):
+    """Direct directory listing for one skill bundle path."""
+
+    root_path: str
+    entries: list[SkillFileTreeEntryResponse]
+
+
+class SkillFileContentResponse(BaseModel):
+    """Text content for one skill file."""
+
+    path: str
+    content: str
+    encoding: Literal["utf-8"] = "utf-8"
 
 
 class SkillArchiveImportJobResponse(BaseModel):
@@ -184,24 +237,6 @@ def _serialize_skill_access_options(db: Session) -> SkillAccessOptionsResponse:
     )
 
 
-@router.get("/skills/shared")
-async def get_shared_skills(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
-) -> list[dict[str, Any]]:
-    """List shared skills visible to the current user."""
-    return list_shared_skills(db, current_user.username)
-
-
-@router.get("/skills/private")
-async def get_private_skills(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
-) -> list[dict[str, Any]]:
-    """List private skills for current user."""
-    return list_private_skills(db, current_user.username)
-
-
 @router.get("/skills/access-options", response_model=SkillAccessOptionsResponse)
 async def get_skill_create_access_options(
     db: Session = Depends(get_db),
@@ -218,6 +253,36 @@ async def get_usable_skills(
 ) -> list[dict[str, Any]]:
     """List skills the current Studio user can select for agents."""
     return list_visible_skills(db, current_user.username)
+
+
+@router.get("/skills/manage")
+async def get_manageable_skills(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> list[dict[str, Any]]:
+    """List skills visible in the Studio management page."""
+    return list_visible_skills(db, current_user.username)
+
+
+@router.post("/skills")
+async def create_skill(
+    body: SkillCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Create one user-authored Skill with unified Auth defaults."""
+    try:
+        metadata = save_user_skill_source(
+            db,
+            current_user,
+            body.skill_name,
+            body.source,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"name": body.skill_name, "status": "ok", "metadata": metadata}
 
 
 @router.get(
@@ -313,21 +378,226 @@ async def update_skill_access(
     )
 
 
-@router.get("/skills/shared/{skill_name}")
-async def get_shared_skill_source(
+@router.get("/skills/{skill_name}/files/tree", response_model=SkillFileTreeResponse)
+async def get_skill_file_tree(
     skill_name: str,
+    path: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
-) -> dict[str, Any]:
-    """Read one shared skill source visible to the current user."""
+) -> SkillFileTreeResponse:
+    """Return direct children for one visible skill directory."""
     try:
-        return read_shared_skill(db, current_user.username, skill_name)
+        entries = list_visible_skill_directory(
+            db,
+            current_user.username,
+            skill_name,
+            path,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SkillFileTreeResponse(
+        root_path=path or ".",
+        entries=[
+            SkillFileTreeEntryResponse(
+                path=entry.path,
+                name=entry.name,
+                kind="directory" if entry.kind == "directory" else "file",
+                parent_path=entry.parent_path,
+                size_bytes=entry.size_bytes,
+            )
+            for entry in entries
+        ],
+    )
+
+
+@router.get(
+    "/skills/{skill_name}/files/content", response_model=SkillFileContentResponse
+)
+async def get_skill_file_content(
+    skill_name: str,
+    path: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> SkillFileContentResponse:
+    """Read one UTF-8 file from a visible skill directory."""
+    try:
+        content = read_visible_skill_file(db, current_user.username, skill_name, path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Skill file is not valid UTF-8 text.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SkillFileContentResponse(path=path, content=content)
+
+
+@router.put("/skills/{skill_name}/files/content")
+async def update_skill_file_content(
+    skill_name: str,
+    payload: SkillFileWriteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Update one UTF-8 file inside an editable skill directory."""
+    try:
+        metadata = update_skill_file(
+            db,
+            current_user,
+            skill_name,
+            payload.path,
+            payload.content,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except UnicodeEncodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Skill file content must be valid UTF-8 text.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", "metadata": metadata}
+
+
+@router.post("/skills/{skill_name}/files/content")
+async def create_skill_file_content(
+    skill_name: str,
+    payload: SkillFileCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Create one UTF-8 file inside an editable skill directory."""
+    try:
+        metadata = create_skill_file(
+            db,
+            current_user,
+            skill_name,
+            payload.path,
+            payload.content,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except UnicodeEncodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Skill file content must be valid UTF-8 text.",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", "metadata": metadata}
+
+
+@router.post("/skills/{skill_name}/files/directory")
+async def create_skill_directory_path(
+    skill_name: str,
+    payload: SkillDirectoryCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Create one directory inside an editable skill directory."""
+    try:
+        metadata = create_skill_directory(
+            db,
+            current_user,
+            skill_name,
+            payload.path,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", "metadata": metadata}
+
+
+@router.delete("/skills/{skill_name}/files/path")
+async def delete_skill_file_path(
+    skill_name: str,
+    path: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Delete one file or directory inside an editable skill directory."""
+    try:
+        metadata = delete_skill_path(db, current_user, skill_name, path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok", "metadata": metadata}
+
+
+@router.get("/skills/{skill_name}/source")
+async def get_skill_source(
+    skill_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Read one skill source when the current user has use access."""
+    try:
+        return read_visible_skill_source(db, current_user.username, skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/skills/{skill_name}/source")
+async def update_existing_skill_source(
+    skill_name: str,
+    body: SkillWriteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, Any]:
+    """Update one existing skill source when the current user has edit access."""
+    try:
+        metadata = update_skill_source(db, current_user, skill_name, body.source)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"name": skill_name, "status": "ok", "metadata": metadata}
+
+
+@router.delete("/skills/{skill_name}")
+async def delete_skill(
+    skill_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
+) -> dict[str, str]:
+    """Delete one editable Skill."""
+    skill = get_skill_by_name(db, skill_name)
+    if skill is None:
+        raise HTTPException(status_code=404, detail="Skill not found.")
+    try:
+        delete_skill_source(db, current_user, skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"name": skill_name, "status": "deleted"}
 
 
 @router.post("/skills/import/bundle")
@@ -347,7 +617,6 @@ async def import_bundle_skill_endpoint(
             {
                 "relative_paths": form_data.getlist("relative_paths"),
                 "bundle_name": form_data.get("bundle_name"),
-                "kind": form_data.get("kind"),
                 "skill_name": form_data.get("skill_name"),
             }
         )
@@ -386,7 +655,6 @@ async def import_bundle_skill_endpoint(
             db,
             current_user,
             bundle_name=parsed_form.bundle_name,
-            kind=parsed_form.kind,
             skill_name=parsed_form.skill_name,
             files=bundle_files,
         )
@@ -488,15 +756,12 @@ async def import_archive_skill_endpoint(
     if job.completed:
         raise HTTPException(status_code=409, detail="Skill import job is already done.")
 
-    form_data = await request.form(max_files=1, max_fields=4)
+    form_data = await request.form(max_files=1, max_fields=3)
     upload = form_data.get("archive")
     if not isinstance(upload, StarletteUploadFile):
         raise HTTPException(status_code=422, detail="Archive file is required.")
 
-    kind = form_data.get("kind")
     skill_name = form_data.get("skill_name")
-    if not isinstance(kind, str) or kind not in {"private", "shared"}:
-        raise HTTPException(status_code=422, detail="Invalid archive import fields.")
     if not isinstance(skill_name, str):
         raise HTTPException(status_code=422, detail="Invalid archive import fields.")
 
@@ -542,7 +807,6 @@ async def import_archive_skill_endpoint(
                 worker_user,
                 archive_path=archive_path,
                 archive_filename=archive_filename,
-                kind=kind,
                 skill_name=skill_name,
                 progress=publish_progress,
             )
@@ -583,48 +847,6 @@ async def import_archive_skill_endpoint(
     return {"status": "imported", "metadata": metadata}
 
 
-@router.get("/skills/{kind}/{skill_name}")
-async def get_user_skill_source(
-    kind: Literal["private", "shared"],
-    skill_name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
-) -> dict[str, Any]:
-    """Read a user-owned skill source from private/shared namespace."""
-    try:
-        return read_user_skill(db, current_user.username, kind, skill_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.put("/skills/{kind}/{skill_name}")
-async def upsert_skill_source(
-    kind: Literal["private", "shared"],
-    skill_name: str,
-    body: SkillWriteRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
-) -> dict[str, Any]:
-    """Create or update a user-owned markdown skill."""
-    try:
-        metadata = upsert_user_skill(db, current_user, kind, skill_name, body.source)
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {
-        "name": skill_name,
-        "kind": kind,
-        "status": "ok",
-        "metadata": metadata,
-    }
-
-
 @router.post("/skills/import/github/probe")
 async def probe_github_skill(
     body: GitHubSkillProbeRequest,
@@ -657,7 +879,6 @@ async def import_github_skill(
             github_url=body.github_url,
             ref=body.ref,
             ref_type=body.ref_type,
-            kind=body.kind,
             remote_directory_name=body.remote_directory_name,
             skill_name=body.skill_name,
         )
@@ -667,23 +888,3 @@ async def import_github_skill(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"status": "imported", "metadata": metadata}
-
-
-@router.delete("/skills/{kind}/{skill_name}")
-async def delete_skill_source(
-    kind: Literal["private", "shared"],
-    skill_name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
-) -> dict[str, str]:
-    """Delete a user-owned markdown skill."""
-    try:
-        delete_user_skill(db, current_user, kind, skill_name)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return {"name": skill_name, "kind": kind, "status": "deleted"}

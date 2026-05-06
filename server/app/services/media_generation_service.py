@@ -8,7 +8,7 @@ import posixpath
 import time
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib import request as urllib_request
 
 from app.media_generation.types import (
@@ -28,6 +28,9 @@ from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.provider_registry_service import ProviderRegistryService
 from sqlmodel import Session, col, select
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 def _load_json_object(raw_value: str | None) -> dict[str, Any]:
@@ -112,9 +115,33 @@ class MediaGenerationService:
             enabled_only=enabled_only,
         )
 
-    def list_catalog(self, agent_id: int | None = None) -> list[dict[str, Any]]:
+    def is_provider_usable_by_user(
+        self,
+        *,
+        user: User | None,
+        provider: Any,
+    ) -> bool:
+        """Return whether one provider is selectable by the current Studio user."""
+        extension_package_id = provider.manifest.extension_name
+        if not extension_package_id or user is None:
+            return True
+        return ExtensionService(self.db).is_package_usable_by_user(
+            user=user,
+            package_id=extension_package_id,
+        )
+
+    def list_catalog(
+        self,
+        agent_id: int | None = None,
+        user: User | None = None,
+    ) -> list[dict[str, Any]]:
         """Return installed media-generation providers visible to the agent."""
         providers = self._list_media_generation_providers()
+        providers = [
+            provider
+            for provider in providers
+            if self.is_provider_usable_by_user(user=user, provider=provider)
+        ]
         if agent_id is not None:
             providers = [
                 provider
@@ -191,9 +218,14 @@ class MediaGenerationService:
         enabled: bool,
         auth_config: dict[str, Any],
         runtime_config: dict[str, Any],
+        user: User | None = None,
     ) -> MediaProviderBindingResponse:
         """Create a new agent media-provider binding after validation."""
         provider = self._get_media_generation_provider(provider_key)
+        if not self.is_provider_usable_by_user(user=user, provider=provider):
+            raise ValueError(
+                "Media generation provider is not available to the caller."
+            )
         if not self._is_provider_available_to_agent(
             agent_id=agent_id,
             provider=provider,
@@ -301,9 +333,14 @@ class MediaGenerationService:
         provider_key: str,
         auth_config: dict[str, Any],
         runtime_config: dict[str, Any],
+        user: User | None = None,
     ) -> dict[str, Any]:
         """Run a provider health check against unsaved form values."""
         provider = self._get_media_generation_provider(provider_key)
+        if not self.is_provider_usable_by_user(user=user, provider=provider):
+            raise ValueError(
+                "Media generation provider is not available to the caller."
+            )
         provider.validate_config(auth_config, runtime_config)
         result = provider.test_connection(
             auth_config=auth_config,
@@ -505,13 +542,9 @@ class MediaGenerationService:
             sandbox_path=item.source_path,
         )
         if not host_path.exists():
-            raise ValueError(
-                f"Media input path does not exist: {item.source_path}"
-            )
+            raise ValueError(f"Media input path does not exist: {item.source_path}")
         if not host_path.is_file():
-            raise ValueError(
-                f"Media input path must be a file: {item.source_path}"
-            )
+            raise ValueError(f"Media input path must be a file: {item.source_path}")
 
         file_bytes = host_path.read_bytes()
         file_service = FileService(self.db)
@@ -519,7 +552,9 @@ class MediaGenerationService:
             verified = file_service.verify_image_upload(host_path.name, file_bytes)
             return item.model_copy(
                 update={
-                    "base64_data": base64.b64encode(verified.file_bytes).decode("ascii"),
+                    "base64_data": base64.b64encode(verified.file_bytes).decode(
+                        "ascii"
+                    ),
                     "mime_type": verified.mime_type,
                     "file_name": host_path.name,
                     "source_path": _workspace_path(item.source_path),
@@ -562,7 +597,9 @@ class MediaGenerationService:
     ) -> list[str]:
         """Persist provider-returned artifacts under the active workspace root."""
         if not artifacts:
-            raise RuntimeError("The provider completed without returning any artifacts.")
+            raise RuntimeError(
+                "The provider completed without returning any artifacts."
+            )
 
         normalized_output_path = _workspace_path(output_path)
         file_service = FileService(self.db)

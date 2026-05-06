@@ -2,7 +2,7 @@
 
 User-owned runtime files live under the unified storage namespace
 ``users/{username}/...``. This service provides CRUD operations over the
-workspace-backed ``tools/`` sub-folder, keeping private tools as plain ``.py``
+workspace-backed ``tools/`` sub-folder, keeping user-authored tools as plain ``.py``
 source files on disk.
 
 The service intentionally works with raw source code strings so that:
@@ -370,7 +370,7 @@ def delete_user_tool(username: str, tool_name: str) -> None:
 
 
 def load_all_user_tool_metadata(username: str) -> list[ToolMetadata]:
-    """Load ToolMetadata for every private tool file belonging to a user.
+    """Load ToolMetadata for every user-authored tool file belonging to a user.
 
     Args:
         username: The authenticated username.

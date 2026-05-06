@@ -19,6 +19,7 @@ from typing import Any
 from app.channels.types import ChannelManifest
 from app.config import get_settings
 from app.media_generation.types import MediaGenerationProviderManifest
+from app.models.access import AccessLevel, PrincipalType, ResourceType
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import (
     AgentChannelBinding,
@@ -30,6 +31,7 @@ from app.models.channel import (
 from app.models.extension import AgentExtensionBinding, ExtensionInstallation
 from app.models.media_generation import AgentMediaProviderBinding
 from app.models.skill import Skill
+from app.models.user import User
 from app.models.web_search import AgentWebSearchBinding
 from app.orchestration.skills.skill_files import parse_front_matter
 from app.orchestration.tool import ToolManager, get_tool_manager
@@ -38,6 +40,7 @@ from app.orchestration.tool.builtin.programmatic_tool_call import (
 )
 from app.orchestration.tool.metadata import ToolMetadata
 from app.orchestration.web_search.types import WebSearchProviderManifest
+from app.services.access_service import AccessService
 from app.services.artifact_storage_service import ExtensionArtifactStorageService
 from app.services.provider_registry_service import (
     ProviderRegistryService,
@@ -326,9 +329,7 @@ def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                 "type": contribution_type,
                 "name": raw_name.strip(),
                 "description": (
-                    raw_description.strip()
-                    if isinstance(raw_description, str)
-                    else ""
+                    raw_description.strip() if isinstance(raw_description, str) else ""
                 ),
             }
             if contribution_type == "chat_surface":
@@ -1212,14 +1213,14 @@ def _load_tool_metadata_from_file(
     raise ValueError(f"Tool entrypoint '{source_path}' does not export a tool.")
 
 
-def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
-    """Parse the existing JSON allowlist format used on agent rows."""
+def _parse_name_allowlist(raw_json: str | None) -> set[str]:
+    """Parse the existing JSON selection format used on agent rows."""
     if raw_json is None:
-        return None
+        return set()
 
     text = raw_json.strip()
     if text == "":
-        return None
+        return set()
 
     try:
         parsed = json.loads(text)
@@ -1239,6 +1240,131 @@ class ExtensionService:
         """Store the active database session."""
         self.db = db
         self.artifact_storage = ExtensionArtifactStorageService()
+
+    def _user_by_username(self, username: str | None) -> User | None:
+        """Return a persisted user by username when available."""
+        if username is None:
+            return None
+        normalized_username = username.strip()
+        if not normalized_username:
+            return None
+        return self.db.exec(
+            select(User).where(User.username == normalized_username)
+        ).first()
+
+    def _grant_installer_edit(
+        self,
+        *,
+        installation: ExtensionInstallation,
+        installed_by: str | None,
+    ) -> None:
+        """Grant extension edit access to the installing user."""
+        installer = self._user_by_username(installed_by)
+        if installation.id is None or installer is None or installer.id is None:
+            return
+        installation.creator_id = installer.id
+        installation.use_scope = "selected"
+        self.db.add(installation)
+        self.db.commit()
+        self.db.refresh(installation)
+        AccessService(self.db).grant_access(
+            resource_type=ResourceType.EXTENSION,
+            resource_id=installation.id,
+            principal_type=PrincipalType.USER,
+            principal_id=installer.id,
+            access_level=AccessLevel.EDIT,
+        )
+
+    def _has_installation_access(
+        self,
+        *,
+        user: User,
+        installation: ExtensionInstallation,
+        access_level: AccessLevel,
+    ) -> bool:
+        """Return whether a user can use or edit one installed extension."""
+        return AccessService(self.db).has_resource_access(
+            user=user,
+            resource_type=ResourceType.EXTENSION,
+            resource_id=installation.id,
+            access_level=access_level,
+            creator_user_id=installation.creator_id,
+            use_scope=installation.use_scope,
+        )
+
+    def can_edit_installation(
+        self,
+        *,
+        user: User,
+        installation: ExtensionInstallation,
+    ) -> bool:
+        """Return whether a user can edit one installed extension."""
+        return self._has_installation_access(
+            user=user,
+            installation=installation,
+            access_level=AccessLevel.EDIT,
+        )
+
+    def installation_has_setup_fields(
+        self,
+        installation: ExtensionInstallation,
+    ) -> bool:
+        """Return whether one installation declares setup fields."""
+        manifest = self._load_manifest_from_installation(installation)
+        return bool(
+            self._get_configuration_schema_section(
+                manifest=manifest,
+                section_name="installation",
+            ).get("fields")
+        )
+
+    def set_installation_access(
+        self,
+        *,
+        installation: ExtensionInstallation,
+        use_scope: str,
+        use_user_ids: set[int],
+        use_group_ids: set[int],
+        edit_user_ids: set[int],
+        edit_group_ids: set[int],
+    ) -> None:
+        """Replace use/edit grants for one installed extension version."""
+        if installation.id is None:
+            raise ValueError(
+                "Extension installation must be persisted before access can be updated."
+            )
+        if use_scope not in {"all", "selected"}:
+            raise ValueError("use_scope must be 'all' or 'selected'.")
+
+        creator_id = installation.creator_id
+        if creator_id is not None:
+            edit_user_ids = set(edit_user_ids)
+            edit_user_ids.add(creator_id)
+            if use_scope == "selected":
+                use_user_ids = set(use_user_ids)
+                use_user_ids.add(creator_id)
+
+        installation.use_scope = use_scope
+        installation.updated_at = datetime.now(UTC)
+        self.db.add(installation)
+
+        access_service = AccessService(self.db)
+        access_service._replace_resource_grants_in_session(
+            resource_type=ResourceType.EXTENSION,
+            resource_id=installation.id,
+            access_level=AccessLevel.USE,
+            user_ids=use_user_ids if use_scope == "selected" else set(),
+            group_ids=use_group_ids if use_scope == "selected" else set(),
+        )
+        access_service._replace_resource_grants_in_session(
+            resource_type=ResourceType.EXTENSION,
+            resource_id=installation.id,
+            access_level=AccessLevel.EDIT,
+            user_ids=edit_user_ids,
+            group_ids=edit_group_ids,
+        )
+        self.db.commit()
+        self.db.refresh(installation)
 
     def _ensure_materialized_installation_root(
         self,
@@ -1272,10 +1398,70 @@ class ExtensionService:
         )
         return list(self.db.exec(statement).all())
 
+    def list_visible_installations(self, user: User) -> list[ExtensionInstallation]:
+        """Return installed extension versions visible to one Studio user."""
+        return [
+            installation
+            for installation in self.list_installations()
+            if self._has_installation_access(
+                user=user,
+                installation=installation,
+                access_level=AccessLevel.USE,
+            )
+        ]
+
+    def is_package_usable_by_user(self, *, user: User, package_id: str) -> bool:
+        """Return whether a user can use at least one active version of a package."""
+        return any(
+            installation.status == "active"
+            and installation.package_id == package_id
+            and self._has_installation_access(
+                user=user,
+                installation=installation,
+                access_level=AccessLevel.USE,
+            )
+            for installation in self.list_installations()
+        )
+
     def list_packages(self) -> list[dict[str, Any]]:
         """Return installed extensions grouped by package name."""
         grouped: dict[str, list[ExtensionInstallation]] = {}
         for installation in self.list_installations():
+            grouped.setdefault(installation.package_id, []).append(installation)
+
+        packages: list[dict[str, Any]] = []
+        for package_id, installations in grouped.items():
+            ordered_installations = sorted(
+                installations,
+                key=lambda item: self._version_sort_key(item.version),
+                reverse=True,
+            )
+            latest = ordered_installations[0]
+            packages.append(
+                {
+                    "package_id": package_id,
+                    "scope": latest.scope,
+                    "name": latest.name,
+                    "display_name": latest.display_name,
+                    "description": latest.description,
+                    "readme_markdown": self._read_installation_readme_markdown(latest),
+                    "latest_version": latest.version,
+                    "active_version_count": sum(
+                        1 for item in ordered_installations if item.status == "active"
+                    ),
+                    "disabled_version_count": sum(
+                        1 for item in ordered_installations if item.status == "disabled"
+                    ),
+                    "versions": ordered_installations,
+                }
+            )
+
+        return sorted(packages, key=lambda item: str(item["package_id"]))
+
+    def list_visible_packages(self, user: User) -> list[dict[str, Any]]:
+        """Return installed extension packages visible to one Studio user."""
+        grouped: dict[str, list[ExtensionInstallation]] = {}
+        for installation in self.list_visible_installations(user):
             grouped.setdefault(installation.package_id, []).append(installation)
 
         packages: list[dict[str, Any]] = []
@@ -1397,13 +1583,17 @@ class ExtensionService:
             self._load_manifest_from_installation(installation)
         )
 
-    def list_agent_package_choices(self, agent_id: int) -> list[dict[str, Any]]:
+    def list_agent_package_choices(
+        self,
+        agent_id: int,
+        user: User,
+    ) -> list[dict[str, Any]]:
         """Return package-level extension choices for one agent."""
-        packages = self.list_packages()
+        packages = self.list_visible_packages(user)
         bindings = self.list_agent_bindings(agent_id)
         installations = {
             installation.id or 0: installation
-            for installation in self.list_installations()
+            for installation in self.list_visible_installations(user)
         }
         bindings_by_package: dict[str, AgentExtensionBinding] = {}
 
@@ -1686,6 +1876,10 @@ class ExtensionService:
                 should_overwrite_existing = True
             else:
                 self._ensure_materialized_installation_root(existing)
+                self._grant_installer_edit(
+                    installation=existing,
+                    installed_by=installed_by,
+                )
                 return existing
 
         version_root = _installation_version_root(
@@ -1747,6 +1941,10 @@ class ExtensionService:
             self.db.commit()
             self.db.refresh(existing)
             self.artifact_storage.delete_artifact(artifact_key=old_artifact_key)
+            self._grant_installer_edit(
+                installation=existing,
+                installed_by=installed_by,
+            )
             return existing
 
         installation = ExtensionInstallation(
@@ -1796,6 +1994,10 @@ class ExtensionService:
                 artifact_key=stored_artifact.artifact_key
             )
             raise
+        self._grant_installer_edit(
+            installation=installation,
+            installed_by=installed_by,
+        )
         return installation
 
     def get_installation_configuration_state(
@@ -2190,9 +2392,7 @@ class ExtensionService:
             tool.name for tool in get_tool_manager().list_tools()
         }
         seen_skill_names: set[str] = set()
-        for row in self.db.exec(
-            select(Skill.name).where(Skill.kind != "private")
-        ).all():
+        for row in self.db.exec(select(Skill.name)).all():
             skill_name = row[0] if isinstance(row, tuple) else row
             if isinstance(skill_name, str) and skill_name:
                 seen_skill_names.add(skill_name)
@@ -2363,7 +2563,10 @@ class ExtensionService:
             enabled_only=False,
         ):
             return False, "Disabled because its extension is off."
-        return False, "Unavailable because its extension is not installed on this agent."
+        return (
+            False,
+            "Unavailable because its extension is not installed on this agent.",
+        )
 
     def build_installation_runtime_entry(
         self,
@@ -2498,12 +2701,10 @@ class ExtensionService:
     ) -> ToolManager:
         """Build the runtime tool catalog for one request-scoped execution.
 
-        Why: extension bindings are already the agent-scoped opt-in for packaged
+        Why: extension bindings are the agent-scoped opt-in for packaged
         capabilities. Once an extension is enabled for an agent, its declared
-        tools should remain available even when the legacy ``tool_ids`` allowlist
-        restricts built-in or private tools. Otherwise newly added extension
-        tools disappear from released agents until users manually update a second
-        allowlist that does not currently surface extension entries in Studio.
+        tools remain available without also being stored in the agent's manual
+        tool selection list.
         """
         ensure_agent_workspace(username, agent_id)
         shared_manager = get_tool_manager()
@@ -2530,9 +2731,6 @@ class ExtensionService:
             ptc_meta.func = make_programmatic_tool_call(full_callables)
 
         allowed_tools = _parse_name_allowlist(raw_tool_ids)
-        if allowed_tools is None:
-            return request_tool_manager
-
         filtered_manager = ToolManager()
         for metadata in request_tool_manager.list_tools():
             if metadata.name in allowed_tools or metadata.name in bundle_tool_names:
@@ -2890,7 +3088,9 @@ class ExtensionService:
             self._load_manifest_from_installation(installation)
         )
 
-        removable_channel_keys = provider_keys["channel"] - preserve_provider_keys["channel"]
+        removable_channel_keys = (
+            provider_keys["channel"] - preserve_provider_keys["channel"]
+        )
         if removable_channel_keys:
             channel_binding_rows = self.db.exec(
                 select(AgentChannelBinding).where(
@@ -2904,7 +3104,9 @@ class ExtensionService:
             if channel_binding_ids:
                 for token_row in self.db.exec(
                     select(ChannelLinkToken).where(
-                        col(ChannelLinkToken.channel_binding_id).in_(channel_binding_ids)
+                        col(ChannelLinkToken.channel_binding_id).in_(
+                            channel_binding_ids
+                        )
                     )
                 ).all():
                     self.db.delete(token_row)
@@ -2936,7 +3138,9 @@ class ExtensionService:
             for binding in self.db.exec(
                 select(AgentMediaProviderBinding).where(
                     AgentMediaProviderBinding.agent_id == agent_id,
-                    col(AgentMediaProviderBinding.provider_key).in_(removable_media_keys),
+                    col(AgentMediaProviderBinding.provider_key).in_(
+                        removable_media_keys
+                    ),
                 )
             ).all():
                 self.db.delete(binding)

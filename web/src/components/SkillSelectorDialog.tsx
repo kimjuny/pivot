@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User as UserIcon, Search, Loader2, Globe2, Inbox, Plus } from "@/lib/lucide";
+import { Search, Loader2, Inbox, Plus } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getUsableSkills,
@@ -8,13 +8,10 @@ import {
   type UsableSkill,
 } from '../utils/api';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Label } from '@/components/ui/label';
 import {
   Empty,
   EmptyContent,
@@ -28,24 +25,21 @@ import DraggableDialog from './DraggableDialog';
 interface SkillEntry {
   name: string;
   summary: string;
-  kind: 'shared' | 'private';
   source: SkillSource;
   creator: string | null;
   readOnly: boolean;
 }
-
-type FilterKind = 'all' | 'shared' | 'private';
 
 interface SkillSelectorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   agentId: number;
   currentSkillIds: string | null | undefined;
-  onSaved: (newSkillIds: string | null) => void;
+  onSaved: (newSkillIds: string) => void;
 }
 
 /**
- * Dialog for configuring the skill allowlist of an agent.
+ * Dialog for configuring the explicit skill selection of an agent.
  * Mirrors the tool selector interaction model for consistency.
  */
 function SkillSelectorDialog({
@@ -61,11 +55,8 @@ function SkillSelectorDialog({
   const [isSaving, setIsSaving] = useState(false);
 
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [allowAll, setAllowAll] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterKind, setFilterKind] = useState<FilterKind>('all');
-
   const loadSkills = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -74,7 +65,6 @@ function SkillSelectorDialog({
         ...skills.map((s: UsableSkill): SkillEntry => ({
           name: s.name,
           summary: s.description,
-          kind: s.kind,
           source: s.source,
           creator: s.creator,
           readOnly: s.read_only,
@@ -91,10 +81,8 @@ function SkillSelectorDialog({
       setAllSkills(deduped);
 
       if (currentSkillIds === null || currentSkillIds === undefined) {
-        setAllowAll(true);
-        setChecked(new Set(deduped.map((s) => s.name)));
+        setChecked(new Set());
       } else {
-        setAllowAll(false);
         try {
           const parsed: unknown = JSON.parse(currentSkillIds);
           const names = Array.isArray(parsed)
@@ -115,7 +103,6 @@ function SkillSelectorDialog({
   useEffect(() => {
     if (open) {
       setSearchQuery('');
-      setFilterKind('all');
       void loadSkills();
     }
   }, [open, loadSkills]);
@@ -123,24 +110,17 @@ function SkillSelectorDialog({
   const filteredSkills = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allSkills.filter((s) => {
-      const matchesKind = filterKind === 'all' || s.kind === filterKind;
       const matchesSearch = !q || s.name.toLowerCase().includes(q) || s.summary.toLowerCase().includes(q);
-      return matchesKind && matchesSearch;
+      return matchesSearch;
     });
-  }, [allSkills, searchQuery, filterKind]);
+  }, [allSkills, searchQuery]);
 
-  const isSkillChecked = (name: string) => allowAll || checked.has(name);
+  const isSkillChecked = (name: string) => checked.has(name);
 
   const toggleSkill = (name: string) => {
     const nextChecked = new Set(checked);
-    if (allowAll) {
-      allSkills.forEach((s) => nextChecked.add(s.name));
-      nextChecked.delete(name);
-      setAllowAll(false);
-    } else {
-      if (nextChecked.has(name)) nextChecked.delete(name);
-      else nextChecked.add(name);
-    }
+    if (nextChecked.has(name)) nextChecked.delete(name);
+    else nextChecked.add(name);
     setChecked(nextChecked);
   };
 
@@ -151,15 +131,8 @@ function SkillSelectorDialog({
 
     if (allVisible) {
       visibleNames.forEach((n) => nextChecked.delete(n));
-      setAllowAll(false);
     } else {
       visibleNames.forEach((n) => nextChecked.add(n));
-      const unfiltered = !searchQuery.trim() && filterKind === 'all';
-      if (unfiltered && nextChecked.size === allSkills.length) {
-        setAllowAll(true);
-      } else {
-        setAllowAll(false);
-      }
     }
 
     setChecked(nextChecked);
@@ -168,13 +141,12 @@ function SkillSelectorDialog({
   const handleSave = () => {
     setIsSaving(true);
     try {
-      const newSkillIds =
-        allowAll ? null : JSON.stringify(Array.from(checked).sort());
+      const newSkillIds = JSON.stringify(Array.from(checked).sort());
       onSaved(newSkillIds);
-      toast.success('Skill allowlist staged in draft');
+      toast.success('Skill selection staged in draft');
       onOpenChange(false);
     } catch {
-      toast.error('Failed to stage skill allowlist');
+      toast.error('Failed to stage skill selection');
     } finally {
       setIsSaving(false);
     }
@@ -187,12 +159,6 @@ function SkillSelectorDialog({
 
   const visibleAllChecked = filteredSkills.length > 0 && filteredSkills.every((s) => isSkillChecked(s.name));
   const visibleSomeChecked = !visibleAllChecked && filteredSkills.some((s) => isSkillChecked(s.name));
-
-  const kindCounts = useMemo(() => ({
-    all: allSkills.length,
-    shared: allSkills.filter((s) => s.kind === 'shared').length,
-    private: allSkills.filter((s) => s.kind === 'private').length,
-  }), [allSkills]);
 
   return (
     <DraggableDialog
@@ -221,23 +187,6 @@ function SkillSelectorDialog({
                 <Search className="w-3.5 h-3.5" />
               </Button>
             </ButtonGroup>
-
-            <Tabs value={filterKind} onValueChange={(v) => setFilterKind(v as FilterKind)}>
-              <TabsList className="h-7 p-0.5 gap-0.5">
-                <TabsTrigger value="all" className="h-6 px-2.5 text-xs gap-1">
-                  All
-                  <span className="tabular-nums text-[10px] opacity-70">{kindCounts.all}</span>
-                </TabsTrigger>
-                <TabsTrigger value="shared" className="h-6 px-2.5 text-xs gap-1">
-                  <Globe2 className="w-3 h-3" />Shared
-                  <span className="tabular-nums text-[10px] opacity-70">{kindCounts.shared}</span>
-                </TabsTrigger>
-                <TabsTrigger value="private" className="h-6 px-2.5 text-xs gap-1">
-                  <UserIcon className="w-3 h-3" />Private
-                  <span className="tabular-nums text-[10px] opacity-70">{kindCounts.private}</span>
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
           </div>
 
           <Separator />
@@ -280,8 +229,7 @@ function SkillSelectorDialog({
                         aria-label="Select all visible skills"
                       />
                     </th>
-                    <th className="w-[38%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Skill name</th>
-                    <th className="w-[22%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Type</th>
+                    <th className="w-[42%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Skill name</th>
                     <th className="h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Description</th>
                   </tr>
                 </thead>
@@ -290,7 +238,7 @@ function SkillSelectorDialog({
                     const isChecked = isSkillChecked(skill.name);
                     return (
                       <tr
-                        key={`${skill.kind}-${skill.name}`}
+                        key={skill.name}
                         className="border-b transition-colors hover:bg-muted/50 cursor-pointer data-[state=selected]:bg-muted"
                         onClick={() => toggleSkill(skill.name)}
                         data-state={isChecked ? 'selected' : undefined}
@@ -305,18 +253,6 @@ function SkillSelectorDialog({
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           <span className="font-mono text-xs font-medium block truncate">{skill.name}</span>
-                        </td>
-                        <td className="px-2 py-2 align-middle">
-                          {skill.kind === 'shared' ? (
-                            <Badge variant="secondary" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">
-                              <Globe2 className="w-2.5 h-2.5" />
-                              {skill.readOnly ? `Shared / ${skill.creator ?? 'Unknown'}` : 'Shared / You'}
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="gap-1 text-[10px] px-1.5 h-5 whitespace-nowrap">
-                              <UserIcon className="w-2.5 h-2.5" />Private
-                            </Badge>
-                          )}
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           {skill.summary ? (
@@ -334,31 +270,7 @@ function SkillSelectorDialog({
           </div>
 
           <Separator />
-          <div className="flex items-center justify-between px-4 py-2 text-xs text-muted-foreground">
-            <Label className="flex items-center gap-1.5 cursor-pointer select-none font-normal" onClick={() => {
-              if (allowAll) {
-                setAllowAll(false);
-                setChecked(new Set());
-              } else {
-                setAllowAll(true);
-                setChecked(new Set(allSkills.map((s) => s.name)));
-              }
-            }}>
-              <Checkbox
-                checked={allowAll}
-                onCheckedChange={(v) => {
-                  if (v) {
-                    setAllowAll(true);
-                    setChecked(new Set(allSkills.map((s) => s.name)));
-                  } else {
-                    setAllowAll(false);
-                  }
-                }}
-                onClick={(e) => e.stopPropagation()}
-              />
-              Allow all
-            </Label>
-
+          <div className="flex items-center justify-end px-4 py-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <span className="tabular-nums">
                 {filteredSkills.filter((s) => isSkillChecked(s.name)).length} of {filteredSkills.length} shown selected

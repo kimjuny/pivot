@@ -24,10 +24,10 @@ def _load_json_array(raw_value: str | None) -> list[str] | None:
         raw_value: JSON text stored on the agent row.
 
     Returns:
-        Sorted unique strings, or ``None`` when the value means unrestricted.
+        Sorted unique strings. ``None`` is normalized to an empty list.
     """
     if raw_value is None:
-        return None
+        return []
     try:
         parsed = json.loads(raw_value)
     except (TypeError, ValueError):
@@ -75,7 +75,7 @@ def _format_name_list(names: list[str], *, noun: str, verb: str) -> str:
 def _normalize_allowlist_payload(raw_value: Any) -> list[str] | None:
     """Normalize a Studio snapshot allowlist payload into a sorted unique list."""
     if raw_value is None:
-        return None
+        return []
     if isinstance(raw_value, str):
         try:
             parsed = json.loads(raw_value)
@@ -507,8 +507,6 @@ class AgentSnapshotService:
         if before_tools != after_tools:
             if before_tools is None and after_tools is None:
                 pass
-            elif after_tools is None:
-                changes.append("Tool access is now unrestricted")
             elif after_tools:
                 changes.append(
                     _format_name_list(after_tools, noun="Tools", verb="enabled")
@@ -521,8 +519,6 @@ class AgentSnapshotService:
         if before_skills != after_skills:
             if before_skills is None and after_skills is None:
                 pass
-            elif after_skills is None:
-                changes.append("Skill access is now unrestricted")
             elif after_skills:
                 changes.append(
                     _format_name_list(after_skills, noun="Skills", verb="enabled")

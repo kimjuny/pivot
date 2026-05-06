@@ -19,7 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Label } from '@/components/ui/label';
 import {
   Empty,
   EmptyContent,
@@ -49,16 +48,16 @@ interface ToolSelectorDialogProps {
   open: boolean;
   /** Callback to open/close the dialog. */
   onOpenChange: (open: boolean) => void;
-  /** Agent ID whose tool allowlist is being edited. */
+  /** Agent ID whose configured tools are being edited. */
   agentId: number;
   /**
-   * Current serialised allowlist from the agent.
-   * ``null`` / ``undefined`` → no restriction (all tools enabled).
-   * JSON string, e.g. ``'["add","test_tool"]'`` → explicit list.
+   * Current serialised tool selection from the agent.
+   * ``null`` / ``undefined`` → no tools selected.
+   * JSON string, e.g. ``'["add","test_tool"]'`` → explicit selected list.
    */
   currentToolIds: string | null | undefined;
   /** Fired after a successful save with the new ``tool_ids`` value. */
-  onSaved: (newToolIds: string | null) => void;
+  onSaved: (newToolIds: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +74,7 @@ function firstLine(desc: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Polished tool-allowlist editor for an agent.
+ * Polished tool selector for an agent.
  *
  * Features:
  * - shadcn Checkbox, Table, Input, Badge, Separator primitives
@@ -95,13 +94,8 @@ function ToolSelectorDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  /** Explicit set of enabled tool names. Sync'd with ``allowAll``. */
+  /** Explicit set of selected tool names. */
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  /**
-   * When true the agent has unrestricted access (``tool_ids === null``).
-   * Visually every row appears checked; on save we send ``null``.
-   */
-  const [allowAll, setAllowAll] = useState(true);
 
   // Search / filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,10 +115,8 @@ function ToolSelectorDialog({
       setAllTools(merged);
 
       if (currentToolIds === null || currentToolIds === undefined) {
-        setAllowAll(true);
-        setChecked(new Set(merged.map(t => t.name)));
+        setChecked(new Set());
       } else {
-        setAllowAll(false);
         try {
           const parsed: unknown = JSON.parse(currentToolIds);
           const names = Array.isArray(parsed)
@@ -165,20 +157,12 @@ function ToolSelectorDialog({
   // Toggle helpers
   // ---------------------------------------------------------------------------
 
-  const isToolChecked = (name: string) => allowAll || checked.has(name);
+  const isToolChecked = (name: string) => checked.has(name);
 
   const toggleTool = (name: string) => {
-    // Clicking any row exits "allow-all" mode and enters explicit mode.
     const nextChecked = new Set(checked);
-    if (allowAll) {
-      // Start from "everything" then uncheck this one
-      allTools.forEach(t => nextChecked.add(t.name));
-      nextChecked.delete(name);
-      setAllowAll(false);
-    } else {
-      if (nextChecked.has(name)) nextChecked.delete(name);
-      else nextChecked.add(name);
-    }
+    if (nextChecked.has(name)) nextChecked.delete(name);
+    else nextChecked.add(name);
     setChecked(nextChecked);
   };
 
@@ -191,17 +175,9 @@ function ToolSelectorDialog({
     if (allVisible) {
       // Deselect all visible
       visibleNames.forEach(n => nextChecked.delete(n));
-      setAllowAll(false);
     } else {
       // Select all visible (keep non-visible as-is)
       visibleNames.forEach(n => nextChecked.add(n));
-      // If no filter is active and all are now checked, re-enter allow-all mode
-      const unfiltered = !searchQuery.trim();
-      if (unfiltered && nextChecked.size === allTools.length) {
-        setAllowAll(true);
-      } else {
-        setAllowAll(false);
-      }
     }
     setChecked(nextChecked);
   };
@@ -213,13 +189,12 @@ function ToolSelectorDialog({
   const handleSave = () => {
     setIsSaving(true);
     try {
-      const newToolIds =
-        allowAll ? null : JSON.stringify(Array.from(checked).sort());
+      const newToolIds = JSON.stringify(Array.from(checked).sort());
       onSaved(newToolIds);
-      toast.success('Tool allowlist staged in draft');
+      toast.success('Tool selection staged in draft');
       onOpenChange(false);
     } catch {
-      toast.error('Failed to stage tool allowlist');
+      toast.error('Failed to stage tool selection');
     } finally {
       setIsSaving(false);
     }
@@ -234,7 +209,6 @@ function ToolSelectorDialog({
   // Derived counts
   // ---------------------------------------------------------------------------
 
-  const enabledCount = allowAll ? allTools.length : checked.size;
   const visibleAllChecked = filteredTools.length > 0 && filteredTools.every(t => isToolChecked(t.name));
   const visibleSomeChecked = !visibleAllChecked && filteredTools.some(t => isToolChecked(t.name));
 
@@ -358,33 +332,7 @@ function ToolSelectorDialog({
 
           {/* ---- Footer ---- */}
           <Separator />
-          <div className="flex items-center justify-between px-4 py-2 text-xs text-muted-foreground">
-            {/* Left: allow-all shortcut */}
-            <Label className="flex items-center gap-1.5 cursor-pointer select-none font-normal" onClick={() => {
-              if (allowAll) {
-                setAllowAll(false);
-                setChecked(new Set());
-              } else {
-                setAllowAll(true);
-                setChecked(new Set(allTools.map(t => t.name)));
-              }
-            }}>
-              <Checkbox
-                checked={allowAll}
-                onCheckedChange={v => {
-                  if (v) {
-                    setAllowAll(true);
-                    setChecked(new Set(allTools.map(t => t.name)));
-                  } else {
-                    setAllowAll(false);
-                  }
-                }}
-                onClick={e => e.stopPropagation()}
-              />
-              Allow all
-            </Label>
-
-            {/* Right: count + Save fused */}
+          <div className="flex items-center justify-end px-4 py-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <span className="tabular-nums">
                 {filteredTools.filter(t => isToolChecked(t.name)).length} of {filteredTools.length} shown selected

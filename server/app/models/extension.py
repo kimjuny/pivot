@@ -70,6 +70,8 @@ class ExtensionInstallation(SQLModel, table=True):
     hub_package_version_id: str | None = Field(default=None, max_length=255)
     hub_artifact_digest: str | None = Field(default=None, max_length=255)
     installed_by: str | None = Field(default=None, max_length=120)
+    creator_id: int | None = Field(default=None, foreign_key="user.id", index=True)
+    use_scope: str = Field(default="selected", max_length=20)
     status: str = Field(default="active", index=True, max_length=32)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -12,7 +12,10 @@ vi.mock("sonner", () => ({
 vi.mock("@/utils/api", () => ({
   getExtensionPackages: vi.fn(),
   getExtensionInstallationConfiguration: vi.fn(),
+  getExtensionInstallationAccess: vi.fn(),
+  getExtensionInstallationAccessOptions: vi.fn(),
   uninstallExtensionInstallation: vi.fn(),
+  updateExtensionInstallationAccess: vi.fn(),
   updateExtensionInstallationConfiguration: vi.fn(),
   updateExtensionInstallationStatus: vi.fn(),
   getExtensionHookExecutions: vi.fn(),
@@ -20,6 +23,8 @@ vi.mock("@/utils/api", () => ({
 }));
 
 import {
+  getExtensionInstallationAccess,
+  getExtensionInstallationAccessOptions,
   getExtensionInstallationConfiguration,
   getExtensionPackages,
   uninstallExtensionInstallation,
@@ -66,6 +71,10 @@ describe("ExtensionDetailPage", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: true,
             status: "active",
             created_at: "2026-04-01T00:00:00Z",
             updated_at: "2026-04-01T00:00:00Z",
@@ -120,6 +129,25 @@ describe("ExtensionDetailPage", () => {
         base_url: "http://localhost:8765",
       },
     });
+    vi.mocked(getExtensionInstallationAccess).mockResolvedValue({
+      installation_id: 11,
+      use_scope: "selected",
+      use_user_ids: [1],
+      use_group_ids: [],
+      edit_user_ids: [1],
+      edit_group_ids: [],
+    });
+    vi.mocked(getExtensionInstallationAccessOptions).mockResolvedValue({
+      users: [
+        {
+          id: 1,
+          username: "alice",
+          display_name: "Alice",
+          email: "alice@example.com",
+        },
+      ],
+      groups: [],
+    });
     render(
       <MemoryRouter initialEntries={["/studio/assets/extensions/acme/memory"]}>
         <Routes>
@@ -157,6 +185,7 @@ describe("ExtensionDetailPage", () => {
     expect(screen.getByText("Hook")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Setup" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Auth" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Versions" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Hook Replay" })).toBeInTheDocument();
   });
@@ -198,6 +227,10 @@ describe("ExtensionDetailPage", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
             status: "active",
             created_at: "2026-04-01T00:00:00Z",
             updated_at: "2026-04-01T00:00:00Z",
@@ -224,6 +257,25 @@ describe("ExtensionDetailPage", () => {
       },
       config: {},
     });
+    vi.mocked(getExtensionInstallationAccess).mockResolvedValue({
+      installation_id: 7,
+      use_scope: "selected",
+      use_user_ids: [1],
+      use_group_ids: [],
+      edit_user_ids: [1],
+      edit_group_ids: [],
+    });
+    vi.mocked(getExtensionInstallationAccessOptions).mockResolvedValue({
+      users: [
+        {
+          id: 1,
+          username: "alice",
+          display_name: "Alice",
+          email: "alice@example.com",
+        },
+      ],
+      groups: [],
+    });
     vi.mocked(updateExtensionInstallationStatus).mockResolvedValue({
       id: 7,
       scope: "pivot",
@@ -247,6 +299,10 @@ describe("ExtensionDetailPage", () => {
       hub_package_version_id: null,
       hub_artifact_digest: null,
       installed_by: "alice",
+      creator_id: 1,
+      use_scope: "selected",
+      read_only: false,
+      has_installation_configuration: false,
       status: "disabled",
       created_at: "2026-04-01T00:00:00Z",
       updated_at: "2026-04-01T00:00:00Z",
@@ -294,6 +350,10 @@ describe("ExtensionDetailPage", () => {
         hub_package_version_id: null,
         hub_artifact_digest: null,
         installed_by: "alice",
+        creator_id: 1,
+        use_scope: "selected",
+        read_only: false,
+        has_installation_configuration: false,
         status: "disabled",
         created_at: "2026-04-01T00:00:00Z",
         updated_at: "2026-04-01T00:00:00Z",

@@ -21,7 +21,7 @@ from app.services.sandbox_service import get_sandbox_service
 from app.services.skill_service import (
     _detect_skill_entry_filename,
     _validate_skill_name,
-    apply_private_skill_directory,
+    apply_skill_directory,
     sync_skill_registry,
 )
 from app.services.workspace_service import workspace_root
@@ -237,7 +237,7 @@ def _resolve_submission_skill_name(
 def _approval_question(*, skill_name: str, change_type: str) -> str:
     """Build the user-facing approval prompt shown by the chat UI."""
     action_text = "create" if change_type == "create" else "update"
-    return f"Approve the request to {action_text} private skill `{skill_name}`?"
+    return f"Approve the request to {action_text} Skill `{skill_name}`?"
 
 
 def _build_pending_user_action(
@@ -282,7 +282,7 @@ def stage_skill_change_submission(
 
     Args:
         session: Active database session.
-        current_user: Authenticated owner of the target private skill namespace.
+        current_user: Authenticated owner of the target Skill.
         agent_id: Agent workspace that holds the draft.
         workspace_id: Owning runtime workspace identifier.
         workspace_backend_path: Backend-container workspace path.
@@ -308,7 +308,7 @@ def stage_skill_change_submission(
         creator_id=current_user.id,
         agent_id=agent_id,
         skill_name="pending",
-        target_kind="private",
+        target_kind="manual",
         change_type="create",
         status="pending",
         sandbox_draft_path=normalized_path,
@@ -338,11 +338,6 @@ def stage_skill_change_submission(
             if existing.creator_id != current_user.id:
                 raise PermissionError(
                     f"Skill '{skill_name}' is owned by another creator."
-                )
-            if existing.kind != "private":
-                raise PermissionError(
-                    f"Skill '{skill_name}' is a {existing.kind} skill and cannot be "
-                    "changed through agent submissions."
                 )
             change_type = "update"
 
@@ -478,7 +473,7 @@ def apply_skill_change_submission(
         }
 
     snapshot_dir = Path(submission.snapshot_location)
-    metadata = apply_private_skill_directory(
+    metadata = apply_skill_directory(
         session,
         current_user,
         skill_name=submission.skill_name,
@@ -495,5 +490,5 @@ def apply_skill_change_submission(
         "skill_name": submission.skill_name,
         "status": submission.status,
         "metadata": metadata,
-        "message": f"Applied private skill '{submission.skill_name}'.",
+        "message": f"Applied Skill '{submission.skill_name}'.",
     }

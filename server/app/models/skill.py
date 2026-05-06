@@ -17,7 +17,6 @@ class Skill(SQLModel, table=True):
         id: Primary key of the skill registry row.
         name: Globally unique skill identifier used by agents and sandbox mounts.
         description: Short summary extracted from markdown front matter.
-        kind: Visibility scope, either ``private`` or ``shared``.
         source: Origin of the skill, one of ``manual``, ``network``,
             ``bundle``, or ``agent``.
         creator_id: Owning user ID for user-created skills.
@@ -40,7 +39,6 @@ class Skill(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True, max_length=255)
     description: str = Field(default="")
-    kind: str = Field(max_length=20)
     use_scope: str = Field(default="all", max_length=20)
     source: str = Field(max_length=20)
     creator_id: int | None = Field(default=None, foreign_key="user.id", index=True)

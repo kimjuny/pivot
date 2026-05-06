@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from app.api.dependencies import get_db
 from app.api.permissions import permissions
-from app.models.agent import Agent
+from app.models.access import AccessLevel
 from app.models.channel import AgentChannelBinding
 from app.schemas.channel import (
     ChannelBindingCreate,
@@ -20,6 +21,8 @@ from app.schemas.channel import (
     ChannelTestResponse,
 )
 from app.security.permission_catalog import Permission
+from app.services.access_service import AccessService
+from app.services.agent_service import AgentService
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.channel_service import ChannelService
 from app.services.provider_registry_service import ProviderRegistryService
@@ -29,6 +32,38 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 router = APIRouter()
 
+if TYPE_CHECKING:
+    from app.models.agent import Agent
+    from app.models.user import User
+    from sqlmodel import Session
+
+
+def _require_agent_edit(db: Session, agent_id: int, current_user: User) -> Agent:
+    """Return one agent after checking channel-management edit access."""
+    try:
+        agent = AgentService(db).get_required_agent(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Agent not found") from exc
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.EDIT,
+    )
+    return agent
+
+
+def _require_channel_binding_edit(
+    db: Session,
+    binding_id: int,
+    current_user: User,
+) -> AgentChannelBinding:
+    """Return one channel binding after checking its parent agent edit access."""
+    binding = db.get(AgentChannelBinding, binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="Channel binding not found")
+    _require_agent_edit(db, binding.agent_id, current_user)
+    return binding
+
 
 @router.get("/channels", response_model=list[ChannelCatalogItemResponse])
 async def list_channels(
@@ -36,9 +71,10 @@ async def list_channels(
     db=Depends(get_db),
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> list[dict[str, object]]:
-    """List all installed built-in channel manifests."""
-    del current_user
-    return ChannelService(db).list_catalog(agent_id)
+    """List all channel manifests available to the current Studio user."""
+    if agent_id is not None:
+        _require_agent_edit(db, agent_id, current_user)
+    return ChannelService(db).list_catalog(agent_id, user=current_user)
 
 
 @router.get("/channels/{channel_key}", response_model=ChannelCatalogItemResponse)
@@ -48,11 +84,13 @@ async def get_channel(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Return one channel manifest by provider key."""
-    del current_user
+    service = ChannelService(db)
     try:
         provider = ProviderRegistryService(db).get_channel_provider(channel_key)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Channel not found") from exc
+    if not service.is_provider_usable_by_user(user=current_user, provider=provider):
+        raise HTTPException(status_code=404, detail="Channel not found")
     return {"manifest": provider.manifest.model_dump()}
 
 
@@ -66,10 +104,7 @@ async def list_agent_channels(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> list[ChannelBindingResponse]:
     """List the channel bindings configured for one agent."""
-    del current_user
-    agent = db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    _require_agent_edit(db, agent_id, current_user)
     return ChannelService(db).list_agent_bindings(agent_id)
 
 
@@ -85,9 +120,7 @@ async def create_agent_channel(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> ChannelBindingResponse:
     """Create one channel binding for an agent."""
-    agent = db.get(Agent, agent_id)
-    if agent is None:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    _require_agent_edit(db, agent_id, current_user)
     try:
         binding = ChannelService(db).create_binding(
             agent_id=agent_id,
@@ -96,6 +129,7 @@ async def create_agent_channel(
             enabled=payload.enabled,
             auth_config=payload.auth_config,
             runtime_config=payload.runtime_config,
+            user=current_user,
         )
         AgentSnapshotService(db).save_draft(
             agent_id,
@@ -118,6 +152,7 @@ async def update_agent_channel(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> ChannelBindingResponse:
     """Update one configured agent channel binding."""
+    binding_row = _require_channel_binding_edit(db, binding_id, current_user)
     try:
         binding = ChannelService(db).update_binding(
             binding_id,
@@ -127,7 +162,7 @@ async def update_agent_channel(
             runtime_config=payload.runtime_config,
         )
         AgentSnapshotService(db).save_draft(
-            binding.agent_id,
+            binding_row.agent_id,
             saved_by=current_user.username,
         )
         return binding
@@ -142,9 +177,7 @@ async def delete_agent_channel(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> Response:
     """Delete one configured channel binding."""
-    binding = db.get(AgentChannelBinding, binding_id)
-    if binding is None:
-        raise HTTPException(status_code=404, detail="Channel binding not found")
+    binding = _require_channel_binding_edit(db, binding_id, current_user)
     try:
         ChannelService(db).delete_binding(binding_id)
         AgentSnapshotService(db).save_draft(
@@ -163,10 +196,7 @@ async def test_agent_channel(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test."""
-    del current_user
-    binding = db.get(AgentChannelBinding, binding_id)
-    if binding is None:
-        raise HTTPException(status_code=404, detail="Channel binding not found")
+    binding = _require_channel_binding_edit(db, binding_id, current_user)
 
     provider = ProviderRegistryService(db).get_channel_provider(binding.channel_key)
     result = await run_in_threadpool(
@@ -192,12 +222,12 @@ async def test_channel_draft(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test for unsaved form values."""
-    del current_user
     try:
         return ChannelService(db).test_binding_draft(
             channel_key=channel_key,
             auth_config=payload.auth_config,
             runtime_config=payload.runtime_config,
+            user=current_user,
         )
     except KeyError as exc:
         raise HTTPException(
@@ -214,7 +244,7 @@ async def poll_agent_channel_once(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Manually poll a polling-based channel binding once."""
-    del current_user
+    _require_channel_binding_edit(db, binding_id, current_user)
     try:
         return await ChannelService(db).poll_binding_once(binding_id)
     except ValueError as exc:

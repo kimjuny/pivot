@@ -33,6 +33,12 @@ from app.services.skill_artifact_storage_service import (
     SkillArtifactStorageService,
     StoredSkillArtifact,
 )
+from app.services.workspace_file_service import (
+    LocalDirectoryFileService,
+    WorkspaceFileNotFoundError,
+    WorkspaceFileTreeEntry,
+    WorkspaceFileValidationError,
+)
 from app.services.workspace_service import workspace_root
 from app.utils.logging_config import get_logger
 from sqlalchemy.exc import IntegrityError
@@ -44,9 +50,7 @@ if TYPE_CHECKING:
 logger = get_logger("skill_service")
 
 _SKILLS_DIRNAME = "skills"
-_ALLOWED_KINDS = {"private", "shared"}
 _ALLOWED_USER_SOURCES = {"manual", "network", "bundle", "agent"}
-_LEGACY_USER_SKILL_DIRS = frozenset(_ALLOWED_KINDS)
 _CANONICAL_SKILL_ENTRY_FILENAME = "SKILL.md"
 
 
@@ -75,7 +79,6 @@ class _DiscoveredSkill:
 
     name: str
     description: str
-    kind: str
     source: str
     creator_id: int | None
     creator_username: str | None
@@ -83,11 +86,6 @@ class _DiscoveredSkill:
     filename: str
     md5: str
     updated_at: datetime
-
-
-def _legacy_user_skills_root(username: str) -> Path:
-    """Return the pre-namespace local root used by older skill layouts."""
-    return workspace_root() / username / _SKILLS_DIRNAME
 
 
 def _user_skills_dir(username: str, *, create: bool) -> Path:
@@ -98,21 +96,6 @@ def _user_skills_dir(username: str, *, create: bool) -> Path:
     on-disk path shape, which keeps future ACL changes out of storage layout.
     """
     base = workspace_root() / "users" / username / _SKILLS_DIRNAME
-    legacy_base = _legacy_user_skills_root(username)
-    if not base.exists() and legacy_base.exists():
-        base.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(legacy_base), str(base))
-        logger.info("Migrated legacy user skill root: %s -> %s", legacy_base, base)
-    if create:
-        base.mkdir(parents=True, exist_ok=True)
-    return base
-
-
-def _legacy_user_skills_dir(username: str, kind: str, *, create: bool) -> Path:
-    """Return the legacy kind-scoped directory used by older installations."""
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
-    base = _user_skills_dir(username, create=create) / kind
     if create:
         base.mkdir(parents=True, exist_ok=True)
     return base
@@ -120,10 +103,6 @@ def _legacy_user_skills_dir(username: str, kind: str, *, create: bool) -> Path:
 
 def _canonical_skill_path(base_dir: Path, skill_name: str) -> Path:
     return base_dir / skill_name / _CANONICAL_SKILL_ENTRY_FILENAME
-
-
-def _legacy_skill_path(base_dir: Path, skill_name: str) -> Path:
-    return base_dir / f"{skill_name}.md"
 
 
 def _sandbox_skill_entry_path(skill_name: str) -> str:
@@ -144,9 +123,6 @@ def _resolve_skill_path(base_dir: Path, skill_name: str) -> Path | None:
             if not candidate.name.startswith("_"):
                 return candidate
 
-    legacy = _legacy_skill_path(base_dir, skill_name)
-    if legacy.exists():
-        return legacy
     return None
 
 
@@ -163,34 +139,19 @@ def _canonicalize_skill_entry_filename(skill_path: Path) -> Path:
     return canonical_path
 
 
-def _list_skill_paths(
-    base_dir: Path,
-    *,
-    ignored_dir_names: set[str] | None = None,
-) -> list[Path]:
+def _list_skill_paths(base_dir: Path) -> list[Path]:
     """List markdown skill files under one base directory."""
     if not base_dir.exists():
         return []
 
     paths: list[Path] = []
-    directory_skill_names: set[str] = set()
-    ignored = ignored_dir_names or set()
 
     for item in sorted(base_dir.iterdir()):
         if not item.is_dir() or item.name.startswith("_"):
             continue
-        if item.name in ignored:
-            continue
         matched = _resolve_skill_path(base_dir, item.name)
         if matched is not None:
             paths.append(matched)
-            directory_skill_names.add(item.name)
-
-    for md_file in sorted(base_dir.glob("*.md")):
-        if md_file.name.startswith("_"):
-            continue
-        if md_file.stem not in directory_skill_names:
-            paths.append(md_file)
 
     return paths
 
@@ -205,62 +166,6 @@ def _fallback_skill_name(base_dir: Path, skill_path: Path) -> str:
     if skill_path.parent == base_dir:
         return skill_path.stem
     return skill_path.parent.name
-
-
-def _migrate_legacy_user_skill(base_dir: Path, skill_name: str) -> Path:
-    """Normalize legacy flat files into directory layout for stable locations."""
-    canonical = base_dir / skill_name / _CANONICAL_SKILL_ENTRY_FILENAME
-    legacy = _legacy_skill_path(base_dir, skill_name)
-    if canonical.exists():
-        return canonical
-    if not legacy.exists():
-        return legacy
-
-    canonical.parent.mkdir(parents=True, exist_ok=True)
-    legacy.replace(canonical)
-    logger.info("Migrated legacy skill layout: %s -> %s", legacy, canonical)
-    return canonical
-
-
-def _migrate_legacy_user_skill_to_unified_root(
-    *,
-    unified_root: Path,
-    legacy_root: Path,
-    skill_name: str,
-) -> Path:
-    """Move one legacy kind-scoped skill into the unified user skill root."""
-    legacy_path = _resolve_skill_path(legacy_root, skill_name)
-    if legacy_path is None:
-        raise FileNotFoundError(
-            f"Legacy skill '{skill_name}' not found in {legacy_root}."
-        )
-
-    if legacy_path == _legacy_skill_path(legacy_root, skill_name):
-        legacy_path = _migrate_legacy_user_skill(legacy_root, skill_name)
-
-    legacy_dir = _skill_location_for_path(legacy_root, legacy_path)
-    target_dir = unified_root / skill_name
-    if target_dir.exists() and target_dir != legacy_dir:
-        raise ValueError(
-            "Cannot migrate legacy skill because unified destination already exists: "
-            f"'{target_dir}'."
-        )
-
-    unified_root.mkdir(parents=True, exist_ok=True)
-    if target_dir != legacy_dir:
-        shutil.move(str(legacy_dir), str(target_dir))
-        logger.info("Migrated legacy skill directory: %s -> %s", legacy_dir, target_dir)
-
-    canonical_path = target_dir / _CANONICAL_SKILL_ENTRY_FILENAME
-    if canonical_path.exists():
-        return canonical_path
-
-    for filename in SKILL_MARKDOWN_FILENAMES:
-        candidate = target_dir / filename
-        if candidate.exists():
-            candidate.replace(canonical_path)
-            break
-    return canonical_path
 
 
 def _read_markdown(path: Path) -> str:
@@ -325,7 +230,6 @@ def _discover_skill(
     *,
     base_dir: Path,
     skill_path: Path,
-    kind: str,
     source: str,
     creator: User | None,
 ) -> _DiscoveredSkill:
@@ -343,7 +247,6 @@ def _discover_skill(
     return _DiscoveredSkill(
         name=name,
         description=parsed.get("description", ""),
-        kind=kind,
         source=source,
         creator_id=creator.id if creator is not None else None,
         creator_username=creator.username if creator is not None else None,
@@ -354,15 +257,15 @@ def _discover_skill(
     )
 
 
-def _kind_for_unified_skill(
+def _source_for_discovered_skill(
     *,
     user: User,
     skill_name: str,
     skill_path: Path,
     existing_by_name: dict[str, Skill],
     existing_by_location: dict[str, Skill],
-) -> tuple[str, str]:
-    """Resolve persisted kind/source for a unified user skill directory."""
+) -> str:
+    """Resolve persisted source for a unified user skill directory."""
     location = str(
         _skill_location_for_path(
             _user_skills_dir(user.username, create=False), skill_path
@@ -370,8 +273,8 @@ def _kind_for_unified_skill(
     )
     existing = existing_by_location.get(location) or existing_by_name.get(skill_name)
     if existing is not None and existing.creator_id == user.id:
-        return existing.kind, _normalize_user_skill_source(existing.source)
-    return "private", "manual"
+        return _normalize_user_skill_source(existing.source)
+    return "manual"
 
 
 def _discover_user_skills(
@@ -384,17 +287,12 @@ def _discover_user_skills(
     for user in users:
         unified_root = _user_skills_dir(user.username, create=False)
         if unified_root.exists():
-            for skill_path in _list_skill_paths(
-                unified_root,
-                ignored_dir_names=set(_LEGACY_USER_SKILL_DIRS),
-            ):
+            for skill_path in _list_skill_paths(unified_root):
                 fallback_name = _fallback_skill_name(unified_root, skill_path)
-                if skill_path == _legacy_skill_path(unified_root, fallback_name):
-                    skill_path = _migrate_legacy_user_skill(unified_root, fallback_name)
                 if not skill_path.exists():
                     continue
                 skill_path = _canonicalize_skill_entry_filename(skill_path)
-                kind, source = _kind_for_unified_skill(
+                source = _source_for_discovered_skill(
                     user=user,
                     skill_name=fallback_name,
                     skill_path=skill_path,
@@ -405,29 +303,7 @@ def _discover_user_skills(
                     _discover_skill(
                         base_dir=unified_root,
                         skill_path=skill_path,
-                        kind=kind,
                         source=source,
-                        creator=user,
-                    )
-                )
-
-        for kind in ("private", "shared"):
-            legacy_root = _legacy_user_skills_dir(user.username, kind, create=False)
-            if not legacy_root.exists():
-                continue
-            for skill_path in _list_skill_paths(legacy_root):
-                fallback_name = _fallback_skill_name(legacy_root, skill_path)
-                migrated_path = _migrate_legacy_user_skill_to_unified_root(
-                    unified_root=unified_root,
-                    legacy_root=legacy_root,
-                    skill_name=fallback_name,
-                )
-                discovered.append(
-                    _discover_skill(
-                        base_dir=unified_root,
-                        skill_path=_canonicalize_skill_entry_filename(migrated_path),
-                        kind=kind,
-                        source="manual",
                         creator=user,
                     )
                 )
@@ -458,13 +334,38 @@ def _skill_content_path(skill: Skill) -> Path:
     return Path(skill.location) / skill.filename
 
 
-def _parse_name_allowlist(raw_json: str | None) -> set[str] | None:
+def _restage_skill_artifact(
+    session: Session,
+    *,
+    skill: Skill,
+    owner: User,
+) -> None:
+    """Persist the current skill directory into artifact storage."""
+    stored_artifact = SkillArtifactStorageService().store_directory(
+        source_dir=Path(skill.location),
+        username=owner.username,
+        skill_name=skill.name,
+    )
+    old_artifact_key = skill.artifact_key
+    skill.artifact_storage_backend = stored_artifact.storage_backend
+    skill.artifact_key = stored_artifact.artifact_key
+    skill.artifact_digest = stored_artifact.artifact_digest
+    skill.artifact_size_bytes = stored_artifact.size_bytes
+    skill.updated_at = datetime.now(UTC)
+    session.add(skill)
+    session.commit()
+    session.refresh(skill)
+    if old_artifact_key is not None and old_artifact_key != skill.artifact_key:
+        SkillArtifactStorageService().delete_artifact(artifact_key=old_artifact_key)
+
+
+def _parse_name_allowlist(raw_json: str | None) -> set[str]:
     if raw_json is None:
-        return None
+        return set()
 
     text = raw_json.strip()
     if not text:
-        return None
+        return set()
 
     try:
         parsed = json.loads(text)
@@ -547,7 +448,6 @@ def _serialize_skill(
         "artifact_key": skill.artifact_key,
         "artifact_digest": skill.artifact_digest,
         "artifact_size_bytes": skill.artifact_size_bytes,
-        "kind": skill.kind,
         "use_scope": skill.use_scope,
         "source": skill.source,
         "creator_id": skill.creator_id,
@@ -609,7 +509,6 @@ def _upsert_skill_row(
             Skill(
                 name=discovered.name,
                 description=discovered.description,
-                kind=discovered.kind,
                 use_scope="all",
                 source=discovered.source,
                 creator_id=discovered.creator_id,
@@ -627,7 +526,6 @@ def _upsert_skill_row(
     new_values = {
         "name": discovered.name,
         "description": discovered.description,
-        "kind": discovered.kind,
         "source": next_source,
         "creator_id": discovered.creator_id,
         "location": discovered.location,
@@ -688,81 +586,6 @@ def sync_skill_registry(session: Session) -> None:
         session.commit()
 
 
-def list_shared_skills(session: Session, username: str) -> list[dict[str, Any]]:
-    """List all shared skills visible to the current user.
-
-    Args:
-        session: Active database session.
-        username: Authenticated username.
-
-    Returns:
-        Serialized shared-skill metadata rows.
-    """
-    sync_skill_registry(session)
-    creator_lookup = _creator_name_map(session)
-    user = _user_by_username(session, username)
-
-    statement = select(Skill).where(Skill.kind == "shared").order_by(Skill.name)
-    skills = list(session.exec(statement).all())
-    return [
-        _serialize_skill(
-            skill,
-            creator_lookup=creator_lookup,
-            current_username=username,
-            can_edit=_has_skill_access(
-                session,
-                user=user,
-                skill=skill,
-                access_level=AccessLevel.EDIT,
-            ),
-        )
-        for skill in skills
-        if _has_skill_access(
-            session,
-            user=user,
-            skill=skill,
-            access_level=AccessLevel.USE,
-        )
-    ]
-
-
-def list_private_skills(session: Session, username: str) -> list[dict[str, Any]]:
-    """List private skills owned by the current user.
-
-    Args:
-        session: Active database session.
-        username: Authenticated username.
-
-    Returns:
-        Serialized private-skill metadata rows.
-    """
-    sync_skill_registry(session)
-    creator_lookup = _creator_name_map(session)
-    user = _user_by_username(session, username)
-
-    statement = (
-        select(Skill)
-        .where(Skill.kind == "private")
-        .order_by(Skill.name)
-    )
-    skills = session.exec(statement).all()
-    return [
-        _serialize_skill(
-            skill,
-            creator_lookup=creator_lookup,
-            current_username=username,
-            can_edit=True,
-        )
-        for skill in skills
-        if _has_skill_access(
-            session,
-            user=user,
-            skill=skill,
-            access_level=AccessLevel.EDIT,
-        )
-    ]
-
-
 def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]:
     """List compact metadata for every skill visible to a user.
 
@@ -771,7 +594,7 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
         username: Authenticated username.
 
     Returns:
-        Serialized metadata for shared and user-private skills.
+        Serialized metadata for Skills visible through unified Auth.
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
@@ -793,10 +616,430 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
     ]
 
 
+def read_visible_skill_source(
+    session: Session,
+    username: str,
+    skill_name: str,
+) -> dict[str, Any]:
+    """Read one skill source when the current user has use or edit access."""
+    _validate_skill_name(skill_name)
+    sync_skill_registry(session)
+    user = _user_by_username(session, username)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=user,
+        skill=skill,
+        access_level=AccessLevel.USE,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not visible.")
+    return _read_skill_payload(session, skill=skill, username=username)
+
+
 def get_skill_by_name(session: Session, skill_name: str) -> Skill | None:
     """Return one skill registry row by globally unique skill name."""
     sync_skill_registry(session)
     return session.exec(select(Skill).where(Skill.name == skill_name)).first()
+
+
+def update_skill_source(
+    session: Session,
+    current_user: User,
+    skill_name: str,
+    source: str,
+) -> dict[str, Any]:
+    """Update one existing skill source when the user has edit access."""
+    _validate_skill_name(skill_name)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
+
+    sync_skill_registry(session)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=current_user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
+
+    owner = (
+        session.get(User, skill.creator_id)
+        if skill.creator_id is not None
+        else current_user
+    )
+    if owner is None:
+        raise ValueError("Skill creator not found.")
+
+    normalized_source = rewrite_skill_name(source, skill_name)
+    skill_dir = Path(skill.location)
+    canonical_path = skill_dir / skill.filename
+    canonical_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_path.write_text(normalized_source, encoding="utf-8")
+
+    discovered = _discover_skill(
+        base_dir=skill_dir.parent,
+        skill_path=canonical_path,
+        source="manual",
+        creator=owner,
+    )
+    stored_artifact = SkillArtifactStorageService().store_directory(
+        source_dir=canonical_path.parent,
+        username=owner.username,
+        skill_name=skill_name,
+    )
+    old_artifact_key = skill.artifact_key
+    skill.description = discovered.description
+    skill.location = discovered.location
+    skill.artifact_storage_backend = stored_artifact.storage_backend
+    skill.artifact_key = stored_artifact.artifact_key
+    skill.artifact_digest = stored_artifact.artifact_digest
+    skill.artifact_size_bytes = stored_artifact.size_bytes
+    skill.filename = discovered.filename
+    skill.md5 = discovered.md5
+    skill.updated_at = discovered.updated_at
+    skill.source = "manual"
+
+    session.add(skill)
+    session.commit()
+    session.refresh(skill)
+    if old_artifact_key is not None and old_artifact_key != skill.artifact_key:
+        SkillArtifactStorageService().delete_artifact(artifact_key=old_artifact_key)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        skill,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+        can_edit=True,
+    )
+
+
+def list_visible_skill_directory(
+    session: Session,
+    username: str,
+    skill_name: str,
+    path: str | None = None,
+) -> list[WorkspaceFileTreeEntry]:
+    """Return direct children for one skill directory visible to the user."""
+    _validate_skill_name(skill_name)
+    sync_skill_registry(session)
+    user = _user_by_username(session, username)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=user,
+        skill=skill,
+        access_level=AccessLevel.USE,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not visible.")
+
+    skill_root = Path(skill.location).resolve()
+    if not skill_root.exists() or not skill_root.is_dir():
+        raise FileNotFoundError(f"Skill '{skill_name}' directory not found.")
+
+    try:
+        return LocalDirectoryFileService().list_directory(
+            root_path=skill_root,
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as exc:
+        raise FileNotFoundError(str(exc)) from exc
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def read_visible_skill_file(
+    session: Session,
+    username: str,
+    skill_name: str,
+    path: str,
+) -> str:
+    """Read one UTF-8 file from a visible skill directory."""
+    _validate_skill_name(skill_name)
+    sync_skill_registry(session)
+    user = _user_by_username(session, username)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=user,
+        skill=skill,
+        access_level=AccessLevel.USE,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not visible.")
+
+    try:
+        return LocalDirectoryFileService().read_text_file(
+            root_path=Path(skill.location).resolve(),
+            path=path,
+        )
+    except WorkspaceFileNotFoundError as exc:
+        raise FileNotFoundError(f"Skill file '{path}' not found.") from exc
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def update_skill_file(
+    session: Session,
+    current_user: User,
+    skill_name: str,
+    path: str,
+    content: str,
+) -> dict[str, Any]:
+    """Update one UTF-8 file inside an editable skill directory."""
+    _validate_skill_name(skill_name)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
+
+    sync_skill_registry(session)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=current_user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
+
+    owner = (
+        session.get(User, skill.creator_id)
+        if skill.creator_id is not None
+        else current_user
+    )
+    if owner is None:
+        raise ValueError("Skill creator not found.")
+
+    local_file_service = LocalDirectoryFileService()
+    skill_root = Path(skill.location).resolve()
+    try:
+        target_path = local_file_service.resolve_path(
+            root_path=skill_root,
+            relative_path=path,
+            allow_root=False,
+        )
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    if not target_path.exists():
+        raise FileNotFoundError(f"Skill file '{path}' not found.")
+    if not target_path.is_file():
+        raise ValueError("Skill path must be a file.")
+
+    if target_path.name in SKILL_MARKDOWN_FILENAMES:
+        content = rewrite_skill_name(content, skill_name)
+    try:
+        local_file_service.write_text_file(
+            root_path=skill_root,
+            path=path,
+            content=content,
+        )
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+
+    if target_path == _skill_content_path(skill).resolve():
+        discovered = _discover_skill(
+            base_dir=Path(skill.location).parent,
+            skill_path=target_path,
+            source="manual",
+            creator=owner,
+        )
+        skill.description = discovered.description
+        skill.filename = discovered.filename
+        skill.md5 = discovered.md5
+    _restage_skill_artifact(session, skill=skill, owner=owner)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        skill,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+        can_edit=True,
+    )
+
+
+def create_skill_file(
+    session: Session,
+    current_user: User,
+    skill_name: str,
+    path: str,
+    content: str = "",
+) -> dict[str, Any]:
+    """Create one UTF-8 file inside an editable skill directory."""
+    _validate_skill_name(skill_name)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
+
+    sync_skill_registry(session)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=current_user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
+
+    owner = (
+        session.get(User, skill.creator_id)
+        if skill.creator_id is not None
+        else current_user
+    )
+    if owner is None:
+        raise ValueError("Skill creator not found.")
+
+    local_file_service = LocalDirectoryFileService()
+    skill_root = Path(skill.location).resolve()
+    try:
+        target_path = local_file_service.resolve_path(
+            root_path=skill_root,
+            relative_path=path,
+            allow_root=False,
+        )
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    if target_path.exists():
+        raise ValueError(f"Skill path '{path}' already exists.")
+
+    try:
+        local_file_service.write_text_file(
+            root_path=skill_root,
+            path=path,
+            content=content,
+        )
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    _restage_skill_artifact(session, skill=skill, owner=owner)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        skill,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+        can_edit=True,
+    )
+
+
+def create_skill_directory(
+    session: Session,
+    current_user: User,
+    skill_name: str,
+    path: str,
+) -> dict[str, Any]:
+    """Create one directory inside an editable skill directory."""
+    _validate_skill_name(skill_name)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
+
+    sync_skill_registry(session)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=current_user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
+
+    owner = (
+        session.get(User, skill.creator_id)
+        if skill.creator_id is not None
+        else current_user
+    )
+    if owner is None:
+        raise ValueError("Skill creator not found.")
+
+    try:
+        LocalDirectoryFileService().create_directory(
+            root_path=Path(skill.location).resolve(),
+            path=path,
+        )
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    _restage_skill_artifact(session, skill=skill, owner=owner)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        skill,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+        can_edit=True,
+    )
+
+
+def delete_skill_path(
+    session: Session,
+    current_user: User,
+    skill_name: str,
+    path: str,
+) -> dict[str, Any]:
+    """Delete one file or directory inside an editable skill directory."""
+    _validate_skill_name(skill_name)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before writing skills.")
+
+    sync_skill_registry(session)
+    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
+    if skill is None:
+        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
+    if not _has_skill_access(
+        session,
+        user=current_user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
+        raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
+
+    owner = (
+        session.get(User, skill.creator_id)
+        if skill.creator_id is not None
+        else current_user
+    )
+    if owner is None:
+        raise ValueError("Skill creator not found.")
+
+    local_file_service = LocalDirectoryFileService()
+    skill_root = Path(skill.location).resolve()
+    try:
+        target_path = local_file_service.resolve_path(
+            root_path=skill_root,
+            relative_path=path,
+            allow_root=False,
+        )
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+
+    canonical_path = _skill_content_path(skill).resolve()
+    if target_path == canonical_path or target_path in canonical_path.parents:
+        raise ValueError("The main SKILL.md file cannot be deleted.")
+
+    try:
+        local_file_service.delete_path(root_path=skill_root, path=path)
+    except WorkspaceFileNotFoundError as exc:
+        raise FileNotFoundError(f"Skill path '{path}' not found.") from exc
+    except WorkspaceFileValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    _restage_skill_artifact(session, skill=skill, owner=owner)
+
+    creator_lookup = _creator_name_map(session)
+    return _serialize_skill(
+        skill,
+        creator_lookup=creator_lookup,
+        current_username=current_user.username,
+        can_edit=True,
+    )
 
 
 def set_skill_access(
@@ -866,7 +1109,7 @@ def list_allowed_visible_skills(
     seen_names: set[str] = set()
 
     for skill in visible_skills:
-        if allowed_names is not None and skill.name not in allowed_names:
+        if skill.name not in allowed_names:
             continue
         if skill.name in seen_names:
             continue
@@ -936,88 +1179,6 @@ def _read_skill_payload(
             ),
         ),
     }
-
-
-def read_user_skill(
-    session: Session,
-    username: str,
-    kind: str,
-    skill_name: str,
-) -> dict[str, Any]:
-    """Read one user-owned skill markdown source and metadata.
-
-    Args:
-        session: Active database session.
-        username: Authenticated username.
-        kind: Skill scope, either ``private`` or ``shared``.
-        skill_name: Globally unique skill name.
-
-    Returns:
-        Source markdown and serialized metadata.
-
-    Raises:
-        FileNotFoundError: If the skill is not owned by the user.
-        PermissionError: If the skill exists but belongs to someone else.
-        ValueError: If the skill name or scope is invalid.
-    """
-    _validate_skill_name(skill_name)
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
-
-    sync_skill_registry(session)
-    user = _user_by_username(session, username)
-
-    skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
-    if skill is None:
-        raise FileNotFoundError(f"Skill '{skill_name}' not found.")
-    if skill.kind != kind or not _has_skill_access(
-        session,
-        user=user,
-        skill=skill,
-        access_level=AccessLevel.EDIT,
-    ):
-        raise PermissionError(f"Skill '{skill_name}' is not editable by '{username}'.")
-
-    return _read_skill_payload(session, skill=skill, username=username)
-
-
-def read_shared_skill(
-    session: Session,
-    username: str,
-    skill_name: str,
-) -> dict[str, Any]:
-    """Read one shared skill visible to the current user.
-
-    Args:
-        session: Active database session.
-        username: Authenticated username.
-        skill_name: Globally unique shared skill name.
-
-    Returns:
-        Source markdown and serialized metadata.
-
-    Raises:
-        FileNotFoundError: If the shared skill does not exist.
-        ValueError: If the skill name is invalid.
-    """
-    _validate_skill_name(skill_name)
-    sync_skill_registry(session)
-    user = _user_by_username(session, username)
-
-    skill = session.exec(
-        select(Skill).where(Skill.name == skill_name, Skill.kind == "shared")
-    ).first()
-    if skill is None:
-        raise FileNotFoundError(f"Shared skill '{skill_name}' not found.")
-    if not _has_skill_access(
-        session,
-        user=user,
-        skill=skill,
-        access_level=AccessLevel.USE,
-    ):
-        raise PermissionError(f"Shared skill '{skill_name}' is not visible.")
-
-    return _read_skill_payload(session, skill=skill, username=username)
 
 
 def build_skills_metadata_prompt_json(
@@ -1239,7 +1400,6 @@ def install_github_skill(
     github_url: str,
     ref: str,
     ref_type: str,
-    kind: str,
     remote_directory_name: str,
     skill_name: str,
 ) -> dict[str, Any]:
@@ -1250,7 +1410,6 @@ def install_github_skill(
         current_user: Authenticated user who owns the installation target.
         github_url: GitHub repository URL.
         ref: Selected branch or tag.
-        kind: Installation scope, either ``private`` or ``shared``.
         remote_directory_name: Chosen folder directly under ``skills/`` in the repo.
         skill_name: Final globally unique skill name stored locally.
 
@@ -1258,8 +1417,6 @@ def install_github_skill(
         Serialized metadata for the installed skill.
     """
     _validate_skill_name(skill_name)
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
     if ref_type not in {"branch", "tag"}:
         raise ValueError(f"Invalid GitHub ref type: {ref_type}")
     if current_user.id is None:
@@ -1291,7 +1448,6 @@ def install_github_skill(
         metadata = _install_skill_from_directory(
             session,
             current_user,
-            kind=kind,
             skill_name=skill_name,
             source="network",
             extracted_dir=extracted_dir,
@@ -1303,8 +1459,7 @@ def install_github_skill(
         )
 
     logger.info(
-        "Imported %s skill '%s' from %s@%s for user '%s'",
-        kind,
+        "Imported skill '%s' from %s@%s for user '%s'",
         skill_name,
         github_url,
         ref,
@@ -1318,14 +1473,11 @@ def install_bundle_skill(
     current_user: User,
     *,
     bundle_name: str,
-    kind: str,
     skill_name: str,
     files: Sequence[BundleImportFile],
 ) -> dict[str, Any]:
     """Install one skill bundle uploaded from the user's local machine."""
     _validate_skill_name(skill_name)
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
     if current_user.id is None:
         raise ValueError("Current user must be persisted before importing skills.")
 
@@ -1344,7 +1496,6 @@ def install_bundle_skill(
         metadata = _install_skill_from_directory(
             session,
             current_user,
-            kind=kind,
             skill_name=skill_name,
             source="bundle",
             extracted_dir=extracted_dir,
@@ -1352,8 +1503,7 @@ def install_bundle_skill(
         )
 
     logger.info(
-        "Imported %s skill '%s' from local bundle '%s' for user '%s'",
-        kind,
+        "Imported skill '%s' from local bundle '%s' for user '%s'",
         skill_name,
         bundle_name,
         current_user.username,
@@ -1367,7 +1517,6 @@ def install_archive_skill(
     *,
     archive_path: Path,
     archive_filename: str,
-    kind: str,
     skill_name: str,
     progress: ImportProgressCallback | None = None,
 ) -> dict[str, Any]:
@@ -1379,8 +1528,6 @@ def install_archive_skill(
         percent=12,
     )
     _validate_skill_name(skill_name)
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
     if current_user.id is None:
         raise ValueError("Current user must be persisted before importing skills.")
 
@@ -1413,7 +1560,6 @@ def install_archive_skill(
         metadata = _install_skill_from_directory(
             session,
             current_user,
-            kind=kind,
             skill_name=skill_name,
             source="bundle",
             extracted_dir=extracted_dir,
@@ -1422,8 +1568,7 @@ def install_archive_skill(
         )
 
     logger.info(
-        "Imported %s skill '%s' from local archive '%s' for user '%s'",
-        kind,
+        "Imported skill '%s' from local archive '%s' for user '%s'",
         skill_name,
         archive_filename,
         current_user.username,
@@ -1660,7 +1805,6 @@ def _create_skill_row(
     return Skill(
         name=discovered.name,
         description=discovered.description,
-        kind=discovered.kind,
         source=source,
         creator_id=creator_id,
         location=discovered.location,
@@ -1701,7 +1845,6 @@ def _update_skill_row_from_discovery(
     """Update an existing row from a newly installed skill directory."""
     row.name = discovered.name
     row.description = discovered.description
-    row.kind = discovered.kind
     row.source = source
     row.creator_id = discovered.creator_id
     row.location = discovered.location
@@ -1723,7 +1866,6 @@ def _install_skill_from_directory(
     session: Session,
     current_user: User,
     *,
-    kind: str,
     skill_name: str,
     source: str,
     extracted_dir: Path,
@@ -1786,7 +1928,6 @@ def _install_skill_from_directory(
     discovered = _discover_skill(
         base_dir=base_dir,
         skill_path=target_dir / entry_filename,
-        kind=kind,
         source=source,
         creator=current_user,
     )
@@ -1826,16 +1967,27 @@ def _install_skill_from_directory(
         shutil.rmtree(target_dir, ignore_errors=True)
         raise ValueError(f"Skill name '{discovered.name}' already exists.") from exc
     session.refresh(row)
+    set_skill_access(
+        session,
+        skill=row,
+        use_scope="selected",
+        use_user_ids={current_user.id},
+        use_group_ids=set(),
+        edit_user_ids={current_user.id},
+        edit_group_ids=set(),
+    )
+    session.refresh(row)
 
     creator_lookup = _creator_name_map(session)
     return _serialize_skill(
         row,
         creator_lookup=creator_lookup,
         current_username=current_user.username,
+        can_edit=True,
     )
 
 
-def apply_private_skill_directory(
+def apply_skill_directory(
     session: Session,
     current_user: User,
     *,
@@ -1843,20 +1995,20 @@ def apply_private_skill_directory(
     source_dir: Path,
     source: str = "agent",
 ) -> dict[str, Any]:
-    """Create or replace one creator-owned private skill from a staged directory.
+    """Create or replace one creator-owned Skill from a staged directory.
 
     Args:
         session: Active database session.
         current_user: Authenticated user who owns the target namespace.
         skill_name: Globally unique skill name to create or replace.
-        source_dir: Directory whose files will become the private skill bundle.
+        source_dir: Directory whose files will become the Skill bundle.
         source: Persisted source label for the resulting skill row.
 
     Returns:
-        Serialized metadata for the applied private skill.
+        Serialized metadata for the applied Skill.
 
     Raises:
-        PermissionError: If the name belongs to a shared or foreign skill.
+        PermissionError: If the name belongs to another creator.
         ValueError: If the skill layout is invalid.
     """
     _validate_skill_name(skill_name)
@@ -1867,16 +2019,10 @@ def apply_private_skill_directory(
 
     sync_skill_registry(session)
     existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
-    if existing is not None:
-        if existing.creator_id != current_user.id:
-            raise PermissionError(
-                f"Skill '{skill_name}' is owned by another creator and is read-only."
-            )
-        if existing.kind != "private":
-            raise PermissionError(
-                f"Skill '{skill_name}' is a {existing.kind} skill and cannot be updated "
-                "through agent submissions."
-            )
+    if existing is not None and existing.creator_id != current_user.id:
+        raise PermissionError(
+            f"Skill '{skill_name}' is owned by another creator and is read-only."
+        )
 
     entry_filename = _detect_skill_entry_filename(
         source_dir,
@@ -1902,7 +2048,6 @@ def apply_private_skill_directory(
     discovered = _discover_skill(
         base_dir=base_dir,
         skill_path=target_dir / entry_filename,
-        kind="private",
         source=source,
         creator=current_user,
     )
@@ -1949,19 +2094,17 @@ def apply_private_skill_directory(
     )
 
 
-def upsert_user_skill(
+def save_user_skill_source(
     session: Session,
     current_user: User,
-    kind: str,
     skill_name: str,
     source: str,
 ) -> dict[str, Any]:
-    """Create or update one user-owned skill and persist its metadata.
+    """Create or update one user-authored Skill and persist its metadata.
 
     Args:
         session: Active database session.
         current_user: Authenticated user who owns the writable namespace.
-        kind: Skill scope, either ``private`` or ``shared``.
         skill_name: Globally unique skill name to write.
         source: Markdown skill source.
 
@@ -1970,45 +2113,28 @@ def upsert_user_skill(
 
     Raises:
         PermissionError: If the target name belongs to another creator.
-        ValueError: If the name or scope is invalid.
+        ValueError: If the name is invalid.
     """
     _validate_skill_name(skill_name)
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
     if current_user.id is None:
         raise ValueError("Current user must be persisted before writing skills.")
 
     sync_skill_registry(session)
     existing = session.exec(select(Skill).where(Skill.name == skill_name)).first()
-    if existing is not None:
-        if existing.creator_id != current_user.id:
-            raise PermissionError(
-                f"Skill '{skill_name}' is owned by another creator and is read-only."
-            )
-        if existing.kind != kind:
-            raise ValueError(
-                f"Skill '{skill_name}' already exists as a {existing.kind} skill."
-            )
+    if existing is not None and existing.creator_id != current_user.id:
+        raise PermissionError(
+            f"Skill '{skill_name}' is owned by another creator and is read-only."
+        )
 
     normalized_source = rewrite_skill_name(source, skill_name)
     base_dir = _user_skills_dir(current_user.username, create=True)
     canonical_path = _canonical_skill_path(base_dir, skill_name)
     canonical_path.parent.mkdir(parents=True, exist_ok=True)
     canonical_path.write_text(normalized_source, encoding="utf-8")
-    for legacy_kind in _ALLOWED_KINDS:
-        legacy_root = _legacy_user_skills_dir(
-            current_user.username,
-            legacy_kind,
-            create=False,
-        )
-        legacy_path = _legacy_skill_path(legacy_root, skill_name)
-        if legacy_path.exists():
-            legacy_path.unlink()
 
     discovered = _discover_skill(
         base_dir=base_dir,
         skill_path=canonical_path,
-        kind=kind,
         source="manual",
         creator=current_user,
     )
@@ -2053,8 +2179,7 @@ def upsert_user_skill(
         SkillArtifactStorageService().delete_artifact(artifact_key=old_artifact_key)
 
     logger.info(
-        "Saved %s skill '%s' for user '%s'",
-        kind,
+        "Saved skill '%s' for user '%s'",
         skill_name,
         current_user.username,
     )
@@ -2066,28 +2191,24 @@ def upsert_user_skill(
     )
 
 
-def delete_user_skill(
+def delete_skill_source(
     session: Session,
     current_user: User,
-    kind: str,
     skill_name: str,
 ) -> None:
-    """Delete one user-owned skill and its persistent metadata row.
+    """Delete one editable Skill source and its persistent metadata row.
 
     Args:
         session: Active database session.
         current_user: Authenticated user who owns the writable namespace.
-        kind: Skill scope, either ``private`` or ``shared``.
         skill_name: Globally unique skill name to delete.
 
     Raises:
         FileNotFoundError: If the skill does not exist.
         PermissionError: If the skill exists but is not owned by the current user.
-        ValueError: If the name or scope is invalid.
+        ValueError: If the name is invalid.
     """
     _validate_skill_name(skill_name)
-    if kind not in _ALLOWED_KINDS:
-        raise ValueError(f"Invalid skill kind: {kind}")
     if current_user.id is None:
         raise ValueError("Current user must be persisted before deleting skills.")
 
@@ -2095,40 +2216,31 @@ def delete_user_skill(
     skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if skill is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found.")
-    if skill.creator_id != current_user.id or skill.kind != kind:
+    if not _has_skill_access(
+        session,
+        user=current_user,
+        skill=skill,
+        access_level=AccessLevel.EDIT,
+    ):
         raise PermissionError(f"Skill '{skill_name}' is not editable by this user.")
 
+    skill_id = skill.id
     skill_dir = Path(skill.location)
-    canonical_path = skill_dir / skill.filename
-    legacy_path = _legacy_skill_path(
-        _user_skills_dir(current_user.username, create=True),
-        skill_name,
-    )
 
-    if canonical_path.exists():
+    if skill_dir.exists() and skill_dir.is_dir():
         shutil.rmtree(skill_dir, ignore_errors=True)
-    if legacy_path.exists():
-        legacy_path.unlink()
-    for legacy_kind in _ALLOWED_KINDS:
-        legacy_root = _legacy_user_skills_dir(
-            current_user.username,
-            legacy_kind,
-            create=False,
-        )
-        legacy_dir = legacy_root / skill_name
-        legacy_file = _legacy_skill_path(legacy_root, skill_name)
-        if legacy_dir.exists():
-            shutil.rmtree(legacy_dir, ignore_errors=True)
-        if legacy_file.exists():
-            legacy_file.unlink()
     if skill.artifact_key:
         SkillArtifactStorageService().delete_artifact(artifact_key=skill.artifact_key)
 
+    if skill_id is not None:
+        AccessService(session)._delete_resource_grants_in_session(
+            resource_type=ResourceType.SKILL,
+            resource_id=skill_id,
+        )
     session.delete(skill)
     session.commit()
     logger.info(
-        "Deleted %s skill '%s' for user '%s'",
-        kind,
+        "Deleted skill '%s' for user '%s'",
         skill_name,
         current_user.username,
     )

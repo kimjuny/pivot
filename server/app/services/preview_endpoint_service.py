@@ -12,11 +12,15 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from app.models.access import AccessLevel
+from app.services.access_service import AccessService
 from app.services.sandbox_service import get_sandbox_service
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
+from sqlmodel import select
 
 if TYPE_CHECKING:
+    from app.models.user import User
     from sqlmodel import Session as DBSession
 
 
@@ -156,8 +160,11 @@ class PreviewEndpointService:
         workspace = WorkspaceService(self.db).get_workspace(record.workspace_id)
         if workspace is None:
             raise PreviewEndpointNotFoundError("Workspace not found.")
-        if workspace.user != username:
-            raise PreviewEndpointPermissionError("Workspace is not owned by the caller.")
+        self._require_workspace_access(
+            username=username,
+            workspace_id=workspace.workspace_id,
+            access_level=AccessLevel.EDIT,
+        )
 
         workspace_backend_path = WorkspaceService(self.db).get_workspace_backend_path(
             workspace
@@ -295,11 +302,37 @@ class PreviewEndpointService:
         workspace = WorkspaceService(self.db).get_workspace(chat_session.workspace_id)
         if workspace is None:
             raise PreviewEndpointNotFoundError("Workspace not found.")
-        if workspace.user != username:
-            raise PreviewEndpointPermissionError(
-                "Workspace is not owned by the caller."
-            )
+        self._require_workspace_access(
+            username=username,
+            workspace_id=workspace.workspace_id,
+            access_level=AccessLevel.EDIT,
+        )
         return chat_session, workspace
+
+    def _require_workspace_access(
+        self,
+        *,
+        username: str,
+        workspace_id: str,
+        access_level: AccessLevel,
+    ) -> None:
+        """Raise unless a caller can access a workspace through resource grants."""
+        workspace = WorkspaceService(self.db).get_workspace(workspace_id)
+        if workspace is None:
+            raise PreviewEndpointNotFoundError("Workspace not found.")
+        user = self._user_by_username(username)
+        if user is None or not AccessService(self.db).has_workspace_access(
+            user=user,
+            workspace=workspace,
+            access_level=access_level,
+        ):
+            raise PreviewEndpointPermissionError("Workspace is not accessible.")
+
+    def _user_by_username(self, username: str) -> User | None:
+        """Return one persisted user by username."""
+        from app.models.user import User
+
+        return self.db.exec(select(User).where(User.username == username)).first()
 
     @staticmethod
     def _normalize_port(raw_port: int) -> int:
@@ -386,9 +419,7 @@ class PreviewEndpointService:
     def _build_launch_command(*, record: PreviewEndpointRecord) -> str:
         """Return one bash command that replays a preview launch recipe."""
         if record.cwd is None or record.start_server is None:
-            raise PreviewEndpointValidationError(
-                "Preview launch recipe is incomplete."
-            )
+            raise PreviewEndpointValidationError("Preview launch recipe is incomplete.")
         return f"cd {shlex.quote(record.cwd)} && {record.start_server}"
 
     def _wait_until_preview_reachable(

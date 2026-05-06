@@ -53,7 +53,6 @@ import {
 } from '@/components/ui/tooltip';
 import { Progress } from '@/components/ui/progress';
 
-type SkillVisibility = 'private' | 'shared';
 type GitHubRefType = 'branch' | 'tag';
 type ImportTabValue = 'bundle' | 'github';
 
@@ -208,11 +207,9 @@ function SkillImportDialog({
   const [bundleFiles, setBundleFiles] = useState<BundleSkillImportFile[]>([]);
   const [bundleEntryFilename, setBundleEntryFilename] = useState('');
   const [bundleSkillName, setBundleSkillName] = useState('');
-  const [bundleVisibility, setBundleVisibility] = useState<SkillVisibility>('private');
   const [bundleMessage, setBundleMessage] = useState<string | null>(null);
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
   const [archiveSkillNameValue, setArchiveSkillNameValue] = useState('');
-  const [archiveVisibility, setArchiveVisibility] = useState<SkillVisibility>('private');
   const [archiveMessage, setArchiveMessage] = useState<string | null>(null);
   const [archiveProgress, setArchiveProgress] = useState<SkillImportProgressEvent | null>(null);
 
@@ -221,7 +218,6 @@ function SkillImportDialog({
   const [selectedRefKey, setSelectedRefKey] = useState<string | null>(null);
   const [selectedDirectoryName, setSelectedDirectoryName] = useState('');
   const [githubSkillName, setGitHubSkillName] = useState('');
-  const [githubVisibility, setGitHubVisibility] = useState<SkillVisibility>('private');
   const [isProbing, setIsProbing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [probeMessage, setProbeMessage] = useState<string | null>(null);
@@ -253,11 +249,9 @@ function SkillImportDialog({
     setBundleFiles([]);
     setBundleEntryFilename('');
     setBundleSkillName('');
-    setBundleVisibility('private');
     setBundleMessage(null);
     setArchiveFile(null);
     setArchiveSkillNameValue('');
-    setArchiveVisibility('private');
     setArchiveMessage(null);
     setArchiveProgress(null);
     setGitHubUrl('');
@@ -265,7 +259,6 @@ function SkillImportDialog({
     setSelectedRefKey(null);
     setSelectedDirectoryName('');
     setGitHubSkillName('');
-    setGitHubVisibility('private');
     setProbeMessage(null);
     setIsProbing(false);
     setIsImporting(false);
@@ -462,7 +455,6 @@ function SkillImportDialog({
 
           await importSkillArchive({
             jobId: job.job_id,
-            kind: archiveVisibility,
             skillName: trimmedArchiveSkillName,
             archive: archiveFile,
           });
@@ -511,7 +503,6 @@ function SkillImportDialog({
       try {
         await importBundleSkill({
           bundleName,
-          kind: bundleVisibility,
           skillName: trimmedBundleSkillName,
           files: bundleFiles,
         });
@@ -550,7 +541,6 @@ function SkillImportDialog({
         github_url: githubUrl.trim(),
         ref: refName,
         ref_type: refType,
-        kind: githubVisibility,
         remote_directory_name: selectedCandidate.directory_name,
         skill_name: trimmedGitHubSkillName,
       });
@@ -567,16 +557,13 @@ function SkillImportDialog({
     activeTab,
     archiveFile,
     archiveNameConflict,
-    archiveVisibility,
     bundleEntryFilename,
     bundleFiles,
     bundleName,
     bundleNameConflict,
-    bundleVisibility,
     effectiveSelectedRefKey,
     githubNameConflict,
     githubUrl,
-    githubVisibility,
     onImported,
     onOpenChange,
     probeResult,
@@ -763,42 +750,7 @@ function SkillImportDialog({
               </div>
 
               {(bundleName || archiveFile) && (
-                <div className="grid items-start gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <div className="flex min-h-6 items-center gap-1.5">
-                      <Label htmlFor="bundle-import-visibility">Visibility</Label>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs">
-                          <p>
-                            Private imports go to your own workspace. Shared imports are visible to other users immediately after import.
-                          </p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                    <Select
-                      value={archiveFile ? archiveVisibility : bundleVisibility}
-                      onValueChange={(value) => {
-                        if (archiveFile) {
-                          setArchiveVisibility(value as SkillVisibility);
-                        } else {
-                          setBundleVisibility(value as SkillVisibility);
-                        }
-                      }}
-                      disabled={isImporting}
-                    >
-                      <SelectTrigger id="bundle-import-visibility">
-                        <SelectValue placeholder="Choose visibility" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="private">Private</SelectItem>
-                        <SelectItem value="shared">Shared</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
+                <div className="grid items-start gap-4">
                   <div className="space-y-2">
                     <div className="flex min-h-6 items-center">
                       <Label htmlFor="bundle-import-name">Local Skill Name</Label>
@@ -940,35 +892,6 @@ function SkillImportDialog({
                               {option.label}
                             </SelectItem>
                           ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex min-h-6 items-center gap-1.5">
-                        <Label htmlFor="skill-import-visibility">Visibility</Label>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Info className="h-3.5 w-3.5 cursor-help text-muted-foreground" />
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs">
-                            <p>
-                              Private imports go to your own workspace. Shared imports are visible to other users immediately after import.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <Select
-                        value={githubVisibility}
-                        onValueChange={(value) => setGitHubVisibility(value as SkillVisibility)}
-                        disabled={isImporting}
-                      >
-                        <SelectTrigger id="skill-import-visibility">
-                          <SelectValue placeholder="Choose visibility" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="private">Private</SelectItem>
-                          <SelectItem value="shared">Shared</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

@@ -480,6 +480,10 @@ describe("ChatContainer session rollover", () => {
             hub_package_version_id: null,
             hub_artifact_digest: null,
             installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
             status: "active",
             created_at: "2026-03-16T00:00:00.000Z",
             updated_at: "2026-03-16T00:00:00.000Z",
@@ -1365,7 +1369,7 @@ describe("ChatContainer session rollover", () => {
               skill_name: "planning-kit",
               change_type: "create",
               question:
-                "Approve the request to create private skill `planning-kit`?",
+                "Approve the request to create Skill `planning-kit`?",
               message: "Adds a reusable planning workflow.",
             },
           },
@@ -1382,13 +1386,13 @@ describe("ChatContainer session rollover", () => {
               action_type: "CLARIFY",
               action_output: JSON.stringify({
                 question:
-                    "Approve the request to create private skill `planning-kit`?",
+                    "Approve the request to create Skill `planning-kit`?",
                 approval_request: {
                   submission_id: 42,
                   skill_name: "planning-kit",
                   change_type: "create",
                   question:
-                    "Approve the request to create private skill `planning-kit`?",
+                    "Approve the request to create Skill `planning-kit`?",
                   message: "Adds a reusable planning workflow.",
                 },
               }),
@@ -1434,7 +1438,7 @@ describe("ChatContainer session rollover", () => {
 
     const approveButton = await screen.findByRole("button", { name: "Approve" });
     expect(
-      screen.getAllByText(/Approve the request to create private skill/).length,
+      screen.getAllByText(/Approve the request to create Skill/).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText("Replying")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Ask anything")).toBeInTheDocument();
@@ -1448,7 +1452,7 @@ describe("ChatContainer session rollover", () => {
       );
     });
     expect(
-      screen.queryByText(/Approve the request to create private skill/),
+      screen.queryByText(/Approve the request to create Skill/),
     ).not.toBeInTheDocument();
   });
 
