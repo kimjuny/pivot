@@ -23,6 +23,7 @@ HUNK_HEADER_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
     r"\+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
 )
+ANCHOR_SEARCH_RADIUS = 5
 REJECTED_GIT_PREFIXES = (
     "diff --git ",
     "index ",
@@ -205,6 +206,10 @@ def line_body(line: str) -> str:
     return split_line_ending(line)[0]
 
 
+def normalized_line_bodies(lines: list[str]) -> list[str]:
+    return [line_body(line) for line in lines]
+
+
 def dominant_line_ending(lines: list[str]) -> str:
     counts: dict[str, int] = {"\r\n": 0, "\n": 0, "\r": 0}
     for line in lines:
@@ -248,6 +253,30 @@ def materialize_new_lines(
     return materialized
 
 
+def find_nearby_unique_match(
+    lines: list[str],
+    old_lines: list[str],
+    expected_start_index: int,
+    radius: int,
+) -> list[int]:
+    if not old_lines:
+        return []
+
+    old_bodies = normalized_line_bodies(old_lines)
+    max_start_index = len(lines) - len(old_lines)
+    if max_start_index < 0:
+        return []
+
+    window_start = max(0, expected_start_index - radius)
+    window_end = min(max_start_index, expected_start_index + radius)
+    matches: list[int] = []
+    for candidate_start in range(window_start, window_end + 1):
+        candidate_slice = lines[candidate_start : candidate_start + len(old_lines)]
+        if normalized_line_bodies(candidate_slice) == old_bodies:
+            matches.append(candidate_start)
+    return matches
+
+
 if not path.exists():
     fail(f"Cannot edit file because it does not exist: {display_path(path)}")
 if path.is_dir():
@@ -277,16 +306,42 @@ for hunk in hunks:
             "the current file. No changes were written."
         )
     current_slice = updated_lines[start_index:end_index]
-    if [line_body(line) for line in current_slice] != [line_body(line) for line in old_lines]:
-        fail(
-            f"Patch failed at hunk {hunk_index}: context did not match around "
-            f"original line {old_start}. old_start is the strict location anchor; "
-            "edit_file will not search elsewhere because repeated code could be "
-            "modified incorrectly. Re-run read_file for the current lines and try "
-            "again.\nExpected old/context lines:\n"
-            f"{format_preview(old_lines, old_start)}\nActual file lines there:\n"
-            f"{format_preview(current_slice, old_start)}\nNo changes were written."
+    if normalized_line_bodies(current_slice) != normalized_line_bodies(old_lines):
+        nearby_matches = find_nearby_unique_match(
+            updated_lines,
+            old_lines,
+            start_index,
+            ANCHOR_SEARCH_RADIUS,
         )
+        if len(nearby_matches) == 1:
+            corrected_start_index = nearby_matches[0]
+            corrected_old_start = corrected_start_index - line_delta + 1
+            warnings.append(
+                f"Hunk {hunk_index} header old_start={old_start} did not match "
+                f"exactly. edit_file applied the hunk at nearby original line "
+                f"{corrected_old_start} after finding a unique match within "
+                f"+/-{ANCHOR_SEARCH_RADIUS} lines."
+            )
+            start_index = corrected_start_index
+            end_index = start_index + len(old_lines)
+            current_slice = updated_lines[start_index:end_index]
+        else:
+            current_line = start_index + 1
+            search_result = (
+                "no nearby match"
+                if not nearby_matches
+                else "multiple nearby matches at original lines "
+                + ", ".join(str(candidate - line_delta + 1) for candidate in nearby_matches)
+            )
+            fail(
+                f"Patch failed at hunk {hunk_index}: context did not match at "
+                f"original line {old_start} (current file line {current_line}). "
+                f"edit_file searched within +/-{ANCHOR_SEARCH_RADIUS} lines and "
+                f"found {search_result}. Re-run read_file for the current lines "
+                "and try again.\nExpected old/context lines:\n"
+                f"{format_preview(old_lines, old_start)}\nActual file lines there:\n"
+                f"{format_preview(current_slice, current_line)}\nNo changes were written."
+            )
     new_lines = materialize_new_lines(body_entries, current_slice, fallback_line_ending)
     updated_lines[start_index:end_index] = new_lines
     line_delta += len(new_lines) - len(old_lines)
@@ -307,52 +362,41 @@ print(json.dumps(payload, ensure_ascii=False))
 
 @tool(tool_type="sandbox")
 def edit_file(path: str, diff: str) -> dict[str, object]:
-    """Apply simplified single-file unified diff hunks under ``/workspace``.
+    """Apply simplified unified diff hunks to one file under ``/workspace``.
 
-    Use this after ``read_file``. ``read_file`` returns line-numbered content;
-    use those numbers to write accurate ``@@`` hunk headers, but do not include
-    the line-number prefixes in diff body lines.
+    Use this after ``read_file``. The ``read_file`` line numbers are snapshot
+    data, so after any successful write to the same file you must re-run
+    ``read_file`` before editing that file again.
 
-    IMPORTANT: Prefer an absolute sandbox path that starts with ``/workspace/``,
-    for example ``/workspace/app/index.html``. Never pass host-machine paths
-    such as ``/Users/...`` or ``/tmp/...``; paths outside ``/workspace`` are
-    rejected.
+    IMPORTANT:
+    - In one recursion, call ``edit_file`` at most once per file.
+    - If one file needs multiple changes, send one ``edit_file`` call with
+      multiple ``@@`` hunks instead of multiple calls.
+    - Use the ``read_file`` numbers in hunk headers, but never include the
+      ``N | `` prefixes in diff body lines.
+    - ``old_start`` should point to the first old/context line. The tool tries
+      that exact anchor first, then may auto-correct within a small nearby
+      window when the old/context block has one unique match.
+    - Keep ``old_count`` and ``new_count`` accurate; mismatches only warn today,
+      but they make future edits less reliable.
 
-    The diff should contain only one or more ``@@`` hunks, without markdown
-    fences, file headers, or full git metadata such as ``diff --git`` /
-    ``index`` lines:
+    Example with multiple hunks:
 
     @@ -10,3 +10,3 @@
      unchanged context
     -old line
     +new line
-
-    ``old_start`` in each hunk header is the strict location anchor. The tool
-    applies the hunk only at that line and will not search elsewhere, because
-    repeated code could otherwise be modified incorrectly. Keep ``old_count``
-    and ``new_count`` accurate too; count mismatches are tolerated with warnings,
-    but accurate counts make future edits more reliable.
-
-    Behavior:
-    - Edits exactly one existing UTF-8 text file.
-    - Allows multiple hunks in that one file.
-    - Applies atomically: if any hunk fails, no changes are written.
-    - Treats optional leading ``---``/``+++`` file headers as compatibility
-      noise and ignores them; ``path`` is the only target file.
+    @@ -40,2 +40,3 @@
+     another context line
+    +inserted line
+     final context line
 
     Args:
-        path (required, str): Absolute ``/workspace/...`` path to the target
-            file. Workspace-relative paths are accepted, but absolute sandbox
-            paths are clearer and less error-prone.
+        path (required, str): Target file path under ``/workspace``.
         diff (required, str): Simplified unified diff hunks for that file.
 
     Returns:
-        Structured summary with message, path, hunk_count, added_lines, and
-        removed_lines, plus warnings when hunk counts are inconsistent.
-
-    Raises:
-        ValueError: If path escapes ``/workspace``.
-        RuntimeError: If sandbox execution fails or the patch does not apply.
+        A dict with message, path, hunk_count, line counts, and warnings.
     """
     if not diff.strip():
         raise ValueError("diff must be a non-empty unified diff patch.")

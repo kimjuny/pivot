@@ -630,6 +630,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
     <SidebarProvider defaultOpen={true}>
       <AgentDetailSidebar
         agent={workspaceAgent ?? agent}
+        activeReleaseVersion={activeReleaseVersion ?? effectiveAgent?.active_release_version ?? null}
         onAgentDraftUpdate={handleAgentDraftUpdate}
         onChannelBindingsLoaded={handleChannelBindingsLoaded}
         onMediaProviderBindingsLoaded={handleMediaProviderBindingsLoaded}
@@ -644,7 +645,6 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
         <div className="flex-1 relative overflow-hidden flex flex-col">
           <div className="pointer-events-none absolute right-4 top-3 z-20 flex justify-end">
             <AgentWorkspaceToolbar
-              activeReleaseVersion={activeReleaseVersion}
               hasUnsavedChanges={hasUnsavedChanges}
               hasPublishableChanges={hasPublishableChanges}
               isSavingDraft={isSubmitting}

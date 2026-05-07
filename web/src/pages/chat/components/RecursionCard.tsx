@@ -440,6 +440,72 @@ function getWindowedLines(value: string, maxLines = 420): {
   };
 }
 
+type DiffPreviewLine = {
+  content: string;
+  oldLineNumber: number | null;
+};
+
+function parseUnifiedDiffLines(value: string): DiffPreviewLine[] {
+  const lines = value.split(/\r\n|\r|\n/);
+  const parsedLines: DiffPreviewLine[] = [];
+  let currentOldLine: number | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const headerMatch = /^@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@/.exec(line);
+      currentOldLine = headerMatch ? Number.parseInt(headerMatch[1], 10) : null;
+      parsedLines.push({ content: line, oldLineNumber: null });
+      continue;
+    }
+
+    if (line.startsWith("---") || line.startsWith("+++")) {
+      parsedLines.push({ content: line, oldLineNumber: null });
+      continue;
+    }
+
+    if (line.startsWith("+")) {
+      parsedLines.push({ content: line, oldLineNumber: null });
+      continue;
+    }
+
+    if (
+      (line.startsWith(" ") || line.startsWith("-")) &&
+      currentOldLine !== null
+    ) {
+      parsedLines.push({ content: line, oldLineNumber: currentOldLine });
+      currentOldLine += 1;
+      continue;
+    }
+
+    parsedLines.push({ content: line, oldLineNumber: null });
+  }
+
+  return parsedLines;
+}
+
+function getWindowedDiffLines(value: string, maxLines = 420): {
+  lines: DiffPreviewLine[];
+  startLine: number;
+  totalLines: number;
+  isTruncated: boolean;
+} {
+  const lines = parseUnifiedDiffLines(value);
+  if (lines.length <= maxLines) {
+    return {
+      lines,
+      startLine: 1,
+      totalLines: lines.length,
+      isTruncated: false,
+    };
+  }
+  return {
+    lines: lines.slice(lines.length - maxLines),
+    startLine: lines.length - maxLines + 1,
+    totalLines: lines.length,
+    isTruncated: true,
+  };
+}
+
 function ToolCodePreview({
   value,
   emptyLabel,
@@ -481,7 +547,7 @@ function ToolCodePreview({
 }
 
 function ToolDiffPreview({ value }: { value: string }) {
-  const preview = value ? getWindowedLines(value) : null;
+  const preview = value ? getWindowedDiffLines(value) : null;
   const lines = preview?.lines ?? [];
 
   return (
@@ -497,24 +563,24 @@ function ToolDiffPreview({ value }: { value: string }) {
       <div className="tool-preview-scroll max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
         {lines.length > 0 ? (
           lines.map((line, index) => {
-            const lineClassName = line.startsWith("+") && !line.startsWith("+++")
+            const lineClassName = line.content.startsWith("+") && !line.content.startsWith("+++")
               ? "bg-success/10 text-emerald-200"
-              : line.startsWith("-") && !line.startsWith("---")
+              : line.content.startsWith("-") && !line.content.startsWith("---")
                 ? "bg-danger/10 text-red-200"
-                : line.startsWith("@@")
+                : line.content.startsWith("@@")
                   ? "bg-sky-500/10 text-sky-200"
                   : "text-zinc-100";
 
             return (
               <div
-                key={`${index}-${line}`}
+                key={`${index}-${line.content}`}
                 className={`flex min-w-0 ${lineClassName}`}
               >
                 <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
-                  {(preview?.startLine ?? 1) + index}
+                  {line.oldLineNumber ?? ""}
                 </span>
                 <span className="min-w-0 flex-1 whitespace-pre">
-                  {line || " "}
+                  {line.content || " "}
                 </span>
               </div>
             );

@@ -93,9 +93,63 @@ class EditFileToolTestCase(unittest.TestCase):
 
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("Patch failed at hunk 2", completed.stderr)
-        self.assertIn("old_start is the strict location anchor", completed.stderr)
+        self.assertIn("searched within +/-5 lines", completed.stderr)
         self.assertIn("Expected old/context lines", completed.stderr)
         self.assertIn("Actual file lines there", completed.stderr)
+        self.assertEqual(updated, original)
+
+    def test_script_autocorrects_nearby_unique_anchor(self) -> None:
+        """A small old_start miss should still apply when the nearby match is unique."""
+        module = cast(Any, edit_file_module)
+        diff = """@@ -3,2 +3,2 @@
+-old target
++new target
+ context line
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "example.py"
+            original = "alpha\nold target\ncontext line\nomega\n"
+            file_path.write_text(original, encoding="utf-8")
+
+            completed = subprocess.run(
+                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            updated = file_path.read_text(encoding="utf-8")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertIn("old_start=3 did not match exactly", payload["warnings"][0])
+        self.assertIn("nearby original line 2", payload["warnings"][0])
+        self.assertEqual(updated, "alpha\nnew target\ncontext line\nomega\n")
+
+    def test_script_rejects_ambiguous_nearby_anchor_matches(self) -> None:
+        """The tool should not guess when multiple nearby matches exist."""
+        module = cast(Any, edit_file_module)
+        diff = """@@ -4,2 +4,2 @@
+-target
++updated
+ context
+"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "example.py"
+            original = "a\ntarget\ncontext\nb\ntarget\ncontext\nc\n"
+            file_path.write_text(original, encoding="utf-8")
+
+            completed = subprocess.run(
+                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            updated = file_path.read_text(encoding="utf-8")
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("multiple nearby matches", completed.stderr)
         self.assertEqual(updated, original)
 
     def test_script_accepts_hunks_without_file_headers(self) -> None:

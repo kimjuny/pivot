@@ -240,6 +240,19 @@ function formatSidebarCountLabel(
     return `${stats.selected_count} / ${stats.total_count}`;
 }
 
+function withSelectedCount(
+    stats: AgentSidebarSectionStats | null | undefined,
+    selectedCount: number,
+): AgentSidebarSectionStats | null | undefined {
+    if (!stats) {
+        return stats;
+    }
+    return {
+        ...stats,
+        selected_count: selectedCount,
+    };
+}
+
 function SidebarCountBadge({
     stats,
     animationIndex,
@@ -363,6 +376,7 @@ function formatExtensionRemovalMessage(pkg: AgentExtensionPackage | null): strin
 
 interface AgentDetailSidebarProps {
     agent: Agent | null;
+    activeReleaseVersion?: number | null;
     onAgentDraftUpdate?: (agent: Agent) => void;
     onChannelBindingsLoaded?: (bindings: SidebarChannel[]) => void;
     onMediaProviderBindingsLoaded?: (bindings: SidebarMediaProviderBinding[]) => void;
@@ -380,6 +394,7 @@ interface AgentDetailSidebarProps {
  */
 function AgentDetailSidebar({
     agent,
+    activeReleaseVersion = null,
     onAgentDraftUpdate,
     onChannelBindingsLoaded,
     onMediaProviderBindingsLoaded,
@@ -563,6 +578,22 @@ function AgentDetailSidebar({
         const baseSkills = skills.filter((skill) => enabledSkillNameSet.has(skill.name));
         return [...baseSkills, ...extensionSkills];
     }, [skills, extensionSkills, enabledSkillNameSet]);
+
+    /**
+     * Tools and skills are edited in the local draft first, so their selected
+     * counts should reflect the draft immediately instead of waiting for the
+     * persisted sidebar stats endpoint to catch up.
+     */
+    const effectiveSidebarStats = useMemo(() => {
+        if (!sidebarStats) {
+            return null;
+        }
+        return {
+            ...sidebarStats,
+            tools: withSelectedCount(sidebarStats.tools, enabledToolNameSet.size),
+            skills: withSelectedCount(sidebarStats.skills, enabledSkillNameSet.size),
+        };
+    }, [enabledSkillNameSet, enabledToolNameSet, sidebarStats]);
 
     /**
      * Prefer installation-backed branding because one package card may point at
@@ -1299,18 +1330,24 @@ function AgentDetailSidebar({
                                             />
                                         </div>
                                         <div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-none">
-                                            <span className="truncate text-sm font-semibold">
-                                                {agent?.name || 'Loading…'}
-                                            </span>
-                                            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="truncate text-sm font-semibold">
+                                                    {agent?.name || 'Loading…'}
+                                                </span>
                                                 <span
+                                                    aria-label={agent?.serving_enabled === false ? 'Serving disabled' : 'Serving enabled'}
+                                                    title={agent?.serving_enabled === false ? 'Serving disabled' : 'Serving enabled'}
                                                     className={`h-1.5 w-1.5 rounded-full ${
                                                         agent?.serving_enabled === false
-                                                            ? 'bg-amber-500'
-                                                            : 'bg-success'
+                                                            ? 'bg-red-500'
+                                                            : 'bg-blue-500'
                                                     }`}
                                                 />
-                                                {agent?.serving_enabled === false ? 'Disabled' : 'Enabled'}
+                                            </div>
+                                            <span className="inline-flex w-fit items-center rounded-md bg-sidebar-accent/50 px-1.5 py-0.5 text-[10px] text-sidebar-foreground/70">
+                                                {activeReleaseVersion !== null
+                                                    ? `Active v${activeReleaseVersion}`
+                                                    : 'not published'}
                                             </span>
                                         </div>
                                     </SidebarMenuButton>
@@ -1377,7 +1414,7 @@ function AgentDetailSidebar({
                                     <Wrench className="size-4" />
                                     <span className="flex-1 text-left">Tools</span>
                                     {/* Count badge: shows enabled / total */}
-                                    <SidebarCountBadge stats={sidebarStats?.tools} animationIndex={0} />
+                                    <SidebarCountBadge stats={effectiveSidebarStats?.tools} animationIndex={0} />
                                     {/* Configure button */}
                                     {agent?.id && (
                                         <Tooltip>
@@ -1405,7 +1442,7 @@ function AgentDetailSidebar({
                                         <SidebarMenu>
                                             <SidebarItemSkeleton testId="agent-sidebar-tools-skeleton" />
                                         </SidebarMenu>
-                                    ) : tools.length + extensionTools.length === 0 || displayedTools.length === 0 ? (
+                                    ) : toolsLoading ? null : tools.length + extensionTools.length === 0 || displayedTools.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
@@ -1502,7 +1539,7 @@ function AgentDetailSidebar({
                                 >
                                     <Zap className="size-4" />
                                     <span className="flex-1 text-left">Skills</span>
-                                    <SidebarCountBadge stats={sidebarStats?.skills} animationIndex={1} />
+                                    <SidebarCountBadge stats={effectiveSidebarStats?.skills} animationIndex={1} />
                                     {agent?.id && (
                                         <Tooltip>
                                             <TooltipTrigger asChild>
@@ -1529,7 +1566,7 @@ function AgentDetailSidebar({
                                         <SidebarMenu>
                                             <SidebarItemSkeleton testId="agent-sidebar-skills-skeleton" />
                                         </SidebarMenu>
-                                    ) : skills.length + extensionSkills.length === 0 || displayedSkills.length === 0 ? (
+                                    ) : skillsLoading ? null : skills.length + extensionSkills.length === 0 || displayedSkills.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
@@ -1656,7 +1693,7 @@ function AgentDetailSidebar({
                                         <SidebarMenu>
                                             <SidebarItemSkeleton testId="agent-sidebar-extensions-skeleton" />
                                         </SidebarMenu>
-                                    ) : selectedExtensionPackages.length === 0 ? (
+                                    ) : extensionsLoading ? null : selectedExtensionPackages.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
@@ -1788,7 +1825,7 @@ function AgentDetailSidebar({
                                         <SidebarMenu>
                                             <SidebarItemSkeleton testId="agent-sidebar-channels-skeleton" />
                                         </SidebarMenu>
-                                    ) : channels.length === 0 ? (
+                                    ) : channelsLoading ? null : channels.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
@@ -1920,7 +1957,7 @@ function AgentDetailSidebar({
                                         <SidebarMenu>
                                             <SidebarItemSkeleton testId="agent-sidebar-media-skeleton" />
                                         </SidebarMenu>
-                                    ) : imageProviderBindings.length === 0 ? (
+                                    ) : imageProvidersLoading ? null : imageProviderBindings.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
@@ -2055,7 +2092,7 @@ function AgentDetailSidebar({
                                         <SidebarMenu>
                                             <SidebarItemSkeleton testId="agent-sidebar-web-search-skeleton" />
                                         </SidebarMenu>
-                                    ) : webSearchBindings.length === 0 ? (
+                                    ) : webSearchLoading ? null : webSearchBindings.length === 0 ? (
                                         <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
                                             <SidebarMenuButton
                                                 size="sm"
@@ -2175,7 +2212,6 @@ function AgentDetailSidebar({
                         if (onAgentDraftUpdate && agent) {
                             onAgentDraftUpdate({ ...agent, tool_ids: newToolIds });
                         }
-                        void loadSidebarStats();
                     }}
                 />
             )}
@@ -2192,7 +2228,6 @@ function AgentDetailSidebar({
                         if (onAgentDraftUpdate && agent) {
                             onAgentDraftUpdate({ ...agent, skill_ids: newSkillIds });
                         }
-                        void loadSidebarStats();
                     }}
                 />
             )}

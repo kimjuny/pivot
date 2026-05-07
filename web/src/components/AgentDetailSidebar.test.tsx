@@ -2,6 +2,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+const mockToolSelectorState = vi.hoisted(() => ({
+  savedToolIds: '["search_docs","write_docs"]',
+}));
+
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
@@ -31,7 +35,19 @@ vi.mock("./AgentModal", () => ({
 }));
 
 vi.mock("./ToolSelectorDialog", () => ({
-  default: () => null,
+  default: ({
+    open,
+    onSaved,
+  }: {
+    open: boolean;
+    onSaved: (newToolIds: string) => void;
+  }) => (
+    open ? (
+      <button onClick={() => onSaved(mockToolSelectorState.savedToolIds)}>
+        Mock save tools
+      </button>
+    ) : null
+  ),
 }));
 
 vi.mock("./SkillSelectorDialog", () => ({
@@ -134,7 +150,9 @@ describe("AgentDetailSidebar", () => {
 
     render(
       <SidebarProvider defaultOpen={true}>
-        <AgentDetailSidebar agent={baseAgent} />
+        <AgentDetailSidebar
+          agent={{ ...baseAgent, tool_ids: '["search_docs"]' }}
+        />
       </SidebarProvider>,
     );
 
@@ -156,6 +174,9 @@ describe("AgentDetailSidebar", () => {
       expect(getAgentExtensionPackages).toHaveBeenCalledWith(2);
     });
 
+    expect(
+      screen.queryByRole("button", { name: "Add first tool" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByTestId("agent-sidebar-tools-skeleton"),
     ).not.toBeInTheDocument();
@@ -185,6 +206,66 @@ describe("AgentDetailSidebar", () => {
       expect(
         screen.queryByTestId("agent-sidebar-tools-skeleton"),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  it("renders the active release badge and serving dot in the sidebar header", () => {
+    vi.mocked(getAgentSidebarStats).mockResolvedValue(baseSidebarStats);
+
+    render(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar agent={baseAgent} activeReleaseVersion={3} />
+      </SidebarProvider>,
+    );
+
+    expect(screen.getByText("Active v3")).toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Serving enabled")).toBeInTheDocument();
+  });
+
+  it("shows not published when no active release exists", () => {
+    vi.mocked(getAgentSidebarStats).mockResolvedValue(baseSidebarStats);
+
+    render(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar agent={baseAgent} activeReleaseVersion={null} />
+      </SidebarProvider>,
+    );
+
+    expect(screen.getByText("not published")).toBeInTheDocument();
+  });
+
+  it("updates the tool count immediately after staging draft tool changes", async () => {
+    const user = userEvent.setup();
+    const onAgentDraftUpdate = vi.fn();
+
+    vi.mocked(getAgentSidebarStats).mockResolvedValue({
+      ...baseSidebarStats,
+      tools: { selected_count: 0, total_count: 10 },
+    });
+
+    render(
+      <SidebarProvider defaultOpen={true}>
+        <AgentDetailSidebar
+          agent={baseAgent}
+          onAgentDraftUpdate={onAgentDraftUpdate}
+        />
+      </SidebarProvider>,
+    );
+
+    expect(await screen.findByText("0 / 10")).toBeInTheDocument();
+    const statsCallCountBeforeSave = vi.mocked(getAgentSidebarStats).mock.calls.length;
+
+    await user.click(screen.getByRole("button", { name: "Configure tools" }));
+    await user.click(screen.getByRole("button", { name: "Mock save tools" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("2 / 10")).toBeInTheDocument();
+    });
+    expect(vi.mocked(getAgentSidebarStats).mock.calls.length).toBe(statsCallCountBeforeSave);
+    expect(onAgentDraftUpdate).toHaveBeenCalledWith({
+      ...baseAgent,
+      tool_ids: mockToolSelectorState.savedToolIds,
     });
   });
 

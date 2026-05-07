@@ -85,29 +85,24 @@ def read_file(
     start_line: int = 1,
     max_lines: int = 400,
 ) -> dict[str, object]:
-    """Read a numbered text chunk from a UTF-8 file under ``/workspace``.
+    """Read numbered UTF-8 lines from a file under ``/workspace``.
 
-    This tool is optimized for ``search -> read -> edit`` workflows. It returns
-    one chunk with stable line-number prefixes so the agent can produce
-    line-accurate unified diffs for ``edit_file``. The line-number prefixes are
-    display aids only; use them for ``@@`` hunk headers and remove them from
-    diff body lines.
+    Use this for ``search -> read -> edit`` workflows. The returned line numbers
+    are only a snapshot of the file at read time. After any successful
+    ``edit_file`` or ``write_file`` on that path, re-run ``read_file`` before
+    editing again because the old line numbers may be stale immediately.
+
+    Use the returned numbers for ``edit_file`` hunk headers only. Do not copy
+    the ``N | `` prefixes into diff body lines.
 
     Args:
         path (required, str): Relative or absolute workspace path to a text
             file.
-        start_line (optional, int): 1-based starting line to read. Defaults to
-            ``1``.
-        max_lines (optional, int): Hard upper bound on returned lines from
-            ``start_line``. Defaults to ``400``.
+        start_line (optional, int): 1-based starting line. Defaults to ``1``.
+        max_lines (optional, int): Maximum returned lines. Defaults to ``400``.
 
     Returns:
-        Structured payload with chunk bounds, pagination hints, and numbered
-        ``content`` for the requested line range.
-
-    Raises:
-        ValueError: If path escapes ``/workspace`` or line arguments are invalid.
-        RuntimeError: If sandbox execution fails.
+        A dict with chunk bounds, pagination hints, and numbered ``content``.
     """
     if start_line < 1:
         raise ValueError("start_line must be greater than or equal to 1.")

@@ -417,6 +417,60 @@ describe("RecursionCard", () => {
     expect(screen.queryByText("line-1")).not.toBeInTheDocument();
   });
 
+  it("renders edit_file previews with original old-file line numbers", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <RecursionCard
+        messageId="message-edit-lines"
+        recursion={buildRecursion({
+          summary: "Editing a file",
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-edit-lines",
+              trace_id: "trace-edit-lines",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-edit-lines",
+                    name: "edit_file",
+                    arguments: {
+                      path: "server/app/demo.py",
+                      diff: "@@ -120,3 +120,4 @@\n old line\n-old value\n+new value\n+extra value\n context line",
+                    },
+                  },
+                ],
+                tool_results: [
+                  {
+                    tool_call_id: "call-edit-lines",
+                    tool_name: "edit_file",
+                    status: "success",
+                    result: "ok",
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Ran edit_file/i }));
+
+    expect(screen.getByText(/old line/)).toBeInTheDocument();
+    expect(screen.getByText(/-old value/)).toBeInTheDocument();
+    expect(screen.getByText(/context line/)).toBeInTheDocument();
+    expect(screen.getByText("120")).toBeInTheDocument();
+    expect(screen.getByText("121")).toBeInTheDocument();
+    expect(screen.getByText("122")).toBeInTheDocument();
+    expect(screen.queryByText(/^1$/)).not.toBeInTheDocument();
+  });
+
   it("renders tool executions as one-line records with terminal details", async () => {
     const user = userEvent.setup();
 

@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import {
   Tooltip,
   TooltipContent,
@@ -10,8 +9,6 @@ import { cn } from '@/lib/utils';
 import ChangeSummaryHoverCard from './ChangeSummaryHoverCard';
 
 interface AgentWorkspaceToolbarProps {
-  /** Currently active release version used for new end-user sessions. */
-  activeReleaseVersion: number | null;
   /** Whether the current working copy differs from the saved draft baseline. */
   hasUnsavedChanges: boolean;
   /** Whether the publish action should surface pending work. */
@@ -40,7 +37,6 @@ interface AgentWorkspaceToolbarProps {
  * sidebar identity block or forcing users into a separate overview page.
  */
 function AgentWorkspaceToolbar({
-  activeReleaseVersion,
   hasUnsavedChanges,
   hasPublishableChanges,
   isSavingDraft,
@@ -103,13 +99,6 @@ function AgentWorkspaceToolbar({
   return (
     <div className="pointer-events-auto w-fit rounded-2xl border border-border/80 bg-background/85 p-2 shadow-[0_16px_40px_rgba(15,23,42,0.16)] backdrop-blur supports-[backdrop-filter]:bg-background/72">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <div className="flex flex-wrap items-center gap-1.5 pr-1">
-          {activeReleaseVersion !== null ? (
-            <Badge variant="default" className="h-6 px-2 text-[11px]">
-              {`Active v${activeReleaseVersion}`}
-            </Badge>
-          ) : null}
-        </div>
         {hasUnsavedChanges ? (
           <Button
             type="button"
