@@ -28,10 +28,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  forceExtensionUpgrade,
   getExtensionInstallationConfiguration,
   getExtensionInstallationAccess,
   getExtensionInstallationAccessOptions,
   getExtensionPackages,
+  reconcileExtensionUpgrade,
   uninstallExtensionInstallation,
   updateExtensionInstallationAccess,
   updateExtensionInstallationConfiguration,
@@ -43,6 +45,7 @@ import {
   type ExtensionContributionSummary,
   type ExtensionInstallation,
   type ExtensionInstallationConfigurationState,
+  type ExtensionPendingUpgrade,
   type ExtensionUninstallResult,
   type ExtensionPackage,
 } from "@/utils/api";
@@ -527,8 +530,10 @@ export default function ExtensionDetailPage() {
   }, [authStates, loadAuthState, pkg]);
 
   const latestInstallation = pkg?.versions[0] ?? null;
+  const pendingUpgrade = pkg?.pending_upgrade ?? null;
   const isLatestStatusUpdating = latestInstallation?.id === statusUpdatingId;
   const isLatestUninstalling = latestInstallation?.id === uninstallingId;
+  const [forcingUpgradeId, setForcingUpgradeId] = useState<number | null>(null);
   const aggregatedContributions = useMemo(() => {
     if (!pkg) {
       return [];
@@ -711,6 +716,47 @@ export default function ExtensionDetailPage() {
     [listPath, loadPackages, navigate, pkg?.versions.length],
   );
 
+  const handleForceUpgrade = useCallback(
+    async (upgrade: ExtensionPendingUpgrade) => {
+      setForcingUpgradeId(upgrade.id);
+      try {
+        await forceExtensionUpgrade(upgrade.id);
+        toast.success("Extension upgrade applied. Affected agents now require republish.");
+        await loadPackages();
+      } catch (error) {
+        console.error("Failed to force extension upgrade:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to force extension upgrade");
+      } finally {
+        setForcingUpgradeId((current) => (current === upgrade.id ? null : current));
+      }
+    },
+    [loadPackages],
+  );
+
+  useEffect(() => {
+    if (!pendingUpgrade) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void (async () => {
+        try {
+          const result = await reconcileExtensionUpgrade(pendingUpgrade.id);
+          if (result.completed) {
+            toast.success("Safe upgrade finished. Affected agents now require republish.");
+          }
+          await loadPackages();
+        } catch (error) {
+          console.error("Failed to reconcile pending extension upgrade:", error);
+        }
+      })();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loadPackages, pendingUpgrade]);
+
   if (isLoading) {
     return (
       <div className="mx-auto flex h-64 max-w-5xl items-center justify-center px-6 text-sm text-muted-foreground">
@@ -764,7 +810,10 @@ export default function ExtensionDetailPage() {
                 void handleStatusToggle(latestInstallation);
               }}
               disabled={
-                latestInstallation.read_only || isLatestStatusUpdating || isLatestUninstalling
+                latestInstallation.read_only
+                || isLatestStatusUpdating
+                || isLatestUninstalling
+                || pendingUpgrade !== null
               }
             >
               {isLatestStatusUpdating ? (
@@ -785,7 +834,10 @@ export default function ExtensionDetailPage() {
                 setPendingUninstall(latestInstallation);
               }}
               disabled={
-                latestInstallation.read_only || isLatestStatusUpdating || isLatestUninstalling
+                latestInstallation.read_only
+                || isLatestStatusUpdating
+                || isLatestUninstalling
+                || pendingUpgrade !== null
               }
             >
               {isLatestUninstalling ? (
@@ -838,6 +890,52 @@ export default function ExtensionDetailPage() {
           </CardHeader>
         </Card>
       </div>
+
+      {pendingUpgrade ? (
+        <div className="mb-6">
+          <Card className="border-blue-500/30 bg-blue-500/5">
+            <CardHeader className="space-y-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <CardTitle className="text-base">Safe upgrade in progress</CardTitle>
+                  <CardDescription>
+                    Pivot has staged <code>{pendingUpgrade.target_version}</code> and is waiting
+                    for running tasks to finish before replacing <code>{pendingUpgrade.source_version}</code>.
+                    Affected agents are currently in <code>draining_for_upgrade</code> and will not
+                    accept new client tasks.
+                  </CardDescription>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">From {pendingUpgrade.source_version}</Badge>
+                    <Badge variant="outline">To {pendingUpgrade.target_version}</Badge>
+                    <Badge variant="outline">Affected agents {pendingUpgrade.affected_agent_count}</Badge>
+                    <Badge variant="outline">Running tasks {pendingUpgrade.running_task_count}</Badge>
+                  </div>
+                  {pendingUpgrade.affected_agent_names.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {pendingUpgrade.affected_agent_names.map((agentName) => (
+                        <Badge key={agentName} variant="secondary">
+                          {agentName}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      void handleForceUpgrade(pendingUpgrade);
+                    }}
+                    disabled={forcingUpgradeId === pendingUpgrade.id}
+                  >
+                    {forcingUpgradeId === pendingUpgrade.id ? "Forcing…" : "Force upgrade now"}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+        </div>
+      ) : null}
 
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList

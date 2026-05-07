@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
+  ExternalLink,
   Pencil,
   Plus,
+  Search,
   SlidersHorizontal,
   Trash2,
   Upload,
+  X,
 } from "@/lib/lucide";
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
 import {
   createSkill,
   deleteSkill,
@@ -65,6 +70,7 @@ Describe reusable guidance or process here.
 type SkillRow = { skill: ManagedSkill };
 
 type SkillDialogTab = 'general' | 'auth';
+type SourceFilter = 'all' | 'builder' | 'extension';
 
 const EMPTY_SKILL_ACCESS: SkillAccess = {
   skill_name: '',
@@ -110,12 +116,35 @@ function extractFrontMatterName(source: string): string | null {
   return null;
 }
 
+function getSkillSourceLabel(sourceCategory: ManagedSkill['source_category']): string {
+  if (sourceCategory === 'extension') {
+    return 'Extension';
+  }
+  return 'Builder';
+}
+
+function getExtensionDetailPath(packageId: string | null | undefined): string | null {
+  if (!packageId || !packageId.startsWith('@')) {
+    return null;
+  }
+
+  const trimmed = packageId.slice(1);
+  const separatorIndex = trimmed.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
+    return null;
+  }
+
+  return `/studio/assets/extensions/${trimmed.slice(0, separatorIndex)}/${trimmed.slice(separatorIndex + 1)}`;
+}
+
 /** Skill management page. */
 function SkillsPage() {
+  const navigate = useNavigate();
   const [skills, setSkills] = useState<ManagedSkill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -163,19 +192,36 @@ function SkillsPage() {
     [skills]
   );
 
+  const sourceCounts = useMemo(
+    () => ({
+      all: allRows.length,
+      builder: allRows.filter((row) => row.skill.source_category === 'builder').length,
+      extension: allRows.filter((row) => row.skill.source_category === 'extension').length,
+    }),
+    [allRows],
+  );
+
   const filteredRows = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allRows.filter((row) => {
+      if (sourceFilter !== 'all' && row.skill.source_category !== sourceFilter) {
+        return false;
+      }
       if (!q) return true;
-      return row.skill.name.toLowerCase().includes(q) || row.skill.description.toLowerCase().includes(q);
+      return (
+        row.skill.name.toLowerCase().includes(q) ||
+        row.skill.description.toLowerCase().includes(q) ||
+        getSkillSourceLabel(row.skill.source_category).toLowerCase().includes(q) ||
+        (row.skill.from_label ?? '').toLowerCase().includes(q)
+      );
     });
-  }, [allRows, searchQuery]);
+  }, [allRows, searchQuery, sourceFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+  }, [searchQuery, sourceFilter]);
 
   const pagedRows = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -224,6 +270,9 @@ function SkillsPage() {
   }, [editorSaveMode]);
 
   const openSkillDialog = useCallback(async (row: SkillRow) => {
+    if (row.skill.source === 'extension') {
+      return;
+    }
     setSkillDialogMode('edit');
     setSkillDialogReadOnly(row.skill.read_only);
     setSkillDialogTab('general');
@@ -262,6 +311,9 @@ function SkillsPage() {
   }, []);
 
   const openSourceEditor = useCallback((row: SkillRow) => {
+    if (row.skill.source === 'extension') {
+      return;
+    }
     setEditorSaveMode('direct');
     setEditingName(row.skill.name);
     setEditorSource('');
@@ -363,6 +415,15 @@ function SkillsPage() {
     }
   }, [deletingSkill, loadSkills]);
 
+  const openOwningExtension = useCallback((row: SkillRow) => {
+    const detailPath = getExtensionDetailPath(row.skill.extension_package_id);
+    if (!detailPath) {
+      toast.error('Extension detail page is unavailable for this skill.');
+      return;
+    }
+    navigate(detailPath);
+  }, [navigate]);
+
   const existingSkillNames = useMemo(
     () => new Set(allRows.map((row) => row.skill.name)),
     [allRows]
@@ -381,7 +442,7 @@ function SkillsPage() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Skills</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Manage reusable skills and control who can use or edit each one.
+            Browse available skills across builder and extension sources, and manage editable ones here.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -406,15 +467,53 @@ function SkillsPage() {
       </div>
 
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(
+            [
+              { value: 'all', label: 'All Sources', count: sourceCounts.all },
+              { value: 'builder', label: 'Builder', count: sourceCounts.builder },
+              { value: 'extension', label: 'Extension', count: sourceCounts.extension },
+            ] as const
+          ).map(({ value, label, count }) => (
+            <button
+              key={value}
+              onClick={() => setSourceFilter(value)}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+            >
+              <Badge
+                variant={sourceFilter === value ? 'default' : 'outline'}
+                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                  sourceFilter === value ? 'list-filter-badge-active' : ''
+                }`}
+              >
+                {label}
+                <span className={sourceFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                  {count}
+                </span>
+              </Badge>
+            </button>
+          ))}
+          {sourceFilter !== 'all' && (
+            <button
+              onClick={() => setSourceFilter('all')}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear source filter"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
         <ButtonGroup className="list-search-group">
           <Input
-            placeholder="Search by name or description…"
+            placeholder="Search by name, description, source, or origin…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             aria-label="Search skills"
             autoComplete="off"
           />
           <Button variant="outline" size="sm" aria-label="Search skills" tabIndex={-1}>
+            <Search className="w-4 h-4" />
             Search
           </Button>
         </ButtonGroup>
@@ -442,6 +541,8 @@ function SkillsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[220px]">Name</TableHead>
+                <TableHead className="w-[110px]">Source</TableHead>
+                <TableHead className="w-[220px]">From</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead className="w-[170px]">Updated</TableHead>
                 <TableHead className="w-[120px] text-right">Actions</TableHead>
@@ -449,8 +550,16 @@ function SkillsPage() {
             </TableHeader>
             <TableBody>
               {pagedRows.map((row) => (
-                <TableRow key={row.skill.name}>
+                <TableRow
+                  key={`${row.skill.source}-${row.skill.extension_package_id ?? 'local'}-${row.skill.name}`}
+                >
                   <TableCell className="font-mono text-xs font-medium">{row.skill.name}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {getSkillSourceLabel(row.skill.source_category)}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {row.skill.from_label ?? '—'}
+                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
                     {row.skill.description || '—'}
                   </TableCell>
@@ -459,35 +568,49 @@ function SkillsPage() {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1 flex-wrap">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        aria-label={`Configure skill ${row.skill.name}`}
-                        onClick={() => void openSkillDialog(row)}
-                        disabled={row.skill.read_only}
-                      >
-                        <SlidersHorizontal className="w-3.5 h-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        aria-label={`Edit skill files for ${row.skill.name}`}
-                        onClick={() => openSourceEditor(row)}
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </Button>
-                      {!row.skill.read_only && (
+                      {row.skill.source === 'extension' ? (
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
-                          aria-label={`Delete skill ${row.skill.name}`}
-                          onClick={() => setDeletingSkill(row)}
+                          className="h-7 w-7"
+                          aria-label={`Open owning extension for ${row.skill.name}`}
+                          onClick={() => openOwningExtension(row)}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <ExternalLink className="w-3.5 h-3.5" />
                         </Button>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            aria-label={`Configure skill ${row.skill.name}`}
+                            onClick={() => void openSkillDialog(row)}
+                            disabled={row.skill.read_only}
+                          >
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            aria-label={`Edit skill files for ${row.skill.name}`}
+                            onClick={() => openSourceEditor(row)}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          {!row.skill.read_only && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive hover:text-destructive"
+                              aria-label={`Delete skill ${row.skill.name}`}
+                              onClick={() => setDeletingSkill(row)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </>
                       )}
                     </div>
                   </TableCell>

@@ -477,4 +477,232 @@ describe("ExtensionsPage", () => {
       });
     });
   });
+
+  it("shows safe and force actions for higher-version upgrades", async () => {
+    vi.mocked(getExtensionPackages).mockResolvedValue([]);
+    vi.mocked(previewExtensionBundle).mockResolvedValue({
+      scope: "acme",
+      name: "providers",
+      package_id: "@acme/providers",
+      version: "2.0.0",
+      display_name: "ACME Providers",
+      description: "Provider package",
+      source: "bundle",
+      trust_status: "unverified",
+      trust_source: "local_import",
+      manifest_hash: "hash-preview-upgrade",
+      contribution_summary: {
+        channel_providers: ["acme@chat"],
+        web_search_providers: ["acme@search"],
+        hooks: [],
+        tools: [],
+        skills: [],
+      },
+      contribution_items: [],
+      permissions: {},
+      existing_installation_id: 9,
+      existing_installation_status: "active",
+      identical_to_installed: false,
+      requires_overwrite_confirmation: false,
+      overwrite_blocked_reason: "",
+      existing_reference_summary: null,
+      import_mode: "upgrade",
+      upgrade_from_version: "1.5.0",
+      upgrade_impact: {
+        affected_agent_count: 2,
+        affected_agent_names: ["Agent A", "Agent B"],
+        running_task_count: 3,
+      },
+    });
+    vi.mocked(importExtensionBundle).mockResolvedValue({
+      id: 10,
+      scope: "acme",
+      name: "providers",
+      package_id: "@acme/providers",
+      version: "2.0.0",
+      display_name: "ACME Providers",
+      description: "Provider package",
+      logo_url: null,
+      manifest_hash: "hash-new-upgrade",
+      artifact_storage_backend: "local_fs",
+      artifact_key: "extensions/acme/providers/2.0.0/hash.tar.gz",
+      artifact_digest: "artifact-hash",
+      artifact_size_bytes: 128,
+      install_root: "/tmp/@acme/providers/2.0.0",
+      source: "bundle",
+      trust_status: "trusted_local",
+      trust_source: "local_import",
+      hub_scope: null,
+      hub_package_id: null,
+      hub_package_version_id: null,
+      hub_artifact_digest: null,
+      installed_by: "alice",
+      creator_id: 1,
+      use_scope: "selected",
+      read_only: false,
+      has_installation_configuration: false,
+      status: "active",
+      created_at: "2026-04-01T00:00:00Z",
+      updated_at: "2026-04-01T00:00:00Z",
+      reference_summary: null,
+      contribution_summary: {
+        channel_providers: ["acme@chat"],
+        web_search_providers: ["acme@search"],
+        hooks: [],
+        tools: [],
+        skills: [],
+      },
+      contribution_items: [],
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ExtensionsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("No extensions installed yet.")).toBeInTheDocument();
+    });
+
+    const input = container.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Expected hidden file input");
+    }
+    const manifest = new File(["{}"], "manifest.json", { type: "application/json" });
+    Object.defineProperty(manifest, "webkitRelativePath", {
+      value: "acme-bundle/manifest.json",
+    });
+
+    fireEvent.change(input, { target: { files: [manifest] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Upgrade Extension")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Affected agents 2")).toBeInTheDocument();
+    expect(screen.getByText("Running tasks 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Safe upgrade" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Force upgrade" }));
+
+    await waitFor(() => {
+      expect(importExtensionBundle).toHaveBeenCalledWith([manifest], {
+        trustConfirmed: true,
+        overwriteConfirmed: false,
+        upgradeMode: "force",
+      });
+    });
+  });
+
+  it("allows safe upgrade once the running-task counter reaches zero", async () => {
+    vi.mocked(getExtensionPackages).mockResolvedValue([]);
+    vi.mocked(previewExtensionBundle).mockResolvedValue({
+      scope: "acme",
+      name: "providers",
+      package_id: "@acme/providers",
+      version: "2.0.0",
+      display_name: "ACME Providers",
+      description: "Provider package",
+      source: "bundle",
+      trust_status: "unverified",
+      trust_source: "local_import",
+      manifest_hash: "hash-preview-safe-upgrade",
+      contribution_summary: {
+        channel_providers: ["acme@chat"],
+        web_search_providers: ["acme@search"],
+        hooks: [],
+        tools: [],
+        skills: [],
+      },
+      contribution_items: [],
+      permissions: {},
+      existing_installation_id: 9,
+      existing_installation_status: "active",
+      identical_to_installed: false,
+      requires_overwrite_confirmation: false,
+      overwrite_blocked_reason: "",
+      existing_reference_summary: null,
+      import_mode: "upgrade",
+      upgrade_from_version: "1.5.0",
+      upgrade_impact: {
+        affected_agent_count: 1,
+        affected_agent_names: ["Agent A"],
+        running_task_count: 0,
+      },
+    });
+    vi.mocked(importExtensionBundle).mockResolvedValue({
+      id: 11,
+      scope: "acme",
+      name: "providers",
+      package_id: "@acme/providers",
+      version: "2.0.0",
+      display_name: "ACME Providers",
+      description: "Provider package",
+      logo_url: null,
+      manifest_hash: "hash-safe-upgrade",
+      artifact_storage_backend: "local_fs",
+      artifact_key: "extensions/acme/providers/2.0.0/hash-safe.tar.gz",
+      artifact_digest: "artifact-hash",
+      artifact_size_bytes: 128,
+      install_root: "/tmp/@acme/providers/2.0.0",
+      source: "bundle",
+      trust_status: "trusted_local",
+      trust_source: "local_import",
+      hub_scope: null,
+      hub_package_id: null,
+      hub_package_version_id: null,
+      hub_artifact_digest: null,
+      installed_by: "alice",
+      creator_id: 1,
+      use_scope: "selected",
+      read_only: false,
+      has_installation_configuration: false,
+      status: "active",
+      created_at: "2026-04-01T00:00:00Z",
+      updated_at: "2026-04-01T00:00:00Z",
+      reference_summary: null,
+      contribution_summary: {
+        channel_providers: ["acme@chat"],
+        web_search_providers: ["acme@search"],
+        hooks: [],
+        tools: [],
+        skills: [],
+      },
+      contribution_items: [],
+    });
+
+    const { container } = render(
+      <MemoryRouter>
+        <ExtensionsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByText("No extensions installed yet.")).toBeInTheDocument();
+    });
+
+    const input = container.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error("Expected hidden file input");
+    }
+    const manifest = new File(["{}"], "manifest.json", { type: "application/json" });
+    Object.defineProperty(manifest, "webkitRelativePath", {
+      value: "acme-bundle/manifest.json",
+    });
+
+    fireEvent.change(input, { target: { files: [manifest] } });
+
+    await waitFor(() => {
+      expect(screen.getByText("Upgrade Extension")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Safe upgrade" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Safe upgrade" }));
+
+    await waitFor(() => {
+      expect(importExtensionBundle).toHaveBeenCalledWith([manifest], {
+        trustConfirmed: true,
+        overwriteConfirmed: false,
+        upgradeMode: "safe",
+      });
+    });
+  });
 });

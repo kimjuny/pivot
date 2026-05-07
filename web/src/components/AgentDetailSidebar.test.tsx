@@ -112,7 +112,7 @@ const baseAgent: Agent = {
   compact_threshold_percent: 80,
   active_release_id: 3,
   active_release_version: 3,
-  serving_enabled: true,
+  client_state: "open",
   model_name: "qwen",
   is_active: true,
   max_iteration: 8,
@@ -196,8 +196,10 @@ describe("AgentDetailSidebar", () => {
         parameters: {},
         tool_type: "normal",
         source_type: "builtin",
+        source_category: "builtin",
         read_only: true,
         creator_id: null,
+        from_label: "Platform",
       },
     ]);
     extensionPackages.resolve([]);
@@ -220,7 +222,7 @@ describe("AgentDetailSidebar", () => {
 
     expect(screen.getByText("Active v3")).toBeInTheDocument();
     expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Serving enabled")).toBeInTheDocument();
+    expect(screen.getByLabelText("Open to clients")).toBeInTheDocument();
   });
 
   it("shows not published when no active release exists", () => {

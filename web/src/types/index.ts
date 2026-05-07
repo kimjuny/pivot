@@ -6,6 +6,15 @@
 /**
  * Represents an AI agent in the system.
  */
+export type AgentClientState =
+  | 'open'
+  | 'paused'
+  | 'draining_for_upgrade'
+  | 'upgrade_required';
+
+/**
+ * Represents an AI agent in the system.
+ */
 export interface Agent {
   /** Unique identifier of the agent */
   id: number;
@@ -32,8 +41,8 @@ export interface Agent {
   created_by_user_id?: number | null;
   /** Whether use access is granted to all users or selected principals. */
   use_scope?: string;
-  /** Whether this agent currently accepts end-user traffic. */
-  serving_enabled?: boolean;
+  /** Current end-user availability state for this agent. */
+  client_state?: AgentClientState;
   /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
   /** Whether the agent is currently active */

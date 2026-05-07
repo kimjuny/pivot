@@ -15,6 +15,8 @@ vi.mock("@/utils/api", () => ({
   getExtensionInstallationAccess: vi.fn(),
   getExtensionInstallationAccessOptions: vi.fn(),
   uninstallExtensionInstallation: vi.fn(),
+  forceExtensionUpgrade: vi.fn(),
+  reconcileExtensionUpgrade: vi.fn(),
   updateExtensionInstallationAccess: vi.fn(),
   updateExtensionInstallationConfiguration: vi.fn(),
   updateExtensionInstallationStatus: vi.fn(),
@@ -23,10 +25,12 @@ vi.mock("@/utils/api", () => ({
 }));
 
 import {
+  forceExtensionUpgrade,
   getExtensionInstallationAccess,
   getExtensionInstallationAccessOptions,
   getExtensionInstallationConfiguration,
   getExtensionPackages,
+  reconcileExtensionUpgrade,
   uninstallExtensionInstallation,
   updateExtensionInstallationStatus,
 } from "@/utils/api";
@@ -399,6 +403,161 @@ describe("ExtensionDetailPage", () => {
 
     await waitFor(() => {
       expect(uninstallExtensionInstallation).toHaveBeenCalledWith(7);
+    });
+  });
+
+  it("shows pending safe-upgrade progress and allows forcing completion", async () => {
+    vi.mocked(reconcileExtensionUpgrade).mockResolvedValue({
+      completed: false,
+      upgrade: {
+        id: 41,
+        package_id: "@pivot/mem0",
+        source_version: "0.1.0",
+        target_version: "0.2.0",
+        mode: "safe",
+        affected_agent_count: 2,
+        affected_agent_names: ["Agent A", "Agent B"],
+        running_task_count: 3,
+      },
+    });
+    vi.mocked(forceExtensionUpgrade).mockResolvedValue({
+      completed: true,
+      upgrade: {
+        id: 41,
+        package_id: "@pivot/mem0",
+        source_version: "0.1.0",
+        target_version: "0.2.0",
+        mode: "safe",
+        affected_agent_count: 2,
+        affected_agent_names: ["Agent A", "Agent B"],
+        running_task_count: 0,
+      },
+    });
+    vi.mocked(getExtensionPackages).mockResolvedValue([
+      {
+        scope: "pivot",
+        name: "mem0",
+        package_id: "@pivot/mem0",
+        display_name: "Mem0 Memory",
+        description: "External memory store",
+        logo_url: null,
+        readme_markdown: "",
+        latest_version: "0.2.0",
+        active_version_count: 1,
+        disabled_version_count: 1,
+        pending_upgrade: {
+          id: 41,
+          package_id: "@pivot/mem0",
+          source_version: "0.1.0",
+          target_version: "0.2.0",
+          mode: "safe",
+          affected_agent_count: 2,
+          affected_agent_names: ["Agent A", "Agent B"],
+          running_task_count: 3,
+        },
+        versions: [
+          {
+            id: 8,
+            scope: "pivot",
+            name: "mem0",
+            package_id: "@pivot/mem0",
+            version: "0.2.0",
+            display_name: "Mem0 Memory",
+            description: "External memory store",
+            logo_url: null,
+            manifest_hash: "hash-2",
+            artifact_storage_backend: "local_fs",
+            artifact_key: "extensions/pivot/mem0/0.2.0/hash.tar.gz",
+            artifact_digest: "artifact-hash-2",
+            artifact_size_bytes: 128,
+            install_root: "/tmp/@pivot/mem0/0.2.0",
+            source: "bundle",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
+            status: "disabled",
+            created_at: "2026-04-02T00:00:00Z",
+            updated_at: "2026-04-02T00:00:00Z",
+            reference_summary: null,
+            contribution_summary: {
+              channel_providers: [],
+              web_search_providers: [],
+              hooks: [],
+              tools: [],
+              skills: [],
+            },
+            contribution_items: [],
+          },
+          {
+            id: 7,
+            scope: "pivot",
+            name: "mem0",
+            package_id: "@pivot/mem0",
+            version: "0.1.0",
+            display_name: "Mem0 Memory",
+            description: "External memory store",
+            logo_url: null,
+            manifest_hash: "hash-1",
+            artifact_storage_backend: "local_fs",
+            artifact_key: "extensions/pivot/mem0/0.1.0/hash.tar.gz",
+            artifact_digest: "artifact-hash-1",
+            artifact_size_bytes: 128,
+            install_root: "/tmp/@pivot/mem0/0.1.0",
+            source: "bundle",
+            trust_status: "trusted_local",
+            trust_source: "local_import",
+            hub_scope: null,
+            hub_package_id: null,
+            hub_package_version_id: null,
+            hub_artifact_digest: null,
+            installed_by: "alice",
+            creator_id: 1,
+            use_scope: "selected",
+            read_only: false,
+            has_installation_configuration: false,
+            status: "active",
+            created_at: "2026-04-01T00:00:00Z",
+            updated_at: "2026-04-01T00:00:00Z",
+            reference_summary: null,
+            contribution_summary: {
+              channel_providers: [],
+              web_search_providers: [],
+              hooks: [],
+              tools: [],
+              skills: [],
+            },
+            contribution_items: [],
+          },
+        ],
+      },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={["/studio/assets/extensions/pivot/mem0"]}>
+        <Routes>
+          <Route path="/studio/assets/extensions/:scope/:name" element={<ExtensionDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Safe upgrade in progress")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Running tasks 3")).toBeInTheDocument();
+    expect(screen.getByText("Agent A")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Force upgrade now" }));
+
+    await waitFor(() => {
+      expect(forceExtensionUpgrade).toHaveBeenCalledWith(41);
     });
   });
 });

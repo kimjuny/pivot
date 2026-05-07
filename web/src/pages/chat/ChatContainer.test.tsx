@@ -134,6 +134,16 @@ function buildContextUsage(sessionId: string | null = null) {
   };
 }
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 /**
  * Radix Select expects pointer-capture helpers that happy-dom does not ship.
  */
@@ -594,6 +604,7 @@ describe("ChatContainer session rollover", () => {
         agentId={7}
         agentName="Pivot Agent"
         primaryLlmId={1}
+        initialSessionId="session-current"
         sessionIdleTimeoutMinutes={15}
       />,
     );
@@ -625,6 +636,82 @@ describe("ChatContainer session rollover", () => {
       web_search_provider: null,
       thinking_mode: null,
       mandatory_skill_names: [],
+    });
+  });
+
+  it("shows a content-side loading overlay while switching sessions", async () => {
+    const deferredHistory = createDeferredPromise<
+      Awaited<ReturnType<typeof getFullSessionHistory>>
+    >();
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: "session-current",
+          agent_id: 7,
+          status: "active",
+          title: "Current thread",
+          is_pinned: false,
+          created_at: "2026-03-16T00:00:00.000Z",
+          updated_at: "2026-03-16T02:00:00.000Z",
+        },
+        {
+          session_id: "session-next",
+          agent_id: 7,
+          status: "active",
+          title: "Next thread",
+          is_pinned: false,
+          created_at: "2026-03-16T00:00:00.000Z",
+          updated_at: "2026-03-16T01:00:00.000Z",
+        },
+      ],
+      total: 2,
+    });
+    vi.mocked(getFullSessionHistory)
+      .mockResolvedValueOnce({
+        session_id: "session-current",
+        last_event_id: 0,
+        resume_from_event_id: 0,
+        tasks: [],
+      })
+      .mockReturnValueOnce(deferredHistory.promise);
+
+    const user = userEvent.setup();
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        initialSessionId="session-current"
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getFullSessionHistory).toHaveBeenCalledWith("session-current");
+    });
+
+    await user.click(await screen.findByText("Next thread"));
+
+    expect(
+      await screen.findByTestId("session-loading-overlay"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("session-loading-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("session-loading-mask")).toHaveClass(
+      "duration-500",
+      "backdrop-blur-md",
+    );
+
+    deferredHistory.resolve({
+      session_id: "session-next",
+      last_event_id: 0,
+      resume_from_event_id: 0,
+      tasks: [],
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("session-loading-overlay"),
+      ).not.toBeInTheDocument();
     });
   });
 

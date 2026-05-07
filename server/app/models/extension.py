@@ -112,6 +112,23 @@ class AgentExtensionBinding(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ExtensionPendingUpgrade(SQLModel, table=True):
+    """One active safe-upgrade drain operation for an extension package."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    package_id: str = Field(index=True, unique=True, max_length=255)
+    source_version: str = Field(max_length=64)
+    target_installation_id: int = Field(
+        foreign_key="extensioninstallation.id",
+        index=True,
+    )
+    mode: str = Field(default="safe", max_length=16)
+    affected_agent_ids_json: str = Field(default="[]")
+    created_by: str | None = Field(default=None, max_length=120)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class ExtensionHookExecution(SQLModel, table=True):
     """Append-only execution log for one packaged lifecycle hook invocation.
 

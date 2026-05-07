@@ -28,6 +28,7 @@ from app.services.skill_service import (
     install_archive_skill,
     install_bundle_skill,
     install_github_skill,
+    list_manageable_skills,
     list_visible_skill_directory,
     list_visible_skills,
     probe_github_skill_import,
@@ -261,7 +262,7 @@ async def get_manageable_skills(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """List skills visible in the Studio management page."""
-    return list_visible_skills(db, current_user.username)
+    return list_manageable_skills(db, current_user)
 
 
 @router.post("/skills")

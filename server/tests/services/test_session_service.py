@@ -528,16 +528,16 @@ class SessionServiceTestCase(unittest.TestCase):
         ):
             self.service.create_session(agent_id=self.agent.id or 0, user="alice")
 
-    def test_create_session_rejects_disabled_agent(self) -> None:
-        """Serving-disabled agents should refuse new interactive sessions."""
+    def test_create_session_rejects_paused_agent(self) -> None:
+        """Paused agents should refuse new interactive sessions."""
         self.agent.active_release_id = 3
-        self.agent.serving_enabled = False
+        self.agent.client_state = "paused"
         self.session.add(self.agent)
         self.session.commit()
 
         with self.assertRaisesRegex(
             ValueError,
-            "disabled for end users",
+            "paused for end users",
         ):
             self.service.create_session(agent_id=self.agent.id or 0, user="alice")
 

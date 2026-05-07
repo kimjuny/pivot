@@ -66,6 +66,7 @@ import {
   type ExtensionInstallation,
   type ExtensionPackage,
   type ExtensionReferenceSummary,
+  type ExtensionUpgradeMode,
 } from '@/utils/api';
 
 const PAGE_SIZE = 10;
@@ -274,6 +275,48 @@ function formatTrustStatusLabel(trustStatus: string): string {
   }
 }
 
+function isUpgradePreview(preview: ExtensionImportPreview | null): boolean {
+  return preview?.import_mode === 'upgrade';
+}
+
+function getImportActionLabel(preview: ExtensionImportPreview | null, isImporting: boolean): string {
+  if (isImporting) {
+    return 'Installing…';
+  }
+  if (!preview) {
+    return 'Trust and Install';
+  }
+  if (preview.import_mode === 'upgrade') {
+    return 'Trust and Upgrade';
+  }
+  if (preview.requires_overwrite_confirmation) {
+    return 'Trust and Overwrite';
+  }
+  if (preview.identical_to_installed) {
+    return 'Trust and Reuse Existing';
+  }
+  return 'Trust and Install';
+}
+
+function getImportSuccessMessage(
+  preview: ExtensionImportPreview,
+  upgradeMode: ExtensionUpgradeMode | null,
+): string {
+  if (preview.import_mode === 'upgrade') {
+    if (upgradeMode === 'safe') {
+      return 'Extension upgraded safely. Affected agents now require republish.';
+    }
+    return 'Extension force-upgraded. Affected agents now require republish.';
+  }
+  if (preview.requires_overwrite_confirmation) {
+    return 'Extension version overwritten';
+  }
+  if (preview.identical_to_installed) {
+    return 'Existing extension version reused';
+  }
+  return 'Extension imported';
+}
+
 /**
  * Pick the most recently installed version for one package.
  *
@@ -299,6 +342,7 @@ function getMostRecentInstallation(
  */
 function ExtensionsPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [packages, setPackages] = useState<ExtensionPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,6 +350,7 @@ function ExtensionsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [isImporting, setIsImporting] = useState(false);
   const [isPreviewingImport, setIsPreviewingImport] = useState(false);
+  const [importingUpgradeMode, setImportingUpgradeMode] = useState<ExtensionUpgradeMode | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingImportState | null>(null);
   const [pendingUninstall, setPendingUninstall] = useState<PendingUninstallState | null>(null);
   const [isUninstalling, setIsUninstalling] = useState(false);
@@ -429,26 +474,36 @@ function ExtensionsPage() {
     }
   };
 
-  const handleConfirmImport = async () => {
+  const handleConfirmImport = async (upgradeMode?: ExtensionUpgradeMode) => {
     if (!pendingImport) {
       return;
     }
 
     setIsImporting(true);
+    setImportingUpgradeMode(upgradeMode ?? null);
     try {
       const shouldOverwrite = pendingImport.preview.requires_overwrite_confirmation;
-      const reusesExisting = pendingImport.preview.identical_to_installed;
-      await importExtensionBundle(pendingImport.files, {
+      const importOptions: {
+        trustConfirmed: boolean;
+        overwriteConfirmed: boolean;
+        upgradeMode?: ExtensionUpgradeMode;
+      } = {
         trustConfirmed: true,
         overwriteConfirmed: shouldOverwrite,
-      });
-      toast.success(
-        shouldOverwrite
-          ? 'Extension version overwritten'
-          : reusesExisting
-            ? 'Existing extension version reused'
-            : 'Extension imported',
-      );
+      };
+      if (upgradeMode) {
+        importOptions.upgradeMode = upgradeMode;
+      }
+      await importExtensionBundle(pendingImport.files, importOptions);
+      toast.success(getImportSuccessMessage(pendingImport.preview, upgradeMode ?? null));
+      if (
+        upgradeMode === 'safe'
+        && (pendingImport.preview.upgrade_impact?.running_task_count ?? 0) > 0
+      ) {
+        navigate(
+          `/studio/assets/extensions/${pendingImport.preview.scope}/${pendingImport.preview.name}`,
+        );
+      }
       setPendingImport(null);
       await loadPackages();
     } catch (error) {
@@ -457,6 +512,7 @@ function ExtensionsPage() {
       );
     } finally {
       setIsImporting(false);
+      setImportingUpgradeMode(null);
     }
   };
 
@@ -520,6 +576,10 @@ function ExtensionsPage() {
       setIsUninstalling(false);
     }
   };
+
+  const pendingUpgradeRunningTasks = pendingImport?.preview.upgrade_impact?.running_task_count ?? 0;
+  const safeUpgradeBlocked = isUpgradePreview(pendingImport?.preview ?? null)
+    && pendingUpgradeRunningTasks > 0;
 
   return (
     <>
@@ -737,10 +797,20 @@ function ExtensionsPage() {
       >
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Trust Extension</DialogTitle>
+            <DialogTitle>
+              {pendingImport && isUpgradePreview(pendingImport.preview)
+                ? 'Upgrade Extension'
+                : 'Trust Extension'}
+            </DialogTitle>
             <DialogDescription>
-              Local imports can claim any scope in <code>manifest.json</code>. Pivot will only
-              treat the package as trusted after you explicitly approve this install.
+              {pendingImport && isUpgradePreview(pendingImport.preview)
+                ? 'Review the affected agents before replacing the currently installed package version.'
+                : (
+                  <>
+                    Local imports can claim any scope in <code>manifest.json</code>. Pivot will only
+                    treat the package as trusted after you explicitly approve this install.
+                  </>
+                )}
             </DialogDescription>
           </DialogHeader>
 
@@ -752,7 +822,15 @@ function ExtensionsPage() {
                     {pendingImport.preview.display_name}
                   </span>
                   <Badge variant="outline">{pendingImport.preview.package_id}</Badge>
-                  <Badge variant="outline">{pendingImport.preview.version}</Badge>
+                  {isUpgradePreview(pendingImport.preview) ? (
+                    <>
+                      <Badge variant="outline">v{pendingImport.preview.upgrade_from_version}</Badge>
+                      <span className="text-xs text-muted-foreground">→</span>
+                      <Badge variant="default">v{pendingImport.preview.version}</Badge>
+                    </>
+                  ) : (
+                    <Badge variant="outline">v{pendingImport.preview.version}</Badge>
+                  )}
                   <Badge variant="outline">
                     {formatTrustStatusLabel(pendingImport.preview.trust_status)}
                   </Badge>
@@ -768,6 +846,34 @@ function ExtensionsPage() {
                   Manifest hash: <code>{pendingImport.preview.manifest_hash}</code>
                 </p>
               </div>
+
+              {isUpgradePreview(pendingImport.preview) ? (
+                <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="border-blue-500/30 text-blue-700 dark:text-blue-300">
+                      Affected agents {pendingImport.preview.upgrade_impact?.affected_agent_count ?? 0}
+                    </Badge>
+                    <Badge variant="outline" className="border-blue-500/30 text-blue-700 dark:text-blue-300">
+                      Running tasks {pendingImport.preview.upgrade_impact?.running_task_count ?? 0}
+                    </Badge>
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Confirming this upgrade will move draft extension bindings for this package to the new installed version and mark affected agents as <code>upgrade_required</code> until their builders publish a new release.
+                  </p>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Safe upgrade is available only when the running-task count reaches zero.
+                  </p>
+                  {pendingImport.preview.upgrade_impact?.affected_agent_names?.length ? (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {pendingImport.preview.upgrade_impact.affected_agent_names.map((agentName) => (
+                        <Badge key={agentName} variant="secondary">
+                          {agentName}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {pendingImport.preview.identical_to_installed ? (
                 <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
@@ -861,20 +967,48 @@ function ExtensionsPage() {
             >
               Cancel
             </Button>
-            <Button
-              type="button"
-              onClick={() => void handleConfirmImport()}
-              disabled={isImporting || pendingImport?.preview.overwrite_blocked_reason !== ''}
-            >
-              {isImporting
-                ? 'Installing…'
-                : pendingImport?.preview.requires_overwrite_confirmation
-                  ? 'Trust and Overwrite'
-                  : pendingImport?.preview.identical_to_installed
-                    ? 'Trust and Reuse Existing'
-                    : 'Trust and Install'}
-            </Button>
+            {isUpgradePreview(pendingImport?.preview ?? null) ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleConfirmImport('safe')}
+                  disabled={
+                    isImporting
+                    || pendingImport?.preview.overwrite_blocked_reason !== ''
+                    || safeUpgradeBlocked
+                  }
+                >
+                  {isImporting && importingUpgradeMode === 'safe'
+                    ? 'Safe upgrading…'
+                    : 'Safe upgrade'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleConfirmImport('force')}
+                  disabled={isImporting || pendingImport?.preview.overwrite_blocked_reason !== ''}
+                >
+                  {isImporting && importingUpgradeMode === 'force'
+                    ? 'Force upgrading…'
+                    : 'Force upgrade'}
+                </Button>
+              </>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => void handleConfirmImport()}
+                disabled={isImporting || pendingImport?.preview.overwrite_blocked_reason !== ''}
+              >
+                {getImportActionLabel(pendingImport?.preview ?? null, isImporting)}
+              </Button>
+            )}
           </DialogFooter>
+          {isUpgradePreview(pendingImport?.preview ?? null) && safeUpgradeBlocked ? (
+            <p className="text-xs text-muted-foreground">
+              Safe upgrade becomes available after the running-task counter reaches zero.
+              Choose Force upgrade if you need to replace this package immediately.
+            </p>
+          ) : null}
         </DialogContent>
       </Dialog>
 
@@ -1020,6 +1154,11 @@ function ExtensionPackageCard({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {pkg.pending_upgrade ? (
+              <Badge variant="outline" className="h-4 px-1.5 py-0 text-[10px] border-blue-500/30 text-blue-700 dark:text-blue-300">
+                Upgrade draining
+              </Badge>
+            ) : null}
             {contributorCategories.length > 0 ? (
               contributorCategories.map((category) => (
                 <Badge

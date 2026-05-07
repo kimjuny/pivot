@@ -182,8 +182,8 @@ def ensure_agent_schema_compatibility() -> None:
             )
         if "active_release_id" not in columns:
             conn.execute(text("ALTER TABLE agent ADD COLUMN active_release_id INTEGER"))
-        if "serving_enabled" not in columns:
-            conn.execute(text("ALTER TABLE agent ADD COLUMN serving_enabled BOOLEAN"))
+        if "client_state" not in columns:
+            conn.execute(text("ALTER TABLE agent ADD COLUMN client_state VARCHAR"))
         conn.execute(
             text(
                 "UPDATE agent "
@@ -205,11 +205,22 @@ def ensure_agent_schema_compatibility() -> None:
                 "WHERE compact_threshold_percent IS NULL"
             )
         )
+        if "serving_enabled" in columns:
+            conn.execute(
+                text(
+                    "UPDATE agent "
+                    "SET client_state = CASE "
+                    "WHEN serving_enabled = 0 THEN 'paused' "
+                    "ELSE 'open' "
+                    "END "
+                    "WHERE client_state IS NULL"
+                )
+            )
         conn.execute(
             text(
                 "UPDATE agent "
-                "SET serving_enabled = 1 "
-                "WHERE serving_enabled IS NULL"
+                "SET client_state = 'open' "
+                "WHERE client_state IS NULL"
             )
         )
 

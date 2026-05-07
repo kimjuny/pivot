@@ -22,6 +22,7 @@ from app.models.extension import (
     AgentExtensionBinding,
     ExtensionHookExecution,
     ExtensionInstallation,
+    ExtensionPendingUpgrade,
 )
 from app.models.file import FileAsset
 from app.models.llm import LLM
@@ -62,6 +63,7 @@ __all__ = [
     "ChannelSession",
     "ExtensionHookExecution",
     "ExtensionInstallation",
+    "ExtensionPendingUpgrade",
     "ExternalIdentityBinding",
     "FileAsset",
     "GroupMember",

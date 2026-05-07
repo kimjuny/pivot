@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Info } from "@/lib/lucide";
+import { Info, Loader2 } from "@/lib/lucide";
 
 import {
   cancelReactTask,
@@ -114,6 +114,7 @@ import {
 
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
 const DOCK_TRANSITION_MS = 200;
+const SESSION_LOADING_OVERLAY_TRANSITION_MS = 200;
 const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
 const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
 
@@ -717,6 +718,60 @@ function findLatestWaitingReplyTaskId(messages: ChatMessage[]): string | null {
   }
 
   return null;
+}
+
+function SessionLoadingOverlay({ isActive }: { isActive: boolean }) {
+  const [isRendered, setIsRendered] = useState(isActive);
+  const [isEntered, setIsEntered] = useState(false);
+
+  useEffect(() => {
+    if (isActive) {
+      setIsRendered(true);
+      const firstFrame = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          setIsEntered(true);
+        });
+      });
+      return () => {
+        window.cancelAnimationFrame(firstFrame);
+      };
+    }
+
+    setIsEntered(false);
+    const timeout = window.setTimeout(() => {
+      setIsRendered(false);
+    }, SESSION_LOADING_OVERLAY_TRANSITION_MS);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [isActive]);
+
+  if (!isRendered) {
+    return null;
+  }
+
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center"
+      aria-hidden={!isActive}
+      data-testid="session-loading-overlay"
+    >
+      <div
+        className="absolute inset-0 transition-[opacity,backdrop-filter,background-color] duration-500 ease-in-out"
+        style={{
+          opacity: isEntered ? 1 : 0,
+          transitionDuration: `${SESSION_LOADING_OVERLAY_TRANSITION_MS}ms`,
+          backgroundColor: "transparent",
+          backdropFilter: isEntered ? "blur(14px)" : "blur(0px)",
+        }}
+        data-testid="session-loading-mask"
+      />
+      <Loader2
+        className="relative z-10 h-5 w-5 animate-spin text-foreground"
+        data-testid="session-loading-spinner"
+      />
+    </div>
+  );
 }
 
 /**
@@ -3472,7 +3527,11 @@ function ChatContainer({
   const isNewSessionDraftActive =
     currentSessionId === null && currentProjectId === null;
   const chatWorkspacePane = (
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+      aria-busy={isLoadingSession}
+    >
+      <SessionLoadingOverlay isActive={isLoadingSession} />
       <div
         ref={scrollContainerRef}
         className="flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]"

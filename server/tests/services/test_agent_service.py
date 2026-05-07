@@ -28,19 +28,19 @@ class AgentServiceTestCase(unittest.TestCase):
             name="visible-agent",
             llm_id=1,
             active_release_id=11,
-            serving_enabled=True,
+            client_state="open",
         )
         unpublished_agent = Agent(
             name="draft-agent",
             llm_id=1,
             active_release_id=None,
-            serving_enabled=True,
+            client_state="open",
         )
         disabled_agent = Agent(
             name="disabled-agent",
             llm_id=1,
             active_release_id=12,
-            serving_enabled=False,
+            client_state="paused",
         )
         self.session.add(visible_agent)
         self.session.add(unpublished_agent)

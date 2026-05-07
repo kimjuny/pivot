@@ -38,7 +38,7 @@ interface ToolEntry {
   name: string;
   /** First non-blank line of the description, for compact display. */
   summary: string;
-  type: 'normal' | 'extension';
+  type: 'builtin' | 'builder' | 'extension';
   extensionLabel: string | null;
 }
 
@@ -77,6 +77,16 @@ interface ToolSelectorDialogProps {
 /** Extract the first meaningful line from a possibly multi-line description. */
 function firstLine(desc: string): string {
   return desc.split('\n').find(l => l.trim().length > 0)?.trim() ?? '';
+}
+
+function getToolTypeLabel(type: ToolEntry['type']): string {
+  if (type === 'builtin') {
+    return 'Built-in';
+  }
+  if (type === 'extension') {
+    return 'Extension';
+  }
+  return 'Builder';
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +133,7 @@ function ToolSelectorDialog({
         ...usable.map((tool: UsableTool): ToolEntry => ({
           name: tool.name,
           summary: firstLine(tool.description),
-          type: 'normal',
+          type: tool.source_category === 'builtin' ? 'builtin' : 'builder',
           extensionLabel: null,
         })),
         ...extensionTools.map((tool): ToolEntry => ({
@@ -347,7 +357,9 @@ function ToolSelectorDialog({
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           <span className="text-xs text-muted-foreground block truncate">
-                            {tool.type}
+                            {tool.type === 'extension' && tool.extensionLabel
+                              ? `${getToolTypeLabel(tool.type)} · ${tool.extensionLabel}`
+                              : getToolTypeLabel(tool.type)}
                           </span>
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">

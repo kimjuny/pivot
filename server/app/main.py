@@ -46,6 +46,7 @@ from app.db.session import (  # noqa: E402
     managed_session,
 )
 from app.orchestration.tool import get_tool_manager  # noqa: E402
+from app.services.extension_service import ExtensionService  # noqa: E402
 from app.services.file_service import FileService  # noqa: E402
 from app.utils.logging_config import get_logger, setup_logging  # noqa: E402
 
@@ -177,6 +178,17 @@ async def startup_event():
     init_db()
 
     logger.info("Database initialized successfully")
+
+    logger.info("Bootstrapping bundled extensions...")
+    try:
+        with managed_session() as session:
+            installations = ExtensionService(session).bootstrap_bundled_extensions()
+        logger.info(
+            "Bundled extension bootstrap complete (%d installation(s) available)",
+            len(installations),
+        )
+    except Exception as e:
+        logger.error(f"Failed to bootstrap bundled extensions: {e}")
 
     # Initialize tool system
     logger.info("Initializing tool system...")

@@ -1,6 +1,14 @@
 from datetime import UTC, datetime
+from typing import Literal
 
 from sqlmodel import Field, SQLModel
+
+AgentClientState = Literal[
+    "open",
+    "paused",
+    "draining_for_upgrade",
+    "upgrade_required",
+]
 
 
 class Agent(SQLModel, table=True):
@@ -42,9 +50,14 @@ class Agent(SQLModel, table=True):
             "None means the agent is not yet available to end users."
         ),
     )
-    serving_enabled: bool = Field(
-        default=True,
-        description="Whether this agent currently accepts end-user traffic.",
+    client_state: str = Field(
+        default="open",
+        index=True,
+        max_length=32,
+        description=(
+            "End-user availability state. "
+            "Only 'open' accepts new client sessions and tasks."
+        ),
     )
     model_name: str | None = Field(
         default=None, description="Deprecated: Use llm_id instead"

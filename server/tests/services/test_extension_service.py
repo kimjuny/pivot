@@ -23,7 +23,10 @@ AgentSavedDraft = import_module("app.models.agent_release").AgentSavedDraft
 AgentTestSnapshot = import_module("app.models.agent_release").AgentTestSnapshot
 AgentWebSearchBinding = import_module("app.models.web_search").AgentWebSearchBinding
 AgentExtensionBinding = import_module("app.models.extension").AgentExtensionBinding
+ExtensionInstallation = import_module("app.models.extension").ExtensionInstallation
+ExtensionPendingUpgrade = import_module("app.models.extension").ExtensionPendingUpgrade
 ExtensionHookExecution = import_module("app.models.extension").ExtensionHookExecution
+ReactTask = import_module("app.models.react").ReactTask
 User = import_module("app.models.user").User
 agent_release_runtime_service = import_module(
     "app.services.agent_release_runtime_service"
@@ -2213,6 +2216,189 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(reinstall.package_id, "@acme/crm")
         self.assertEqual(reinstall.status, "active")
         self.assertTrue(version_root.joinpath("runtime", "manifest.json").is_file())
+
+    def test_preview_from_path_marks_higher_version_as_upgrade(self) -> None:
+        """Preview should surface impacted agents and running tasks for upgrades."""
+        service = ExtensionService(self.session)
+        original_root = self._write_extension(version="0.1.0")
+        original_installation = service.install_from_path(
+            source_dir=original_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=original_installation.id or 0,
+            enabled=True,
+        )
+        self.session.add(
+            ReactTask(
+                task_id="upgrade-preview-task",
+                session_id="session-upgrade-preview",
+                agent_id=self.agent.id or 0,
+                user="alice",
+                user_message="Run task",
+                user_intent="Run task",
+                status="running",
+            )
+        )
+        self.session.commit()
+
+        preview = service.preview_from_path(
+            source_dir=self._write_extension(version="0.2.0")
+        )
+
+        self.assertEqual(preview.import_mode, "upgrade")
+        self.assertEqual(preview.upgrade_from_version, "0.1.0")
+        self.assertIsNotNone(preview.upgrade_impact)
+        self.assertEqual(preview.upgrade_impact["affected_agent_count"], 1)
+        self.assertEqual(preview.upgrade_impact["affected_agent_names"], ["ext-agent"])
+        self.assertEqual(preview.upgrade_impact["running_task_count"], 1)
+
+    def test_safe_upgrade_starts_draining_when_affected_tasks_are_still_running(
+        self,
+    ) -> None:
+        """Safe upgrades should stage the new version and drain affected agents."""
+        service = ExtensionService(self.session)
+        original_root = self._write_extension(version="0.1.0")
+        original_installation = service.install_from_path(
+            source_dir=original_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=original_installation.id or 0,
+            enabled=True,
+        )
+        self.session.add(
+            ReactTask(
+                task_id="safe-upgrade-task",
+                session_id="session-safe-upgrade",
+                agent_id=self.agent.id or 0,
+                user="alice",
+                user_message="Run task",
+                user_intent="Run task",
+                status="running",
+            )
+        )
+        self.session.commit()
+
+        upgraded_installation = service.install_from_path(
+            source_dir=self._write_extension(version="0.2.0"),
+            installed_by="alice",
+            trust_confirmed=True,
+            upgrade_mode="safe",
+        )
+
+        self.session.refresh(self.agent)
+        pending_upgrade = self.session.exec(select(ExtensionPendingUpgrade)).first()
+        self.assertIsNotNone(pending_upgrade)
+        self.assertEqual(self.agent.client_state, "draining_for_upgrade")
+        self.assertEqual(upgraded_installation.status, "disabled")
+        self.assertIsNotNone(pending_upgrade)
+        if pending_upgrade is None:
+            self.fail("Expected a pending upgrade row to be created.")
+        self.assertEqual(
+            pending_upgrade.target_installation_id,
+            upgraded_installation.id or 0,
+        )
+        summary = service.get_pending_package_upgrade_summary(package_id="@acme/crm")
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["running_task_count"], 1)
+
+    def test_reconcile_pending_upgrade_finalizes_when_running_tasks_finish(self) -> None:
+        """Reconciling a drained safe upgrade should move bindings and require republish."""
+        service = ExtensionService(self.session)
+        original_root = self._write_extension(version="0.1.0")
+        original_installation = service.install_from_path(
+            source_dir=original_root,
+            installed_by="alice",
+            trust_confirmed=True,
+        )
+        original_binding = service.upsert_agent_binding(
+            agent_id=self.agent.id or 0,
+            extension_installation_id=original_installation.id or 0,
+            enabled=True,
+            priority=12,
+        )
+        task = ReactTask(
+            task_id="safe-upgrade-reconcile-task",
+            session_id="session-safe-upgrade-reconcile",
+            agent_id=self.agent.id or 0,
+            user="alice",
+            user_message="Run task",
+            user_intent="Run task",
+            status="running",
+        )
+        self.session.add(task)
+        self.session.commit()
+
+        upgraded_installation = service.install_from_path(
+            source_dir=self._write_extension(version="0.2.0"),
+            installed_by="alice",
+            trust_confirmed=True,
+            upgrade_mode="safe",
+        )
+        pending_upgrade = self.session.exec(select(ExtensionPendingUpgrade)).first()
+        if pending_upgrade is None:
+            self.fail("Expected a pending upgrade row to exist before reconcile.")
+
+        task.status = "completed"
+        self.session.add(task)
+        self.session.commit()
+
+        result = service.reconcile_pending_upgrade(
+            pending_upgrade_id=pending_upgrade.id or 0
+        )
+
+        self.assertTrue(result["completed"])
+        self.session.refresh(self.agent)
+        self.assertEqual(self.agent.client_state, "upgrade_required")
+        upgraded_binding = self.session.exec(
+            select(AgentExtensionBinding).where(
+                AgentExtensionBinding.id == (original_binding.id or 0)
+            )
+        ).one()
+        self.assertEqual(
+            upgraded_binding.extension_installation_id,
+            upgraded_installation.id or 0,
+        )
+        self.assertIsNone(
+            self.session.exec(select(ExtensionPendingUpgrade)).first()
+        )
+
+    def test_bootstrap_bundled_extensions_installs_local_manifest_roots(self) -> None:
+        """Bootstrapping should install first-party local extension package roots."""
+        catalog_root = self.root / "bundled-extensions"
+        catalog_root.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            self._write_extension(package_name="pivot.baidu", version="0.1.0"),
+            catalog_root / "baidu",
+        )
+        nested_release_root = catalog_root / "tavily" / "release"
+        nested_release_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(
+            self._write_extension(package_name="pivot.tavily", version="0.1.0"),
+            nested_release_root,
+        )
+
+        with patch.object(
+            extension_service_module,
+            "_bundled_extensions_catalog_root",
+            return_value=catalog_root,
+        ):
+            installed = ExtensionService(self.session).bootstrap_bundled_extensions()
+
+        self.assertEqual(
+            sorted(installation.package_id for installation in installed),
+            ["@pivot/baidu", "@pivot/tavily"],
+        )
+        rows = self.session.exec(select(ExtensionInstallation)).all()
+        self.assertEqual(
+            sorted(installation.package_id for installation in rows),
+            ["@pivot/baidu", "@pivot/tavily"],
+        )
 
     def test_install_bundle_requires_top_level_manifest(self) -> None:
         """Bundle imports should reject archives missing top-level manifest.json."""

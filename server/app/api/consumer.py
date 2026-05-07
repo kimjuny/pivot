@@ -45,7 +45,7 @@ def _serialize_consumer_agent_response(
         "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
         "compact_threshold_percent": agent.compact_threshold_percent,
         "active_release_id": agent.active_release_id,
-        "serving_enabled": agent.serving_enabled,
+        "client_state": agent.client_state,
         "model_name": model_display,
         "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,

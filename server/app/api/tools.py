@@ -17,6 +17,7 @@ from app.services.tool_service import (
     create_manual_tool_source,
     delete_manual_tool,
     get_tool_resource,
+    list_manageable_tools,
     list_usable_tools,
     read_manual_tool_source,
     require_tool_access,
@@ -193,7 +194,7 @@ async def get_manageable_tools(
     current_user: User = Depends(permissions(Permission.TOOLS_MANAGE)),
 ) -> list[dict[str, object]]:
     """List tools visible in the Studio management page."""
-    return list_usable_tools(db, current_user=current_user)
+    return list_manageable_tools(db, current_user=current_user)
 
 
 @router.get("/tools/access-options", response_model=ToolAccessOptionsResponse)

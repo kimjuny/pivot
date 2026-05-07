@@ -450,8 +450,10 @@ def _serialize_skill(
         "artifact_size_bytes": skill.artifact_size_bytes,
         "use_scope": skill.use_scope,
         "source": skill.source,
+        "source_category": "builder",
         "creator_id": skill.creator_id,
         "creator": creator,
+        "from_label": creator or "Builder",
         "read_only": read_only,
         "md5": skill.md5,
         "github_repo_url": skill.github_repo_url,
@@ -459,6 +461,9 @@ def _serialize_skill(
         "github_ref_type": skill.github_ref_type,
         "github_skill_path": skill.github_skill_path,
         "imported": skill.github_repo_url is not None,
+        "extension_package_id": None,
+        "extension_display_name": None,
+        "extension_version": None,
         "created_at": _serialize_utc_timestamp(skill.created_at),
         "updated_at": _serialize_utc_timestamp(skill.updated_at),
     }
@@ -614,6 +619,58 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
         )
         for skill in skills
     ]
+
+
+def list_manageable_skills(session: Session, current_user: User) -> list[dict[str, Any]]:
+    """List skill inventory rows visible in the Studio management page."""
+    rows = list_visible_skills(session, current_user.username)
+
+    from app.services.extension_service import ExtensionService
+
+    extension_rows = ExtensionService(session).list_visible_contribution_inventory(
+        user=current_user,
+        contribution_type="skill",
+    )
+    now_iso = _serialize_utc_timestamp(datetime.now(UTC))
+    for item in extension_rows:
+        rows.append(
+            {
+                "name": item["name"],
+                "description": item["description"],
+                "location": "",
+                "filename": "",
+                "artifact_storage_backend": "",
+                "artifact_key": "",
+                "artifact_digest": "",
+                "artifact_size_bytes": 0,
+                "use_scope": "selected",
+                "source": "extension",
+                "source_category": "extension",
+                "creator_id": None,
+                "creator": None,
+                "from_label": item["from_label"],
+                "read_only": True,
+                "md5": "",
+                "github_repo_url": None,
+                "github_ref": None,
+                "github_ref_type": None,
+                "github_skill_path": None,
+                "imported": False,
+                "extension_package_id": item["extension_package_id"],
+                "extension_display_name": item["extension_display_name"],
+                "extension_version": item["extension_version"],
+                "created_at": now_iso,
+                "updated_at": now_iso,
+            }
+        )
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("name", "")).lower(),
+            str(row.get("from_label", "")).lower(),
+        ),
+    )
 
 
 def read_visible_skill_source(

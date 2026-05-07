@@ -17,12 +17,12 @@ from app.schemas.schemas import (
     AgentAccessResponse,
     AgentAccessUpdate,
     AgentAccessUserOption,
+    AgentClientStateUpdate,
     AgentCreate,
     AgentDraftStateResponse,
     AgentPublishRequest,
     AgentReleaseResponse,
     AgentResponse,
-    AgentServingUpdate,
     AgentSidebarStatsResponse,
     AgentUpdate,
 )
@@ -60,7 +60,7 @@ def _serialize_agent_response(
         "compact_threshold_percent": agent.compact_threshold_percent,
         "active_release_id": agent.active_release_id,
         "active_release_version": active_release_version,
-        "serving_enabled": agent.serving_enabled,
+        "client_state": agent.client_state,
         "model_name": model_display,
         "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
@@ -356,25 +356,28 @@ async def publish_agent_release(
         access_level=AccessLevel.EDIT,
     )
     try:
-        return AgentSnapshotService(db).publish_saved_draft(
+        draft_state = AgentSnapshotService(db).publish_saved_draft(
             agent_id,
             release_note=payload.release_note,
             published_by=current_user.username,
         )
+        if agent.client_state == "upgrade_required":
+            AgentService(db).set_client_state(agent_id, "open")
+        return draft_state
     except ValueError as exc:
         detail = str(exc)
         status_code = 409 if "already published" in detail else 404
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
 
-@router.patch("/agents/{agent_id}/serving", response_model=AgentResponse)
-async def update_agent_serving_state(
+@router.patch("/agents/{agent_id}/client-state", response_model=AgentResponse)
+async def update_agent_client_state(
     agent_id: int,
-    payload: AgentServingUpdate,
+    payload: AgentClientStateUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> dict[str, Any]:
-    """Enable or disable one agent for end-user traffic."""
+    """Update one agent's end-user availability state."""
     agent = agent_crud.get(agent_id, db)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -384,9 +387,9 @@ async def update_agent_serving_state(
         access_level=AccessLevel.EDIT,
     )
     try:
-        updated_agent = AgentService(db).set_serving_enabled(
+        updated_agent = AgentService(db).set_client_state(
             agent_id,
-            payload.serving_enabled,
+            payload.client_state,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

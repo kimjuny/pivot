@@ -1,8 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Pencil, Plus, SlidersHorizontal, Trash2 } from '@/lib/lucide';
+import { useNavigate } from 'react-router-dom';
+import {
+  ExternalLink,
+  Pencil,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from '@/lib/lucide';
 import { toast } from 'sonner';
 
 import ResourceAuthTab from '@/components/ResourceAuthTab';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import {
@@ -48,6 +58,7 @@ import {
   updateToolAccess,
   updateToolSource,
   type ManagedTool,
+  type ToolInventorySourceType,
   type ToolAccess,
   type ToolAccessOptions,
   type ToolSourceType,
@@ -86,9 +97,10 @@ const EMPTY_TOOL_ACCESS: ToolAccess = {
 
 const TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-type ToolRow = { sourceType: ToolSourceType; tool: ManagedTool };
+type ToolRow = { sourceType: ToolInventorySourceType; tool: ManagedTool };
 
 type ToolDialogTab = 'general' | 'auth';
+type SourceFilter = 'all' | 'builtin' | 'builder' | 'extension';
 
 function buildPageList(current: number, total: number): (number | 'ellipsis')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -125,14 +137,40 @@ function getToolFileNameLabel(name: string): string {
   return isValidToolName(normalizedName) ? `${normalizedName}.py` : 'tool.py';
 }
 
+function getToolSourceLabel(sourceCategory: ManagedTool['source_category']): string {
+  if (sourceCategory === 'builtin') {
+    return 'Built-in';
+  }
+  if (sourceCategory === 'extension') {
+    return 'Extension';
+  }
+  return 'Builder';
+}
+
+function getExtensionDetailPath(packageId: string | null | undefined): string | null {
+  if (!packageId || !packageId.startsWith('@')) {
+    return null;
+  }
+
+  const trimmed = packageId.slice(1);
+  const separatorIndex = trimmed.indexOf('/');
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
+    return null;
+  }
+
+  return `/studio/assets/extensions/${trimmed.slice(0, separatorIndex)}/${trimmed.slice(separatorIndex + 1)}`;
+}
+
 function extractFunctionName(source: string): string | null {
   return /^def\s+(\w+)\s*\(/m.exec(source)?.[1] ?? null;
 }
 
 function ToolsPage() {
+  const navigate = useNavigate();
   const [tools, setTools] = useState<ManagedTool[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -184,22 +222,37 @@ function ToolsPage() {
     [tools],
   );
 
+  const sourceCounts = useMemo(
+    () => ({
+      all: allRows.length,
+      builtin: allRows.filter((row) => row.tool.source_category === 'builtin').length,
+      builder: allRows.filter((row) => row.tool.source_category === 'builder').length,
+      extension: allRows.filter((row) => row.tool.source_category === 'extension').length,
+    }),
+    [allRows],
+  );
+
   const filteredRows = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return allRows.filter((row) => {
+      if (sourceFilter !== 'all' && row.tool.source_category !== sourceFilter) {
+        return false;
+      }
       if (!q) return true;
       return (
         row.tool.name.toLowerCase().includes(q) ||
-        row.tool.description.toLowerCase().includes(q)
+        row.tool.description.toLowerCase().includes(q) ||
+        getToolSourceLabel(row.tool.source_category).toLowerCase().includes(q) ||
+        (row.tool.from_label ?? '').toLowerCase().includes(q)
       );
     });
-  }, [allRows, searchQuery]);
+  }, [allRows, searchQuery, sourceFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery]);
+  }, [searchQuery, sourceFilter]);
 
   const pagedRows = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -229,6 +282,9 @@ function ToolsPage() {
   };
 
   const openToolDialog = useCallback(async (row: ToolRow) => {
+    if (row.sourceType === 'extension') {
+      return;
+    }
     const toolName = row.tool.name;
     setToolDialogMode('edit');
     setToolDialogTab('general');
@@ -258,6 +314,9 @@ function ToolsPage() {
   }, []);
 
   const openSourceEditor = useCallback(async (row: ToolRow) => {
+    if (row.sourceType === 'extension') {
+      return;
+    }
     const toolName = row.tool.name;
     try {
       const result = await getToolSource(row.sourceType, toolName);
@@ -393,6 +452,9 @@ function ToolsPage() {
   ]);
 
   const handleDelete = useCallback(async (row: ToolRow) => {
+    if (row.sourceType === 'extension') {
+      return;
+    }
     if (row.sourceType === 'builtin') {
       toast.error('Built-in tools are read-only');
       return;
@@ -406,6 +468,15 @@ function ToolsPage() {
     }
   }, [loadTools]);
 
+  const openOwningExtension = useCallback((row: ToolRow) => {
+    const detailPath = getExtensionDetailPath(row.tool.extension_package_id);
+    if (!detailPath) {
+      toast.error('Extension detail page is unavailable for this tool.');
+      return;
+    }
+    navigate(detailPath);
+  }, [navigate]);
+
   const isBuiltinDialog = toolDialogSourceType === 'builtin';
   const isReadOnlyDialog = toolDialogReadOnly || isBuiltinDialog;
   const toolDialogTabIndex = toolDialogTab === 'auth' ? 1 : 0;
@@ -417,7 +488,7 @@ function ToolsPage() {
           <div>
             <h1 className="text-xl font-semibold text-foreground">Tools</h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Manage tools and control who can use or edit each one.
+              Browse available tools across built-in, builder, and extension sources, and manage editable ones here.
             </p>
           </div>
           <Button
@@ -430,19 +501,60 @@ function ToolsPage() {
           </Button>
         </div>
 
-        <div className="mb-4 flex justify-end">
-          <ButtonGroup className="list-search-group">
-            <Input
-              placeholder="Search by name or description…"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Search tools"
-              autoComplete="off"
-            />
-            <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
-              Search
-            </Button>
-          </ButtonGroup>
+        <div className="mb-4 flex flex-col gap-3">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(
+              [
+                { value: 'all', label: 'All Sources', count: sourceCounts.all },
+                { value: 'builtin', label: 'Built-in', count: sourceCounts.builtin },
+                { value: 'builder', label: 'Builder', count: sourceCounts.builder },
+                { value: 'extension', label: 'Extension', count: sourceCounts.extension },
+              ] as const
+            ).map(({ value, label, count }) => (
+              <button
+                key={value}
+                onClick={() => setSourceFilter(value)}
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
+              >
+                <Badge
+                  variant={sourceFilter === value ? 'default' : 'outline'}
+                  className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                    sourceFilter === value ? 'list-filter-badge-active' : ''
+                  }`}
+                >
+                  {label}
+                  <span className={sourceFilter === value ? 'opacity-70' : 'text-muted-foreground'}>
+                    {count}
+                  </span>
+                </Badge>
+              </button>
+            ))}
+            {sourceFilter !== 'all' && (
+              <button
+                onClick={() => setSourceFilter('all')}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear source filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <ButtonGroup className="list-search-group">
+              <Input
+                placeholder="Search by name, description, source, or origin…"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                aria-label="Search tools"
+                autoComplete="off"
+              />
+              <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
+                <Search className="w-4 h-4" />
+                Search
+              </Button>
+            </ButtonGroup>
+          </div>
         </div>
 
         {isLoading ? (
@@ -469,6 +581,8 @@ function ToolsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[220px]">Name</TableHead>
+                  <TableHead className="w-[110px]">Source</TableHead>
+                  <TableHead className="w-[220px]">From</TableHead>
                   <TableHead className="w-[120px]">Sandbox</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead className="w-[120px] text-right">Actions</TableHead>
@@ -481,6 +595,12 @@ function ToolsPage() {
                     <TableRow key={`${row.sourceType}-${row.tool.name}`}>
                       <TableCell className="font-mono text-xs font-medium">
                         {row.tool.name}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {getToolSourceLabel(row.tool.source_category)}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {row.tool.from_label ?? '—'}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {row.tool.tool_type === 'sandbox' ? 'Yes' : 'No'}
@@ -506,35 +626,49 @@ function ToolsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label={`Configure tool ${row.tool.name}`}
-                            onClick={() => void openToolDialog(row)}
-                          >
-                            <SlidersHorizontal className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            aria-label={`${row.sourceType === 'builtin' ? 'View' : 'Edit'} tool.py for ${row.tool.name}`}
-                            onClick={() => void openSourceEditor(row)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          {!row.tool.read_only ? (
+                          {row.sourceType === 'extension' ? (
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              aria-label={`Delete tool ${row.tool.name}`}
-                              onClick={() => void handleDelete(row)}
+                              className="h-7 w-7"
+                              aria-label={`Open owning extension for ${row.tool.name}`}
+                              onClick={() => openOwningExtension(row)}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <ExternalLink className="h-3.5 w-3.5" />
                             </Button>
-                          ) : null}
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                aria-label={`Configure tool ${row.tool.name}`}
+                                onClick={() => void openToolDialog(row)}
+                              >
+                                <SlidersHorizontal className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                aria-label={`${row.sourceType === 'builtin' ? 'View' : 'Edit'} tool.py for ${row.tool.name}`}
+                                onClick={() => void openSourceEditor(row)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              {!row.tool.read_only ? (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-destructive hover:text-destructive"
+                                  aria-label={`Delete tool ${row.tool.name}`}
+                                  onClick={() => void handleDelete(row)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

@@ -645,6 +645,8 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
         <div className="flex-1 relative overflow-hidden flex flex-col">
           <div className="pointer-events-none absolute right-4 top-3 z-20 flex justify-end">
             <AgentWorkspaceToolbar
+              agentId={agentId}
+              clientState={effectiveAgent?.client_state}
               hasUnsavedChanges={hasUnsavedChanges}
               hasPublishableChanges={hasPublishableChanges}
               isSavingDraft={isSubmitting}
@@ -857,6 +859,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
         onReleaseNoteChange={setReleaseNote}
         isPublishing={isPublishingRelease}
         canPublish={hasPublishableChanges}
+        clientState={effectiveAgent?.client_state}
         onPublish={handlePublishRelease}
       />
       <ReleaseHistoryDialog

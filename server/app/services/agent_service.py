@@ -12,6 +12,18 @@ if TYPE_CHECKING:
     from sqlmodel import Session as DBSession
 
 
+OPEN_CLIENT_STATE = "open"
+PAUSED_CLIENT_STATE = "paused"
+DRAINING_CLIENT_STATE = "draining_for_upgrade"
+UPGRADE_REQUIRED_CLIENT_STATE = "upgrade_required"
+VALID_CLIENT_STATES = {
+    OPEN_CLIENT_STATE,
+    PAUSED_CLIENT_STATE,
+    DRAINING_CLIENT_STATE,
+    UPGRADE_REQUIRED_CLIENT_STATE,
+}
+
+
 class AgentService:
     """Provide reusable CRUD-like operations over persisted agent rows.
 
@@ -95,21 +107,23 @@ class AgentService:
         """
         return self.update_agent_fields(agent_id, active_release_id=release_id)
 
-    def set_serving_enabled(
+    def set_client_state(
         self,
         agent_id: int,
-        serving_enabled: bool,
+        client_state: str,
     ) -> Agent:
-        """Update whether an agent currently accepts end-user traffic.
+        """Update one agent's end-user availability state.
 
         Args:
             agent_id: Stable agent identifier.
-            serving_enabled: Desired end-user serving state.
+            client_state: Desired end-user availability state.
 
         Returns:
             The refreshed updated agent row.
         """
-        return self.update_agent_fields(agent_id, serving_enabled=serving_enabled)
+        if client_state not in VALID_CLIENT_STATES:
+            raise ValueError(f"Unsupported client state '{client_state}'")
+        return self.update_agent_fields(agent_id, client_state=client_state)
 
     def require_session_creation_ready(self, agent_id: int) -> Agent:
         """Return one agent that is ready to accept a new user session.
@@ -127,8 +141,14 @@ class AgentService:
         agent = self.get_required_agent(agent_id)
         if agent.active_release_id is None:
             raise ValueError("Agent is not published for end users yet")
-        if not agent.serving_enabled:
-            raise ValueError("Agent is currently disabled for end users")
+        if agent.client_state != OPEN_CLIENT_STATE:
+            if agent.client_state == PAUSED_CLIENT_STATE:
+                raise ValueError("Agent is currently paused for end users")
+            if agent.client_state == DRAINING_CLIENT_STATE:
+                raise ValueError("Agent is preparing for an upgrade")
+            if agent.client_state == UPGRADE_REQUIRED_CLIENT_STATE:
+                raise ValueError("Agent is awaiting a new published release")
+            raise ValueError("Agent is currently unavailable for end users")
         return agent
 
     def list_consumer_visible_agents(self) -> list[Agent]:
@@ -141,7 +161,7 @@ class AgentService:
         statement = (
             select(Agent)
             .where(col(Agent.active_release_id).is_not(None))
-            .where(col(Agent.serving_enabled).is_(True))
+            .where(col(Agent.client_state) == OPEN_CLIENT_STATE)
             .order_by(col(Agent.updated_at).desc())
         )
         return list(self.db.exec(statement).all())
@@ -159,7 +179,7 @@ class AgentService:
             select(Agent)
             .where(Agent.id == agent_id)
             .where(col(Agent.active_release_id).is_not(None))
-            .where(col(Agent.serving_enabled).is_(True))
+            .where(col(Agent.client_state) == OPEN_CLIENT_STATE)
         )
         return self.db.exec(statement).first()
 
@@ -193,6 +213,12 @@ class AgentService:
             ValueError: If the agent does not exist or is disabled.
         """
         agent = self.get_required_agent(agent_id)
-        if not agent.serving_enabled:
+        if agent.client_state != OPEN_CLIENT_STATE:
+            if agent.client_state == PAUSED_CLIENT_STATE:
+                raise ValueError("This agent is temporarily paused")
+            if agent.client_state == DRAINING_CLIENT_STATE:
+                raise ValueError("This agent is preparing for an upgrade")
+            if agent.client_state == UPGRADE_REQUIRED_CLIENT_STATE:
+                raise ValueError("This agent requires a new published release")
             raise ValueError("This agent is temporarily unavailable")
         return agent

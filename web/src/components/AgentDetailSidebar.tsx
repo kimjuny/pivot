@@ -334,6 +334,20 @@ function SidebarCountBadge({
     );
 }
 
+function getAgentClientStateLabel(clientState: string | null | undefined): string {
+    switch (clientState) {
+        case 'paused':
+            return 'Client access paused';
+        case 'draining_for_upgrade':
+            return 'Preparing for upgrade';
+        case 'upgrade_required':
+            return 'Republish required';
+        case 'open':
+        default:
+            return 'Open to clients';
+    }
+}
+
 function SidebarItemSkeleton({
     testId,
 }: {
@@ -1451,12 +1465,14 @@ function AgentDetailSidebar({
                                                     {agent?.name || 'Loading…'}
                                                 </span>
                                                 <span
-                                                    aria-label={agent?.serving_enabled === false ? 'Serving disabled' : 'Serving enabled'}
-                                                    title={agent?.serving_enabled === false ? 'Serving disabled' : 'Serving enabled'}
+                                                    aria-label={getAgentClientStateLabel(agent?.client_state)}
+                                                    title={getAgentClientStateLabel(agent?.client_state)}
                                                     className={`h-1.5 w-1.5 rounded-full ${
-                                                        agent?.serving_enabled === false
-                                                            ? 'bg-red-500'
-                                                            : 'bg-blue-500'
+                                                        agent?.client_state === 'upgrade_required'
+                                                            ? 'bg-blue-500'
+                                                            : agent?.client_state === 'open' || agent?.client_state == null
+                                                                ? 'bg-emerald-500'
+                                                                : 'bg-amber-500'
                                                     }`}
                                                 />
                                             </div>
@@ -1603,7 +1619,7 @@ function AgentDetailSidebar({
                                                                             ? `· extension · ${t.extensionLabel ?? 'unknown'}`
                                                                             : t.source === 'builtin'
                                                                               ? '· builtin'
-                                                                              : '· manual'}
+                                                                              : '· builder'}
                                                                     </span>
                                                                 </div>
                                                                 {t.description && (
@@ -1724,8 +1740,8 @@ function AgentDetailSidebar({
                                                                         {s.source === 'extension'
                                                                             ? `· extension · ${s.extensionLabel ?? 'unknown'}`
                                                                             : s.readOnly
-                                                                              ? `· read-only · ${s.creator ?? 'unknown'}`
-                                                                              : '· editable'}
+                                                                              ? `· builder · read-only · ${s.creator ?? 'unknown'}`
+                                                                              : '· builder · editable'}
                                                                     </span>
                                                                 </div>
                                                                 {s.description && (

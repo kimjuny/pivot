@@ -402,7 +402,7 @@ class AccessService:
         if require_published:
             statement = statement.where(col(Agent.active_release_id).is_not(None))
         if require_serving:
-            statement = statement.where(col(Agent.serving_enabled).is_(True))
+            statement = statement.where(col(Agent.client_state) == "open")
 
         agents = list(self.db.exec(statement).all())
         visible = [

@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/tooltip';
 import type { AgentReleaseRecord } from '../utils/api';
 import ReleaseSummarySections from './ReleaseSummarySections';
+import type { AgentClientState } from '@/types';
 
 interface PublishReleaseDrawerProps {
   /** Controls drawer visibility. */
@@ -37,6 +38,8 @@ interface PublishReleaseDrawerProps {
   isPublishing: boolean;
   /** Whether the current draft can produce a new release. */
   canPublish: boolean;
+  /** Current end-user availability state for this agent. */
+  clientState: AgentClientState | undefined;
   /** Confirm publishing the current saved draft. */
   onPublish: () => void | Promise<void>;
 }
@@ -56,16 +59,18 @@ function PublishReleaseDrawer({
   onReleaseNoteChange,
   isPublishing,
   canPublish,
+  clientState,
   onPublish,
 }: PublishReleaseDrawerProps) {
   const nextVersion = latestRelease ? latestRelease.version + 1 : 1;
+  const needsRepublish = clientState === 'upgrade_required';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <span>Publish current draft</span>
+            <span>{needsRepublish ? 'Publish new release' : 'Publish current draft'}</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -162,8 +167,12 @@ function PublishReleaseDrawer({
             {isPublishing
               ? 'Publishing…'
               : hasUnsavedChanges
-                ? 'Save & publish'
-                : 'Publish'}
+                ? needsRepublish
+                  ? 'Save & publish new release'
+                  : 'Save & publish'
+                : needsRepublish
+                  ? 'Publish new release'
+                  : 'Publish'}
           </Button>
         </DialogFooter>
       </DialogContent>

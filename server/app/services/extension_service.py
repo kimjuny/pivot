@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import inspect
 import json
+import logging
 import re
 import shutil
 import sys
@@ -20,6 +21,7 @@ from app.channels.types import ChannelManifest
 from app.config import get_settings
 from app.media_generation.types import MediaGenerationProviderManifest
 from app.models.access import AccessLevel, PrincipalType, ResourceType
+from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import (
     AgentChannelBinding,
@@ -28,8 +30,13 @@ from app.models.channel import (
     ChannelSession,
     ExternalIdentityBinding,
 )
-from app.models.extension import AgentExtensionBinding, ExtensionInstallation
+from app.models.extension import (
+    AgentExtensionBinding,
+    ExtensionInstallation,
+    ExtensionPendingUpgrade,
+)
 from app.models.media_generation import AgentMediaProviderBinding
+from app.models.react import ReactTask
 from app.models.skill import Skill
 from app.models.user import User
 from app.models.web_search import AgentWebSearchBinding
@@ -52,6 +59,8 @@ from app.services.provider_registry_service import (
 from app.services.tool_service import load_runtime_manual_tool_metadata
 from app.services.workspace_service import ensure_agent_workspace
 from sqlmodel import Session, col, select
+
+logger = logging.getLogger(__name__)
 
 _MANIFEST_FILENAME = "manifest.json"
 _README_MARKDOWN_FILENAME = "README.md"
@@ -119,6 +128,9 @@ class ExtensionInstallPreview:
     requires_overwrite_confirmation: bool = False
     overwrite_blocked_reason: str = ""
     existing_reference_summary: ExtensionReferenceSummary | None = None
+    import_mode: str = "new_install"
+    upgrade_from_version: str | None = None
+    upgrade_impact: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +179,25 @@ class ExtensionReferenceSummary:
         }
 
 
+def _version_sort_key(version: str) -> tuple[tuple[int, int | str], ...]:
+    """Build a loose sortable key for semver-like version strings."""
+    parts = re.findall(r"\d+|[A-Za-z]+", version)
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part.lower()) for part in parts
+    )
+
+
+def _parse_package_id(package_id: str) -> tuple[str, str]:
+    """Split one canonical package id into scope and name."""
+    normalized = package_id.strip()
+    if not normalized.startswith("@") or "/" not in normalized:
+        raise ValueError("package_id must be in the form @scope/name")
+    scope, name = normalized[1:].split("/", 1)
+    if not scope or not name:
+        raise ValueError("package_id must be in the form @scope/name")
+    return scope, name
+
+
 def _dump_json(payload: Any) -> str:
     """Serialize one payload into canonical compact JSON text."""
     return json.dumps(
@@ -198,6 +229,11 @@ def _extensions_root() -> Path:
     root = root / "extensions"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _bundled_extensions_catalog_root() -> Path:
+    """Return the sibling first-party extension catalog root, when present."""
+    return Path(__file__).resolve().parents[4] / "extensions" / "extensions"
 
 
 def _installation_version_root(*, scope: str, name: str, version: str) -> Path:
@@ -1399,6 +1435,39 @@ class ExtensionService:
         )
         return list(self.db.exec(statement).all())
 
+    def bootstrap_bundled_extensions(self) -> list[ExtensionInstallation]:
+        """Install first-party local extension packages from the sibling repo."""
+        catalog_root = _bundled_extensions_catalog_root()
+        if not catalog_root.is_dir():
+            return []
+
+        manifest_paths = sorted(
+            {
+                *catalog_root.glob("*/manifest.json"),
+                *catalog_root.glob("*/extension/manifest.json"),
+                *catalog_root.glob("*/release/manifest.json"),
+            }
+        )
+        installed: list[ExtensionInstallation] = []
+        for manifest_path in manifest_paths:
+            package_root = manifest_path.parent
+            try:
+                installation = self.install_from_path(
+                    source_dir=package_root,
+                    installed_by="system",
+                    source="bootstrap",
+                    trust_confirmed=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Skipping bundled extension bootstrap for %s: %s",
+                    package_root,
+                    exc,
+                )
+                continue
+            installed.append(installation)
+        return installed
+
     def list_visible_installations(self, user: User) -> list[ExtensionInstallation]:
         """Return installed extension versions visible to one Studio user."""
         return [
@@ -1453,6 +1522,9 @@ class ExtensionService:
                     "disabled_version_count": sum(
                         1 for item in ordered_installations if item.status == "disabled"
                     ),
+                    "pending_upgrade": self.get_pending_package_upgrade_summary(
+                        package_id=package_id
+                    ),
                     "versions": ordered_installations,
                 }
             )
@@ -1488,11 +1560,71 @@ class ExtensionService:
                     "disabled_version_count": sum(
                         1 for item in ordered_installations if item.status == "disabled"
                     ),
+                    "pending_upgrade": self.get_pending_package_upgrade_summary(
+                        package_id=package_id
+                    ),
                     "versions": ordered_installations,
                 }
             )
 
         return sorted(packages, key=lambda item: str(item["package_id"]))
+
+    def list_visible_contribution_inventory(
+        self,
+        *,
+        user: User,
+        contribution_type: str,
+    ) -> list[dict[str, Any]]:
+        """Return visible active extension contributions of one type.
+
+        Why: top-level inventory pages such as Tools and Skills should be able
+        to show extension-origin capabilities without requiring callers to
+        understand package/version grouping rules.
+        """
+        rows: list[dict[str, Any]] = []
+        seen: set[tuple[int, str, str]] = set()
+
+        for installation in self.list_visible_installations(user):
+            if installation.status != "active":
+                continue
+
+            installation_id = installation.id or 0
+            from_label = installation.display_name or installation.package_id
+            if installation.version:
+                from_label = f"{from_label}@{installation.version}"
+
+            for item in self.get_installation_contribution_items(installation):
+                item_type = str(item.get("type", "")).strip()
+                item_name = str(item.get("name", "")).strip()
+                if item_type != contribution_type or item_name == "":
+                    continue
+
+                dedupe_key = (installation_id, contribution_type, item_name)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                rows.append(
+                    {
+                        "name": item_name,
+                        "description": str(item.get("description", "")).strip(),
+                        "type": contribution_type,
+                        "from_label": from_label,
+                        "extension_installation_id": installation_id,
+                        "extension_package_id": installation.package_id,
+                        "extension_display_name": installation.display_name,
+                        "extension_version": installation.version,
+                    }
+                )
+
+        return sorted(
+            rows,
+            key=lambda item: (
+                str(item.get("name", "")).lower(),
+                str(item.get("extension_package_id", "")).lower(),
+                str(item.get("extension_version", "")).lower(),
+            ),
+        )
 
     def _read_installation_readme_markdown(
         self,
@@ -1677,6 +1809,10 @@ class ExtensionService:
 
         normalized_manifest = _normalize_manifest(raw_manifest, source_dir=package_root)
         manifest_hash = _hash_payload(normalized_manifest)
+        latest_existing = self._get_latest_installation_for_package(
+            scope=normalized_manifest["scope"],
+            name=normalized_manifest["name"],
+        )
         existing = self.db.exec(
             select(ExtensionInstallation).where(
                 ExtensionInstallation.scope == normalized_manifest["scope"],
@@ -1690,11 +1826,15 @@ class ExtensionService:
         overwrite_blocked_reason = ""
         existing_installation_id: int | None = None
         existing_installation_status: str | None = None
+        import_mode = "new_install"
+        upgrade_from_version: str | None = None
+        upgrade_impact: dict[str, Any] | None = None
         if existing is not None:
             existing_installation_id = existing.id
             existing_installation_status = existing.status
             identical_to_installed = existing.manifest_hash == manifest_hash
             if not identical_to_installed:
+                import_mode = "same_version_overwrite"
                 existing_reference_summary = self.get_reference_summary(
                     installation_id=existing.id or 0
                 )
@@ -1707,6 +1847,21 @@ class ExtensionService:
                     )
                 else:
                     requires_overwrite_confirmation = True
+            else:
+                import_mode = "same_version_reuse"
+        elif (
+            latest_existing is not None
+            and _version_sort_key(normalized_manifest["version"])
+            > _version_sort_key(latest_existing.version)
+        ):
+            import_mode = "upgrade"
+            upgrade_from_version = latest_existing.version
+            upgrade_impact = self.get_package_upgrade_impact(
+                package_id=_package_id(
+                    normalized_manifest["scope"],
+                    normalized_manifest["name"],
+                )
+            )
         return ExtensionInstallPreview(
             scope=normalized_manifest["scope"],
             name=normalized_manifest["name"],
@@ -1734,6 +1889,9 @@ class ExtensionService:
             requires_overwrite_confirmation=requires_overwrite_confirmation,
             overwrite_blocked_reason=overwrite_blocked_reason,
             existing_reference_summary=existing_reference_summary,
+            import_mode=import_mode,
+            upgrade_from_version=upgrade_from_version,
+            upgrade_impact=upgrade_impact,
         )
 
     def set_installation_status(
@@ -1754,6 +1912,11 @@ class ExtensionService:
         installation = self.db.get(ExtensionInstallation, installation_id)
         if installation is None:
             raise ValueError("Installed extension version not found.")
+        if self._get_package_pending_upgrade(package_id=installation.package_id) is not None:
+            raise ValueError(
+                "This extension package is currently draining a safe upgrade. "
+                "Wait for it to finish or force the upgrade before changing version status."
+            )
         normalized_status = status.strip().lower()
         if normalized_status not in {"active", "disabled"}:
             raise ValueError("status must be either 'active' or 'disabled'.")
@@ -1790,6 +1953,304 @@ class ExtensionService:
         self.db.refresh(installation)
         return installation
 
+    def _get_latest_installation_for_package(
+        self,
+        *,
+        scope: str,
+        name: str,
+    ) -> ExtensionInstallation | None:
+        """Return the highest-version installed row for one package."""
+        installations = list(
+            self.db.exec(
+                select(ExtensionInstallation).where(
+                    ExtensionInstallation.scope == scope,
+                    ExtensionInstallation.name == name,
+                )
+            ).all()
+        )
+        if not installations:
+            return None
+        return max(
+            installations,
+            key=lambda installation: (
+                _version_sort_key(installation.version),
+                installation.created_at,
+            ),
+        )
+
+    def get_package_upgrade_impact(self, *, package_id: str) -> dict[str, Any]:
+        """Summarize which agents and tasks would be affected by one package upgrade."""
+        affected_agent_ids = self._collect_package_upgrade_agent_ids(package_id=package_id)
+        return self._build_upgrade_impact_payload(
+            package_id=package_id,
+            affected_agent_ids=affected_agent_ids,
+        )
+
+    def _collect_package_upgrade_agent_ids(self, *, package_id: str) -> set[int]:
+        """Return every agent that depends on one package or its providers."""
+        scope, name = _parse_package_id(package_id)
+        installations = list(
+            self.db.exec(
+                select(ExtensionInstallation).where(
+                    ExtensionInstallation.scope == scope,
+                    ExtensionInstallation.name == name,
+                )
+            ).all()
+        )
+        if not installations:
+            return set()
+
+        installation_ids = {installation.id or 0 for installation in installations}
+        provider_keys = {"channel": set(), "media": set(), "web_search": set()}
+        for installation in installations:
+            provider_key_groups = extract_provider_keys_from_manifest(
+                self._load_manifest_from_installation(installation)
+            )
+            for provider_type, values in provider_key_groups.items():
+                provider_keys[provider_type].update(values)
+
+        affected_agent_ids: set[int] = set()
+        if installation_ids:
+            for binding in self.db.exec(
+                select(AgentExtensionBinding).where(
+                    col(AgentExtensionBinding.extension_installation_id).in_(
+                        installation_ids
+                    )
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+        if provider_keys["channel"]:
+            for binding in self.db.exec(
+                select(AgentChannelBinding).where(
+                    col(AgentChannelBinding.channel_key).in_(provider_keys["channel"])
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+        if provider_keys["media"]:
+            for binding in self.db.exec(
+                select(AgentMediaProviderBinding).where(
+                    col(AgentMediaProviderBinding.provider_key).in_(provider_keys["media"])
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+        if provider_keys["web_search"]:
+            for binding in self.db.exec(
+                select(AgentWebSearchBinding).where(
+                    col(AgentWebSearchBinding.provider_key).in_(
+                        provider_keys["web_search"]
+                    )
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+        return affected_agent_ids
+
+    def _build_upgrade_impact_payload(
+        self,
+        *,
+        package_id: str,
+        affected_agent_ids: set[int],
+    ) -> dict[str, Any]:
+        """Build names and running-task counts for one affected-agent set."""
+        del package_id
+        if not affected_agent_ids:
+            return {
+                "affected_agent_count": 0,
+                "affected_agent_names": [],
+                "running_task_count": 0,
+            }
+
+        agents = list(
+            self.db.exec(select(Agent).where(col(Agent.id).in_(affected_agent_ids))).all()
+        )
+        running_task_count = len(
+            self.db.exec(
+                select(ReactTask).where(
+                    col(ReactTask.agent_id).in_(affected_agent_ids),
+                    col(ReactTask.status).in_(["pending", "running", "waiting_input"]),
+                )
+            ).all()
+        )
+        return {
+            "affected_agent_count": len(agents),
+            "affected_agent_names": sorted(agent.name for agent in agents),
+            "running_task_count": running_task_count,
+        }
+
+    def _list_package_pending_upgrade_rows(
+        self,
+        *,
+        package_id: str,
+    ) -> list[ExtensionPendingUpgrade]:
+        """Return active pending-upgrade rows for one package."""
+        return list(
+            self.db.exec(
+                select(ExtensionPendingUpgrade)
+                .where(ExtensionPendingUpgrade.package_id == package_id)
+                .order_by(col(ExtensionPendingUpgrade.created_at).desc())
+            ).all()
+        )
+
+    def _get_package_pending_upgrade(
+        self,
+        *,
+        package_id: str,
+    ) -> ExtensionPendingUpgrade | None:
+        """Return the newest active pending-upgrade row for one package."""
+        upgrades = self._list_package_pending_upgrade_rows(package_id=package_id)
+        return upgrades[0] if upgrades else None
+
+    def _parse_pending_upgrade_agent_ids(
+        self,
+        pending_upgrade: ExtensionPendingUpgrade,
+    ) -> list[int]:
+        """Decode the persisted affected-agent ids for one pending upgrade."""
+        try:
+            parsed = json.loads(pending_upgrade.affected_agent_ids_json)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(parsed, list):
+            return []
+        return sorted(
+            {
+                int(value)
+                for value in parsed
+                if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
+            }
+        )
+
+    def get_pending_package_upgrade_summary(
+        self,
+        *,
+        package_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the currently draining safe-upgrade summary for one package."""
+        pending_upgrade = self._get_package_pending_upgrade(package_id=package_id)
+        if pending_upgrade is None:
+            return None
+        installation = self.db.get(
+            ExtensionInstallation,
+            pending_upgrade.target_installation_id,
+        )
+        if installation is None:
+            return None
+        affected_agent_ids = set(self._parse_pending_upgrade_agent_ids(pending_upgrade))
+        impact = self._build_upgrade_impact_payload(
+            package_id=package_id,
+            affected_agent_ids=affected_agent_ids,
+        )
+        return {
+            "id": pending_upgrade.id or 0,
+            "package_id": pending_upgrade.package_id,
+            "source_version": pending_upgrade.source_version,
+            "target_version": installation.version,
+            "mode": pending_upgrade.mode,
+            **impact,
+        }
+
+    def _start_pending_package_upgrade(
+        self,
+        *,
+        package_id: str,
+        source_version: str,
+        target_installation_id: int,
+        affected_agent_ids: set[int],
+        created_by: str | None,
+    ) -> None:
+        """Persist one safe-upgrade drain and block new client traffic."""
+        if self._get_package_pending_upgrade(package_id=package_id) is not None:
+            raise ValueError(
+                "A safe upgrade is already draining for this extension package."
+            )
+        now = datetime.now(UTC)
+        pending_upgrade = ExtensionPendingUpgrade(
+            package_id=package_id,
+            source_version=source_version,
+            target_installation_id=target_installation_id,
+            mode="safe",
+            affected_agent_ids_json=_dump_json(sorted(affected_agent_ids)),
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
+        )
+        self.db.add(pending_upgrade)
+        if affected_agent_ids:
+            for agent in self.db.exec(
+                select(Agent).where(col(Agent.id).in_(affected_agent_ids))
+            ).all():
+                agent.client_state = "draining_for_upgrade"
+                agent.updated_at = now
+                self.db.add(agent)
+        self.db.commit()
+
+    def reconcile_pending_upgrade(
+        self,
+        *,
+        pending_upgrade_id: int,
+    ) -> dict[str, Any]:
+        """Finalize one draining safe upgrade once its running-task count reaches zero."""
+        pending_upgrade = self.db.get(ExtensionPendingUpgrade, pending_upgrade_id)
+        if pending_upgrade is None:
+            raise ValueError("Pending extension upgrade not found.")
+        affected_agent_ids = set(self._parse_pending_upgrade_agent_ids(pending_upgrade))
+        impact = self._build_upgrade_impact_payload(
+            package_id=pending_upgrade.package_id,
+            affected_agent_ids=affected_agent_ids,
+        )
+        if int(impact.get("running_task_count", 0)) > 0:
+            return {
+                "completed": False,
+                "upgrade": self.get_pending_package_upgrade_summary(
+                    package_id=pending_upgrade.package_id
+                ),
+            }
+        summary = self._finalize_pending_package_upgrade(
+            pending_upgrade=pending_upgrade,
+        )
+        return {"completed": True, "upgrade": summary}
+
+    def force_pending_upgrade(
+        self,
+        *,
+        pending_upgrade_id: int,
+    ) -> dict[str, Any]:
+        """Immediately finish one draining safe upgrade."""
+        pending_upgrade = self.db.get(ExtensionPendingUpgrade, pending_upgrade_id)
+        if pending_upgrade is None:
+            raise ValueError("Pending extension upgrade not found.")
+        summary = self._finalize_pending_package_upgrade(pending_upgrade=pending_upgrade)
+        return {"completed": True, "upgrade": summary}
+
+    def _finalize_pending_package_upgrade(
+        self,
+        *,
+        pending_upgrade: ExtensionPendingUpgrade,
+    ) -> dict[str, Any]:
+        """Apply one staged package upgrade and clear its drain marker."""
+        summary = self.get_pending_package_upgrade_summary(
+            package_id=pending_upgrade.package_id
+        )
+        self._apply_package_upgrade(
+            package_id=pending_upgrade.package_id,
+            new_installation_id=pending_upgrade.target_installation_id,
+            affected_agent_ids_override=set(
+                self._parse_pending_upgrade_agent_ids(pending_upgrade)
+            ),
+        )
+        refreshed = self.db.get(ExtensionPendingUpgrade, pending_upgrade.id)
+        if refreshed is not None:
+            self.db.delete(refreshed)
+            self.db.commit()
+        return summary or {
+            "id": pending_upgrade.id or 0,
+            "package_id": pending_upgrade.package_id,
+            "source_version": pending_upgrade.source_version,
+            "target_version": "",
+            "mode": pending_upgrade.mode,
+            "affected_agent_count": 0,
+            "affected_agent_names": [],
+            "running_task_count": 0,
+        }
+
     def install_from_path(
         self,
         *,
@@ -1798,6 +2259,7 @@ class ExtensionService:
         source: str = "manual",
         trust_confirmed: bool,
         overwrite_confirmed: bool = False,
+        upgrade_mode: str = "force",
     ) -> ExtensionInstallation:
         """Validate and install one extension folder into the workspace registry.
 
@@ -1833,10 +2295,42 @@ class ExtensionService:
             normalized_manifest, source_dir=package_root
         )
         manifest_hash = preview.manifest_hash
+        normalized_upgrade_mode = upgrade_mode.strip().lower()
+        if normalized_upgrade_mode not in {"safe", "force"}:
+            raise ValueError("upgrade_mode must be either 'safe' or 'force'.")
+        latest_existing = self._get_latest_installation_for_package(
+            scope=normalized_manifest["scope"],
+            name=normalized_manifest["name"],
+        )
+        is_package_upgrade = (
+            latest_existing is not None
+            and _version_sort_key(normalized_manifest["version"])
+            > _version_sort_key(latest_existing.version)
+        )
+        package_id = _package_id(
+            normalized_manifest["scope"],
+            normalized_manifest["name"],
+        )
+        upgrade_impact = (
+            self.get_package_upgrade_impact(package_id=package_id)
+            if is_package_upgrade
+            else {
+                "affected_agent_count": 0,
+                "affected_agent_names": [],
+                "running_task_count": 0,
+            }
+        )
         provider_registry = ProviderRegistryService(self.db)
         provider_conflicts = provider_registry.analyze_manifest_provider_conflicts(
             manifest=normalized_manifest
         )
+        if is_package_upgrade:
+            provider_conflicts = [
+                conflict
+                for conflict in provider_conflicts
+                if conflict.installation_name
+                != package_id
+            ]
         builtin_conflicts = [
             conflict for conflict in provider_conflicts if conflict.source == "builtin"
         ]
@@ -1980,7 +2474,16 @@ class ExtensionService:
             hub_package_version_id=None,
             hub_artifact_digest=None,
             installed_by=installed_by,
-            status="disabled" if provider_conflicts else "active",
+            status=(
+                "disabled"
+                if provider_conflicts
+                or (
+                    is_package_upgrade
+                    and normalized_upgrade_mode == "safe"
+                    and int(upgrade_impact.get("running_task_count", 0)) > 0
+                )
+                else "active"
+            ),
             created_at=now,
             updated_at=now,
         )
@@ -1999,6 +2502,25 @@ class ExtensionService:
             installation=installation,
             installed_by=installed_by,
         )
+        if is_package_upgrade:
+            if (
+                normalized_upgrade_mode == "safe"
+                and int(upgrade_impact.get("running_task_count", 0)) > 0
+            ):
+                self._start_pending_package_upgrade(
+                    package_id=package_id,
+                    source_version=latest_existing.version if latest_existing else "",
+                    target_installation_id=installation.id or 0,
+                    affected_agent_ids=self._collect_package_upgrade_agent_ids(
+                        package_id=package_id
+                    ),
+                    created_by=installed_by,
+                )
+            else:
+                self._apply_package_upgrade(
+                    package_id=package_id,
+                    new_installation_id=installation.id or 0,
+                )
         return installation
 
     def get_installation_configuration_state(
@@ -2016,6 +2538,102 @@ class ExtensionService:
             "schema": manifest.get("configuration", {}),
             "config": self._parse_config(installation.config_json),
         }
+
+    def _apply_package_upgrade(
+        self,
+        *,
+        package_id: str,
+        new_installation_id: int,
+        affected_agent_ids_override: set[int] | None = None,
+    ) -> None:
+        """Move draft bindings to the new installation and flag affected agents."""
+        new_installation = self._get_installation_or_raise(new_installation_id)
+        now = datetime.now(UTC)
+        new_installation.status = "active"
+        new_installation.updated_at = now
+        self.db.add(new_installation)
+        same_package_installations = list(
+            self.db.exec(
+                select(ExtensionInstallation).where(
+                    ExtensionInstallation.scope == new_installation.scope,
+                    ExtensionInstallation.name == new_installation.name,
+                )
+            ).all()
+        )
+        previous_installation_ids = {
+            installation.id or 0
+            for installation in same_package_installations
+            if (installation.id or 0) != new_installation_id
+        }
+
+        affected_agent_ids: set[int] = set(affected_agent_ids_override or set())
+        if previous_installation_ids:
+            bindings = list(
+                self.db.exec(
+                    select(AgentExtensionBinding).where(
+                        col(AgentExtensionBinding.extension_installation_id).in_(
+                            previous_installation_ids
+                        )
+                    )
+                ).all()
+            )
+            primary_bindings_by_agent: dict[int, AgentExtensionBinding] = {}
+            for binding in sorted(bindings, key=lambda item: (item.agent_id, item.priority)):
+                existing_binding = primary_bindings_by_agent.get(binding.agent_id)
+                if existing_binding is None:
+                    primary_bindings_by_agent[binding.agent_id] = binding
+                    binding.extension_installation_id = new_installation_id
+                    binding.updated_at = now
+                    self.db.add(binding)
+                else:
+                    self.db.delete(binding)
+                affected_agent_ids.add(binding.agent_id)
+
+        provider_keys = extract_provider_keys_from_manifest(
+            self._load_manifest_from_installation(new_installation)
+        )
+        if provider_keys["channel"]:
+            for binding in self.db.exec(
+                select(AgentChannelBinding).where(
+                    col(AgentChannelBinding.channel_key).in_(provider_keys["channel"])
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+        if provider_keys["media"]:
+            for binding in self.db.exec(
+                select(AgentMediaProviderBinding).where(
+                    col(AgentMediaProviderBinding.provider_key).in_(provider_keys["media"])
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+        if provider_keys["web_search"]:
+            for binding in self.db.exec(
+                select(AgentWebSearchBinding).where(
+                    col(AgentWebSearchBinding.provider_key).in_(
+                        provider_keys["web_search"]
+                    )
+                )
+            ).all():
+                affected_agent_ids.add(binding.agent_id)
+
+        for installation in same_package_installations:
+            if installation.id is None or installation.id == new_installation_id:
+                continue
+            if installation.status != "disabled":
+                installation.status = "disabled"
+                installation.updated_at = now
+                self.db.add(installation)
+
+        if affected_agent_ids:
+            for agent in self.db.exec(
+                select(Agent).where(col(Agent.id).in_(affected_agent_ids))
+            ).all():
+                agent.client_state = "upgrade_required"
+                agent.updated_at = now
+                self.db.add(agent)
+
+        self.db.commit()
+        self.db.refresh(new_installation)
 
     def update_installation_config(
         self,
@@ -2049,6 +2667,7 @@ class ExtensionService:
         installed_by: str | None,
         trust_confirmed: bool,
         overwrite_confirmed: bool = False,
+        upgrade_mode: str = "force",
     ) -> ExtensionInstallation:
         """Install one extension bundle uploaded from the local machine.
 
@@ -2073,6 +2692,7 @@ class ExtensionService:
                 source="bundle",
                 trust_confirmed=trust_confirmed,
                 overwrite_confirmed=overwrite_confirmed,
+                upgrade_mode=upgrade_mode,
             )
 
     def preview_bundle(
@@ -2331,6 +2951,11 @@ class ExtensionService:
         installation = self.db.get(ExtensionInstallation, installation_id)
         if installation is None:
             raise ValueError("Installed extension version not found.")
+        if self._get_package_pending_upgrade(package_id=installation.package_id) is not None:
+            raise ValueError(
+                "This extension package is currently draining a safe upgrade. "
+                "Finish that upgrade before uninstalling a version."
+            )
         if (
             ProviderRegistryService(
                 self.db

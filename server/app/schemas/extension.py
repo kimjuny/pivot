@@ -7,6 +7,8 @@ from typing import Any, Literal
 from app.schemas.base import AppBaseModel
 from pydantic import Field
 
+ExtensionUpgradeMode = Literal["safe", "force"]
+
 
 class ExtensionInstallRequest(AppBaseModel):
     """Request payload for installing one extension folder."""
@@ -22,6 +24,10 @@ class ExtensionInstallRequest(AppBaseModel):
             "Whether the operator explicitly approved overwriting an already "
             "installed package with the same scope, name, and version."
         ),
+    )
+    upgrade_mode: ExtensionUpgradeMode = Field(
+        default="force",
+        description="Upgrade mode for higher-version package replacements.",
     )
 
 
@@ -232,6 +238,7 @@ class ExtensionPackageResponse(AppBaseModel):
     latest_version: str
     active_version_count: int
     disabled_version_count: int
+    pending_upgrade: ExtensionPendingUpgradeResponse | None = None
     versions: list[ExtensionInstallationResponse] = Field(default_factory=list)
 
 
@@ -261,6 +268,37 @@ class ExtensionImportPreviewResponse(AppBaseModel):
     requires_overwrite_confirmation: bool = False
     overwrite_blocked_reason: str = ""
     existing_reference_summary: ExtensionReferenceSummaryResponse | None = None
+    import_mode: str = "new_install"
+    upgrade_from_version: str | None = None
+    upgrade_impact: ExtensionUpgradeImpactResponse | None = None
+
+
+class ExtensionUpgradeImpactResponse(AppBaseModel):
+    """Impact summary shown before importing a higher package version."""
+
+    affected_agent_count: int
+    affected_agent_names: list[str] = Field(default_factory=list)
+    running_task_count: int
+
+
+class ExtensionPendingUpgradeResponse(AppBaseModel):
+    """One currently draining safe-upgrade operation."""
+
+    id: int
+    package_id: str
+    source_version: str
+    target_version: str
+    mode: ExtensionUpgradeMode = "safe"
+    affected_agent_count: int
+    affected_agent_names: list[str] = Field(default_factory=list)
+    running_task_count: int
+
+
+class ExtensionPendingUpgradeActionResponse(AppBaseModel):
+    """Result of reconciling or forcing one pending upgrade."""
+
+    completed: bool = False
+    upgrade: ExtensionPendingUpgradeResponse | None = None
 
 
 class ExtensionReferenceSummaryResponse(AppBaseModel):

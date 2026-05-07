@@ -361,8 +361,13 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
                 "parameters": metadata.parameters,
                 "tool_type": metadata.tool_type,
                 "source_type": "builtin",
+                "source_category": "builtin",
                 "read_only": True,
                 "creator_id": None,
+                "from_label": "Platform",
+                "extension_package_id": None,
+                "extension_display_name": None,
+                "extension_version": None,
             }
         )
 
@@ -398,9 +403,53 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
                 "parameters": metadata.parameters if metadata is not None else {},
                 "tool_type": metadata.tool_type if metadata is not None else "normal",
                 "source_type": "manual",
+                "source_category": "builder",
                 "read_only": not can_edit,
                 "creator_id": tool.creator_id,
+                "from_label": owner.username,
+                "extension_package_id": None,
+                "extension_display_name": None,
+                "extension_version": None,
             }
         )
 
     return sorted(rows, key=lambda row: str(row["name"]))
+
+
+def list_manageable_tools(db: Session, *, current_user: User) -> list[dict[str, object]]:
+    """List tool inventory rows visible in the Studio management page."""
+    rows = list_usable_tools(db, current_user=current_user)
+
+    # Local import avoids a module cycle because extension_service imports one
+    # runtime metadata helper from this module.
+    from app.services.extension_service import ExtensionService
+
+    extension_rows = ExtensionService(db).list_visible_contribution_inventory(
+        user=current_user,
+        contribution_type="tool",
+    )
+    for item in extension_rows:
+        rows.append(
+            {
+                "name": item["name"],
+                "description": item["description"],
+                "parameters": {},
+                "tool_type": "normal",
+                "source_type": "extension",
+                "source_category": "extension",
+                "read_only": True,
+                "creator_id": None,
+                "from_label": item["from_label"],
+                "extension_package_id": item["extension_package_id"],
+                "extension_display_name": item["extension_display_name"],
+                "extension_version": item["extension_version"],
+            }
+        )
+
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row["name"]).lower(),
+            str(row.get("from_label", "")).lower(),
+        ),
+    )

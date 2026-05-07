@@ -18,12 +18,12 @@ import {
   updateAgent,
   createAgent,
   updateAgentAccess,
-  updateAgentServing,
+  updateAgentClientState,
   AuthError,
   type AgentAccess,
 } from '../utils/api';
 import { formatTimestamp } from '../utils/timestamp';
-import type { Agent } from '../types';
+import type { Agent, AgentClientState } from '../types';
 import AgentModal from './AgentModal';
 import ConfirmationModal from './ConfirmationModal';
 import { LLMBrandAvatar } from './LLMBrandAvatar';
@@ -70,6 +70,20 @@ function buildPageList(current: number, total: number): (number | 'ellipsis')[] 
   if (current < total - 2) pages.push('ellipsis');
   pages.push(total);
   return pages;
+}
+
+function getClientStateLabel(state: AgentClientState | undefined): string {
+  switch (state) {
+    case 'paused':
+      return 'Paused';
+    case 'draining_for_upgrade':
+      return 'Draining';
+    case 'upgrade_required':
+      return 'Republish required';
+    case 'open':
+    default:
+      return 'Open';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,14 +184,18 @@ function AgentList() {
 
   const handleServingToggle = async (agent: Agent, e: MouseEvent) => {
     e.stopPropagation();
+    if (agent.client_state !== 'open' && agent.client_state !== 'paused') {
+      toast.error('This agent is being managed by an upgrade flow right now.');
+      return;
+    }
     setServingAgentIds(previous => [...previous, agent.id]);
     try {
-      const nextServingEnabled = agent.serving_enabled === false;
-      const updatedAgent = await updateAgentServing(agent.id, nextServingEnabled);
+      const nextClientState = agent.client_state === 'open' ? 'paused' : 'open';
+      const updatedAgent = await updateAgentClientState(agent.id, nextClientState);
       setAgents(previous =>
         previous.map(existing => (existing.id === updatedAgent.id ? updatedAgent : existing)),
       );
-      toast.success(nextServingEnabled ? 'Agent enabled' : 'Agent disabled');
+      toast.success(nextClientState === 'open' ? 'Agent opened to clients' : 'Agent paused');
     } catch (err) {
       toast.error(`Failed to update availability: ${(err as Error).message}`);
     } finally {
@@ -367,7 +385,11 @@ function AgentList() {
             itemClassName="h-full"
             renderItem={(agent) => {
               const isPublished = agent.active_release_id != null;
-              const isServingEnabled = agent.serving_enabled !== false;
+              const isClientOpen = (agent.client_state ?? 'open') === 'open';
+              const isManuallyToggleable =
+                agent.client_state === undefined ||
+                agent.client_state === 'open' ||
+                agent.client_state === 'paused';
               const isServingPending = servingAgentIds.includes(agent.id);
 
               return (
@@ -418,16 +440,20 @@ function AgentList() {
                       >
                         <DropdownMenuItem
                           onClick={e => void handleServingToggle(agent, e as unknown as MouseEvent)}
-                          disabled={isServingPending}
+                          disabled={isServingPending || !isManuallyToggleable}
                         >
                           {isServingPending ? (
                             <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                          ) : isServingEnabled ? (
+                          ) : isClientOpen ? (
                             <XCircle className="w-4 h-4" aria-hidden="true" />
                           ) : (
                             <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
                           )}
-                          {isServingEnabled ? 'Disable' : 'Enable'}
+                          {isManuallyToggleable
+                            ? isClientOpen
+                              ? 'Pause'
+                              : 'Open to clients'
+                            : 'Managed by upgrade flow'}
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={e => handleEditAgent(agent, e as unknown as MouseEvent)}>
                           <Pencil className="w-4 h-4" aria-hidden="true" />
@@ -466,12 +492,14 @@ function AgentList() {
                     <Badge
                       variant="outline"
                       className={`text-[10px] px-1.5 py-0 h-4 ${
-                        isServingEnabled
+                        isClientOpen
                           ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                          : 'border-amber-500/30 text-amber-700 dark:text-amber-300'
+                          : agent.client_state === 'upgrade_required'
+                            ? 'border-blue-500/30 text-blue-700 dark:text-blue-300'
+                            : 'border-amber-500/30 text-amber-700 dark:text-amber-300'
                       }`}
                     >
-                      {isServingEnabled ? 'Enabled' : 'Disabled'}
+                      {getClientStateLabel(agent.client_state)}
                     </Badge>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 max-w-full truncate">
                       {agent.model_name || 'No LLM'}

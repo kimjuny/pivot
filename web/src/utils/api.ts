@@ -354,19 +354,19 @@ export const createAgent = async (agentData: {
 };
 
 /**
- * Update whether an agent is currently available to end users.
+ * Update one agent's end-user availability state.
  *
  * @param agentId - Stable agent identifier
- * @param servingEnabled - Whether end users can currently use this agent
+ * @param clientState - Whether end users can currently use this agent
  * @returns Promise resolving to updated Agent object
  */
-export const updateAgentServing = async (
+export const updateAgentClientState = async (
   agentId: number,
-  servingEnabled: boolean,
+  clientState: 'open' | 'paused',
 ): Promise<Agent> => {
-  return apiRequest(`/agents/${agentId}/serving`, {
+  return apiRequest(`/agents/${agentId}/client-state`, {
     method: 'PATCH',
-    body: JSON.stringify({ serving_enabled: servingEnabled }),
+    body: JSON.stringify({ client_state: clientState }),
   }) as Promise<Agent>;
 };
 
@@ -1125,6 +1125,32 @@ export interface ExtensionInstallation {
   updated_at: string;
 }
 
+export interface ExtensionPendingUpgrade {
+  /** Stable pending-upgrade row id. */
+  id: number;
+  /** Canonical npm-style package id. */
+  package_id: string;
+  /** Previously active package version. */
+  source_version: string;
+  /** Newly installed package version waiting to be applied. */
+  target_version: string;
+  /** Upgrade mode currently draining. */
+  mode: ExtensionUpgradeMode;
+  /** Number of affected agents. */
+  affected_agent_count: number;
+  /** Human-readable affected agent names. */
+  affected_agent_names: string[];
+  /** Number of still-running tasks blocking completion. */
+  running_task_count: number;
+}
+
+export interface ExtensionPendingUpgradeActionResponse {
+  /** Whether the pending upgrade finished during this action. */
+  completed: boolean;
+  /** Remaining or completed upgrade summary. */
+  upgrade: ExtensionPendingUpgrade | null;
+}
+
 /**
  * Normalized contribution names declared by one extension version.
  */
@@ -1223,6 +1249,8 @@ export interface ExtensionPackage {
   active_version_count: number;
   /** Count of disabled installed versions. */
   disabled_version_count: number;
+  /** Currently draining safe-upgrade state, if any. */
+  pending_upgrade?: ExtensionPendingUpgrade | null;
   /** Installed versions ordered newest-first. */
   versions: ExtensionInstallation[];
 }
@@ -1291,7 +1319,19 @@ export interface ExtensionImportPreview {
   overwrite_blocked_reason: string;
   /** Existing references that still rely on the installed version, if any. */
   existing_reference_summary: ExtensionReferenceSummary | null;
+  /** Whether this import is a brand-new install, reuse, overwrite, or upgrade. */
+  import_mode?: 'new_install' | 'same_version_reuse' | 'same_version_overwrite' | 'upgrade';
+  /** Previous installed version that would be replaced by an upgrade flow. */
+  upgrade_from_version?: string | null;
+  /** Agent/task impact summary for higher-version upgrades. */
+  upgrade_impact?: {
+    affected_agent_count: number;
+    affected_agent_names: string[];
+    running_task_count: number;
+  } | null;
 }
+
+export type ExtensionUpgradeMode = 'safe' | 'force';
 
 /**
  * Result returned after uninstalling one extension version.
@@ -1513,7 +1553,11 @@ export const previewExtensionBundle = async (
  */
 export const importExtensionBundle = async (
   files: File[],
-  options: { trustConfirmed: boolean; overwriteConfirmed?: boolean },
+  options: {
+    trustConfirmed: boolean;
+    overwriteConfirmed?: boolean;
+    upgradeMode?: ExtensionUpgradeMode;
+  },
 ): Promise<ExtensionInstallation> => {
   if (files.length === 0) {
     throw new Error('Choose an extension folder before importing.');
@@ -1525,6 +1569,7 @@ export const importExtensionBundle = async (
   formData.append('bundle_name', bundleName);
   formData.append('trust_confirmed', options.trustConfirmed ? 'true' : 'false');
   formData.append('overwrite_confirmed', options.overwriteConfirmed ? 'true' : 'false');
+  formData.append('upgrade_mode', options.upgradeMode ?? 'force');
   files.forEach((file) => {
     formData.append('files', file);
     formData.append('relative_paths', file.webkitRelativePath || file.name);
@@ -1534,6 +1579,22 @@ export const importExtensionBundle = async (
     '/extensions/installations/import/bundle',
     formData,
   ) as Promise<ExtensionInstallation>;
+};
+
+export const reconcileExtensionUpgrade = async (
+  pendingUpgradeId: number,
+): Promise<ExtensionPendingUpgradeActionResponse> => {
+  return apiRequest(`/extensions/upgrades/${pendingUpgradeId}/reconcile`, {
+    method: 'POST',
+  }) as Promise<ExtensionPendingUpgradeActionResponse>;
+};
+
+export const forceExtensionUpgrade = async (
+  pendingUpgradeId: number,
+): Promise<ExtensionPendingUpgradeActionResponse> => {
+  return apiRequest(`/extensions/upgrades/${pendingUpgradeId}/force`, {
+    method: 'POST',
+  }) as Promise<ExtensionPendingUpgradeActionResponse>;
 };
 
 /**
@@ -2805,17 +2866,28 @@ export interface ToolParameters {
  */
 export type ToolExecutionType = 'normal' | 'sandbox';
 
+export type ToolSourceType = 'builtin' | 'manual';
+export type ToolInventorySourceType = ToolSourceType | 'extension';
+export type ToolSourceCategory = 'builtin' | 'builder' | 'extension';
+
 export interface UsableTool {
   name: string;
   description: string;
   parameters: ToolParameters;
   tool_type: ToolExecutionType;
   source_type: ToolSourceType;
+  source_category: ToolSourceCategory;
   read_only: boolean;
   creator_id: number | null;
+  from_label: string | null;
+  extension_package_id?: string | null;
+  extension_display_name?: string | null;
+  extension_version?: string | null;
 }
 
-export type ManagedTool = UsableTool;
+export interface ManagedTool extends Omit<UsableTool, 'source_type'> {
+  source_type: ToolInventorySourceType;
+}
 
 /**
  * Source code payload for a tool read response.
@@ -2824,8 +2896,6 @@ export interface ToolSourcePayload {
   name: string;
   source: string;
 }
-
-export type ToolSourceType = 'builtin' | 'manual';
 
 export interface ToolAccess {
   tool_name: string;
@@ -2853,7 +2923,8 @@ export interface ToolDiagnostic {
   source: string;
 }
 
-export type SkillSource = 'manual' | 'network' | 'bundle' | 'agent';
+export type SkillSource = 'manual' | 'network' | 'bundle' | 'agent' | 'extension';
+export type SkillSourceCategory = 'builder' | 'extension';
 
 /**
  * One file entry selected from a local skill bundle.
@@ -2888,8 +2959,10 @@ export interface UserSkill {
   filename: string;
   use_scope: 'all' | 'selected';
   source: SkillSource;
+  source_category: SkillSourceCategory;
   creator_id: number | null;
   creator: string | null;
+  from_label: string | null;
   read_only: boolean;
   md5: string;
   github_repo_url: string | null;
@@ -2897,6 +2970,9 @@ export interface UserSkill {
   github_ref_type: 'branch' | 'tag' | null;
   github_skill_path: string | null;
   imported: boolean;
+  extension_package_id?: string | null;
+  extension_display_name?: string | null;
+  extension_version?: string | null;
   created_at: string;
   updated_at: string;
 }

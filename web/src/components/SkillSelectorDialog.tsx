@@ -24,7 +24,7 @@ import DraggableDialog from './DraggableDialog';
 interface SkillEntry {
   name: string;
   summary: string;
-  type: 'normal' | 'extension';
+  type: 'builder' | 'extension';
   extensionLabel: string | null;
 }
 
@@ -45,6 +45,13 @@ interface SkillSelectorDialogProps {
 
 function firstLine(desc: string): string {
   return desc.split('\n').find((line) => line.trim().length > 0)?.trim() ?? '';
+}
+
+function getSkillTypeLabel(type: SkillEntry['type']): string {
+  if (type === 'extension') {
+    return 'Extension';
+  }
+  return 'Builder';
 }
 
 /**
@@ -75,7 +82,7 @@ function SkillSelectorDialog({
         ...skills.map((s: UsableSkill): SkillEntry => ({
           name: s.name,
           summary: firstLine(s.description),
-          type: 'normal',
+          type: 'builder',
           extensionLabel: null,
         })),
         ...extensionSkills.map((skill): SkillEntry => ({
@@ -272,7 +279,9 @@ function SkillSelectorDialog({
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           <span className="text-xs text-muted-foreground block truncate">
-                            {skill.type}
+                            {skill.type === 'extension' && skill.extensionLabel
+                              ? `${getSkillTypeLabel(skill.type)} · ${skill.extensionLabel}`
+                              : getSkillTypeLabel(skill.type)}
                           </span>
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">

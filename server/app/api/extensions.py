@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import mimetypes
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from app.api.dependencies import get_db
 from app.api.permissions import permissions
@@ -39,8 +39,11 @@ from app.schemas.extension import (
     ExtensionInstallationStatusRequest,
     ExtensionInstallRequest,
     ExtensionPackageResponse,
+    ExtensionPendingUpgradeActionResponse,
+    ExtensionPendingUpgradeResponse,
     ExtensionReferenceSummaryResponse,
     ExtensionUninstallResponse,
+    ExtensionUpgradeImpactResponse,
 )
 from app.security.permission_catalog import Permission
 from app.services.access_service import AccessService
@@ -425,6 +428,13 @@ def _serialize_preview(
             if preview.existing_reference_summary is not None
             else None
         ),
+        import_mode=preview.import_mode,
+        upgrade_from_version=preview.upgrade_from_version,
+        upgrade_impact=(
+            ExtensionUpgradeImpactResponse(**preview.upgrade_impact)
+            if isinstance(preview.upgrade_impact, dict)
+            else None
+        ),
     )
 
 
@@ -484,6 +494,7 @@ def _serialize_package(
     raw_versions = payload.get("versions", [])
     active_version_count = payload.get("active_version_count", 0)
     disabled_version_count = payload.get("disabled_version_count", 0)
+    raw_pending_upgrade = payload.get("pending_upgrade")
     versions = (
         [
             _serialize_installation(item, service=service, current_user=current_user)
@@ -510,6 +521,11 @@ def _serialize_package(
         ),
         disabled_version_count=(
             disabled_version_count if isinstance(disabled_version_count, int) else 0
+        ),
+        pending_upgrade=(
+            ExtensionPendingUpgradeResponse(**raw_pending_upgrade)
+            if isinstance(raw_pending_upgrade, dict)
+            else None
         ),
         versions=versions,
     )
@@ -920,6 +936,7 @@ async def install_extension(
             installed_by=current_user.username,
             trust_confirmed=body.trust_confirmed,
             overwrite_confirmed=body.overwrite_confirmed,
+            upgrade_mode=body.upgrade_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -977,6 +994,7 @@ async def import_bundle_extension(
     bundle_name: str = Form(...),
     trust_confirmed: bool = Form(False),
     overwrite_confirmed: bool = Form(False),
+    upgrade_mode: Literal["safe", "force"] = Form("force"),
     db: Session = Depends(get_db),
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationResponse:
@@ -1003,6 +1021,7 @@ async def import_bundle_extension(
             installed_by=current_user.username,
             trust_confirmed=trust_confirmed,
             overwrite_confirmed=overwrite_confirmed,
+            upgrade_mode=upgrade_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1010,6 +1029,62 @@ async def import_bundle_extension(
         installation,
         service=service,
         current_user=current_user,
+    )
+
+
+@router.post(
+    "/extensions/upgrades/{pending_upgrade_id}/reconcile",
+    response_model=ExtensionPendingUpgradeActionResponse,
+)
+async def reconcile_extension_upgrade(
+    pending_upgrade_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionPendingUpgradeActionResponse:
+    """Poll one draining safe upgrade and finish it once tasks reach zero."""
+    del current_user
+    service = ExtensionService(db)
+    try:
+        result = service.reconcile_pending_upgrade(
+            pending_upgrade_id=pending_upgrade_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ExtensionPendingUpgradeActionResponse(
+        completed=bool(result.get("completed", False)),
+        upgrade=(
+            ExtensionPendingUpgradeResponse(**result["upgrade"])
+            if isinstance(result.get("upgrade"), dict)
+            else None
+        ),
+    )
+
+
+@router.post(
+    "/extensions/upgrades/{pending_upgrade_id}/force",
+    response_model=ExtensionPendingUpgradeActionResponse,
+)
+async def force_extension_upgrade(
+    pending_upgrade_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionPendingUpgradeActionResponse:
+    """Immediately finish one draining safe upgrade."""
+    del current_user
+    service = ExtensionService(db)
+    try:
+        result = service.force_pending_upgrade(
+            pending_upgrade_id=pending_upgrade_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ExtensionPendingUpgradeActionResponse(
+        completed=bool(result.get("completed", False)),
+        upgrade=(
+            ExtensionPendingUpgradeResponse(**result["upgrade"])
+            if isinstance(result.get("upgrade"), dict)
+            else None
+        ),
     )
 
 

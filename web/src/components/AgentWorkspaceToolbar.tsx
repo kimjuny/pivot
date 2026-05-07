@@ -1,14 +1,22 @@
+import { useEffect, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { History } from '@/lib/lucide';
+import { History, Info, X } from '@/lib/lucide';
 import { cn } from '@/lib/utils';
 import ChangeSummaryHoverCard from './ChangeSummaryHoverCard';
+import type { AgentClientState } from '@/types';
 
 interface AgentWorkspaceToolbarProps {
+  /** Stable agent identifier used to reset local hint state. */
+  agentId: number;
+  /** Current end-user availability state for this agent. */
+  clientState: AgentClientState | undefined;
   /** Whether the current working copy differs from the saved draft baseline. */
   hasUnsavedChanges: boolean;
   /** Whether the publish action should surface pending work. */
@@ -37,6 +45,8 @@ interface AgentWorkspaceToolbarProps {
  * sidebar identity block or forcing users into a separate overview page.
  */
 function AgentWorkspaceToolbar({
+  agentId,
+  clientState,
   hasUnsavedChanges,
   hasPublishableChanges,
   isSavingDraft,
@@ -48,6 +58,13 @@ function AgentWorkspaceToolbar({
   onOpenPublish,
   onOpenReleaseHistory,
 }: AgentWorkspaceToolbarProps) {
+  const [republishHintDismissed, setRepublishHintDismissed] = useState(false);
+  const needsRepublish = clientState === 'upgrade_required';
+
+  useEffect(() => {
+    setRepublishHintDismissed(false);
+  }, [agentId, clientState]);
+
   const renderActionButton = (
     label: string,
     options: {
@@ -130,7 +147,48 @@ function AgentWorkspaceToolbar({
           </TooltipTrigger>
           <TooltipContent side="top">Release history</TooltipContent>
         </Tooltip>
-        {renderActionButton('Publish', {
+        {needsRepublish && !republishHintDismissed ? (
+          <Popover defaultOpen>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center"
+                aria-label="Republish required"
+              >
+                <Badge
+                  variant="outline"
+                  className="h-8 cursor-pointer border-amber-500/30 px-2 text-[11px] text-amber-700 transition-colors hover:border-amber-500/50 hover:text-amber-800 dark:text-amber-300"
+                >
+                  <Info className="mr-1 h-3 w-3" />
+                  Republish required
+                </Badge>
+              </button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 space-y-3 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">
+                    A new release is required before this agent can serve clients again.
+                  </p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    Studio test and configuration work can continue here, but end users will stay blocked until you publish a fresh release.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0"
+                  onClick={() => setRepublishHintDismissed(true)}
+                  aria-label="Dismiss republish hint"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : null}
+        {renderActionButton(needsRepublish ? 'Publish New Release' : 'Publish', {
           showDot: hasPublishableChanges,
           onClick: onOpenPublish,
           summaryTitle: 'Ready to publish',
