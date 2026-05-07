@@ -158,7 +158,7 @@ describe("AgentDetailSidebar", () => {
 
     expect(screen.getAllByText("_ / _")).toHaveLength(6);
     expect(getUsableTools).not.toHaveBeenCalled();
-    expect(getAgentExtensionPackages).not.toHaveBeenCalled();
+    expect(getAgentExtensionPackages).toHaveBeenCalledWith(2);
 
     sidebarStats.resolve({
       ...baseSidebarStats,

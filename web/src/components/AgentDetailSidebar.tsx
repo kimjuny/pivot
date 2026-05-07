@@ -3,6 +3,7 @@ import {
     Bot,
     ChevronRight,
     Layers,
+    type LucideIcon,
     Server,
     Wrench,
     Zap,
@@ -231,6 +232,10 @@ function parseSkillIds(skillIds: string | null | undefined): Set<string> {
     }
 }
 
+function stringifyNameSet(names: Set<string>): string {
+    return JSON.stringify(Array.from(names).sort());
+}
+
 function formatSidebarCountLabel(
     stats: AgentSidebarSectionStats | null | undefined,
 ): string {
@@ -251,6 +256,33 @@ function withSelectedCount(
         ...stats,
         selected_count: selectedCount,
     };
+}
+
+function SidebarSectionLeadingIcon({
+    icon: Icon,
+    isOpen,
+}: {
+    icon: LucideIcon;
+    isOpen: boolean;
+}) {
+    return (
+        <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center">
+            <Icon
+                className={`absolute size-4 transition-all duration-150 ${
+                    isOpen
+                        ? 'scale-90 opacity-0'
+                        : 'scale-100 opacity-100 group-hover/section-trigger:scale-90 group-hover/section-trigger:opacity-0 group-focus-visible/section-trigger:scale-90 group-focus-visible/section-trigger:opacity-0'
+                }`}
+            />
+            <ChevronRight
+                className={`absolute size-3.5 transition-all duration-150 ${
+                    isOpen
+                        ? 'scale-100 rotate-90 opacity-100'
+                        : 'scale-90 rotate-0 opacity-0 group-hover/section-trigger:scale-100 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:scale-100 group-focus-visible/section-trigger:opacity-100'
+                }`}
+            />
+        </span>
+    );
 }
 
 function SidebarCountBadge({
@@ -565,9 +597,17 @@ function AgentDetailSidebar({
         [extensionPackages]
     );
 
+    const enabledExtensionToolNameSet = useMemo(
+        () => new Set(extensionTools.map((tool) => tool.name)),
+        [extensionTools]
+    );
+    const enabledExtensionSkillNameSet = useMemo(
+        () => new Set(extensionSkills.map((skill) => skill.name)),
+        [extensionSkills]
+    );
+
     const displayedTools = useMemo(() => {
-        const baseTools = tools.filter((tool) => enabledToolNameSet.has(tool.name));
-        return [...baseTools, ...extensionTools];
+        return [...tools, ...extensionTools].filter((tool) => enabledToolNameSet.has(tool.name));
     }, [tools, extensionTools, enabledToolNameSet]);
 
     /**
@@ -575,8 +615,7 @@ function AgentDetailSidebar({
      * agent, instead of the global skill catalog.
      */
     const displayedSkills = useMemo(() => {
-        const baseSkills = skills.filter((skill) => enabledSkillNameSet.has(skill.name));
-        return [...baseSkills, ...extensionSkills];
+        return [...skills, ...extensionSkills].filter((skill) => enabledSkillNameSet.has(skill.name));
     }, [skills, extensionSkills, enabledSkillNameSet]);
 
     /**
@@ -594,6 +633,62 @@ function AgentDetailSidebar({
             skills: withSelectedCount(sidebarStats.skills, enabledSkillNameSet.size),
         };
     }, [enabledSkillNameSet, enabledToolNameSet, sidebarStats]);
+
+    const stageToolIds = useCallback((nextToolIds: string) => {
+        setLocalToolIds(nextToolIds);
+        if (onAgentDraftUpdate && agent) {
+            onAgentDraftUpdate({ ...agent, tool_ids: nextToolIds });
+        }
+    }, [agent, onAgentDraftUpdate]);
+
+    const stageSkillIds = useCallback((nextSkillIds: string) => {
+        setLocalSkillIds(nextSkillIds);
+        if (onAgentDraftUpdate && agent) {
+            onAgentDraftUpdate({ ...agent, skill_ids: nextSkillIds });
+        }
+    }, [agent, onAgentDraftUpdate]);
+
+    const previousEnabledExtensionToolNameSetRef = useRef<Set<string>>(new Set());
+    const previousEnabledExtensionSkillNameSetRef = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        previousEnabledExtensionToolNameSetRef.current = new Set();
+        previousEnabledExtensionSkillNameSetRef.current = new Set();
+    }, [agent?.id]);
+
+    useEffect(() => {
+        const previousNames = previousEnabledExtensionToolNameSetRef.current;
+        const nextNames = enabledExtensionToolNameSet;
+        const addedNames = Array.from(nextNames).filter((name) => !previousNames.has(name));
+        const removedNames = Array.from(previousNames).filter((name) => !nextNames.has(name));
+
+        if (addedNames.length === 0 && removedNames.length === 0) {
+            return;
+        }
+
+        const nextSelected = parseToolIds(localToolIds);
+        addedNames.forEach((name) => nextSelected.add(name));
+        removedNames.forEach((name) => nextSelected.delete(name));
+        previousEnabledExtensionToolNameSetRef.current = new Set(nextNames);
+        stageToolIds(stringifyNameSet(nextSelected));
+    }, [enabledExtensionToolNameSet, localToolIds, stageToolIds]);
+
+    useEffect(() => {
+        const previousNames = previousEnabledExtensionSkillNameSetRef.current;
+        const nextNames = enabledExtensionSkillNameSet;
+        const addedNames = Array.from(nextNames).filter((name) => !previousNames.has(name));
+        const removedNames = Array.from(previousNames).filter((name) => !nextNames.has(name));
+
+        if (addedNames.length === 0 && removedNames.length === 0) {
+            return;
+        }
+
+        const nextSelected = parseSkillIds(localSkillIds);
+        addedNames.forEach((name) => nextSelected.add(name));
+        removedNames.forEach((name) => nextSelected.delete(name));
+        previousEnabledExtensionSkillNameSetRef.current = new Set(nextNames);
+        stageSkillIds(stringifyNameSet(nextSelected));
+    }, [enabledExtensionSkillNameSet, localSkillIds, stageSkillIds]);
 
     /**
      * Prefer installation-backed branding because one package card may point at
@@ -786,6 +881,13 @@ function AgentDetailSidebar({
         }
     }, [agent?.id]);
 
+    useEffect(() => {
+        if (!agent?.id) {
+            return;
+        }
+        void loadExtensionPackages();
+    }, [agent?.id, loadExtensionPackages]);
+
     const loadChannels = useCallback(async (force = false) => {
         if (hasFetchedChannelsRef.current && !force) {
             return;
@@ -965,6 +1067,20 @@ function AgentDetailSidebar({
         }
         void loadExtensionPackages();
     }, [agentChangedSinceLastRender, isExtensionsOpen, loadExtensionPackages]);
+
+    useEffect(() => {
+        if (!isToolSelectorOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void loadExtensionPackages();
+    }, [agentChangedSinceLastRender, isToolSelectorOpen, loadExtensionPackages]);
+
+    useEffect(() => {
+        if (!isSkillSelectorOpen || agentChangedSinceLastRender) {
+            return;
+        }
+        void loadExtensionPackages();
+    }, [agentChangedSinceLastRender, isSkillSelectorOpen, loadExtensionPackages]);
 
     useEffect(() => {
         if (!isChannelsOpen || agentChangedSinceLastRender) {
@@ -1411,7 +1527,7 @@ function AgentDetailSidebar({
                                     onClick={() => handleSectionClick('tools')}
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
-                                    <Wrench className="size-4" />
+                                    <SidebarSectionLeadingIcon icon={Wrench} isOpen={isToolsOpen} />
                                     <span className="flex-1 text-left">Tools</span>
                                     {/* Count badge: shows enabled / total */}
                                     <SidebarCountBadge stats={effectiveSidebarStats?.tools} animationIndex={0} />
@@ -1433,7 +1549,6 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Configure tools</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
@@ -1537,7 +1652,7 @@ function AgentDetailSidebar({
                                     onClick={() => handleSectionClick('skills')}
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
-                                    <Zap className="size-4" />
+                                    <SidebarSectionLeadingIcon icon={Zap} isOpen={isSkillsOpen} />
                                     <span className="flex-1 text-left">Skills</span>
                                     <SidebarCountBadge stats={effectiveSidebarStats?.skills} animationIndex={1} />
                                     {agent?.id && (
@@ -1557,7 +1672,6 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Configure skills</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
@@ -1664,7 +1778,7 @@ function AgentDetailSidebar({
                                     onClick={() => handleSectionClick('extensions')}
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
-                                    <Server className="size-4" />
+                                    <SidebarSectionLeadingIcon icon={Server} isOpen={isExtensionsOpen} />
                                     <span className="flex-1 text-left">Extensions</span>
                                     <SidebarCountBadge stats={sidebarStats?.extensions} animationIndex={2} />
                                     {agent?.id && (
@@ -1684,7 +1798,6 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add extension</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
@@ -1796,7 +1909,7 @@ function AgentDetailSidebar({
                                     onClick={() => handleSectionClick('channels')}
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
-                                    <Radio className="size-4" />
+                                    <SidebarSectionLeadingIcon icon={Radio} isOpen={isChannelsOpen} />
                                     <span className="flex-1 text-left">Channels</span>
                                     <SidebarCountBadge stats={sidebarStats?.channels} animationIndex={3} />
                                     {agent?.id && (
@@ -1816,7 +1929,6 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add channel</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
@@ -1928,7 +2040,7 @@ function AgentDetailSidebar({
                                     onClick={() => handleSectionClick('imageProviders')}
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
-                                    <Layers className="size-4" />
+                                    <SidebarSectionLeadingIcon icon={Layers} isOpen={isMediaProvidersOpen} />
                                     <span className="flex-1 text-left">Media</span>
                                     <SidebarCountBadge stats={sidebarStats?.media} animationIndex={4} />
                                     {agent?.id && (
@@ -1948,7 +2060,6 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add media provider</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
@@ -2063,7 +2174,7 @@ function AgentDetailSidebar({
                                     onClick={() => handleSectionClick('webSearch')}
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-foreground"
                                 >
-                                    <Globe className="size-4" />
+                                    <SidebarSectionLeadingIcon icon={Globe} isOpen={isWebSearchOpen} />
                                     <span className="flex-1 text-left">Web Search</span>
                                     <SidebarCountBadge stats={sidebarStats?.web_search} animationIndex={5} />
                                     {agent?.id && (
@@ -2083,7 +2194,6 @@ function AgentDetailSidebar({
                                             <TooltipContent side="right">Add web search provider</TooltipContent>
                                         </Tooltip>
                                     )}
-                                    <ChevronRight className="absolute left-2 size-3.5 opacity-0 transition-all duration-150 group-hover/section-trigger:opacity-100 group-focus-visible/section-trigger:opacity-100 group-data-[state=open]/section-trigger:rotate-90" />
                                 </CollapsibleTrigger>
                             </SidebarGroupLabel>
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
@@ -2207,12 +2317,12 @@ function AgentDetailSidebar({
                     onOpenChange={setIsToolSelectorOpen}
                     agentId={agent.id}
                     currentToolIds={localToolIds}
-                    onSaved={(newToolIds) => {
-                        setLocalToolIds(newToolIds);
-                        if (onAgentDraftUpdate && agent) {
-                            onAgentDraftUpdate({ ...agent, tool_ids: newToolIds });
-                        }
-                    }}
+                    extensionTools={extensionTools.map((tool) => ({
+                        name: tool.name,
+                        description: tool.description,
+                        extensionLabel: tool.extensionLabel ?? null,
+                    }))}
+                    onSaved={stageToolIds}
                 />
             )}
 
@@ -2223,12 +2333,12 @@ function AgentDetailSidebar({
                     onOpenChange={setIsSkillSelectorOpen}
                     agentId={agent.id}
                     currentSkillIds={localSkillIds}
-                    onSaved={(newSkillIds) => {
-                        setLocalSkillIds(newSkillIds);
-                        if (onAgentDraftUpdate && agent) {
-                            onAgentDraftUpdate({ ...agent, skill_ids: newSkillIds });
-                        }
-                    }}
+                    extensionSkills={extensionSkills.map((skill) => ({
+                        name: skill.name,
+                        description: skill.description,
+                        extensionLabel: skill.extensionLabel ?? null,
+                    }))}
+                    onSaved={stageSkillIds}
                 />
             )}
 

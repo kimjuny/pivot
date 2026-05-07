@@ -2702,10 +2702,9 @@ class ExtensionService:
     ) -> ToolManager:
         """Build the runtime tool catalog for one request-scoped execution.
 
-        Why: extension bindings are the agent-scoped opt-in for packaged
-        capabilities. Once an extension is enabled for an agent, its declared
-        tools remain available without also being stored in the agent's manual
-        tool selection list.
+        Why: extension bindings decide which packaged tools become available
+        to the Agent configuration UI, while the persisted tool allowlist still
+        decides which of those available tools are enabled at runtime.
         """
         ensure_agent_workspace(username, agent_id)
         shared_manager = get_tool_manager()
@@ -2723,7 +2722,6 @@ class ExtensionService:
                 request_tool_manager.add_entry(metadata)
 
         bundle_tool_metadata = self.load_bundle_tool_metadata(extension_bundle)
-        bundle_tool_names = {metadata.name for metadata in bundle_tool_metadata}
         for metadata in bundle_tool_metadata:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
@@ -2735,7 +2733,7 @@ class ExtensionService:
 
         filtered_manager = ToolManager()
         for metadata in request_tool_manager.list_tools():
-            if metadata.name in allowed_tools or metadata.name in bundle_tool_names:
+            if metadata.name in allowed_tools:
                 filtered_manager.add_entry(metadata)
         return filtered_manager
 

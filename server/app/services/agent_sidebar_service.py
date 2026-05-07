@@ -37,15 +37,15 @@ class AgentSidebarService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def _count_enabled_extension_contributions(
+    def _list_enabled_extension_contribution_names(
         self,
         *,
         packages: list[dict[str, Any]],
         contribution_type: str,
-    ) -> int:
-        """Count enabled extension contribution items of one type."""
+    ) -> set[str]:
+        """Return enabled extension contribution names of one type."""
         extension_service = ExtensionService(self.db)
-        total = 0
+        names: set[str] = set()
 
         for package in packages:
             binding = package.get("selected_binding")
@@ -67,15 +67,17 @@ class AgentSidebarService:
             if installation is None:
                 continue
 
-            total += sum(
-                1
+            names.update(
+                item["name"]
                 for item in extension_service.get_installation_contribution_items(
                     installation
                 )
                 if item.get("type") == contribution_type
+                and isinstance(item.get("name"), str)
+                and item["name"].strip()
             )
 
-        return total
+        return names
 
     def get_sidebar_stats(
         self,
@@ -101,11 +103,11 @@ class AgentSidebarService:
             for package in extension_packages
             if package.get("selected_binding") is not None
         ]
-        enabled_extension_tool_count = self._count_enabled_extension_contributions(
+        enabled_extension_tool_names = self._list_enabled_extension_contribution_names(
             packages=extension_packages,
             contribution_type="tool",
         )
-        enabled_extension_skill_count = self._count_enabled_extension_contributions(
+        enabled_extension_skill_names = self._list_enabled_extension_contribution_names(
             packages=extension_packages,
             contribution_type="skill",
         )
@@ -115,11 +117,11 @@ class AgentSidebarService:
 
         tool_selected_count = (
             sum(1 for item in usable_tools if item.get("name") in allowed_tool_names)
-            + enabled_extension_tool_count
+            + sum(1 for name in enabled_extension_tool_names if name in allowed_tool_names)
         )
         skill_selected_count = (
             sum(1 for item in visible_skills if item.get("name") in allowed_skill_names)
-            + enabled_extension_skill_count
+            + sum(1 for name in enabled_extension_skill_names if name in allowed_skill_names)
         )
 
         channel_catalog = channel_service.list_catalog(agent_id, user=user)
@@ -132,11 +134,11 @@ class AgentSidebarService:
         return {
             "tools": {
                 "selected_count": tool_selected_count,
-                "total_count": len(usable_tools) + enabled_extension_tool_count,
+                "total_count": len(usable_tools) + len(enabled_extension_tool_names),
             },
             "skills": {
                 "selected_count": skill_selected_count,
-                "total_count": len(visible_skills) + enabled_extension_skill_count,
+                "total_count": len(visible_skills) + len(enabled_extension_skill_names),
             },
             "extensions": {
                 "selected_count": len(selected_extension_packages),

@@ -38,6 +38,14 @@ interface ToolEntry {
   name: string;
   /** First non-blank line of the description, for compact display. */
   summary: string;
+  type: 'normal' | 'extension';
+  extensionLabel: string | null;
+}
+
+interface ExtensionToolEntry {
+  name: string;
+  description: string;
+  extensionLabel: string | null;
 }
 
 /**
@@ -58,6 +66,8 @@ interface ToolSelectorDialogProps {
   currentToolIds: string | null | undefined;
   /** Fired after a successful save with the new ``tool_ids`` value. */
   onSaved: (newToolIds: string) => void;
+  /** Extension-provided tools bound to this agent and available for selection. */
+  extensionTools?: ExtensionToolEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +98,7 @@ function ToolSelectorDialog({
   agentId,
   currentToolIds,
   onSaved,
+  extensionTools = [],
 }: ToolSelectorDialogProps) {
   const navigate = useNavigate();
   const [allTools, setAllTools] = useState<ToolEntry[]>([]);
@@ -108,11 +119,29 @@ function ToolSelectorDialog({
     setIsLoading(true);
     try {
       const usable = await getUsableTools();
-      const merged: ToolEntry[] = usable.map((tool: UsableTool): ToolEntry => ({
-        name: tool.name,
-        summary: firstLine(tool.description),
-      }));
-      setAllTools(merged);
+      const merged: ToolEntry[] = [
+        ...usable.map((tool: UsableTool): ToolEntry => ({
+          name: tool.name,
+          summary: firstLine(tool.description),
+          type: 'normal',
+          extensionLabel: null,
+        })),
+        ...extensionTools.map((tool): ToolEntry => ({
+          name: tool.name,
+          summary: firstLine(tool.description),
+          type: 'extension',
+          extensionLabel: tool.extensionLabel,
+        })),
+      ];
+      const deduped = Array.from(
+        merged.reduce((map, item) => {
+          if (!map.has(item.name)) {
+            map.set(item.name, item);
+          }
+          return map;
+        }, new Map<string, ToolEntry>()).values()
+      );
+      setAllTools(deduped);
 
       if (currentToolIds === null || currentToolIds === undefined) {
         setChecked(new Set());
@@ -132,7 +161,7 @@ function ToolSelectorDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [currentToolIds]);
+  }, [currentToolIds, extensionTools]);
 
   useEffect(() => {
     if (open) {
@@ -290,7 +319,8 @@ function ToolSelectorDialog({
                         aria-label="Select all visible tools"
                       />
                     </th>
-                    <th className="w-[45%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Tool name</th>
+                    <th className="w-[36%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Name</th>
+                    <th className="w-[18%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Type</th>
                     <th className="h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Description</th>
                   </tr>
                 </thead>
@@ -314,6 +344,11 @@ function ToolSelectorDialog({
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           <span className="font-mono text-xs font-medium block truncate">{tool.name}</span>
+                        </td>
+                        <td className="px-2 py-2 align-middle overflow-hidden">
+                          <span className="text-xs text-muted-foreground block truncate">
+                            {tool.type}
+                          </span>
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           {tool.summary ? (

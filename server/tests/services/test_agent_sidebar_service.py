@@ -131,8 +131,8 @@ class AgentSidebarServiceTestCase(unittest.TestCase):
         self.assertEqual(
             stats,
             {
-                "tools": {"selected_count": 3, "total_count": 4},
-                "skills": {"selected_count": 2, "total_count": 3},
+                "tools": {"selected_count": 1, "total_count": 4},
+                "skills": {"selected_count": 1, "total_count": 3},
                 "extensions": {"selected_count": 2, "total_count": 3},
                 "channels": {"selected_count": 1, "total_count": 3},
                 "media": {"selected_count": 2, "total_count": 5},

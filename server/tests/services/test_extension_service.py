@@ -521,7 +521,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
         tool_manager = service.build_request_tool_manager(
             username="alice",
             agent_id=self.agent.id or 0,
-            raw_tool_ids=None,
+            raw_tool_ids=json.dumps(["search_accounts"]),
             extension_bundle=runtime_config.extension_bundle,
         )
         self.assertIsNotNone(tool_manager.get_tool("search_accounts"))
@@ -581,10 +581,10 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertEqual(bundle[0]["hooks"][0]["callable"], "handle_task_event")
         self.assertTrue(Path(bundle[0]["hooks"][0]["source_path"]).is_file())
 
-    def test_extension_tools_remain_available_under_legacy_tool_allowlist(
+    def test_extension_tools_respect_agent_tool_and_skill_allowlists(
         self,
     ) -> None:
-        """Bound extension tools and skills should ignore legacy allowlists."""
+        """Bound extension tools and skills should only run when explicitly selected."""
         extension_root = self._write_extension(
             tool_name="seedream_generate_image",
             skill_name="seedream_skill",
@@ -620,8 +620,8 @@ class ExtensionServiceTestCase(unittest.TestCase):
             extra_skills=extension_skills,
         )
 
-        self.assertIsNotNone(tool_manager.get_tool("seedream_generate_image"))
-        self.assertTrue(
+        self.assertIsNone(tool_manager.get_tool("seedream_generate_image"))
+        self.assertFalse(
             any(skill["name"] == "seedream_skill" for skill in visible_skills)
         )
 

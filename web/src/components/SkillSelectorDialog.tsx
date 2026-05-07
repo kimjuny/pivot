@@ -4,7 +4,6 @@ import { Search, Loader2, Inbox, Plus } from "@/lib/lucide";
 import { toast } from 'sonner';
 import {
   getUsableSkills,
-  type SkillSource,
   type UsableSkill,
 } from '../utils/api';
 import { Button } from '@/components/ui/button';
@@ -25,9 +24,14 @@ import DraggableDialog from './DraggableDialog';
 interface SkillEntry {
   name: string;
   summary: string;
-  source: SkillSource;
-  creator: string | null;
-  readOnly: boolean;
+  type: 'normal' | 'extension';
+  extensionLabel: string | null;
+}
+
+interface ExtensionSkillEntry {
+  name: string;
+  description: string;
+  extensionLabel: string | null;
 }
 
 interface SkillSelectorDialogProps {
@@ -36,6 +40,11 @@ interface SkillSelectorDialogProps {
   agentId: number;
   currentSkillIds: string | null | undefined;
   onSaved: (newSkillIds: string) => void;
+  extensionSkills?: ExtensionSkillEntry[];
+}
+
+function firstLine(desc: string): string {
+  return desc.split('\n').find((line) => line.trim().length > 0)?.trim() ?? '';
 }
 
 /**
@@ -48,6 +57,7 @@ function SkillSelectorDialog({
   agentId,
   currentSkillIds,
   onSaved,
+  extensionSkills = [],
 }: SkillSelectorDialogProps) {
   const navigate = useNavigate();
   const [allSkills, setAllSkills] = useState<SkillEntry[]>([]);
@@ -64,10 +74,15 @@ function SkillSelectorDialog({
       const merged: SkillEntry[] = [
         ...skills.map((s: UsableSkill): SkillEntry => ({
           name: s.name,
-          summary: s.description,
-          source: s.source,
-          creator: s.creator,
-          readOnly: s.read_only,
+          summary: firstLine(s.description),
+          type: 'normal',
+          extensionLabel: null,
+        })),
+        ...extensionSkills.map((skill): SkillEntry => ({
+          name: skill.name,
+          summary: firstLine(skill.description),
+          type: 'extension',
+          extensionLabel: skill.extensionLabel,
         })),
       ];
 
@@ -98,7 +113,7 @@ function SkillSelectorDialog({
     } finally {
       setIsLoading(false);
     }
-  }, [currentSkillIds]);
+  }, [currentSkillIds, extensionSkills]);
 
   useEffect(() => {
     if (open) {
@@ -229,7 +244,8 @@ function SkillSelectorDialog({
                         aria-label="Select all visible skills"
                       />
                     </th>
-                    <th className="w-[42%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Skill name</th>
+                    <th className="w-[36%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Name</th>
+                    <th className="w-[18%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Type</th>
                     <th className="h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Description</th>
                   </tr>
                 </thead>
@@ -253,6 +269,11 @@ function SkillSelectorDialog({
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           <span className="font-mono text-xs font-medium block truncate">{skill.name}</span>
+                        </td>
+                        <td className="px-2 py-2 align-middle overflow-hidden">
+                          <span className="text-xs text-muted-foreground block truncate">
+                            {skill.type}
+                          </span>
                         </td>
                         <td className="px-2 py-2 align-middle overflow-hidden">
                           {skill.summary ? (

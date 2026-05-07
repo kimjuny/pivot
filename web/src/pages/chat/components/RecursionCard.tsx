@@ -562,29 +562,31 @@ function ToolDiffPreview({ value }: { value: string }) {
       </div>
       <div className="tool-preview-scroll max-h-80 overflow-auto rounded border border-white/10 bg-zinc-950/80 py-2 font-mono text-xs leading-relaxed">
         {lines.length > 0 ? (
-          lines.map((line, index) => {
-            const lineClassName = line.content.startsWith("+") && !line.content.startsWith("+++")
-              ? "bg-success/10 text-emerald-200"
-              : line.content.startsWith("-") && !line.content.startsWith("---")
-                ? "bg-danger/10 text-red-200"
-                : line.content.startsWith("@@")
-                  ? "bg-sky-500/10 text-sky-200"
-                  : "text-zinc-100";
+          <div className="min-w-full w-max">
+            {lines.map((line, index) => {
+              const lineClassName = line.content.startsWith("+") && !line.content.startsWith("+++")
+                ? "bg-success/10 text-emerald-200"
+                : line.content.startsWith("-") && !line.content.startsWith("---")
+                  ? "bg-danger/10 text-red-200"
+                  : line.content.startsWith("@@")
+                    ? "bg-sky-500/10 text-sky-200"
+                    : "text-zinc-100";
 
-            return (
-              <div
-                key={`${index}-${line.content}`}
-                className={`flex min-w-0 ${lineClassName}`}
-              >
-                <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
-                  {line.oldLineNumber ?? ""}
-                </span>
-                <span className="min-w-0 flex-1 whitespace-pre">
-                  {line.content || " "}
-                </span>
-              </div>
-            );
-          })
+              return (
+                <div
+                  key={`${index}-${line.content}`}
+                  className={`flex w-full ${lineClassName}`}
+                >
+                  <span className="w-10 shrink-0 select-none pr-3 text-right text-zinc-500">
+                    {line.oldLineNumber ?? ""}
+                  </span>
+                  <span className="whitespace-pre pr-3">
+                    {line.content || " "}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         ) : (
           <div className="px-3 text-zinc-500">Waiting for diff...</div>
         )}
