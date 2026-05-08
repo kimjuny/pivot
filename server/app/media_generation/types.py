@@ -39,6 +39,7 @@ class MediaGenerationProviderManifest(AppBaseModel):
     extension_name: str | None = None
     extension_version: str | None = None
     extension_display_name: str | None = None
+    logo_url: str | None = None
     auth_schema: list[MediaProviderConfigField]
     config_schema: list[MediaProviderConfigField]
     setup_steps: list[str]

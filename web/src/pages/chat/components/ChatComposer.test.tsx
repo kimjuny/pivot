@@ -167,8 +167,8 @@ describe("ChatComposer", () => {
           canSendMessage: true,
           thinkingModes: ["auto", "fast"],
           selectedThinkingMode: "auto",
-          webSearchProviders: [{ key: "tavily", name: "Tavily" }],
-          selectedWebSearchProvider: "tavily",
+          webSearchProviders: [{ key: "pivot@test", name: "Test" }],
+          selectedWebSearchProvider: "pivot@test",
         })}
       />,
     );
@@ -662,10 +662,10 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...buildComposerProps({
           webSearchProviders: [
-            { key: "tavily", name: "Tavily" },
-            { key: "baidu", name: "Baidu AI Search" },
+            { key: "pivot@test", name: "Test" },
+            { key: "pivot@test-b", name: "Test B" },
           ],
-          selectedWebSearchProvider: "tavily",
+          selectedWebSearchProvider: "pivot@test",
           onWebSearchProviderChange: handleProviderChange,
         })}
       />,
@@ -674,8 +674,8 @@ describe("ChatComposer", () => {
     await user.click(
       screen.getByRole("combobox", { name: "Web search provider" }),
     );
-    await user.click(screen.getByRole("option", { name: "Baidu AI Search" }));
+    await user.click(screen.getByRole("option", { name: "Test B" }));
 
-    expect(handleProviderChange).toHaveBeenCalledWith("baidu");
+    expect(handleProviderChange).toHaveBeenCalledWith("pivot@test-b");
   });
 });

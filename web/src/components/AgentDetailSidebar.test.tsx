@@ -601,7 +601,7 @@ describe("AgentDetailSidebar", () => {
         {
           id: 41,
           agent_id: baseAgent.id,
-          provider_key: "baidu",
+          provider_key: "pivot@test",
           enabled: true,
           auth_config: {},
           runtime_config: {},
@@ -611,10 +611,10 @@ describe("AgentDetailSidebar", () => {
           created_at: "2026-04-03T00:00:00+00:00",
           updated_at: "2026-04-03T00:00:00+00:00",
           manifest: {
-            key: "baidu",
-            name: "Baidu Search",
-            description: "Baidu search provider",
-            docs_url: "https://example.com/baidu",
+            key: "pivot@test",
+            name: "Test Search",
+            description: "Test search provider",
+            docs_url: "https://example.com/test",
             visibility: "builtin",
             status: "active",
             logo_url: null,
@@ -645,7 +645,7 @@ describe("AgentDetailSidebar", () => {
 
     await user.click(screen.getAllByText("Web Search")[1]);
 
-    expect((await screen.findAllByText("Baidu Search")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("Test Search")).length).toBeGreaterThan(0);
 
     rerender(
       <SidebarProvider defaultOpen={true}>
@@ -656,7 +656,7 @@ describe("AgentDetailSidebar", () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryAllByText("Baidu Search")).toHaveLength(0);
+      expect(screen.queryAllByText("Test Search")).toHaveLength(0);
     });
 
     expect(getAgentWebSearchBindings).toHaveBeenCalledTimes(1);

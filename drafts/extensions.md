@@ -793,15 +793,22 @@ Recommended package ids:
 
 Recommended stable provider keys:
 
-- `baidu`
-- `tavily`
-- `work_wechat`
-- `feishu`
-- `telegram`
-- `dingtalk`
+- `pivot@baidu`
+- `pivot@tavily`
+- `pivot@work_wechat`
+- `pivot@feishu`
+- `pivot@telegram`
+- `pivot@dingtalk`
 
-The stable key should not change during migration.  
-The ownership source changes; the runtime identity should not.
+Provider keys use the `scope@name` convention (e.g. `pivot@baidu`).
+This follows the same `scope@provider_name` format used across all Pivot
+extension-managed providers and is consistent with the manifest identity
+(`scope` + `name`).
+
+Since the project has not launched yet, the key migration from the old
+built-in plain keys (`baidu`, `tavily`) to the scoped format (`pivot@baidu`,
+`pivot@tavily`) has no backwards-compatibility constraints. Dev databases
+can be deleted and recreated.
 
 ## Target Package Layout
 
@@ -871,7 +878,7 @@ Each package contributes exactly one provider.
 
 ## Phased Implementation Plan
 
-## Phase 1: Inventory and Read-Only Semantics
+## Phase 1: Inventory and Read-Only Semantics [COMPLETED]
 
 ### Objective
 
@@ -911,7 +918,19 @@ Make Studio represent extension ownership correctly before more built-ins are mo
 - selector dialogs show the same extension-origin rows
 - API mutation attempts against extension-origin capabilities are rejected
 
-## Phase 2: Externalize Baidu and Tavily
+## Phase 2: Externalize Baidu and Tavily [COMPLETED]
+
+### Completed work
+
+- Extension packages created at `/extensions/extensions/baidu` and `/extensions/extensions/tavily`
+- Provider keys use `scope@name` convention: `pivot@baidu`, `pivot@tavily`
+- Full built-in provider logic ported to extension packages (matching current `WebSearchExecutionResult` format)
+- Bootstrap auto-install mechanism verified: `main.py` → `ExtensionService.bootstrap_bundled_extensions()`
+- Built-in web-search provider directories removed from `pivot/server/app/orchestration/web_search/providers/`
+- `BUILTIN_WEB_SEARCH_PROVIDERS` is now an empty dict; all web-search providers come from extensions
+- Auto-discovery infrastructure preserved in `providers/__init__.py` for future built-ins if needed
+- All test fixtures updated to use generic provider keys instead of hardcoded `"baidu"`/`"tavily"`
+- Provider key convention aligned in design doc and user-facing docs
 
 ### Objective
 
@@ -948,50 +967,58 @@ Recommended order:
 4. package executes successfully
 5. built-in registration is retired
 
-## Phase 3: Externalize Work WeChat, Feishu, Telegram, DingTalk
+## Phase 3: Externalize Work WeChat, Feishu, Telegram, DingTalk [DONE]
 
 ### Objective
 
 Move the built-in channel providers into extension packages while preserving runtime behavior.
 
-### Source code to migrate
+### Architecture decisions
 
-Primary source:
+1. **Extension dependency management**: Extensions with third-party dependencies (e.g., `lark-oapi` for Feishu) use `requirements.txt` at the extension root. The server runs `pip install -r requirements.txt -t lib/` during installation and adds `lib/` to `sys.path` before importing the provider entrypoint.
 
-- `pivot/server/app/channels/providers.py`
+   > **Transitional mechanism**: The current `sys.path` approach is **not the final design**. Extensions run in the same Python process as pivot-server, so vendored packages are added to the global import path. This can pollute the server's environment and make errors harder to diagnose — for example, if an extension vendors `httpx` v0.27 while pivot-server uses v0.24, the first-loaded version wins and may cause subtle breakage. In practice, vendor-specific SDKs (`lark-oapi`, `python-telegram-bot`) rarely overlap with server deps, so the risk is low today. **We plan to replace this with proper dependency isolation** (e.g., per-extension sub-process or importlib namespace isolation) in a future phase. This should be treated as a known tech-debt item.
 
-Additional Work WeChat helper code:
+2. **Generic ChannelRuntimeManager**: The runtime manager is no longer hardcoded to `work_wechat`. It scans ALL enabled bindings, checks if the provider implements `create_binding_runtime()` (duck-typed), and creates appropriate background runtimes.
 
-- `pivot/server/app/channels/work_wechat_socket.py`
+3. **Provider key convention**: Extension channel providers use `pivot@<name>` keys (e.g., `pivot@feishu`, `pivot@work_wechat`), consistent with the web search provider convention established in Phase 2.
 
-### Work
+4. **Feishu WebSocket mode**: Feishu uses the Lark SDK (`lark-oapi`) WebSocket long-connection mode. The SDK's blocking `client.start()` runs in a thread, with async/sync bridging for event processing via per-event event loops.
 
-1. Create the four extension packages.
-2. Move each provider implementation into its own package entrypoint.
-3. Keep provider-specific helper code package-local where possible.
-4. Preserve provider schema:
-   - stable provider key
-   - display name
-   - auth fields
-   - validation rules
-   - setup instructions
-   - runtime capabilities
-5. Import/install each package.
-6. Verify:
-   - inventory listing
-   - binding flows
-   - credential validation
-   - inbound/outbound runtime behavior
+5. **Work WeChat websocket code**: `work_wechat_socket.py` stays in the server core for now because the WorkWeChat extension's `create_binding_runtime` lazy-imports `WorkWeChatBindingRuntime` from the server. When we retire builtins (Phase 4), this code will move into the extension package.
 
-### Special note for Work WeChat
+6. **Transport mode dispatch**: `channel_service.py` no longer uses `isinstance(provider, TelegramProvider)` — it checks `provider.manifest.transport_mode == "polling"` instead.
 
-`work_wechat_socket.py` is provider-specific enough that the first migration should prefer packaging that logic with the Work WeChat extension, instead of inventing a shared abstraction too early.
+7. **Extension installation via UI/API only**: Removed `bootstrap_bundled_extensions` startup mechanism. Extensions are installed exclusively through the UI/API (future: extension marketplace). The server no longer scans sibling directories at startup.
 
-The default bias should be:
+### Completed work
 
-- duplicate a little
-- keep ownership obvious
-- avoid cross-extension shared runtime unless it is clearly justified later
+- [x] Extension dependency management infrastructure (`requirements.txt` → `pip install -t lib/` → `sys.path`)
+- [x] Generic `ChannelRuntimeManager` (duck-typed `create_binding_runtime`)
+- [x] Feishu/Lark extension package with WebSocket mode (`pivot@feishu`)
+- [x] Work WeChat extension package (`pivot@work_wechat`)
+- [x] Telegram extension package with polling (`pivot@telegram`)
+- [x] DingTalk extension package (stub, V1 setup only) (`pivot@dingtalk`)
+- [x] Transport mode dispatch replaces `isinstance` checks
+- [x] Removed `bootstrap_bundled_extensions` startup mechanism
+- [x] Verified all 4 extension providers load correctly in registry (12 installations, 8 channel providers)
+- [x] Frontend uses dynamic keys from API — no hardcoded channel key references
+
+### Source code changed
+
+Server-side:
+- `pivot/server/app/services/extension_service.py` — added `_install_extension_dependencies()`; removed `bootstrap_bundled_extensions()` and `_bundled_extensions_catalog_root()`
+- `pivot/server/app/services/provider_registry_service.py` — added `_ensure_extension_lib_path()`
+- `pivot/server/app/channels/runtime.py` — generic runtime manager with duck-typed dispatch
+- `pivot/server/app/channels/providers.py` — added `create_binding_runtime()` to `WorkWeChatProvider`
+- `pivot/server/app/services/channel_service.py` — replaced `isinstance` with transport_mode check
+- `pivot/server/app/main.py` — removed bootstrap bundled extensions call on startup
+
+Extension packages created:
+- `extensions/extensions/feishu/` — Feishu/Lark WebSocket provider
+- `extensions/extensions/work_wechat/` — Work WeChat WebSocket provider
+- `extensions/extensions/telegram/` — Telegram polling provider
+- `extensions/extensions/dingtalk/` — DingTalk stub provider
 
 ## Phase 4: Retire Built-In Non-Tool Providers
 
@@ -1074,16 +1101,13 @@ The error should clearly instruct the user to update the owning extension packag
 
 ## Migration Safety Rules
 
-## Stable keys must not drift
+## Stable keys use scope@name convention
 
-When moving built-ins into extension packages, the provider key should stay the same.
+When moving built-ins into extension packages, the provider key follows the
+`scope@name` convention (e.g. `pivot@baidu`).
 
-Examples:
-
-- `work_wechat` stays `work_wechat`
-- `baidu` stays `baidu`
-
-This reduces rebinding risk and keeps agent/runtime references stable.
+Since the project has not launched, dev databases can be deleted and
+recreated. There are no backwards-compatibility constraints on key changes.
 
 ## No silent duplicate resolution
 

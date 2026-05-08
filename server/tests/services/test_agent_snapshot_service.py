@@ -89,7 +89,7 @@ class AgentSnapshotServiceTestCase(unittest.TestCase):
 
         web_search_binding = AgentWebSearchBinding(
             agent_id=self.agent.id or 0,
-            provider_key="tavily",
+            provider_key="pivot@test",
             enabled=True,
             auth_config='{"api_key":"secret"}',
             runtime_config='{"search_depth":"advanced"}',

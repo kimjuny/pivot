@@ -44,7 +44,7 @@ class WebSearchServiceTestCase(unittest.TestCase):
         """One agent should not persist the same provider twice."""
         self.service.create_binding(
             agent_id=self.agent.id or 0,
-            provider_key="tavily",
+            provider_key="pivot@test",
             enabled=True,
             auth_config={"api_key": "tvly-1"},
             runtime_config={},
@@ -53,7 +53,7 @@ class WebSearchServiceTestCase(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "already configured"):
             self.service.create_binding(
                 agent_id=self.agent.id or 0,
-                provider_key="tavily",
+                provider_key="pivot@test",
                 enabled=True,
                 auth_config={"api_key": "tvly-2"},
                 runtime_config={},
@@ -65,16 +65,16 @@ class WebSearchServiceTestCase(unittest.TestCase):
         """Ambiguous multi-provider agent config should fail loudly."""
         self.service.create_binding(
             agent_id=self.agent.id or 0,
-            provider_key="tavily",
+            provider_key="pivot@test-a",
             enabled=True,
-            auth_config={"api_key": "tvly-1"},
+            auth_config={"api_key": "key-a"},
             runtime_config={},
         )
         self.service.create_binding(
             agent_id=self.agent.id or 0,
-            provider_key="baidu",
+            provider_key="pivot@test-b",
             enabled=True,
-            auth_config={"api_key": "bce-1"},
+            auth_config={"api_key": "key-b"},
             runtime_config={},
         )
 
@@ -88,7 +88,7 @@ class WebSearchServiceTestCase(unittest.TestCase):
         """Explicit provider selection should route to the matching adapter."""
         self.service.create_binding(
             agent_id=self.agent.id or 0,
-            provider_key="tavily",
+            provider_key="pivot@test",
             enabled=True,
             auth_config={"api_key": "tvly-1"},
             runtime_config={},
@@ -96,7 +96,7 @@ class WebSearchServiceTestCase(unittest.TestCase):
 
         expected_result = types_module.WebSearchExecutionResult(
             query="Pivot release notes",
-            provider={"key": "tavily", "name": "Tavily"},
+            provider={"key": "pivot@test", "name": "Test"},
             applied_parameters={"max_results": 2},
             results=[],
         )
@@ -111,12 +111,12 @@ class WebSearchServiceTestCase(unittest.TestCase):
                 agent_id=self.agent.id or 0,
                 request=types_module.WebSearchQueryRequest(
                     query="Pivot release notes",
-                    provider="tavily",
+                    provider="pivot@test",
                     max_results=2,
                 ),
             )
 
-        self.assertEqual(result.provider["key"], "tavily")
+        self.assertEqual(result.provider["key"], "pivot@test")
         provider.search.assert_called_once()
 
 

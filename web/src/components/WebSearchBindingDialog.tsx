@@ -209,7 +209,7 @@ function WebSearchBindingDialog({
     <DraggableDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={initialBinding ? 'Edit Web Search Provider' : 'Add Web Search Provider'}
+      title={initialBinding ? 'Edit Web Search' : 'Add Web Search'}
       size="default"
     >
       <div className="flex h-full flex-col">

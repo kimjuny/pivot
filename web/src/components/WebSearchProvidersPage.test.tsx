@@ -20,10 +20,10 @@ describe("WebSearchProvidersPage", () => {
     vi.mocked(getWebSearchProviders).mockResolvedValue([
       {
         manifest: {
-          key: "tavily",
-          name: "Tavily",
+          key: "pivot@test",
+          name: "Test",
           description: "Built-in search provider",
-          docs_url: "https://example.com/tavily",
+          docs_url: "https://example.com/test",
           logo_url: null,
           visibility: "builtin",
           status: "active",
@@ -56,7 +56,7 @@ describe("WebSearchProvidersPage", () => {
     render(<WebSearchProvidersPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Tavily")).toBeInTheDocument();
+      expect(screen.getByText("Test")).toBeInTheDocument();
       expect(screen.getByText("ACME Search")).toBeInTheDocument();
     });
 

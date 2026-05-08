@@ -565,6 +565,7 @@ export interface ChannelManifest {
   extension_name?: string | null;
   extension_version?: string | null;
   extension_display_name?: string | null;
+  logo_url?: string | null;
   capabilities: string[];
   auth_schema: ChannelConfigField[];
   config_schema: ChannelConfigField[];
@@ -844,6 +845,7 @@ export interface MediaProviderManifest {
   extension_name?: string | null;
   extension_version?: string | null;
   extension_display_name?: string | null;
+  logo_url?: string | null;
   auth_schema: MediaProviderConfigField[];
   config_schema: MediaProviderConfigField[];
   setup_steps: string[];

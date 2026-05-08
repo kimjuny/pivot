@@ -2368,38 +2368,6 @@ class ExtensionServiceTestCase(unittest.TestCase):
             self.session.exec(select(ExtensionPendingUpgrade)).first()
         )
 
-    def test_bootstrap_bundled_extensions_installs_local_manifest_roots(self) -> None:
-        """Bootstrapping should install first-party local extension package roots."""
-        catalog_root = self.root / "bundled-extensions"
-        catalog_root.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(
-            self._write_extension(package_name="pivot.baidu", version="0.1.0"),
-            catalog_root / "baidu",
-        )
-        nested_release_root = catalog_root / "tavily" / "release"
-        nested_release_root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(
-            self._write_extension(package_name="pivot.tavily", version="0.1.0"),
-            nested_release_root,
-        )
-
-        with patch.object(
-            extension_service_module,
-            "_bundled_extensions_catalog_root",
-            return_value=catalog_root,
-        ):
-            installed = ExtensionService(self.session).bootstrap_bundled_extensions()
-
-        self.assertEqual(
-            sorted(installation.package_id for installation in installed),
-            ["@pivot/baidu", "@pivot/tavily"],
-        )
-        rows = self.session.exec(select(ExtensionInstallation)).all()
-        self.assertEqual(
-            sorted(installation.package_id for installation in rows),
-            ["@pivot/baidu", "@pivot/tavily"],
-        )
-
     def test_install_bundle_requires_top_level_manifest(self) -> None:
         """Bundle imports should reject archives missing top-level manifest.json."""
         files = [

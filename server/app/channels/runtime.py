@@ -7,7 +7,6 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from app.channels.registry import get_channel_provider
 from app.channels.work_wechat_socket import (
     WORK_WECHAT_CALLBACK_COMMAND,
     WORK_WECHAT_EVENT_COMMAND,
@@ -64,6 +63,17 @@ def _build_binding_fingerprint(binding: AgentChannelBinding) -> str:
         sort_keys=True,
         ensure_ascii=False,
     )
+
+
+def _get_runtime_factory(provider: Any) -> Any | None:
+    """Return the provider's create_binding_runtime callable if available.
+
+    Why: websocket and polling providers need background tasks, but the
+    ChannelProvider protocol intentionally omits runtime creation so that
+    webhook-only providers stay simple.  Duck-typing keeps the check cheap.
+    """
+    factory = getattr(provider, "create_binding_runtime", None)
+    return factory if callable(factory) else None
 
 
 class WorkWeChatBindingRuntime:
@@ -364,13 +374,14 @@ class ChannelRuntimeManager:
             rows = session.exec(
                 select(AgentChannelBinding).where(
                     AgentChannelBinding.enabled == True,  # noqa: E712
-                    AgentChannelBinding.channel_key == "work_wechat",
                 )
             ).all()
             channel_service = ChannelService(session)
 
         for row in rows:
             provider = channel_service._get_channel_provider(row.channel_key)
+            if _get_runtime_factory(provider) is None:
+                continue
             if not channel_service._is_provider_available_to_agent(
                 agent_id=row.agent_id,
                 provider=provider,
@@ -395,22 +406,35 @@ class ChannelRuntimeManager:
             if existing_task is not None:
                 await self._stop_binding(binding_id)
 
-            await self._start_binding(binding_id, fingerprint)
+            await self._start_binding(binding_id, provider, fingerprint)
 
         for binding_id in list(self._binding_tasks):
             if binding_id not in desired_bindings:
                 await self._stop_binding(binding_id)
 
-    async def _start_binding(self, binding_id: int, fingerprint: str) -> None:
-        """Start a websocket runtime for one binding."""
-        provider = get_channel_provider("work_wechat")
+    async def _start_binding(
+        self,
+        binding_id: int,
+        provider: Any,
+        fingerprint: str,
+    ) -> None:
+        """Start a background runtime for one binding via its provider factory."""
+        factory = _get_runtime_factory(provider)
+        if factory is None:
+            logger.warning(
+                "No runtime factory for %s binding %s — skipping.",
+                provider.manifest.key,
+                binding_id,
+            )
+            return
+
         logger.info(
             "Starting %s runtime for binding %s.",
             provider.manifest.name,
             binding_id,
         )
         stop_event = asyncio.Event()
-        runtime = WorkWeChatBindingRuntime(binding_id)
+        runtime = factory(binding_id)
         task = asyncio.create_task(runtime.run(stop_event))
         self._binding_tasks[binding_id] = task
         self._binding_stop_events[binding_id] = stop_event

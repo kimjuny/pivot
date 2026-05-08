@@ -14,7 +14,7 @@ class AgentWebSearchBinding(SQLModel, table=True):
     Attributes:
         id: Primary key of the binding.
         agent_id: Agent that owns this configured provider binding.
-        provider_key: Stable provider identifier, such as ``tavily`` or ``baidu``.
+        provider_key: Stable provider identifier following the ``scope@name`` convention.
         enabled: Whether the provider is available to the agent at runtime.
         auth_config: JSON-encoded secret payload for the provider.
         runtime_config: JSON-encoded non-secret provider options.

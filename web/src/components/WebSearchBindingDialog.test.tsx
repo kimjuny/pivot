@@ -21,7 +21,7 @@ describe("WebSearchBindingDialog", () => {
       result: {
         ok: true,
         status: "healthy",
-        message: "Tavily credentials verified successfully.",
+        message: "Test credentials verified successfully.",
       },
     });
 
@@ -35,10 +35,10 @@ describe("WebSearchBindingDialog", () => {
           catalog={[
             {
               manifest: {
-                key: "tavily",
-                name: "Tavily",
+                key: "pivot@test",
+                name: "Test",
                 description: "General-purpose search",
-                docs_url: "https://docs.tavily.com",
+                docs_url: "https://example.com/docs",
                 visibility: "builtin",
                 status: "active",
                 auth_schema: [
@@ -65,13 +65,13 @@ describe("WebSearchBindingDialog", () => {
     await user.click(screen.getByRole("button", { name: "Test Connection" }));
 
     await waitFor(() => {
-      expect(testWebSearchProviderDraft).toHaveBeenCalledWith("tavily", {
+      expect(testWebSearchProviderDraft).toHaveBeenCalledWith("pivot@test", {
         auth_config: { api_key: "tvly-demo" },
         runtime_config: {},
       });
     });
 
-    expect(screen.getByText("Tavily credentials verified successfully.")).toBeInTheDocument();
+    expect(screen.getByText("Test credentials verified successfully.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
   });
 });

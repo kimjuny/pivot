@@ -9,6 +9,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
@@ -213,6 +214,49 @@ def _hash_payload(payload: Any) -> str:
     return hashlib.sha256(_dump_json(payload).encode("utf-8")).hexdigest()
 
 
+def _install_extension_dependencies(install_root: Path) -> None:
+    """Install pip dependencies from requirements.txt into install_root/lib/.
+
+    Why: extensions like Feishu (lark-oapi) need third-party packages that must
+    not pollute the pivot-server virtualenv. ``pip install -t lib/`` vendors
+    them inside the extension's own runtime cache, and the provider loader adds
+    ``lib/`` to ``sys.path`` before importing the entrypoint.
+    """
+    requirements_file = install_root / "requirements.txt"
+    if not requirements_file.is_file():
+        return
+    lib_dir = install_root / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-r",
+                str(requirements_file),
+                "-t",
+                str(lib_dir),
+                "--quiet",
+                "--no-warn-script-location",
+            ],
+            check=True,
+            timeout=120,
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.warning(
+            "Failed to install dependencies for extension at %s: %s",
+            install_root,
+            exc,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            "Timed out installing dependencies for extension at %s.",
+            install_root,
+        )
+
+
 def _extensions_root() -> Path:
     """Return the local runtime-cache root for materialized extension versions.
 
@@ -231,9 +275,6 @@ def _extensions_root() -> Path:
     return root
 
 
-def _bundled_extensions_catalog_root() -> Path:
-    """Return the sibling first-party extension catalog root, when present."""
-    return Path(__file__).resolve().parents[4] / "extensions" / "extensions"
 
 
 def _installation_version_root(*, scope: str, name: str, version: str) -> Path:
@@ -1414,10 +1455,13 @@ class ExtensionService:
         cache cleanup or pod restarts.
         """
         target_dir = _runtime_install_root_for_installation(installation)
-        return self.artifact_storage.ensure_materialized_directory(
+        result = self.artifact_storage.ensure_materialized_directory(
             artifact_key=installation.artifact_key,
             target_dir=target_dir,
         )
+        if (result / "requirements.txt").is_file() and not (result / "lib").is_dir():
+            _install_extension_dependencies(result)
+        return result
 
     def get_runtime_install_root(
         self,
@@ -1434,39 +1478,6 @@ class ExtensionService:
             col(ExtensionInstallation.version).desc(),
         )
         return list(self.db.exec(statement).all())
-
-    def bootstrap_bundled_extensions(self) -> list[ExtensionInstallation]:
-        """Install first-party local extension packages from the sibling repo."""
-        catalog_root = _bundled_extensions_catalog_root()
-        if not catalog_root.is_dir():
-            return []
-
-        manifest_paths = sorted(
-            {
-                *catalog_root.glob("*/manifest.json"),
-                *catalog_root.glob("*/extension/manifest.json"),
-                *catalog_root.glob("*/release/manifest.json"),
-            }
-        )
-        installed: list[ExtensionInstallation] = []
-        for manifest_path in manifest_paths:
-            package_root = manifest_path.parent
-            try:
-                installation = self.install_from_path(
-                    source_dir=package_root,
-                    installed_by="system",
-                    source="bootstrap",
-                    trust_confirmed=True,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Skipping bundled extension bootstrap for %s: %s",
-                    package_root,
-                    exc,
-                )
-                continue
-            installed.append(installation)
-        return installed
 
     def list_visible_installations(self, user: User) -> list[ExtensionInstallation]:
         """Return installed extension versions visible to one Studio user."""
@@ -2407,6 +2418,7 @@ class ExtensionService:
                 artifact_key=stored_artifact.artifact_key,
                 target_dir=install_root,
             )
+            _install_extension_dependencies(install_root)
         except Exception:
             shutil.rmtree(version_root, ignore_errors=True)
             self.artifact_storage.delete_artifact(

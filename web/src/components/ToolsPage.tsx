@@ -501,11 +501,11 @@ function ToolsPage() {
           </Button>
         </div>
 
-        <div className="mb-4 flex flex-col gap-3">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-1.5 flex-wrap">
             {(
               [
-                { value: 'all', label: 'All Sources', count: sourceCounts.all },
+                { value: 'all', label: 'All', count: sourceCounts.all },
                 { value: 'builtin', label: 'Built-in', count: sourceCounts.builtin },
                 { value: 'builder', label: 'Builder', count: sourceCounts.builder },
                 { value: 'extension', label: 'Extension', count: sourceCounts.extension },
@@ -540,21 +540,19 @@ function ToolsPage() {
             )}
           </div>
 
-          <div className="flex justify-end">
-            <ButtonGroup className="list-search-group">
-              <Input
-                placeholder="Search by name, description, source, or origin…"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                aria-label="Search tools"
-                autoComplete="off"
-              />
-              <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
-                <Search className="w-4 h-4" />
-                Search
-              </Button>
-            </ButtonGroup>
-          </div>
+          <ButtonGroup className="list-search-group">
+            <Input
+              placeholder="Search by name, description, source, or origin…"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              aria-label="Search tools"
+              autoComplete="off"
+            />
+            <Button variant="outline" size="sm" aria-label="Search tools" tabIndex={-1}>
+              <Search className="w-4 h-4" />
+              Search
+            </Button>
+          </ButtonGroup>
         </div>
 
         {isLoading ? (

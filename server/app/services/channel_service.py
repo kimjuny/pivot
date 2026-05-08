@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from app.channels.providers import TelegramProvider
 from app.channels.work_wechat_socket import (
     decrypt_work_wechat_media,
     download_work_wechat_media,
@@ -1296,12 +1295,12 @@ class ChannelService:
         )
 
     async def poll_binding_once(self, binding_id: int) -> dict[str, Any]:
-        """Poll one Telegram binding once and route any fetched updates."""
+        """Poll one polling-mode binding once and route any fetched updates."""
         binding = self.db.get(AgentChannelBinding, binding_id)
         if binding is None:
             raise ValueError("Channel binding not found.")
         provider = self._get_channel_provider(binding.channel_key)
-        if not isinstance(provider, TelegramProvider):
+        if provider.manifest.transport_mode != "polling":
             raise ValueError("This binding does not support manual polling.")
 
         runtime_config = _load_json_object(binding.runtime_config)
@@ -1314,7 +1313,7 @@ class ChannelService:
             if session_row.last_cursor and session_row.last_cursor.isdigit():
                 offset = max(offset or 0, int(session_row.last_cursor))
 
-        events, next_offset = provider.poll_once(
+        events, next_offset = provider.poll_once(  # type: ignore[union-attr]
             _load_json_object(binding.auth_config),
             runtime_config,
             offset=offset,

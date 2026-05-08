@@ -46,6 +46,7 @@ class ChannelManifest(AppBaseModel):
     extension_name: str | None = None
     extension_version: str | None = None
     extension_display_name: str | None = None
+    logo_url: str | None = None
     capabilities: list[str]
     auth_schema: list[ChannelConfigField]
     config_schema: list[ChannelConfigField]

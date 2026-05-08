@@ -23,7 +23,7 @@ class WebSearchNormalizationTestCase(unittest.TestCase):
         payload = normalization_module.normalize_web_search_request_payload(
             {
                 "query": "2026 deep learning breakthrough research papers\n",
-                "provider": "TAVILY\n",
+                "provider": "Pivot@Test\n",
                 "max_results": "15\n",
                 "topic": "general\n",
                 "time_range": "m\n",
@@ -42,7 +42,7 @@ class WebSearchNormalizationTestCase(unittest.TestCase):
             payload["query"],
             "2026 deep learning breakthrough research papers",
         )
-        self.assertEqual(payload["provider"], "tavily")
+        self.assertEqual(payload["provider"], "pivot@test")
         self.assertEqual(payload["max_results"], 15)
         self.assertEqual(payload["topic"], "general")
         self.assertEqual(payload["time_range"], "month")
@@ -55,7 +55,7 @@ class WebSearchNormalizationTestCase(unittest.TestCase):
         """The request model should also normalize noisy direct construction."""
         request = types_module.WebSearchQueryRequest(
             query=" 2026 papers\n",
-            provider="TAVILY\n",
+            provider="Pivot@Test\n",
             topic="GENERAL\n",
             time_range="w\n",
             start_date="2026-02-03 00:00:00\n",
@@ -64,7 +64,7 @@ class WebSearchNormalizationTestCase(unittest.TestCase):
         )
 
         self.assertEqual(request.query, "2026 papers")
-        self.assertEqual(request.provider, "tavily")
+        self.assertEqual(request.provider, "pivot@test")
         self.assertEqual(request.topic, "general")
         self.assertEqual(request.time_range, "week")
         self.assertEqual(request.start_date, "2026-02-03")

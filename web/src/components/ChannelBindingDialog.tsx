@@ -129,7 +129,7 @@ function ChannelBindingDialog({
     if (!manifest || initialBinding) {
       return;
     }
-    setName((currentName) => currentName || `${manifest.name} Binding`);
+    setName(`${manifest.name} Binding`);
   }, [manifest, initialBinding]);
 
   const handleFieldChange = (
@@ -246,7 +246,7 @@ function ChannelBindingDialog({
     <DraggableDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={initialBinding ? 'Edit Channel Binding' : 'Add Channel Binding'}
+      title={initialBinding ? 'Edit Channel' : 'Add Channel'}
       size="default"
     >
       <div className="flex h-full flex-col">
@@ -281,6 +281,7 @@ function ChannelBindingDialog({
                     <ChannelProviderBadge
                       channelKey={manifest.key}
                       name={manifest.name}
+                      logoUrl={manifest.logo_url ?? null}
                     />
                   ) : (
                     <SelectValue placeholder="Select a provider" />
@@ -292,6 +293,7 @@ function ChannelBindingDialog({
                       <ChannelProviderBadge
                         channelKey={item.manifest.key}
                         name={item.manifest.name}
+                        logoUrl={item.manifest.logo_url ?? null}
                       />
                     </SelectItem>
                   ))}

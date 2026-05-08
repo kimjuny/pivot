@@ -32,7 +32,7 @@ class WebSearchToolTestCase(unittest.TestCase):
         captured_request: object | None = None
         fake_result = types_module.WebSearchExecutionResult(
             query="2026 deep learning breakthrough research papers",
-            provider={"key": "tavily", "name": "Tavily"},
+            provider={"key": "pivot@test", "name": "Test"},
             results=[],
         )
 
@@ -62,7 +62,7 @@ class WebSearchToolTestCase(unittest.TestCase):
                 max_results=15,
             )
 
-        self.assertEqual(result["provider"]["key"], "tavily")
+        self.assertEqual(result["provider"]["key"], "pivot@test")
         self.assertIsNotNone(captured_request)
         request = cast(Any, captured_request)
         self.assertEqual(
@@ -77,7 +77,7 @@ class WebSearchToolTestCase(unittest.TestCase):
         captured_request: object | None = None
         fake_result = types_module.WebSearchExecutionResult(
             query="latest ai regulations",
-            provider={"key": "baidu", "name": "Baidu"},
+            provider={"key": "pivot@test-a", "name": "Test A"},
             results=[],
         )
 
@@ -91,7 +91,9 @@ class WebSearchToolTestCase(unittest.TestCase):
             patch.object(
                 tool_module,
                 "get_current_tool_execution_context",
-                return_value=SimpleNamespace(agent_id=7, web_search_provider="baidu"),
+                return_value=SimpleNamespace(
+                    agent_id=7, web_search_provider="pivot@test-a"
+                ),
             ),
             patch.object(
                 tool_module.WebSearchService,
@@ -101,13 +103,13 @@ class WebSearchToolTestCase(unittest.TestCase):
         ):
             result = tool_module.web_search(
                 query="latest ai regulations",
-                provider="tavily",
+                provider="pivot@test-b",
             )
 
-        self.assertEqual(result["provider"]["key"], "baidu")
+        self.assertEqual(result["provider"]["key"], "pivot@test-a")
         self.assertIsNotNone(captured_request)
         request = cast(Any, captured_request)
-        self.assertEqual(request.provider, "baidu")
+        self.assertEqual(request.provider, "pivot@test-a")
 
     def test_web_search_surfaces_invalid_turn_scoped_provider_errors(self) -> None:
         """Invalid chat-selected providers should fail clearly instead of falling back."""
@@ -136,7 +138,7 @@ class WebSearchToolTestCase(unittest.TestCase):
         ):
             tool_module.web_search(
                 query="latest ai regulations",
-                provider="tavily",
+                provider="pivot@test",
             )
 
 

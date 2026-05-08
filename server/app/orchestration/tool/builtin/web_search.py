@@ -67,7 +67,7 @@ def web_search(
         max_results (optional, int): Maximum number of normalized search
             results to return. Defaults to ``5``.
         search_depth (optional, SearchDepth | None): Search depth hint.
-            Supported today by Tavily only. Defaults to ``None``.
+            Supported by some providers. Defaults to ``None``.
         topic (optional, SearchTopic | None): Search topic hint such as
             ``general`` or ``news``. Defaults to ``None``.
         time_range (optional, SearchTimeRange | None): Recency filter such as

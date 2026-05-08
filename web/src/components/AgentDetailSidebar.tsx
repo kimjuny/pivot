@@ -121,6 +121,7 @@ export interface SidebarChannel {
     providerName: string;
     providerVisibility: string;
     providerExtensionLabel: string | null;
+    providerLogoUrl: string | null;
     enabled: boolean;
     effectiveEnabled: boolean;
     disabledReason: string | null;
@@ -934,6 +935,7 @@ function AgentDetailSidebar({
                     binding.manifest.extension_name,
                     binding.manifest.extension_version,
                 ),
+                providerLogoUrl: binding.manifest.logo_url ?? null,
                 enabled: binding.enabled,
                 effectiveEnabled: binding.effective_enabled ?? binding.enabled,
                 disabledReason: binding.disabled_reason ?? null,
@@ -1979,6 +1981,7 @@ function AgentDetailSidebar({
                                                                 <ChannelProviderBadge
                                                                     channelKey={channel.channelKey}
                                                                     name={channel.providerName}
+                                                                    logoUrl={channel.providerLogoUrl}
                                                                     className="w-4 shrink-0 justify-center"
                                                                     textClassName="hidden"
                                                                 />
@@ -2068,12 +2071,12 @@ function AgentDetailSidebar({
                                                     onClick={(e) => { e.stopPropagation(); void handleAddMediaProviderBinding(); }}
                                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void handleAddMediaProviderBinding(); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
-                                                    aria-label="Add media provider"
+                                                    aria-label="Add media"
                                                 >
                                                     <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
                                                 </div>
                                             </TooltipTrigger>
-                                            <TooltipContent side="right">Add media provider</TooltipContent>
+                                            <TooltipContent side="right">Add media</TooltipContent>
                                         </Tooltip>
                                     )}
                                 </CollapsibleTrigger>
@@ -2093,7 +2096,7 @@ function AgentDetailSidebar({
                                                 className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                             >
                                                 <Plus className="size-3.5" />
-                                                Add first media provider
+                                                Add first media
                                             </SidebarMenuButton>
                                         </div>
                                     ) : (
@@ -2202,12 +2205,12 @@ function AgentDetailSidebar({
                                                     onClick={(e) => { e.stopPropagation(); void handleAddWebSearchBinding(); }}
                                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void handleAddWebSearchBinding(); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
-                                                    aria-label="Add web search provider"
+                                                    aria-label="Add web search"
                                                 >
                                                     <Plus className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
                                                 </div>
                                             </TooltipTrigger>
-                                            <TooltipContent side="right">Add web search provider</TooltipContent>
+                                            <TooltipContent side="right">Add web search</TooltipContent>
                                         </Tooltip>
                                     )}
                                 </CollapsibleTrigger>

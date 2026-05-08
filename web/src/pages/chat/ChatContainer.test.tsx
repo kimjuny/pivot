@@ -823,15 +823,15 @@ describe("ChatContainer session rollover", () => {
       {
         id: 11,
         agent_id: 7,
-        provider_key: "tavily",
+        provider_key: "pivot@test-a",
         enabled: true,
         auth_config: {},
         runtime_config: {},
         manifest: {
-          key: "tavily",
-          name: "Tavily",
+          key: "pivot@test-a",
+          name: "Test A",
           description: "Search the web",
-          docs_url: "https://example.com/tavily",
+          docs_url: "https://example.com/test-a",
           visibility: "builtin",
           status: "active",
           auth_schema: [],
@@ -848,15 +848,15 @@ describe("ChatContainer session rollover", () => {
       {
         id: 12,
         agent_id: 7,
-        provider_key: "baidu",
+        provider_key: "pivot@test-b",
         enabled: true,
         auth_config: {},
         runtime_config: {},
         manifest: {
-          key: "baidu",
-          name: "Baidu AI Search",
+          key: "pivot@test-b",
+          name: "Test B",
           description: "Search the web",
-          docs_url: "https://example.com/baidu",
+          docs_url: "https://example.com/test-b",
           visibility: "builtin",
           status: "active",
           auth_schema: [],
@@ -916,7 +916,7 @@ describe("ChatContainer session rollover", () => {
     });
 
     await user.click(screen.getByRole("combobox", { name: "Web search provider" }));
-    await user.click(screen.getByRole("option", { name: "Baidu AI Search" }));
+    await user.click(screen.getByRole("option", { name: "Test B" }));
     await user.type(screen.getByPlaceholderText("Ask anything"), "Search it");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
@@ -927,7 +927,7 @@ describe("ChatContainer session rollover", () => {
         session_id: "fresh-session",
         task_id: null,
         file_ids: [],
-        web_search_provider: "baidu",
+        web_search_provider: "pivot@test-b",
         thinking_mode: null,
         mandatory_skill_names: [],
       });
@@ -1159,15 +1159,15 @@ describe("ChatContainer session rollover", () => {
       {
         id: 11,
         agent_id: 7,
-        provider_key: "tavily",
+        provider_key: "pivot@test-a",
         enabled: true,
         auth_config: {},
         runtime_config: {},
         manifest: {
-          key: "tavily",
-          name: "Tavily",
+          key: "pivot@test-a",
+          name: "Test A",
           description: "Search the web",
-          docs_url: "https://example.com/tavily",
+          docs_url: "https://example.com/test-a",
           visibility: "builtin",
           status: "active",
           auth_schema: [],

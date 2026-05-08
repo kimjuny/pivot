@@ -239,7 +239,7 @@ function MediaGenerationBindingDialog({
     <DraggableDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={initialBinding ? 'Edit Media Provider' : 'Add Media Provider'}
+      title={initialBinding ? 'Edit Media' : 'Add Media'}
       size="default"
     >
       <div className="flex h-full flex-col">
@@ -273,6 +273,7 @@ function MediaGenerationBindingDialog({
                   {manifest ? (
                     <MediaProviderBadge
                       name={manifest.name}
+                      logoUrl={manifest.logo_url ?? null}
                     />
                   ) : (
                     <SelectValue placeholder="Select a provider" />
@@ -283,6 +284,7 @@ function MediaGenerationBindingDialog({
                     <SelectItem key={item.manifest.key} value={item.manifest.key}>
                       <MediaProviderBadge
                         name={item.manifest.name}
+                        logoUrl={item.manifest.logo_url ?? null}
                       />
                     </SelectItem>
                   ))}

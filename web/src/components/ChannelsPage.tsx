@@ -27,13 +27,6 @@ import {
 
 const PAGE_SIZE = 6;
 
-const CHANNEL_ICON_PATHS: Record<string, string> = {
-  work_wechat: '/work-wechat.svg',
-  feishu: '/feishu.svg',
-  telegram: '/telegram.svg',
-  dingtalk: '/dingtalk.svg',
-};
-
 type TransportFilter = 'all' | 'webhook' | 'websocket' | 'polling';
 type SourceFilter = 'all' | 'builtin' | 'extension';
 
@@ -58,14 +51,6 @@ function buildPageList(current: number, total: number): (number | 'ellipsis')[] 
   }
   pages.push(total);
   return pages;
-}
-
-/**
- * Resolve the public asset path for one built-in channel icon.
- * Why: brand assets in web/public keep this catalog visually aligned with the providers users recognize.
- */
-function getChannelIconPath(channelKey: string): string | null {
-  return CHANNEL_ICON_PATHS[channelKey] ?? null;
 }
 
 /**
@@ -360,7 +345,6 @@ interface ChannelCardProps {
  * Presentation card for one channel manifest.
  */
 function ChannelCard({ manifest }: ChannelCardProps) {
-  const iconPath = getChannelIconPath(manifest.key);
   const extensionLabel = formatProviderExtensionLabel(
     manifest.extension_display_name,
     manifest.extension_name,
@@ -373,9 +357,9 @@ function ChannelCard({ manifest }: ChannelCardProps) {
           <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-              {iconPath ? (
+              {manifest.logo_url ? (
                 <img
-                  src={iconPath}
+                  src={manifest.logo_url}
                   alt={`${manifest.name} logo`}
                   className="h-5 w-5"
                   loading="lazy"

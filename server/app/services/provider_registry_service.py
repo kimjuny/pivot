@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from app.channels.providers import BUILTIN_PROVIDERS
 from app.channels.types import ChannelManifest, ChannelProvider
 from app.media_generation.providers import BUILTIN_MEDIA_GENERATION_PROVIDERS
 from app.media_generation.types import (
@@ -89,6 +88,25 @@ def extract_provider_keys_from_manifest(
     }
 
 
+def _ensure_extension_lib_path(source_path: Path) -> str | None:
+    """Insert the extension's vendored ``lib/`` into ``sys.path`` if present.
+
+    Why: extensions that declare ``requirements.txt`` get their dependencies
+    installed into ``<install_root>/lib/``.  The provider entrypoint lives
+    somewhere under the same install root, so we walk up to find ``lib/``.
+
+    Returns the inserted path string, or None if no lib directory exists.
+    """
+    for parent in source_path.parents:
+        lib_dir = parent / "lib"
+        if lib_dir.is_dir():
+            lib_str = str(lib_dir)
+            if lib_str not in sys.path:
+                sys.path.insert(0, lib_str)
+            return lib_str
+    return None
+
+
 def load_channel_provider_from_file(
     *,
     source_path: Path,
@@ -98,8 +116,10 @@ def load_channel_provider_from_file(
     extension_name: str | None = None,
     extension_version: str | None = None,
     extension_display_name: str | None = None,
+    logo_url: str | None = None,
 ) -> ChannelProvider:
     """Load one channel provider object exported from a Python entrypoint."""
+    _ensure_extension_lib_path(source_path)
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
         raise ValueError(
@@ -132,6 +152,7 @@ def load_channel_provider_from_file(
             "extension_name": extension_name,
             "extension_version": extension_version,
             "extension_display_name": extension_display_name,
+            "logo_url": logo_url,
         }
     )
     return provider
@@ -146,8 +167,10 @@ def load_web_search_provider_from_file(
     extension_name: str | None = None,
     extension_version: str | None = None,
     extension_display_name: str | None = None,
+    logo_url: str | None = None,
 ) -> WebSearchProvider:
     """Load one web-search provider object exported from a Python entrypoint."""
+    _ensure_extension_lib_path(source_path)
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
         raise ValueError(
@@ -173,7 +196,12 @@ def load_web_search_provider_from_file(
             f"Web-search provider entrypoint '{source_path}' must expose "
             "a WebSearchProviderManifest."
         )
-    logo_path = provider.get_logo_path()
+    provider_logo_path = provider.get_logo_path()
+    resolved_logo_url = logo_url or (
+        f"/api/web-search/providers/{manifest.key}/logo"
+        if provider_logo_path is not None
+        else None
+    )
     provider.manifest = manifest.model_copy(
         update={
             "visibility": visibility,
@@ -181,11 +209,7 @@ def load_web_search_provider_from_file(
             "extension_name": extension_name,
             "extension_version": extension_version,
             "extension_display_name": extension_display_name,
-            "logo_url": (
-                f"/api/web-search/providers/{manifest.key}/logo"
-                if logo_path is not None
-                else None
-            ),
+            "logo_url": resolved_logo_url,
         }
     )
     return provider
@@ -200,8 +224,10 @@ def load_media_generation_provider_from_file(
     extension_name: str | None = None,
     extension_version: str | None = None,
     extension_display_name: str | None = None,
+    logo_url: str | None = None,
 ) -> MediaGenerationProvider:
     """Load one media-generation provider object from a Python entrypoint."""
+    _ensure_extension_lib_path(source_path)
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
         raise ValueError(
@@ -234,6 +260,7 @@ def load_media_generation_provider_from_file(
             "extension_name": extension_name,
             "extension_version": extension_version,
             "extension_display_name": extension_display_name,
+            "logo_url": logo_url,
         }
     )
     return provider
@@ -249,7 +276,7 @@ class ProviderRegistryService:
 
     def list_channel_providers(self) -> list[ChannelProvider]:
         """Return every active channel provider visible to the application."""
-        providers = dict(BUILTIN_PROVIDERS)
+        providers: dict[str, ChannelProvider] = {}
         for provider in self._load_extension_channel_providers().values():
             providers[provider.manifest.key] = provider
         return list(providers.values())
@@ -259,7 +286,10 @@ class ProviderRegistryService:
         provider = self._load_extension_channel_providers().get(channel_key)
         if provider is not None:
             return provider
-        return BUILTIN_PROVIDERS[channel_key]
+        raise KeyError(
+            f"Channel provider '{channel_key}' is not installed. "
+            "Install the corresponding extension to enable this channel."
+        )
 
     def list_web_search_providers(self) -> list[WebSearchProvider]:
         """Return every active web-search provider visible to the application."""
@@ -301,16 +331,6 @@ class ProviderRegistryService:
         """Return provider-key conflicts for one manifest against active providers."""
         conflicts: list[ProviderConflict] = []
         requested_keys = extract_provider_keys_from_manifest(manifest)
-
-        for channel_key in sorted(requested_keys["channel"]):
-            if channel_key in BUILTIN_PROVIDERS:
-                conflicts.append(
-                    ProviderConflict(
-                        provider_type="channel",
-                        provider_key=channel_key,
-                        source="builtin",
-                    )
-                )
 
         for provider_key in sorted(requested_keys["media"]):
             if provider_key in BUILTIN_MEDIA_GENERATION_PROVIDERS:
@@ -446,6 +466,7 @@ class ProviderRegistryService:
                     extension_name=installation.package_id,
                     extension_version=installation.version,
                     extension_display_name=installation.display_name,
+                    logo_url=self._installation_logo_url(installation),
                 )
                 providers[provider.manifest.key] = provider
         return providers
@@ -479,6 +500,7 @@ class ProviderRegistryService:
                     extension_name=installation.package_id,
                     extension_version=installation.version,
                     extension_display_name=installation.display_name,
+                    logo_url=self._installation_logo_url(installation),
                 )
                 providers[provider.manifest.key] = provider
         return providers
@@ -514,6 +536,7 @@ class ProviderRegistryService:
                     extension_name=installation.package_id,
                     extension_version=installation.version,
                     extension_display_name=installation.display_name,
+                    logo_url=self._installation_logo_url(installation),
                 )
                 providers[provider.manifest.key] = provider
         return providers
@@ -535,3 +558,11 @@ class ProviderRegistryService:
                 "is invalid."
             )
         return parsed
+
+    @staticmethod
+    def _installation_logo_url(installation: ExtensionInstallation) -> str | None:
+        """Return a versioned logo URL for one installation, if a logo exists."""
+        installation_id = installation.id
+        if not installation_id:
+            return None
+        return f"/api/extensions/installations/{installation_id}/logo"

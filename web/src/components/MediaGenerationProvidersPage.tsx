@@ -301,7 +301,7 @@ function MediaProviderCard({ manifest }: MediaProviderCardProps) {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <CardTitle className="text-base">
-              <MediaProviderBadge name={manifest.name} />
+              <MediaProviderBadge name={manifest.name} logoUrl={manifest.logo_url ?? null} />
             </CardTitle>
             <CardDescription className="mt-1">
               {manifest.description}
