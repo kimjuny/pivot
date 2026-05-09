@@ -1045,27 +1045,21 @@ Make extension packages the only source of non-tool providers.
 - all supported non-tool providers are resolved from installed extensions
 - pivot server core contains zero provider-specific implementation code
 
-## Phase 5: Skills Convergence
+## Phase 5: Skills Convergence [COMPLETED]
 
 ### Objective
 
 Align `Skill` with the same external-only direction as providers.
 
-### Current state
+### Audit findings
 
-- Extension-contributed skills already appear in the Skill management list as `read_only: True`.
-- Skills have full Auth support (`ResourceType.SKILL`, use/edit access API, Auth tab on settings dialog).
-- Builder skills can be created manually or imported from GitHub/archive.
-- There is no "builtin" source type; skills are `manual`, `network`, `bundle`, `agent`, or extension-contributed.
-
-### Work
-
-1. Audit whether any built-in skills remain in active product use.
-2. Keep them working only as a transition measure if necessary.
-3. Make extension-origin skills first-class in list and binding surfaces.
-4. Avoid expanding builder/built-in skill investment further unless product direction changes.
-
-This phase is intentionally separate because the current conversation named concrete provider migrations first, and those have a clearer operational path.
+- No builtin skills exist. `Skill.source` only accepts `manual`, `network`, `bundle`, `agent`. Legacy `builtin`/`user`/NULL values were migrated to `manual` at DB init.
+- Extension skills are virtual (never stored in the `Skill` table) and surfaced at runtime via `ExtensionService.list_visible_contribution_inventory`.
+- Extension skills are first-class in all surfaces: SkillsPage (read-only, provenance shown), SkillSelectorDialog (selectable for binding), AgentDetailSidebar (ext badge, tooltip), runtime sandbox (mounted from extension directory), LLM prompt (injected via `build_skills_metadata_prompt_json`).
+- Provenance is consistent: `source_category` (`builder`/`extension`), `from_label`, `extension_package_id`, `extension_display_name`, `extension_version`.
+- Auth is fully functional for builder skills (`ResourceAuthTab` with use/edit grants). Extension skills inherit Auth from their parent extension installation.
+- Edit protection is correct: extension skills show only "Open owning extension" action; no inline editing, deletion, or tab opening.
+- No code changes required.
 
 ## Phase 6: Stale Session Detection and Migration
 
@@ -1160,14 +1154,31 @@ When an extension is upgraded, its provider schemas may change (e.g., new requir
    - Builder publishes a new release.
    - Successful publish clears `upgrade_required` → `client_state = "open"`.
 
-#### Frontend (Studio)
+#### Frontend (Studio — Upgrade Interaction Surface)
 
-1. AgentDetail sidebar: when `upgrade_required`, show a section listing affected extension bindings with per-binding status:
+1. **Upgrade decision dialog** (import flow): when the builder imports a higher-version extension, the install confirmation becomes an upgrade decision dialog showing:
+   - current installed version → incoming version
+   - affected Agent count
+   - currently running task count
+   - bindings that will need reconfiguration
+   - **removed capabilities** (capabilities present in old version but absent in new)
+   - **added capabilities** (capabilities present in new version but absent in old)
+   - any explicit breaking schema/config changes
+   - Actions: `Cancel` / `Safe upgrade` / `Force upgrade`
+2. **Upgrade progress surface** (extension detail page or dedicated screen): after `safe upgrade` is chosen, show:
+   - **elapsed waiting time** since drain started
+   - affected Agent count
+   - remaining running task count
+   - **per-Agent draining visibility**: list each affected Agent with its running task count and draining status
+   - `Force upgrade now` button
+   - `Cancel draining` button (returns affected Agents to their prior client-serving state)
+3. **Studio test chat blocking**: during `draining_for_upgrade`, Studio-side test chat must not create new runtime work against affected Agents.
+4. AgentDetail sidebar: when `upgrade_required`, show a section listing affected extension bindings with per-binding status:
    - `needs_reconfiguration` bindings: show warning icon, config diff summary, "Reconfigure" button that opens the binding config dialog with the new schema.
    - `active` bindings: show green checkmark.
-2. Binding config dialog: when `needs_reconfiguration`, highlight new/changed/removed fields.
-3. Publish drawer: block publish with a clear message listing bindings that need reconfiguration.
-4. Publish button: show persistent hint ("Republish required") as described in the design doc.
+5. Binding config dialog: when `needs_reconfiguration`, highlight new/changed/removed fields.
+6. Publish drawer: block publish with a clear message listing bindings that need reconfiguration.
+7. Publish button: show persistent hint ("Republish required") as described in the design doc.
 
 ### Acceptance criteria
 
@@ -1309,7 +1320,7 @@ Mitigation:
 2. Phase 2: Baidu and Tavily extensionization [COMPLETED]
 3. Phase 3: channel provider extensionization [COMPLETED]
 4. Phase 4: built-in non-tool provider retirement [COMPLETED]
-5. Phase 5: skill model convergence
+5. Phase 5: skill model convergence [COMPLETED]
 6. Phase 6: stale session detection and migration
 7. Phase 7: extension upgrade reconfiguration tracking
 
