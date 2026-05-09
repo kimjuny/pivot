@@ -366,7 +366,10 @@ async def publish_agent_release(
         return draft_state
     except ValueError as exc:
         detail = str(exc)
-        status_code = 409 if "already published" in detail else 404
+        if "already published" in detail or "Reconfigure these extensions" in detail:
+            status_code = 409
+        else:
+            status_code = 404
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
 

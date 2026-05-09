@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ArrowUp, Loader2, Plus, Server } from "@/lib/lucide";
+import { AlertTriangle, ArrowUp, Loader2, Plus, Server } from "@/lib/lucide";
 import { toast } from 'sonner';
 
 import DraggableDialog from './DraggableDialog';
@@ -22,6 +22,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { ExtensionPackageBadge } from './ExtensionPackageBadge';
 import {
+  confirmAgentExtensionBinding,
   replaceAgentExtensionBindings,
   upsertAgentExtensionBinding,
   type AgentExtensionPackage,
@@ -103,7 +104,26 @@ function ExtensionBindingDialog({
   const [priority, setPriority] = useState('100');
   const [configText, setConfigText] = useState('{\n}');
   const [isSaving, setIsSaving] = useState(false);
+  const [isConfirmingReview, setIsConfirmingReview] = useState(false);
   const configTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleConfirmReview = async () => {
+    const bindingId = selectedPackage?.selected_binding?.id;
+    if (!bindingId) return;
+    setIsConfirmingReview(true);
+    try {
+      await confirmAgentExtensionBinding(agentId, bindingId);
+      toast.success('Binding confirmed');
+      await onSaved();
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to confirm binding',
+      );
+    } finally {
+      setIsConfirmingReview(false);
+    }
+  };
 
   const selectablePackages = useMemo(() => {
     if (initialPackage) {
@@ -357,6 +377,31 @@ function ExtensionBindingDialog({
                   )}
                 </div>
               </div>
+
+              {selectedPackage.selected_binding?.status ===
+                'needs_reconfiguration' && (
+                <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+                  <div className="space-y-0.5">
+                    <p className="font-medium text-warning">Needs reconfiguration</p>
+                    <p className="text-muted-foreground">
+                      The extension manifest changed in the latest upgrade. Review
+                      the config below and Save to clear this flag, or Confirm if
+                      the existing values still apply.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="mt-2"
+                      disabled={isConfirmingReview}
+                      onClick={() => { void handleConfirmReview(); }}
+                    >
+                      {isConfirmingReview ? 'Confirming…' : 'Confirm without changes'}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="extension-version">Version</Label>

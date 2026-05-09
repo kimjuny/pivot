@@ -222,6 +222,30 @@ export class AuthError extends Error {
 }
 
 /**
+ * Structured API error preserving the FastAPI `detail` payload.
+ *
+ * Why: some backend errors embed a structured code and extra metadata (e.g.
+ * `session_stale` carrying the latest_release_id). Flattening to a string
+ * would strip the information the UI needs to decide its next action.
+ */
+export class ApiError extends Error {
+  status: number;
+  detail: unknown;
+  code: string | null;
+
+  constructor(status: number, detail: unknown, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+    this.code =
+      detail && typeof detail === 'object' && 'code' in detail
+        ? String((detail as { code: unknown }).code)
+        : null;
+  }
+}
+
+/**
  * Make an API request to backend server.
  * Handles common request/response logic including error handling.
  * Automatically includes auth token if available.
@@ -275,8 +299,15 @@ export const apiRequest = async (endpoint: string, options: RequestOptions = {})
     }
 
     if (!response.ok) {
-      const errorData = await response.json() as { detail?: string };
-      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      const errorData = await response.json() as { detail?: unknown };
+      const detail = errorData.detail;
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : detail && typeof detail === 'object' && 'message' in detail
+            ? String((detail as { message: unknown }).message)
+            : `HTTP error! status: ${response.status}`;
+      throw new ApiError(response.status, detail, message);
     }
 
     if (response.status === 204) {
@@ -1138,12 +1169,20 @@ export interface ExtensionPendingUpgrade {
   target_version: string;
   /** Upgrade mode currently draining. */
   mode: ExtensionUpgradeMode;
+  /** ISO timestamp when the pending upgrade was created. */
+  created_at?: string | null;
   /** Number of affected agents. */
   affected_agent_count: number;
   /** Human-readable affected agent names. */
   affected_agent_names: string[];
   /** Number of still-running tasks blocking completion. */
   running_task_count: number;
+  /** True when the target manifest differs from the source version. */
+  manifest_hash_changed?: boolean;
+  /** Capabilities that appear in the target version. */
+  added_capabilities?: ExtensionContributionItem[];
+  /** Capabilities that disappear in the target version. */
+  removed_capabilities?: ExtensionContributionItem[];
 }
 
 export interface ExtensionPendingUpgradeActionResponse {
@@ -1330,6 +1369,12 @@ export interface ExtensionImportPreview {
     affected_agent_count: number;
     affected_agent_names: string[];
     running_task_count: number;
+    /** True when manifest differs from the installed version. */
+    manifest_hash_changed?: boolean;
+    /** Capabilities gained in the target version. */
+    added_capabilities?: ExtensionContributionItem[];
+    /** Capabilities dropped in the target version. */
+    removed_capabilities?: ExtensionContributionItem[];
   } | null;
 }
 
@@ -1473,6 +1518,12 @@ export interface AgentExtensionBinding {
   priority: number;
   /** Agent-local extension config payload. */
   config: Record<string, unknown>;
+  /**
+   * Binding review status. "active" is the normal state.
+   * "needs_reconfiguration" means the last extension upgrade changed the
+   * manifest and the builder must review before republishing.
+   */
+  status?: 'active' | 'needs_reconfiguration';
   /** UTC timestamp when the binding was created. */
   created_at: string;
   /** UTC timestamp when the binding last changed. */
@@ -1774,6 +1825,20 @@ export const upsertAgentExtensionBinding = async (
 };
 
 /**
+ * Clear the ``needs_reconfiguration`` flag on one extension binding after the
+ * builder has reviewed it against the updated manifest.
+ */
+export const confirmAgentExtensionBinding = async (
+  agentId: number,
+  bindingId: number,
+): Promise<AgentExtensionBinding> => {
+  return apiRequest(
+    `/agents/${agentId}/extensions/${bindingId}/confirm`,
+    { method: 'POST' },
+  ) as Promise<AgentExtensionBinding>;
+};
+
+/**
  * Replace the full extension binding set for one agent.
  */
 export const replaceAgentExtensionBindings = async (
@@ -2062,6 +2127,8 @@ export interface SessionListItem {
   agent_id: number;
   type?: ChatSessionType;
   release_id?: number | null;
+  latest_release_id?: number | null;
+  is_stale?: boolean;
   project_id?: string | null;
   workspace_id?: string | null;
   workspace_scope?: "session_private" | "project_shared" | null;
@@ -2091,6 +2158,8 @@ export interface SessionResponse {
   agent_id: number;
   type?: ChatSessionType;
   release_id?: number | null;
+  latest_release_id?: number | null;
+  is_stale?: boolean;
   project_id?: string | null;
   workspace_id?: string | null;
   workspace_scope?: "session_private" | "project_shared" | null;
@@ -2102,6 +2171,15 @@ export interface SessionResponse {
   is_pinned: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Response from POST /sessions/{id}/migrate.
+ */
+export interface SessionMigrateResponse {
+  old_session_id: string;
+  new_session_id: string;
+  new_release_id: number | null;
 }
 
 /**
@@ -2349,6 +2427,29 @@ export const deleteSession = async (sessionId: string): Promise<void> => {
   await apiRequest(`/sessions/${sessionId}`, {
     method: 'DELETE',
   });
+};
+
+/**
+ * Mark a session as closed without deleting its history or workspace.
+ */
+export const closeSession = async (
+  sessionId: string,
+): Promise<SessionResponse> => {
+  return apiRequest(`/sessions/${sessionId}/close`, {
+    method: 'POST',
+  }) as Promise<SessionResponse>;
+};
+
+/**
+ * Migrate a stale consumer session onto the agent's latest release.
+ * Creates a new session, copies private workspace contents, closes the old one.
+ */
+export const migrateSession = async (
+  sessionId: string,
+): Promise<SessionMigrateResponse> => {
+  return apiRequest(`/sessions/${sessionId}/migrate`, {
+    method: 'POST',
+  }) as Promise<SessionMigrateResponse>;
 };
 
 /**

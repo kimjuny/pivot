@@ -372,6 +372,7 @@ def _serialize_binding(
         enabled=binding.enabled,
         priority=binding.priority,
         config=_parse_config(binding.config_json),
+        status=binding.status,
         created_at=_serialize_utc_timestamp(binding.created_at),
         updated_at=_serialize_utc_timestamp(binding.updated_at),
         installation=_serialize_installation(installation, service=service),
@@ -1073,9 +1074,7 @@ async def force_extension_upgrade(
     del current_user
     service = ExtensionService(db)
     try:
-        result = service.force_pending_upgrade(
-            pending_upgrade_id=pending_upgrade_id
-        )
+        result = service.force_pending_upgrade(pending_upgrade_id=pending_upgrade_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return ExtensionPendingUpgradeActionResponse(
@@ -1329,6 +1328,37 @@ async def upsert_agent_extension_binding(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    installation = db.get(ExtensionInstallation, binding.extension_installation_id)
+    if installation is None:
+        raise HTTPException(status_code=404, detail="Installed extension not found")
+    return _serialize_binding(binding, installation, service=service)
+
+
+@router.post(
+    "/agents/{agent_id}/extensions/{binding_id}/confirm",
+    response_model=AgentExtensionBindingResponse,
+)
+async def confirm_agent_extension_binding(
+    agent_id: int,
+    binding_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> AgentExtensionBindingResponse:
+    """Clear the ``needs_reconfiguration`` flag after the builder reviews.
+
+    Why: the builder may verify the existing config still works with the new
+    manifest without changing any fields. Confirming lets them unblock publish
+    without re-saving identical config values.
+    """
+    _require_agent_edit(db=db, current_user=current_user, agent_id=agent_id)
+    service = ExtensionService(db)
+    try:
+        binding = service.confirm_binding_reconfiguration(
+            agent_id=agent_id,
+            binding_id=binding_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     installation = db.get(ExtensionInstallation, binding.extension_installation_id)
     if installation is None:
         raise HTTPException(status_code=404, detail="Installed extension not found")

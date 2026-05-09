@@ -139,6 +139,7 @@ async def list_consumer_sessions(
         limit=limit,
     )
 
+    session_service = SessionService(db)
     return ConsumerSessionListResponse(
         sessions=[
             ConsumerSessionListItem(
@@ -148,6 +149,10 @@ async def list_consumer_sessions(
                 agent_name=visible_agent.name,
                 agent_description=visible_agent.description,
                 release_id=session.release_id,
+                latest_release_id=visible_agent.active_release_id,
+                is_stale=session_service.is_session_stale(
+                    session, visible_agent.active_release_id
+                ),
                 status=session.status,
                 runtime_status=session.runtime_status,
                 title=session.title,

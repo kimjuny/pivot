@@ -422,6 +422,14 @@ export function SessionSidebar({
               <span className="min-w-0 flex-1 truncate transition-[transform] duration-200 ease-out">
                 {getSessionTitle(session)}
               </span>
+              {session.is_stale ? (
+                <span
+                  className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
+                  title="Agent republished · session needs migration"
+                >
+                  stale
+                </span>
+              ) : null}
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

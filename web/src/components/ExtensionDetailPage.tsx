@@ -411,6 +411,28 @@ function parseConfigInputValue(
 }
 
 /**
+ * Format elapsed waiting time since one ISO timestamp.
+ *
+ * Why: the safe-upgrade progress card needs a live counter so the builder can
+ * gauge how long the drain has been blocking client traffic.
+ */
+function formatElapsed(isoTimestamp: string, nowMs: number): string {
+  const startMs = Date.parse(isoTimestamp);
+  if (Number.isNaN(startMs)) return "";
+  const totalSeconds = Math.max(0, Math.floor((nowMs - startMs) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
  * Render one package-scoped extension detail page.
  *
  * Why: extension inventory and extension debugging are different workflows.
@@ -432,6 +454,15 @@ export default function ExtensionDetailPage() {
   const [loadingAuthIds, setLoadingAuthIds] = useState<number[]>([]);
   const [savingAuthIds, setSavingAuthIds] = useState<number[]>([]);
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+  // Why: tick once per second so the upgrade progress card can show a live
+  // elapsed-waiting timer while a safe drain is in flight.
+  const [elapsedTick, setElapsedTick] = useState(() => Date.now());
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      setElapsedTick(Date.now());
+    }, 1000);
+    return () => window.clearInterval(handle);
+  }, []);
   const [pendingUninstall, setPendingUninstall] = useState<ExtensionInstallation | null>(null);
   const [uninstallingId, setUninstallingId] = useState<number | null>(null);
   const listPath = location.pathname.startsWith("/studio/")
@@ -909,6 +940,11 @@ export default function ExtensionDetailPage() {
                     <Badge variant="outline">To {pendingUpgrade.target_version}</Badge>
                     <Badge variant="outline">Affected agents {pendingUpgrade.affected_agent_count}</Badge>
                     <Badge variant="outline">Running tasks {pendingUpgrade.running_task_count}</Badge>
+                    {pendingUpgrade.created_at ? (
+                      <Badge variant="outline">
+                        Waiting {formatElapsed(pendingUpgrade.created_at, elapsedTick)}
+                      </Badge>
+                    ) : null}
                   </div>
                   {pendingUpgrade.affected_agent_names.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
@@ -917,6 +953,30 @@ export default function ExtensionDetailPage() {
                           {agentName}
                         </Badge>
                       ))}
+                    </div>
+                  ) : null}
+                  {(pendingUpgrade.added_capabilities?.length ?? 0) > 0 ? (
+                    <div>
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Added capabilities</p>
+                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                        {pendingUpgrade.added_capabilities?.map((item) => (
+                          <li key={`added-${item.type}-${item.name}`}>
+                            <code>{item.type}</code> · {item.name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {(pendingUpgrade.removed_capabilities?.length ?? 0) > 0 ? (
+                    <div>
+                      <p className="text-xs font-medium text-rose-700 dark:text-rose-300">Removed capabilities</p>
+                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                        {pendingUpgrade.removed_capabilities?.map((item) => (
+                          <li key={`removed-${item.type}-${item.name}`}>
+                            <code>{item.type}</code> · {item.name}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ) : null}
                 </div>

@@ -856,6 +856,11 @@ function ExtensionsPage() {
                     <Badge variant="outline" className="border-blue-500/30 text-blue-700 dark:text-blue-300">
                       Running tasks {pendingImport.preview.upgrade_impact?.running_task_count ?? 0}
                     </Badge>
+                    {pendingImport.preview.upgrade_impact?.manifest_hash_changed ? (
+                      <Badge variant="outline" className="border-amber-500/40 text-amber-700 dark:text-amber-300">
+                        Bindings will need reconfiguration
+                      </Badge>
+                    ) : null}
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">
                     Confirming this upgrade will move draft extension bindings for this package to the new installed version and mark affected agents as <code>upgrade_required</code> until their builders publish a new release.
@@ -870,6 +875,30 @@ function ExtensionsPage() {
                           {agentName}
                         </Badge>
                       ))}
+                    </div>
+                  ) : null}
+                  {(pendingImport.preview.upgrade_impact?.added_capabilities?.length ?? 0) > 0 ? (
+                    <div className="mt-3">
+                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Added capabilities</p>
+                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                        {pendingImport.preview.upgrade_impact?.added_capabilities?.map((item) => (
+                          <li key={`added-${item.type}-${item.name}`}>
+                            <code>{item.type}</code> · {item.name}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {(pendingImport.preview.upgrade_impact?.removed_capabilities?.length ?? 0) > 0 ? (
+                    <div className="mt-3">
+                      <p className="text-xs font-medium text-rose-700 dark:text-rose-300">Removed capabilities</p>
+                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
+                        {pendingImport.preview.upgrade_impact?.removed_capabilities?.map((item) => (
+                          <li key={`removed-${item.type}-${item.name}`}>
+                            <code>{item.type}</code> · {item.name}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ) : null}
                 </div>

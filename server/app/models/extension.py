@@ -93,6 +93,10 @@ class AgentExtensionBinding(SQLModel, table=True):
         enabled: Whether the extension is active for the agent.
         priority: Lower numbers run earlier during deterministic resolution.
         config_json: Optional agent-local configuration payload.
+        status: Binding review status. ``active`` is the normal state.
+            ``needs_reconfiguration`` means the last extension upgrade changed
+            the installation manifest and the builder must review the binding
+            config before the agent can be republished.
         created_at: UTC timestamp when the binding was created.
         updated_at: UTC timestamp when the binding last changed.
     """
@@ -108,6 +112,7 @@ class AgentExtensionBinding(SQLModel, table=True):
     enabled: bool = Field(default=True, index=True)
     priority: int = Field(default=100)
     config_json: str | None = Field(default=None)
+    status: str = Field(default="active", index=True, max_length=32)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

@@ -9,7 +9,9 @@ import {
 import { Info, Loader2 } from "@/lib/lucide";
 
 import {
+  ApiError,
   cancelReactTask,
+  closeSession,
   createProject,
   createDevSurfaceSession,
   createInstalledSurfaceSession,
@@ -25,6 +27,7 @@ import {
   getReactSessionRuntimeDebug,
   listProjects,
   listSessions,
+  migrateSession,
   startReactTask,
   submitReactUserAction,
   updateProject,
@@ -75,6 +78,7 @@ import type { InstalledChatSurfaceDescriptor } from "./components/ExtensionDock"
 import { useRegisterChatDebugPanelSection } from "./components/ChatDebugPanelContext";
 import ProjectAccessDialog from "./components/ProjectAccessDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
+import StaleSessionDialog from "@/components/StaleSessionDialog";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
 import { useChatUploads } from "./hooks/useChatUploads";
 import type {
@@ -791,6 +795,7 @@ function ChatContainer({
   sidebarTitleIcon,
   sidebarTitle,
   sidebarFooter,
+  agentClientState,
   onRuntimeDebugChange,
   onSurfaceDevAttached,
 }: ChatPageProps) {
@@ -808,6 +813,9 @@ function ChatContainer({
   const [accessProjectId, setAccessProjectId] = useState<string | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [staleSessionId, setStaleSessionId] = useState<string | null>(null);
+  const [isMigratingStaleSession, setIsMigratingStaleSession] = useState(false);
+  const [isClosingStaleSession, setIsClosingStaleSession] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isExtensionDockOpen, setIsExtensionDockOpen] = useState(false);
   const [isExtensionDockMounted, setIsExtensionDockMounted] = useState(false);
@@ -2219,6 +2227,25 @@ function ChatContainer({
     void loadSessionRuntimeDebug(currentSessionId);
   }, [currentSessionId, loadSessionRuntimeDebug]);
 
+  // Why: consumer sessions pinned to an older Agent release must prompt the
+  // user to migrate or close before they try to send a message.
+  useEffect(() => {
+    if (currentSessionId === null) {
+      setStaleSessionId(null);
+      return;
+    }
+    const current = sessions.find(
+      (session) => session.session_id === currentSessionId,
+    );
+    if (current?.type === "consumer" && current.is_stale) {
+      setStaleSessionId(currentSessionId);
+    } else {
+      setStaleSessionId((previous) =>
+        previous === currentSessionId ? null : previous,
+      );
+    }
+  }, [currentSessionId, sessions]);
+
   useEffect(() => {
     onRuntimeDebugChange?.({
       currentSessionId,
@@ -2710,6 +2737,60 @@ function ChatContainer({
   };
 
   /**
+   * Migrate a stale consumer session onto the agent's latest release.
+   * Creates a new session, copies private workspace files server-side, and
+   * marks the old session closed. Switches the UI to the new session.
+   */
+  const handleMigrateStaleSession = async () => {
+    if (staleSessionId === null || isMigratingStaleSession) return;
+    setIsMigratingStaleSession(true);
+    try {
+      const { new_session_id } = await migrateSession(staleSessionId);
+      setStaleSessionId(null);
+      const { sessions: refreshedSessions } = await refreshSidebarData();
+      const newSession = refreshedSessions.find(
+        (session) => session.session_id === new_session_id,
+      );
+      if (newSession) {
+        await handleSelectSession(new_session_id);
+      }
+    } catch (migrateError) {
+      console.error("Failed to migrate stale session:", migrateError);
+      setError(
+        migrateError instanceof Error
+          ? migrateError.message
+          : "Failed to migrate session",
+      );
+    } finally {
+      setIsMigratingStaleSession(false);
+    }
+  };
+
+  /**
+   * Close a stale session without deleting history. Leaves the conversation
+   * as read-only and returns to the draft state so the user can start fresh.
+   */
+  const handleCloseStaleSession = async () => {
+    if (staleSessionId === null || isClosingStaleSession) return;
+    setIsClosingStaleSession(true);
+    try {
+      await closeSession(staleSessionId);
+      setStaleSessionId(null);
+      await refreshSidebarData();
+      await enterDraftState(null);
+    } catch (closeError) {
+      console.error("Failed to close stale session:", closeError);
+      setError(
+        closeError instanceof Error
+          ? closeError.message
+          : "Failed to close session",
+      );
+    } finally {
+      setIsClosingStaleSession(false);
+    }
+  };
+
+  /**
    * Applies a user-provided sidebar title and keeps local ordering in sync.
    */
   const handleRenameSession = async (
@@ -2974,6 +3055,14 @@ function ChatContainer({
         setActiveContextTaskId(null);
         setActiveContextIteration(null);
         clearCompactStatusImmediately();
+        if (
+          streamError instanceof ApiError &&
+          streamError.code === "session_stale" &&
+          currentSessionId
+        ) {
+          setStaleSessionId(currentSessionId);
+          void refreshSidebarData().catch(() => {});
+        }
         const normalizedError =
           streamError instanceof Error
             ? streamError
@@ -3113,13 +3202,31 @@ function ChatContainer({
       if (isStreaming || hasUploadingFiles) {
         return;
       }
+      if (
+        sessionType === "studio_test" &&
+        agentClientState === "draining_for_upgrade"
+      ) {
+        // Why: a half-upgraded extension cannot serve the test chat without
+        // risking inconsistent runtime behavior; let the draining state finish.
+        setError(
+          "Agent is preparing for an extension upgrade. New tasks are blocked until the upgrade finishes.",
+        );
+        return;
+      }
       if (message.trim().length === 0 && readyPendingFiles.length === 0) {
         return;
       }
 
       void sendMessage({ messageOverride: message });
     },
-    [hasUploadingFiles, isStreaming, readyPendingFiles.length, sendMessage],
+    [
+      agentClientState,
+      hasUploadingFiles,
+      isStreaming,
+      readyPendingFiles.length,
+      sendMessage,
+      sessionType,
+    ],
   );
 
   /**
@@ -3591,6 +3698,13 @@ function ChatContainer({
         </div>
       </div>
 
+      {sessionType === "studio_test" && agentClientState === "draining_for_upgrade" ? (
+        <div className="mx-3 mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          This agent is preparing for an extension upgrade. New tasks are paused until
+          the safe upgrade finishes or is forced to complete.
+        </div>
+      ) : null}
+
       <ChatComposer
         error={error}
         compactStatusMessage={compactStatusMessage}
@@ -3735,6 +3849,17 @@ function ChatContainer({
           <div className="flex min-h-0 flex-1">{chatWorkspacePane}</div>
         )}
       </SidebarInset>
+      <StaleSessionDialog
+        isOpen={staleSessionId !== null}
+        onMigrate={() => {
+          void handleMigrateStaleSession();
+        }}
+        onClose={() => {
+          void handleCloseStaleSession();
+        }}
+        isMigrating={isMigratingStaleSession}
+        isClosing={isClosingStaleSession}
+      />
     </SidebarProvider>
   );
 }

@@ -18,6 +18,7 @@ from app.schemas.session import (
     SessionCreate,
     SessionListItem,
     SessionListResponse,
+    SessionMigrateResponse,
     SessionResponse,
     SessionUpdate,
     TaskMessage,
@@ -77,6 +78,8 @@ def _build_session_response(
     session: Session,
     *,
     test_workspace_hash: str | None = None,
+    latest_release_id: int | None = None,
+    is_stale: bool = False,
 ) -> SessionResponse:
     """Serialize one session row into the API response contract."""
     return SessionResponse(
@@ -85,6 +88,8 @@ def _build_session_response(
         agent_id=session.agent_id,
         type=cast(Literal["consumer", "studio_test"], session.type),
         release_id=session.release_id,
+        latest_release_id=latest_release_id,
+        is_stale=is_stale,
         project_id=session.project_id,
         workspace_id=session.workspace_id,
         workspace_scope=SessionService.get_workspace_scope(session),
@@ -161,9 +166,14 @@ async def create_session(
             test_snapshot_id
         )
 
+    latest_release_id = service.get_agent_active_release_ids([session.agent_id]).get(
+        session.agent_id
+    )
     return _build_session_response(
         session,
         test_workspace_hash=test_workspace_hash,
+        latest_release_id=latest_release_id,
+        is_stale=service.is_session_stale(session, latest_release_id),
     )
 
 
@@ -216,14 +226,20 @@ async def list_sessions(
             if session.test_snapshot_id is not None
         ]
     )
+    active_release_ids = service.get_agent_active_release_ids(
+        [session.agent_id for session in visible_sessions]
+    )
     session_items = []
     for session in visible_sessions:
+        latest_release_id = active_release_ids.get(session.agent_id)
         session_items.append(
             SessionListItem(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
                 type=cast(Literal["consumer", "studio_test"], session.type),
                 release_id=session.release_id,
+                latest_release_id=latest_release_id,
+                is_stale=service.is_session_stale(session, latest_release_id),
                 project_id=session.project_id,
                 workspace_id=session.workspace_id,
                 workspace_scope=service.get_workspace_scope(session),
@@ -281,9 +297,14 @@ async def get_session(
         test_workspace_hash = service.get_test_workspace_hashes(
             [session.test_snapshot_id]
         ).get(session.test_snapshot_id)
+    latest_release_id = service.get_agent_active_release_ids([session.agent_id]).get(
+        session.agent_id
+    )
     return _build_session_response(
         session,
         test_workspace_hash=test_workspace_hash,
+        latest_release_id=latest_release_id,
+        is_stale=service.is_session_stale(session, latest_release_id),
     )
 
 
@@ -340,9 +361,14 @@ async def update_session(
             [updated_session.test_snapshot_id]
         ).get(updated_session.test_snapshot_id)
 
+    latest_release_id = service.get_agent_active_release_ids(
+        [updated_session.agent_id]
+    ).get(updated_session.agent_id)
     return _build_session_response(
         updated_session,
         test_workspace_hash=test_workspace_hash,
+        latest_release_id=latest_release_id,
+        is_stale=service.is_session_stale(updated_session, latest_release_id),
     )
 
 
@@ -530,3 +556,77 @@ async def delete_session(
         return {"status": "deleted", "session_id": session_id}
     else:
         raise HTTPException(status_code=500, detail="Failed to delete session")
+
+
+@router.post("/sessions/{session_id}/close", response_model=SessionResponse)
+async def close_session(
+    session_id: str,
+    db: DBSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SessionResponse:
+    """Mark a session as closed while preserving its history and workspace.
+
+    Why: stale sessions need a non-destructive exit so the user can still
+    review the previous conversation after switching to a new release.
+    """
+    service = SessionService(db)
+    session = service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user != current_user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_access(db, current_user, session)
+
+    service.update_session_status(session_id, "closed")
+    updated_session = service.get_session(session_id)
+    if updated_session is None:
+        raise HTTPException(status_code=500, detail="Failed to close session")
+
+    test_workspace_hash = None
+    if updated_session.test_snapshot_id is not None:
+        test_workspace_hash = service.get_test_workspace_hashes(
+            [updated_session.test_snapshot_id]
+        ).get(updated_session.test_snapshot_id)
+    latest_release_id = service.get_agent_active_release_ids(
+        [updated_session.agent_id]
+    ).get(updated_session.agent_id)
+    return _build_session_response(
+        updated_session,
+        test_workspace_hash=test_workspace_hash,
+        latest_release_id=latest_release_id,
+        is_stale=service.is_session_stale(updated_session, latest_release_id),
+    )
+
+
+@router.post("/sessions/{session_id}/migrate", response_model=SessionMigrateResponse)
+async def migrate_session(
+    session_id: str,
+    db: DBSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SessionMigrateResponse:
+    """Migrate a stale consumer session onto the agent's latest release.
+
+    Creates a new session pinned to ``agent.active_release_id``, copies
+    workspace contents for session-private workspaces, and marks the old
+    session closed (history preserved).
+    """
+    service = SessionService(db)
+    session = service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.user != current_user.username:
+        raise HTTPException(status_code=403, detail="Access denied")
+    _require_session_access(db, current_user, session)
+
+    try:
+        new_session = service.migrate_stale_session(session_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail else 409
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+
+    return SessionMigrateResponse(
+        old_session_id=session_id,
+        new_session_id=new_session.session_id,
+        new_release_id=new_session.release_id,
+    )

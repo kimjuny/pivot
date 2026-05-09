@@ -71,6 +71,12 @@ export interface ReactChatInterfaceProps {
   sidebarFooter?: (isCollapsed: boolean) => ReactNode;
   /** Whether the floating compact debug affordance should be shown. */
   showCompactDebug?: boolean;
+  /**
+   * Current end-user availability state for the agent. Studio test chat
+   * blocks new tasks while the agent is ``draining_for_upgrade`` so a half-
+   * upgraded extension cannot run inside the test sandbox.
+   */
+  agentClientState?: string;
 }
 
 /**

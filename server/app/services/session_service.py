@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from app.models.access import AccessLevel
+from app.models.agent import Agent
 from app.models.agent_release import AgentTestSnapshot
 from app.models.react import (
     ReactPlanStep,
@@ -180,6 +181,34 @@ class SessionService:
         if session.workspace_id:
             return "session_private"
         return None
+
+    def get_agent_active_release_ids(
+        self, agent_ids: Sequence[int]
+    ) -> dict[int, int | None]:
+        """Return a mapping of agent_id to its active_release_id."""
+        unique_ids = {aid for aid in agent_ids if aid is not None}
+        if not unique_ids:
+            return {}
+        rows = self.db.exec(
+            select(Agent.id, Agent.active_release_id).where(
+                col(Agent.id).in_(unique_ids)
+            )
+        ).all()
+        return {row[0]: row[1] for row in rows if row[0] is not None}
+
+    @staticmethod
+    def is_session_stale(session: Session, active_release_id: int | None) -> bool:
+        """Return True when a consumer session is pinned to an outdated release.
+
+        Why: once the Agent is republished, existing sessions still run against
+        the old release snapshot. Consumers must be redirected to a fresh
+        session rather than continuing silently on the stale runtime.
+        """
+        if session.type != "consumer":
+            return False
+        if active_release_id is None:
+            return False
+        return session.release_id != active_release_id
 
     def get_session(self, session_id: str) -> Session | None:
         """Get a session by session_id.
@@ -713,6 +742,64 @@ class SessionService:
         session.updated_at = datetime.now(UTC)
         self.db.commit()
         return True
+
+    def migrate_stale_session(self, session_id: str) -> Session:
+        """Create a fresh session pinned to the agent's latest release.
+
+        Why: when an Agent is republished, existing sessions pin to the old
+        release and cannot safely accept new tasks. Migration creates a new
+        consumer session on the latest release, copies workspace contents for
+        session-private workspaces, and marks the old session closed while
+        preserving its history.
+
+        Returns:
+            The newly created session row.
+
+        Raises:
+            ValueError: If the session cannot be migrated (missing, wrong type,
+                not actually stale, agent unpublished, or unresolved workspace).
+        """
+        old_session = self.get_session(session_id)
+        if old_session is None:
+            raise ValueError(f"Session {session_id} not found.")
+        if old_session.type != "consumer":
+            raise ValueError("Only consumer sessions can be migrated.")
+
+        agent = AgentService(self.db).require_session_creation_ready(
+            old_session.agent_id
+        )
+        latest_release_id = agent.active_release_id
+        if latest_release_id is None:
+            raise ValueError("Agent has no active release to migrate to.")
+        if old_session.release_id == latest_release_id:
+            raise ValueError("Session is already on the latest release.")
+
+        new_session = self.create_session(
+            agent_id=old_session.agent_id,
+            user=old_session.user,
+            project_id=old_session.project_id,
+            session_type="consumer",
+        )
+
+        if old_session.project_id is None and old_session.workspace_id is not None:
+            workspace_service = WorkspaceService(self.db)
+            source_workspace = workspace_service.get_workspace(old_session.workspace_id)
+            destination_workspace = (
+                workspace_service.get_workspace(new_session.workspace_id)
+                if new_session.workspace_id
+                else None
+            )
+            if source_workspace is not None and destination_workspace is not None:
+                workspace_service.copy_workspace_contents(
+                    source=source_workspace,
+                    destination=destination_workspace,
+                )
+
+        old_session.status = "closed"
+        old_session.updated_at = datetime.now(UTC)
+        self.db.commit()
+        self.db.refresh(new_session)
+        return new_session
 
     def delete_session(self, session_id: str, *, delete_workspace: bool = True) -> bool:
         """Delete a session and its associated data.

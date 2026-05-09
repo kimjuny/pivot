@@ -1061,7 +1061,7 @@ Align `Skill` with the same external-only direction as providers.
 - Edit protection is correct: extension skills show only "Open owning extension" action; no inline editing, deletion, or tab opening.
 - No code changes required.
 
-## Phase 6: Stale Session Detection and Migration
+## Phase 6: Stale Session Detection and Migration [COMPLETED]
 
 ### Objective
 
@@ -1113,6 +1113,42 @@ Consumer sessions pin to `release_id` at creation time. When an Agent is republi
 - New sessions are always created against the latest release.
 
 ## Phase 7: Extension Upgrade Reconfiguration Tracking
+
+### Phase 7A [COMPLETED]: backend foundation + publish gate
+
+Delivered:
+
+- `AgentExtensionBinding.status` field (`active` | `needs_reconfiguration`) with a DB migration that backfills existing rows.
+- During `_apply_package_upgrade`, migrated bindings get `status = "needs_reconfiguration"` when the old and new installation manifest hashes differ. Identical manifests keep `active`.
+- `upsert_agent_binding` resets `status = "active"` on any config edit, so re-saving the binding is implicit confirmation.
+- New `ExtensionService.confirm_binding_reconfiguration` and the `POST /api/agents/{agent_id}/extensions/{binding_id}/confirm` endpoint for acknowledge-only confirmation.
+- `publish_saved_draft` rejects the request when any enabled binding is `needs_reconfiguration` (maps to 409 in the Agent API).
+- Upgrade preview and pending-upgrade response now expose `manifest_hash_changed`, `added_capabilities`, `removed_capabilities` so the UI can render the decision dialog and drain panel without another backend call.
+- Frontend types updated: `AgentExtensionBinding.status`, `upgrade_impact.manifest_hash_changed/added_capabilities/removed_capabilities`, `confirmAgentExtensionBinding` API client.
+
+### Phase 7B [COMPLETED]: UI interaction details
+
+Delivered:
+
+- AgentDetailSidebar: extension rows show an `AlertTriangle` warning icon and tooltip when the binding is `needs_reconfiguration`. Clicking opens `ExtensionBindingDialog`.
+- `ExtensionBindingDialog`: shows a warning banner explaining the binding needs review, with a "Confirm without changes" button that calls `confirmAgentExtensionBinding`. Saving config also clears the flag automatically (handled in 7A).
+- `ExtensionsPage` import dialog: upgrade preview now lists added/removed capabilities and a "Bindings will need reconfiguration" badge when the manifest hash changed.
+- `ExtensionDetailPage` upgrade progress card: shows live elapsed waiting time (per-second tick), added/removed capability lists; existing Force upgrade button retained.
+- ChatContainer (Studio test mode): blocks new tasks and shows an amber banner when `agent.client_state == "draining_for_upgrade"`. Submission is rejected with a clear error message.
+- Publish drawer: existing 409 error from the publish gate now surfaces the binding names via the existing toast path.
+
+### Phase 7B [COMPLETED]: UI interaction details
+
+Delivered:
+
+- AgentDetailSidebar: extension rows show an `AlertTriangle` warning icon and tooltip when the binding is `needs_reconfiguration`. Clicking opens `ExtensionBindingDialog`.
+- `ExtensionBindingDialog`: shows a warning banner explaining the binding needs review, with a "Confirm without changes" button that calls `confirmAgentExtensionBinding`. Saving config also clears the flag automatically (handled in 7A).
+- `ExtensionsPage` import dialog: upgrade preview now lists added/removed capabilities and a "Bindings will need reconfiguration" badge when the manifest hash changed.
+- `ExtensionDetailPage` upgrade progress card: shows live elapsed waiting time (per-second tick), added/removed capability lists; existing Force upgrade button retained.
+- ChatContainer (Studio test mode): blocks new tasks and shows an amber banner when `agent.client_state == "draining_for_upgrade"`. Submission is rejected with a clear error message.
+- Publish drawer: existing 409 error from the publish gate now surfaces the binding names via the existing toast path.
+
+### Phase 7B: UI interaction details
 
 ### Objective
 
@@ -1321,8 +1357,9 @@ Mitigation:
 3. Phase 3: channel provider extensionization [COMPLETED]
 4. Phase 4: built-in non-tool provider retirement [COMPLETED]
 5. Phase 5: skill model convergence [COMPLETED]
-6. Phase 6: stale session detection and migration
-7. Phase 7: extension upgrade reconfiguration tracking
+6. Phase 6: stale session detection and migration [COMPLETED]
+7. Phase 7A: extension upgrade reconfiguration tracking (backend + publish gate) [COMPLETED]
+8. Phase 7B: extension upgrade UI interaction details [COMPLETED] [COMPLETED]
 
 ## Recommendation
 

@@ -12,6 +12,8 @@ export interface ConsumerSessionListItem {
   agent_name: string;
   agent_description: string | null;
   release_id?: number | null;
+  latest_release_id?: number | null;
+  is_stale?: boolean;
   status: string;
   runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;

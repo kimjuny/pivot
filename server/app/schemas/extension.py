@@ -279,6 +279,22 @@ class ExtensionUpgradeImpactResponse(AppBaseModel):
     affected_agent_count: int
     affected_agent_names: list[str] = Field(default_factory=list)
     running_task_count: int
+    manifest_hash_changed: bool = Field(
+        default=False,
+        description=(
+            "True when the incoming manifest differs from the currently "
+            "installed one. Matches the rule that flags bindings as "
+            "needs_reconfiguration after the upgrade finalizes."
+        ),
+    )
+    added_capabilities: list[ExtensionContributionItemResponse] = Field(
+        default_factory=list,
+        description="Capabilities present in the new version but absent in the installed one.",
+    )
+    removed_capabilities: list[ExtensionContributionItemResponse] = Field(
+        default_factory=list,
+        description="Capabilities present in the installed version but absent in the new one.",
+    )
 
 
 class ExtensionPendingUpgradeResponse(AppBaseModel):
@@ -289,9 +305,17 @@ class ExtensionPendingUpgradeResponse(AppBaseModel):
     source_version: str
     target_version: str
     mode: ExtensionUpgradeMode = "safe"
+    created_at: str | None = None
     affected_agent_count: int
     affected_agent_names: list[str] = Field(default_factory=list)
     running_task_count: int
+    manifest_hash_changed: bool = False
+    added_capabilities: list[ExtensionContributionItemResponse] = Field(
+        default_factory=list
+    )
+    removed_capabilities: list[ExtensionContributionItemResponse] = Field(
+        default_factory=list
+    )
 
 
 class ExtensionPendingUpgradeActionResponse(AppBaseModel):
@@ -354,6 +378,15 @@ class AgentExtensionBindingResponse(AppBaseModel):
     enabled: bool
     priority: int
     config: dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(
+        default="active",
+        description=(
+            "Binding review status. 'active' is normal. "
+            "'needs_reconfiguration' means the last extension upgrade changed "
+            "the manifest and the builder must review the config before the "
+            "agent can be republished."
+        ),
+    )
     created_at: str
     updated_at: str
     installation: ExtensionInstallationResponse

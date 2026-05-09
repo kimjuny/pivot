@@ -16,6 +16,7 @@ import importlib.util
 import inspect
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -279,6 +280,30 @@ class WorkspaceService:
         self.db.delete(workspace)
         self.db.commit()
         return True
+
+    def copy_workspace_contents(
+        self,
+        *,
+        source: Workspace,
+        destination: Workspace,
+    ) -> None:
+        """Copy all files from one workspace directory into another.
+
+        Why: session migration preserves the user's generated files so the new
+        release can continue from the same working state without losing the
+        prior conversation's artifacts.
+        """
+        source_path = self.get_workspace_path(source)
+        destination_path = self.get_workspace_path(destination)
+        destination_path.mkdir(parents=True, exist_ok=True)
+        if not source_path.exists():
+            return
+        for entry in source_path.iterdir():
+            target = destination_path / entry.name
+            if entry.is_dir():
+                shutil.copytree(entry, target, dirs_exist_ok=True)
+            else:
+                shutil.copy2(entry, target)
 
 
 # ---------------------------------------------------------------------------

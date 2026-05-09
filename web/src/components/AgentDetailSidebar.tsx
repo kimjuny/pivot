@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
+    AlertTriangle,
     Bot,
     ChevronRight,
     Layers,
@@ -1838,7 +1839,11 @@ function AgentDetailSidebar({
                                         </div>
                                     ) : (
                                         <SidebarMenu>
-                                            {selectedExtensionPackages.map((pkg) => (
+                                            {selectedExtensionPackages.map((pkg) => {
+                                                const needsReconfig =
+                                                    pkg.selected_binding?.status ===
+                                                    'needs_reconfiguration';
+                                                return (
                                                 <SidebarMenuItem key={pkg.package_id} className="group/item">
                                                     <Tooltip>
                                                         <TooltipTrigger asChild>
@@ -1857,6 +1862,12 @@ function AgentDetailSidebar({
                                                                 <span className="truncate flex-1">
                                                                     {pkg.display_name}
                                                                 </span>
+                                                                {needsReconfig && (
+                                                                    <AlertTriangle
+                                                                        className="size-3.5 shrink-0 text-warning"
+                                                                        aria-label="Needs reconfiguration"
+                                                                    />
+                                                                )}
                                                                 <span className="text-[9px] px-1 rounded bg-sidebar-accent/60 text-sidebar-foreground/50 ml-1 shrink-0">
                                                                     {pkg.selected_binding?.installation.version ?? pkg.latest_version}
                                                                 </span>
@@ -1877,6 +1888,11 @@ function AgentDetailSidebar({
                                                                     {' · '}
                                                                     {pkg.selected_binding?.enabled ? 'enabled' : 'disabled'}
                                                                 </p>
+                                                                {needsReconfig && (
+                                                                    <p className="text-xs text-warning">
+                                                                        Manifest changed — open to review the binding config before publishing.
+                                                                    </p>
+                                                                )}
                                                             </div>
                                                         </TooltipContent>
                                                     </Tooltip>
@@ -1894,7 +1910,8 @@ function AgentDetailSidebar({
                                                         </SidebarMenuAction>
                                                     )}
                                                 </SidebarMenuItem>
-                                            ))}
+                                                );
+                                            })}
                                         </SidebarMenu>
                                     )}
                                 </SidebarGroupContent>

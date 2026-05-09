@@ -139,6 +139,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_file_schema_compatibility()
     ensure_task_attachment_schema_compatibility()
     ensure_skill_schema_compatibility()
+    ensure_extension_schema_compatibility()
 
     from app.services.permission_service import PermissionService
     from app.services.skill_service import sync_skill_registry
@@ -511,3 +512,33 @@ def ensure_skill_schema_compatibility() -> None:
                 "END"
             )
         )
+
+
+def ensure_extension_schema_compatibility() -> None:
+    """Apply additive schema updates for the extension binding table.
+
+    Why: the binding review status was added after launch so existing
+    developer SQLite rows need a default ``active`` backfill.
+    """
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("agentextensionbinding"):
+        return
+
+    columns = {
+        column["name"] for column in inspector.get_columns("agentextensionbinding")
+    }
+    with engine.begin() as conn:
+        if "status" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agentextensionbinding "
+                    "ADD COLUMN status VARCHAR DEFAULT 'active'"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE agentextensionbinding "
+                    "SET status = 'active' WHERE status IS NULL"
+                )
+            )

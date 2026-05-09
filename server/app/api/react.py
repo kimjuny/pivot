@@ -162,6 +162,21 @@ def _resolve_runtime_agent_for_request(
         status_code = 404 if "not found" in detail else 409
         raise HTTPException(status_code=status_code, detail=detail) from exc
 
+    if session_row is not None and SessionService.is_session_stale(
+        session_row, agent.active_release_id
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "session_stale",
+                "message": (
+                    "Agent has been republished. Migrate this session or "
+                    "start a new one."
+                ),
+                "latest_release_id": agent.active_release_id,
+            },
+        )
+
     _require_runtime_permission(
         db=db,
         user=user,

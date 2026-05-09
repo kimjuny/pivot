@@ -57,6 +57,8 @@ class SessionResponse(AppBaseModel):
     agent_id: int
     type: Literal["consumer", "studio_test"]
     release_id: int | None
+    latest_release_id: int | None = None
+    is_stale: bool = False
     project_id: str | None = None
     workspace_id: str | None = None
     workspace_scope: Literal["session_private", "project_shared"] | None = None
@@ -84,6 +86,8 @@ class SessionListItem(AppBaseModel):
     agent_id: int
     type: Literal["consumer", "studio_test"]
     release_id: int | None
+    latest_release_id: int | None = None
+    is_stale: bool = False
     project_id: str | None = None
     workspace_id: str | None = None
     workspace_scope: Literal["session_private", "project_shared"] | None = None
@@ -94,6 +98,14 @@ class SessionListItem(AppBaseModel):
     is_pinned: bool = False
     created_at: str
     updated_at: str
+
+
+class SessionMigrateResponse(AppBaseModel):
+    """Response schema for session migration endpoint."""
+
+    old_session_id: str
+    new_session_id: str
+    new_release_id: int | None = None
 
 
 class SessionListResponse(AppBaseModel):

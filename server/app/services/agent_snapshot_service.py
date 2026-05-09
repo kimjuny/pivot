@@ -10,6 +10,7 @@ from typing import Any
 from app.models.agent import Agent
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import AgentChannelBinding
+from app.models.extension import AgentExtensionBinding, ExtensionInstallation
 from app.models.media_generation import AgentMediaProviderBinding
 from app.models.web_search import AgentWebSearchBinding
 from app.services.agent_service import AgentService
@@ -681,6 +682,40 @@ class AgentSnapshotService:
             and latest_release.snapshot_hash == draft.snapshot_hash
         ):
             raise ValueError("The current saved draft is already published.")
+
+        # Why: an extension upgrade may have flagged enabled bindings as
+        # ``needs_reconfiguration``. Publishing a release would expose the
+        # unverified capability surface to end users, so block the call until
+        # the builder reviews each flagged binding.
+        stale_bindings = list(
+            self.db.exec(
+                select(AgentExtensionBinding).where(
+                    AgentExtensionBinding.agent_id == agent_id,
+                    col(AgentExtensionBinding.enabled).is_(True),
+                    AgentExtensionBinding.status == "needs_reconfiguration",
+                )
+            ).all()
+        )
+        if stale_bindings:
+            installations = {
+                installation.id: installation
+                for installation in self.db.exec(
+                    select(ExtensionInstallation).where(
+                        col(ExtensionInstallation.id).in_(
+                            [
+                                binding.extension_installation_id
+                                for binding in stale_bindings
+                            ]
+                        )
+                    )
+                ).all()
+            }
+            names = ", ".join(
+                installations[binding.extension_installation_id].display_name
+                for binding in stale_bindings
+                if binding.extension_installation_id in installations
+            )
+            raise ValueError("Reconfigure these extensions before publishing: " + names)
 
         latest_release_snapshot = (
             self._load_snapshot_json(latest_release.snapshot_json)
