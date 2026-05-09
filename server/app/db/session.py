@@ -259,6 +259,10 @@ def ensure_session_schema_compatibility() -> None:
             )
         if "runtime_status" not in columns:
             conn.execute(text("ALTER TABLE session ADD COLUMN runtime_status VARCHAR"))
+        if "migrated_to_session_id" not in columns:
+            conn.execute(
+                text("ALTER TABLE session ADD COLUMN migrated_to_session_id VARCHAR")
+            )
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
         conn.execute(text("UPDATE session SET type = 'consumer' WHERE type IS NULL"))
         conn.execute(

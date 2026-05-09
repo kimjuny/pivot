@@ -1381,6 +1381,21 @@ export interface ExtensionImportPreview {
 export type ExtensionUpgradeMode = 'safe' | 'force';
 
 /**
+ * Progress event emitted by an extension bundle import job.
+ */
+export interface ExtensionImportProgressEvent {
+  event_id: number;
+  job_id: string;
+  stage: string;
+  label: string;
+  percent: number;
+  status: 'running' | 'complete' | 'failed';
+  detail: string | null;
+  metadata: unknown;
+  timestamp: string;
+}
+
+/**
  * Result returned after uninstalling one extension version.
  */
 export interface ExtensionUninstallResult {
@@ -1632,6 +1647,122 @@ export const importExtensionBundle = async (
     '/extensions/installations/import/bundle',
     formData,
   ) as Promise<ExtensionInstallation>;
+};
+
+/**
+ * Create one SSE-observable extension bundle import job.
+ */
+export const createExtensionBundleImportJob = async (): Promise<{ job_id: string }> => {
+  return apiRequest('/extensions/installations/import/bundle/jobs', {
+    method: 'POST',
+  }) as Promise<{ job_id: string }>;
+};
+
+function parseExtensionImportProgressEvent(value: unknown): ExtensionImportProgressEvent | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const event = value as Partial<ExtensionImportProgressEvent>;
+  if (
+    typeof event.event_id !== 'number'
+    || typeof event.job_id !== 'string'
+    || typeof event.stage !== 'string'
+    || typeof event.label !== 'string'
+    || typeof event.percent !== 'number'
+    || typeof event.status !== 'string'
+  ) {
+    return null;
+  }
+  if (!['running', 'complete', 'failed'].includes(event.status)) {
+    return null;
+  }
+  return event as ExtensionImportProgressEvent;
+}
+
+/**
+ * Stream progress events for one extension bundle import job.
+ */
+export const streamExtensionBundleImportJobEvents = async (
+  jobId: string,
+  onEvent: (event: ExtensionImportProgressEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> => {
+  const response = await httpClient(
+    `${getApiBaseUrl()}/extensions/installations/import/bundle/jobs/${jobId}/events/stream`,
+    {
+      headers: getAuthorizedHeaders(),
+      signal,
+    },
+  );
+
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+    throw new AuthError('Authentication expired. Please log in again.');
+  }
+  if (!response.ok || !response.body) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim() || line.startsWith(':') || !line.startsWith('data: ')) {
+        continue;
+      }
+      const parsed = JSON.parse(line.slice(6).trim()) as unknown;
+      const event = parseExtensionImportProgressEvent(parsed);
+      if (event) {
+        onEvent(event);
+      }
+    }
+  }
+};
+
+/**
+ * Upload and install one extension bundle into an existing import job.
+ */
+export const importExtensionBundleWithJob = async (payload: {
+  jobId: string;
+  files: File[];
+  trustConfirmed: boolean;
+  overwriteConfirmed: boolean;
+  upgradeMode: ExtensionUpgradeMode;
+}): Promise<unknown> => {
+  if (payload.files.length === 0) {
+    throw new Error('Choose an extension folder before importing.');
+  }
+
+  const bundleName =
+    payload.files[0]?.webkitRelativePath.split('/')[0]?.trim()
+    || payload.files[0]?.name
+    || 'extension-bundle';
+
+  const formData = new FormData();
+  formData.append('bundle_name', bundleName);
+  formData.append('trust_confirmed', payload.trustConfirmed ? 'true' : 'false');
+  formData.append('overwrite_confirmed', payload.overwriteConfirmed ? 'true' : 'false');
+  formData.append('upgrade_mode', payload.upgradeMode);
+  payload.files.forEach((file) => {
+    formData.append('files', file);
+    formData.append('relative_paths', file.webkitRelativePath || file.name);
+  });
+
+  return apiRequestFormData(
+    `/extensions/installations/import/bundle/jobs/${payload.jobId}`,
+    formData,
+  );
 };
 
 export const reconcileExtensionUpgrade = async (
@@ -2129,6 +2260,7 @@ export interface SessionListItem {
   release_id?: number | null;
   latest_release_id?: number | null;
   is_stale?: boolean;
+  migrated_to_session_id?: string | null;
   project_id?: string | null;
   workspace_id?: string | null;
   workspace_scope?: "session_private" | "project_shared" | null;
@@ -2160,6 +2292,7 @@ export interface SessionResponse {
   release_id?: number | null;
   latest_release_id?: number | null;
   is_stale?: boolean;
+  migrated_to_session_id?: string | null;
   project_id?: string | null;
   workspace_id?: string | null;
   workspace_scope?: "session_private" | "project_shared" | null;

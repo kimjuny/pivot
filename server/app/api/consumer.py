@@ -153,6 +153,7 @@ async def list_consumer_sessions(
                 is_stale=session_service.is_session_stale(
                     session, visible_agent.active_release_id
                 ),
+                migrated_to_session_id=session.migrated_to_session_id,
                 status=session.status,
                 runtime_status=session.runtime_status,
                 title=session.title,

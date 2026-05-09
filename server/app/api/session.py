@@ -99,6 +99,7 @@ def _build_session_response(
         runtime_status=session.runtime_status,
         title=session.title,
         is_pinned=session.is_pinned,
+        migrated_to_session_id=session.migrated_to_session_id,
         created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
         updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
     )
@@ -240,6 +241,7 @@ async def list_sessions(
                 release_id=session.release_id,
                 latest_release_id=latest_release_id,
                 is_stale=service.is_session_stale(session, latest_release_id),
+                migrated_to_session_id=session.migrated_to_session_id,
                 project_id=session.project_id,
                 workspace_id=session.workspace_id,
                 workspace_scope=service.get_workspace_scope(session),

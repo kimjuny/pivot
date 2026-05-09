@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -62,6 +63,22 @@ from app.services.workspace_service import ensure_agent_workspace
 from sqlmodel import Session, col, select
 
 logger = logging.getLogger(__name__)
+
+ExtensionImportProgressCallback = Callable[[str, str, int, str | None], None]
+
+
+def _emit_import_progress(
+    progress: ExtensionImportProgressCallback | None,
+    *,
+    stage: str,
+    label: str,
+    percent: int,
+    detail: str | None = None,
+) -> None:
+    """Publish one progress event if a callback is wired."""
+    if progress is not None:
+        progress(stage, label, percent, detail)
+
 
 _MANIFEST_FILENAME = "manifest.json"
 _README_MARKDOWN_FILENAME = "README.md"
@@ -2353,6 +2370,7 @@ class ExtensionService:
         trust_confirmed: bool,
         overwrite_confirmed: bool = False,
         upgrade_mode: str = "force",
+        progress: ExtensionImportProgressCallback | None = None,
     ) -> ExtensionInstallation:
         """Validate and install one extension folder into the workspace registry.
 
@@ -2365,6 +2383,7 @@ class ExtensionService:
             overwrite_confirmed: Whether the operator explicitly approved
                 replacing one already-installed package with the same
                 ``scope/name/version`` but different contents.
+            progress: Optional SSE progress callback ``(stage, label, percent, detail)``.
 
         Returns:
             Persisted installation row.
@@ -2378,6 +2397,14 @@ class ExtensionService:
             )
 
         package_root = Path(source_dir).expanduser().resolve()
+
+        # Phase 1 — validating
+        _emit_import_progress(
+            progress,
+            stage="validating",
+            label="Validating extension manifest",
+            percent=15,
+        )
         preview = self.preview_from_path(source_dir=package_root, source=source)
         normalized_manifest = json.loads(
             (package_root / _MANIFEST_FILENAME).read_text(encoding="utf-8")
@@ -2398,10 +2425,19 @@ class ExtensionService:
         is_package_upgrade = latest_existing is not None and _version_sort_key(
             normalized_manifest["version"]
         ) > _version_sort_key(latest_existing.version)
+
+        # Phase 2 — analyzing upgrade impact
         package_id = _package_id(
             normalized_manifest["scope"],
             normalized_manifest["name"],
         )
+        if is_package_upgrade:
+            _emit_import_progress(
+                progress,
+                stage="analyzing",
+                label="Analyzing upgrade impact",
+                percent=25,
+            )
         upgrade_impact = (
             self.get_package_upgrade_impact(
                 package_id=package_id,
@@ -2485,6 +2521,14 @@ class ExtensionService:
             # artifacts. If the database record is gone, treat the leftover
             # directory as an orphaned cache and recreate it from scratch.
             shutil.rmtree(version_root, ignore_errors=True)
+
+        # Phase 3 — storing
+        _emit_import_progress(
+            progress,
+            stage="storing",
+            label="Packaging and storing extension files",
+            percent=40,
+        )
         stored_artifact = self.artifact_storage.store_directory(
             source_dir=package_root,
             scope=normalized_manifest["scope"],
@@ -2496,10 +2540,27 @@ class ExtensionService:
         if should_overwrite_existing:
             shutil.rmtree(install_root, ignore_errors=True)
         try:
+            # Phase 4 — extracting
+            _emit_import_progress(
+                progress,
+                stage="extracting",
+                label="Extracting extension files",
+                percent=55,
+            )
             self.artifact_storage.materialize_to_directory(
                 artifact_key=stored_artifact.artifact_key,
                 target_dir=install_root,
             )
+
+            # Phase 5 — installing dependencies
+            has_requirements = (install_root / "requirements.txt").is_file()
+            if has_requirements:
+                _emit_import_progress(
+                    progress,
+                    stage="installing_deps",
+                    label="Installing Python dependencies",
+                    percent=65,
+                )
             _install_extension_dependencies(install_root)
         except Exception:
             shutil.rmtree(version_root, ignore_errors=True)
@@ -2511,6 +2572,13 @@ class ExtensionService:
         now = datetime.now(UTC)
         trust_status, trust_source = _local_trust_metadata(source=source)
         if existing is not None and should_overwrite_existing:
+            # Phase 6 — registering (overwrite path)
+            _emit_import_progress(
+                progress,
+                stage="registering",
+                label="Updating extension installation",
+                percent=85,
+            )
             old_artifact_key = existing.artifact_key
             existing.display_name = normalized_manifest["display_name"]
             existing.description = normalized_manifest["description"]
@@ -2536,6 +2604,13 @@ class ExtensionService:
             )
             return existing
 
+        # Phase 6 — registering
+        _emit_import_progress(
+            progress,
+            stage="registering",
+            label="Registering extension installation",
+            percent=85,
+        )
         installation = ExtensionInstallation(
             scope=normalized_manifest["scope"],
             name=normalized_manifest["name"],
@@ -2601,6 +2676,12 @@ class ExtensionService:
                 normalized_upgrade_mode == "safe"
                 and int(upgrade_impact.get("running_task_count", 0)) > 0
             ):
+                _emit_import_progress(
+                    progress,
+                    stage="staging",
+                    label="Staging safe upgrade",
+                    percent=92,
+                )
                 self._start_pending_package_upgrade(
                     package_id=package_id,
                     source_version=latest_existing.version if latest_existing else "",
@@ -2611,6 +2692,12 @@ class ExtensionService:
                     created_by=installed_by,
                 )
             else:
+                _emit_import_progress(
+                    progress,
+                    stage="applying",
+                    label="Applying upgrade",
+                    percent=92,
+                )
                 self._apply_package_upgrade(
                     package_id=package_id,
                     new_installation_id=installation.id or 0,
@@ -2783,6 +2870,7 @@ class ExtensionService:
         trust_confirmed: bool,
         overwrite_confirmed: bool = False,
         upgrade_mode: str = "force",
+        progress: ExtensionImportProgressCallback | None = None,
     ) -> ExtensionInstallation:
         """Install one extension bundle uploaded from the local machine.
 
@@ -2790,11 +2878,18 @@ class ExtensionService:
             bundle_name: Root folder name selected by the user.
             files: Uploaded bundle files with relative paths.
             installed_by: Username that initiated the installation.
+            progress: Optional SSE progress callback ``(stage, label, percent, detail)``.
 
         Returns:
             Persisted installation row.
         """
         with TemporaryDirectory(prefix="pivot-extension-bundle-") as tmp_root:
+            _emit_import_progress(
+                progress,
+                stage="upload_received",
+                label="Upload received",
+                percent=8,
+            )
             extracted_dir = Path(tmp_root) / bundle_name
             _extract_bundle_extension_directory(
                 bundle_name=bundle_name,
@@ -2808,6 +2903,7 @@ class ExtensionService:
                 trust_confirmed=trust_confirmed,
                 overwrite_confirmed=overwrite_confirmed,
                 upgrade_mode=upgrade_mode,
+                progress=progress,
             )
 
     def preview_bundle(

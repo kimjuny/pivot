@@ -16,6 +16,8 @@ import {
   ChevronUp as ChevronUpIcon,
   ChevronsUpDown as ChevronsUpDownIcon,
   Circle as CircleIcon,
+  CircleFadingArrowUp as CircleFadingArrowUpIcon,
+  CircleCheck as CircleCheckIcon,
   Copy as CopyIcon,
   Download as DownloadIcon,
   Expand as ExpandIcon,
@@ -108,6 +110,8 @@ export const BugPlay = withDefaultStroke(BugPlayIcon);
 export const Check = withDefaultStroke(CheckIcon);
 export const CheckCircle2 = withDefaultStroke(CheckCircle2Icon);
 export const ChevronDown = withDefaultStroke(ChevronDownIcon);
+export const CircleFadingArrowUp = withDefaultStroke(CircleFadingArrowUpIcon);
+export const CircleCheck = withDefaultStroke(CircleCheckIcon);
 export const ChevronLeft = withDefaultStroke(ChevronLeftIcon);
 export const ChevronRight = withDefaultStroke(ChevronRightIcon);
 export const ChevronUp = withDefaultStroke(ChevronUpIcon);

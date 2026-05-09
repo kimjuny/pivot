@@ -11,7 +11,6 @@ import { Info, Loader2 } from "@/lib/lucide";
 import {
   ApiError,
   cancelReactTask,
-  closeSession,
   createProject,
   createDevSurfaceSession,
   createInstalledSurfaceSession,
@@ -814,8 +813,9 @@ function ChatContainer({
   const [isLoadingSession, setIsLoadingSession] = useState<boolean>(false);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
   const [staleSessionId, setStaleSessionId] = useState<string | null>(null);
+  const [migratedSessionId, setMigratedSessionId] = useState<string | null>(null);
   const [isMigratingStaleSession, setIsMigratingStaleSession] = useState(false);
-  const [isClosingStaleSession, setIsClosingStaleSession] = useState(false);
+  const [isStaleBannerDismissed, setIsStaleBannerDismissed] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isExtensionDockOpen, setIsExtensionDockOpen] = useState(false);
   const [isExtensionDockMounted, setIsExtensionDockMounted] = useState(false);
@@ -2228,21 +2228,30 @@ function ChatContainer({
   }, [currentSessionId, loadSessionRuntimeDebug]);
 
   // Why: consumer sessions pinned to an older Agent release must prompt the
-  // user to migrate or close before they try to send a message.
+  // user to migrate. Already-migrated sessions show a different dialog.
+  // The banner reappears each time the user navigates to a stale/migrated session.
   useEffect(() => {
     if (currentSessionId === null) {
       setStaleSessionId(null);
+      setMigratedSessionId(null);
       return;
     }
     const current = sessions.find(
       (session) => session.session_id === currentSessionId,
     );
-    if (current?.type === "consumer" && current.is_stale) {
+    if (current?.type === "consumer" && current.migrated_to_session_id) {
+      setMigratedSessionId(current.migrated_to_session_id);
+      setStaleSessionId(null);
+      setIsStaleBannerDismissed(false);
+    } else if (current?.type === "consumer" && current.is_stale) {
       setStaleSessionId(currentSessionId);
+      setMigratedSessionId(null);
+      setIsStaleBannerDismissed(false);
     } else {
       setStaleSessionId((previous) =>
         previous === currentSessionId ? null : previous,
       );
+      setMigratedSessionId(null);
     }
   }, [currentSessionId, sessions]);
 
@@ -2767,27 +2776,22 @@ function ChatContainer({
   };
 
   /**
-   * Close a stale session without deleting history. Leaves the conversation
-   * as read-only and returns to the draft state so the user can start fresh.
+   * Dismiss the stale session banner without navigating away.
+   *
+   * Why: the user should stay on the stale session and browse history
+   * freely. The composer stays disabled for stale sessions regardless
+   * of whether the banner is visible.
    */
-  const handleCloseStaleSession = async () => {
-    if (staleSessionId === null || isClosingStaleSession) return;
-    setIsClosingStaleSession(true);
-    try {
-      await closeSession(staleSessionId);
-      setStaleSessionId(null);
-      await refreshSidebarData();
-      await enterDraftState(null);
-    } catch (closeError) {
-      console.error("Failed to close stale session:", closeError);
-      setError(
-        closeError instanceof Error
-          ? closeError.message
-          : "Failed to close session",
-      );
-    } finally {
-      setIsClosingStaleSession(false);
-    }
+  const handleDismissStaleBanner = () => {
+    setIsStaleBannerDismissed(true);
+  };
+
+  /**
+   * Navigate from a migrated (old) session to its replacement.
+   */
+  const handleGoToMigratedSession = (targetSessionId: string) => {
+    setMigratedSessionId(null);
+    void handleSelectSession(targetSessionId);
   };
 
   /**
@@ -3711,6 +3715,7 @@ function ChatContainer({
         replyTarget={replyTarget}
         pendingFiles={pendingFiles}
         isStreaming={isStreaming}
+        canSendMessage={staleSessionId === null && migratedSessionId === null}
         isConversationEmpty={isConversationEmpty}
         hasUploadingFiles={hasUploadingFiles}
         taskPlan={composerTaskPlan}
@@ -3850,15 +3855,17 @@ function ChatContainer({
         )}
       </SidebarInset>
       <StaleSessionDialog
-        isOpen={staleSessionId !== null}
+        isOpen={
+          (staleSessionId !== null || migratedSessionId !== null) &&
+          !isStaleBannerDismissed
+        }
         onMigrate={() => {
           void handleMigrateStaleSession();
         }}
-        onClose={() => {
-          void handleCloseStaleSession();
-        }}
+        onClose={handleDismissStaleBanner}
         isMigrating={isMigratingStaleSession}
-        isClosing={isClosingStaleSession}
+        migratedSessionId={migratedSessionId}
+        onGoToMigrated={handleGoToMigratedSession}
       />
     </SidebarProvider>
   );

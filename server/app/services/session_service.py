@@ -202,9 +202,13 @@ class SessionService:
 
         Why: once the Agent is republished, existing sessions still run against
         the old release snapshot. Consumers must be redirected to a fresh
-        session rather than continuing silently on the stale runtime.
+        session rather than continuing silently on the stale runtime. Closed
+        sessions are never stale because they are either finished or already
+        migrated.
         """
         if session.type != "consumer":
+            return False
+        if session.status == "closed":
             return False
         if active_release_id is None:
             return False
@@ -781,6 +785,12 @@ class SessionService:
             session_type="consumer",
         )
 
+        new_session.title = (
+            f"Migrate: {old_session.title}"
+            if old_session.title
+            else "Migrate"
+        )
+
         if old_session.project_id is None and old_session.workspace_id is not None:
             workspace_service = WorkspaceService(self.db)
             source_workspace = workspace_service.get_workspace(old_session.workspace_id)
@@ -796,7 +806,7 @@ class SessionService:
                 )
 
         old_session.status = "closed"
-        old_session.updated_at = datetime.now(UTC)
+        old_session.migrated_to_session_id = new_session.session_id
         self.db.commit()
         self.db.refresh(new_session)
         return new_session

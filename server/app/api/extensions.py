@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
 from datetime import UTC, datetime
@@ -50,6 +51,9 @@ from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.extension_hook_execution_service import ExtensionHookExecutionService
 from app.services.extension_hook_replay_service import ExtensionHookReplayService
+from app.services.extension_import_progress_service import (
+    get_extension_import_progress_service,
+)
 from app.services.extension_service import (
     ExtensionBundleImportFile,
     ExtensionInstallPreview,
@@ -57,14 +61,31 @@ from app.services.extension_service import (
 )
 from app.services.group_service import GroupService
 from app.services.user_service import UserService
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
+from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 if TYPE_CHECKING:
     from app.models.user import User
 
 router = APIRouter()
+
+
+class ExtensionBundleImportJobResponse(BaseModel):
+    """Response body when creating an SSE-observable extension import job."""
+
+    job_id: str
+
 
 _EXTENSION_LOGO_MEDIA_TYPES: dict[str, str] = {
     ".png": "image/png",
@@ -1031,6 +1052,199 @@ async def import_bundle_extension(
         service=service,
         current_user=current_user,
     )
+
+
+@router.post(
+    "/extensions/installations/import/bundle/jobs",
+    response_model=ExtensionBundleImportJobResponse,
+)
+async def create_bundle_import_job(
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionBundleImportJobResponse:
+    """Create one SSE-observable extension bundle import job."""
+    job = get_extension_import_progress_service().create_job(
+        username=current_user.username,
+    )
+    return ExtensionBundleImportJobResponse(job_id=job.job_id)
+
+
+@router.get("/extensions/installations/import/bundle/jobs/{job_id}/events/stream")
+async def stream_bundle_import_job_events(
+    job_id: str,
+    raw_request: Request,
+    after_id: int = 0,
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> StreamingResponse:
+    """Stream progress events for one extension bundle import job."""
+    progress_service = get_extension_import_progress_service()
+    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Extension import job not found.")
+
+    async def event_generator():
+        cursor = after_id
+        subscriber = await progress_service.subscribe(
+            job_id=job_id,
+            username=current_user.username,
+        )
+        try:
+            for payload in progress_service.list_events(
+                job_id=job_id,
+                username=current_user.username,
+                after_id=cursor,
+            ):
+                event_id = payload.get("event_id")
+                if isinstance(event_id, int):
+                    cursor = max(cursor, event_id)
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                if payload.get("status") in {"complete", "failed"}:
+                    return
+
+            while True:
+                if await raw_request.is_disconnected():
+                    break
+
+                try:
+                    payload = await asyncio.wait_for(
+                        subscriber.queue.get(),
+                        timeout=15.0,
+                    )
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+
+                event_id = payload.get("event_id")
+                if isinstance(event_id, int) and event_id <= cursor:
+                    continue
+                if isinstance(event_id, int):
+                    cursor = event_id
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                if payload.get("status") in {"complete", "failed"}:
+                    break
+        finally:
+            await progress_service.unsubscribe(
+                job_id=job_id,
+                subscriber=subscriber,
+            )
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post(
+    "/extensions/installations/import/bundle/jobs/{job_id}",
+    response_model=ExtensionInstallationResponse,
+)
+async def import_bundle_with_progress(
+    job_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
+) -> ExtensionInstallationResponse:
+    """Upload and install one extension bundle with SSE progress tracking."""
+    progress_service = get_extension_import_progress_service()
+    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Extension import job not found.")
+    if job.completed:
+        raise HTTPException(
+            status_code=409, detail="Extension import job is already done."
+        )
+
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+
+    form_data = await request.form(max_files=100, max_fields=200)
+
+    files_raw = form_data.getlist("files")
+    paths_raw = form_data.getlist("relative_paths")
+    bundle_name_raw = form_data.get("bundle_name")
+    trust_raw = form_data.get("trust_confirmed")
+    overwrite_raw = form_data.get("overwrite_confirmed")
+    upgrade_mode_raw = form_data.get("upgrade_mode")
+
+    if not bundle_name_raw or not isinstance(bundle_name_raw, str):
+        raise HTTPException(status_code=422, detail="bundle_name is required.")
+
+    bundle_files: list[ExtensionBundleImportFile] = []
+    relative_paths: list[str] = []
+    for idx, upload in enumerate(files_raw):
+        if not isinstance(upload, StarletteUploadFile):
+            continue
+        raw_path = paths_raw[idx] if idx < len(paths_raw) else None
+        if isinstance(raw_path, str):
+            relative_paths.append(raw_path)
+        else:
+            relative_paths.append(upload.filename or f"file_{idx}")
+        bundle_files.append(
+            ExtensionBundleImportFile(
+                relative_path=relative_paths[-1],
+                content=await upload.read(),
+            )
+        )
+
+    if len(bundle_files) != len(relative_paths):
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded files and relative paths must have the same length.",
+        )
+
+    def publish_progress(
+        stage: str,
+        label: str,
+        percent: int,
+        detail: str | None,
+    ) -> None:
+        progress_service.publish(
+            job_id,
+            stage=stage,
+            label=label,
+            percent=percent,
+            detail=detail,
+        )
+
+    def run_install() -> ExtensionInstallationResponse:
+        service = ExtensionService(db)
+        try:
+            installation = service.install_bundle(
+                bundle_name=bundle_name_raw,
+                files=bundle_files,
+                installed_by=current_user.username,
+                trust_confirmed=trust_raw == "true",
+                overwrite_confirmed=overwrite_raw == "true",
+                upgrade_mode=(
+                    upgrade_mode_raw if isinstance(upgrade_mode_raw, str) else "force"
+                ),
+                progress=publish_progress,
+            )
+        except ValueError as exc:
+            progress_service.publish(
+                job_id,
+                stage="failed",
+                label="Import failed",
+                percent=100,
+                status="failed",
+                detail=str(exc),
+            )
+            raise
+        return _serialize_installation(
+            installation,
+            service=service,
+            current_user=current_user,
+        )
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(None, run_install)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    progress_service.publish(
+        job_id,
+        stage="complete",
+        label="Extension installed",
+        percent=100,
+        status="complete",
+        metadata=result.model_dump(),
+    )
+    return result
 
 
 @router.post(

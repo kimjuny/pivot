@@ -59,6 +59,7 @@ class SessionResponse(AppBaseModel):
     release_id: int | None
     latest_release_id: int | None = None
     is_stale: bool = False
+    migrated_to_session_id: str | None = None
     project_id: str | None = None
     workspace_id: str | None = None
     workspace_scope: Literal["session_private", "project_shared"] | None = None
@@ -88,6 +89,7 @@ class SessionListItem(AppBaseModel):
     release_id: int | None
     latest_release_id: int | None = None
     is_stale: bool = False
+    migrated_to_session_id: str | None = None
     project_id: str | None = None
     workspace_id: str | None = None
     workspace_scope: Literal["session_private", "project_shared"] | None = None

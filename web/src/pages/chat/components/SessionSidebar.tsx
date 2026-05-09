@@ -3,6 +3,8 @@ import type { KeyboardEvent, ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
+  CircleCheck,
+  CircleFadingArrowUp,
   Folder,
   FolderUp,
   Loader2,
@@ -377,7 +379,7 @@ export function SessionSidebar({
     const isRunning = isSessionRunning(session);
 
     return (
-      <SidebarMenuItem key={session.session_id}>
+      <SidebarMenuItem key={session.session_id} className="group/session-row">
         {isEditing ? (
           <div className="px-2 py-1">
             <Input
@@ -422,27 +424,29 @@ export function SessionSidebar({
               <span className="min-w-0 flex-1 truncate transition-[transform] duration-200 ease-out">
                 {getSessionTitle(session)}
               </span>
-              {session.is_stale ? (
-                <span
-                  className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warning"
-                  title="Agent republished · session needs migration"
-                >
-                  stale
-                </span>
-              ) : null}
             </SidebarMenuButton>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuAction
-                  showOnHover={!session.is_pinned}
+                  showOnHover
                   onClick={(event) => {
                     event.stopPropagation();
                   }}
                   title="Session actions"
-                  className="right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
+                  className="group/action right-2 h-7 w-7 rounded-lg text-sidebar-foreground/45 hover:bg-sidebar-accent hover:text-sidebar-foreground !top-1/2 -translate-y-1/2"
                 >
                   {session.is_pinned ? (
                     <Pin className="h-4 w-4" />
+                  ) : session.migrated_to_session_id ? (
+                    <>
+                      <CircleCheck className="absolute h-4 w-4 transition-opacity duration-150 group-hover/action:opacity-0" />
+                      <MoreHorizontal className="h-4 w-4 opacity-0 transition-opacity duration-150 group-hover/action:opacity-100" />
+                    </>
+                  ) : session.is_stale ? (
+                    <>
+                      <CircleFadingArrowUp className="absolute h-4 w-4 transition-opacity duration-150 group-hover/action:opacity-0" />
+                      <MoreHorizontal className="h-4 w-4 opacity-0 transition-opacity duration-150 group-hover/action:opacity-100" />
+                    </>
                   ) : (
                     <MoreHorizontal className="h-4 w-4" />
                   )}

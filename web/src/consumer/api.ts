@@ -14,6 +14,7 @@ export interface ConsumerSessionListItem {
   release_id?: number | null;
   latest_release_id?: number | null;
   is_stale?: boolean;
+  migrated_to_session_id?: string | null;
   status: string;
   runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;

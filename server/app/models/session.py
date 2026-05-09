@@ -97,6 +97,13 @@ class Session(SQLModel, table=True):
         default=False,
         description="Whether the session is pinned in the sidebar",
     )
+    migrated_to_session_id: str | None = Field(
+        default=None,
+        description=(
+            "When this session has been migrated, points to the new session. "
+            "Null means the session was never migrated."
+        ),
+    )
     chat_history: str | None = Field(
         default=None,
         description="JSON string of complete chat history",
