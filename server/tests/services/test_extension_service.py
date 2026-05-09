@@ -209,12 +209,16 @@ class ExtensionServiceTestCase(unittest.TestCase):
                 extension_root / "channel_providers" / f"{channel_provider_filename}.py"
             ).write_text(
                 (
-                    "from app.channels.providers import BaseBuiltinProvider\n"
+                    "from __future__ import annotations\n"
+                    "from typing import Any\n"
                     "from app.channels.types import (\n"
+                    "    ChannelConfigField,\n"
+                    "    ChannelEndpointInfo,\n"
                     "    ChannelManifest,\n"
                     "    ChannelTestResult,\n"
+                    "    ChannelWebhookResult,\n"
                     ")\n\n"
-                    "class DemoChannelProvider(BaseBuiltinProvider):\n"
+                    "class DemoChannelProvider:\n"
                     "    manifest = ChannelManifest(\n"
                     f'        key="{channel_provider_key}",\n'
                     '        name="Demo Channel",\n'
@@ -227,6 +231,12 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     "        config_schema=[],\n"
                     '        setup_steps=["Save the binding to enable the provider."],\n'
                     "    )\n\n"
+                    "    def validate_config(\n"
+                    "        self, auth_config: dict[str, Any], runtime_config: dict[str, Any],\n"
+                    "    ) -> None:\n"
+                    "        pass\n\n"
+                    "    def build_endpoint_infos(self, binding_id: int) -> list[ChannelEndpointInfo]:\n"
+                    "        return []\n\n"
                     "    def test_connection(\n"
                     "        self,\n"
                     "        auth_config: dict[str, object],\n"
@@ -239,6 +249,22 @@ class ExtensionServiceTestCase(unittest.TestCase):
                     '            status="ok",\n'
                     '            message="Channel extension provider is healthy.",\n'
                     "        )\n\n"
+                    "    def handle_webhook(\n"
+                    "        self, auth_config: dict[str, Any], runtime_config: dict[str, Any],\n"
+                    "        *, method: str, query_params: dict[str, str],\n"
+                    "        headers: dict[str, str], body: bytes,\n"
+                    "    ) -> ChannelWebhookResult:\n"
+                    "        return ChannelWebhookResult()\n\n"
+                    "    def send_text(\n"
+                    "        self, auth_config: dict[str, Any], runtime_config: dict[str, Any],\n"
+                    "        *, conversation_id: str, user_id: str | None, text: str,\n"
+                    "    ) -> None:\n"
+                    "        pass\n\n"
+                    "    def send_action(\n"
+                    "        self, auth_config: dict[str, Any], runtime_config: dict[str, Any],\n"
+                    "        *, context: Any, action: Any,\n"
+                    "    ) -> None:\n"
+                    "        pass\n\n"
                     "PROVIDER = DemoChannelProvider()\n"
                 ),
                 encoding="utf-8",

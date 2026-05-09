@@ -41,7 +41,7 @@ class ChannelManifest(AppBaseModel):
     icon: str
     docs_url: str
     transport_mode: TransportMode
-    visibility: str = "builtin"
+    visibility: str = "extension"
     status: str = "active"
     extension_name: str | None = None
     extension_version: str | None = None
@@ -196,4 +196,15 @@ class ChannelProvider(Protocol):
         action: ChannelOutboundAction,
     ) -> None:
         """Deliver one standardized outbound action through the provider."""
+        ...
+
+    def resolve_media_attachment(
+        self,
+        attachment: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Resolve one raw media attachment into storable bytes.
+
+        Returns ``{"data": bytes, "filename": str, "content_type": str | None}``
+        or ``None`` to skip this attachment.
+        """
         ...

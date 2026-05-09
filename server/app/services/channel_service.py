@@ -11,11 +11,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-from app.channels.work_wechat_socket import (
-    decrypt_work_wechat_media,
-    download_work_wechat_media,
-    infer_work_wechat_filename,
-)
 from app.config import get_settings
 from app.models.agent import Agent
 from app.models.channel import (
@@ -749,6 +744,7 @@ class ChannelService:
         if event.attachments:
             linked_user = self.db.get(User, identity.pivot_user_id)
             channel_file_ids = await self._prepare_channel_attachments(
+                binding=binding,
                 username=(
                     linked_user.username
                     if linked_user is not None
@@ -1059,6 +1055,7 @@ class ChannelService:
     async def _prepare_channel_attachments(
         self,
         *,
+        binding: AgentChannelBinding,
         username: str,
         external_event: ChannelInboundEvent,
     ) -> list[str]:
@@ -1066,46 +1063,26 @@ class ChannelService:
         if not external_event.attachments:
             return []
 
+        provider = self._get_channel_provider(binding.channel_key)
+        resolve = getattr(provider, "resolve_media_attachment", None)
+        if resolve is None or not callable(resolve):
+            return []
+
         file_service = FileService(self.db)
         stored_file_ids: list[str] = []
         for attachment in external_event.attachments:
-            if attachment.get("provider") != "work_wechat":
+            resolved = await run_in_threadpool(resolve, attachment)
+            if resolved is None:
                 continue
-            stored_file = await run_in_threadpool(
-                self._store_work_wechat_attachment,
-                file_service,
-                username,
-                attachment,
+            stored_file = file_service.store_uploaded_file(
+                username=username,
+                filename=resolved["filename"],
+                source=f"channel:{binding.channel_key}",
+                file_bytes=resolved["data"],
             )
             stored_file_ids.append(stored_file.file_id)
 
         return stored_file_ids
-
-    def _store_work_wechat_attachment(
-        self,
-        file_service: FileService,
-        username: str,
-        attachment: dict[str, Any],
-    ) -> Any:
-        """Download, decrypt, and persist one Work WeChat media attachment."""
-        encrypted_bytes, header_filename, content_type = download_work_wechat_media(
-            str(attachment["url"])
-        )
-        decrypted_bytes = decrypt_work_wechat_media(
-            encrypted_bytes,
-            str(attachment["aes_key"]),
-        )
-        filename = infer_work_wechat_filename(
-            message_type=str(attachment.get("message_type") or "file"),
-            header_filename=header_filename,
-            content_type=content_type,
-        )
-        return file_service.store_uploaded_file(
-            username=username,
-            filename=filename,
-            source="channel:work_wechat",
-            file_bytes=decrypted_bytes,
-        )
 
     def _default_attachment_message(self, event: ChannelInboundEvent) -> str:
         """Create a fallback text prompt for attachment-only channel turns."""

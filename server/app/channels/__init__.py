@@ -1,1 +1,1 @@
-"""Channel provider registry and built-in adapters."""
+"""Channel binding runtime and shared types."""

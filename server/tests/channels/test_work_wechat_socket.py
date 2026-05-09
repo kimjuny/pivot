@@ -1,11 +1,16 @@
-"""Tests for the official Work WeChat long-connection helpers."""
+"""Tests for the Work WeChat extension's protocol helpers.
+
+The Work WeChat extension is self-contained at
+extensions/extensions/work_wechat/providers/work_wechat.py.
+These tests load that module directly to validate the protocol logic.
+"""
 
 from __future__ import annotations
 
 import base64
+import importlib.util
 import sys
 import unittest
-from importlib import import_module
 from pathlib import Path
 
 from cryptography.hazmat.backends import default_backend
@@ -15,15 +20,18 @@ SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-socket_module = import_module("app.channels.work_wechat_socket")
+EXTENSION_PATH = SERVER_ROOT.parent.parent / "extensions" / "extensions" / "work_wechat" / "providers" / "work_wechat.py"
+
+_spec = importlib.util.spec_from_file_location("work_wechat_ext", EXTENSION_PATH)
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
 
 
 class WorkWeChatSocketTestCase(unittest.TestCase):
     """Validate frame parsing against the official websocket payload shape."""
 
     def test_parse_text_callback_frame(self) -> None:
-        """Text callbacks should produce a neutral text event."""
-        event = socket_module.build_work_wechat_inbound_event(
+        event = _module.build_inbound_event(
             {
                 "cmd": "aibot_msg_callback",
                 "headers": {"req_id": "req-1"},
@@ -47,8 +55,7 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
         self.assertEqual(event.attachments, [])
 
     def test_parse_enter_chat_event_frame(self) -> None:
-        """Enter-chat events should map to the new official event name."""
-        event = socket_module.build_work_wechat_inbound_event(
+        event = _module.build_inbound_event(
             {
                 "cmd": "aibot_event_callback",
                 "headers": {"req_id": "req-2"},
@@ -69,8 +76,7 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
         self.assertIsNone(event.text)
 
     def test_parse_image_callback_frame(self) -> None:
-        """Image callbacks should expose a decryptable attachment descriptor."""
-        event = socket_module.build_work_wechat_inbound_event(
+        event = _module.build_inbound_event(
             {
                 "cmd": "aibot_msg_callback",
                 "headers": {"req_id": "req-3"},
@@ -93,8 +99,7 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
         self.assertEqual(event.attachments[0]["url"], "https://example.com/file")
 
     def test_parse_mixed_callback_frame_collects_text_and_images(self) -> None:
-        """Mixed callbacks should retain text and image items together."""
-        event = socket_module.build_work_wechat_inbound_event(
+        event = _module.build_inbound_event(
             {
                 "cmd": "aibot_msg_callback",
                 "headers": {"req_id": "req-4"},
@@ -126,7 +131,6 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
         self.assertEqual(event.attachments[0]["message_type"], "image")
 
     def test_decrypt_media_matches_official_algorithm(self) -> None:
-        """Media decryption should match the official SDK's AES-CBC behavior."""
         key = b"0123456789abcdef0123456789abcdef"
         iv = key[:16]
         plaintext = b"hello work wechat media"
@@ -139,20 +143,19 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
         encryptor = cipher.encryptor()
         encrypted = encryptor.update(padded_plaintext) + encryptor.finalize()
 
-        decrypted = socket_module.decrypt_work_wechat_media(
+        decrypted = _module.decrypt_media(
             encrypted,
             base64.b64encode(key).decode("ascii"),
         )
         self.assertEqual(decrypted, plaintext)
 
     def test_decrypt_media_accepts_unpadded_base64_key(self) -> None:
-        """Provider aeskey values may omit trailing '=' padding."""
         key = b"0123456789abcdef0123456789abcdef"
         plaintext = b"file-bytes"
         encrypted = self._encrypt_media_payload(plaintext, key)
         unpadded_key = base64.b64encode(key).decode("ascii").rstrip("=")
 
-        decrypted = socket_module.decrypt_work_wechat_media(
+        decrypted = _module.decrypt_media(
             encrypted,
             unpadded_key,
         )
@@ -161,7 +164,6 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
 
     @staticmethod
     def _pkcs7_pad_32(value: bytes) -> bytes:
-        """Pad bytes to a 32-byte boundary like the official SDK expects."""
         pad_len = 32 - (len(value) % 32)
         if pad_len == 0:
             pad_len = 32
@@ -169,7 +171,6 @@ class WorkWeChatSocketTestCase(unittest.TestCase):
 
     @classmethod
     def _encrypt_media_payload(cls, plaintext: bytes, key: bytes) -> bytes:
-        """Encrypt payload bytes using the same mode expected by decrypt tests."""
         iv = key[:16]
         cipher = Cipher(
             algorithms.AES(key),

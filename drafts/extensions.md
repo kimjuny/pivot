@@ -1020,25 +1020,30 @@ Extension packages created:
 - `extensions/extensions/telegram/` — Telegram polling provider
 - `extensions/extensions/dingtalk/` — DingTalk stub provider
 
-## Phase 4: Retire Built-In Non-Tool Providers
+## Phase 4: Retire Built-In Non-Tool Providers [COMPLETED]
 
 ### Objective
 
 Make extension packages the only source of non-tool providers.
 
-### Work
+### Completed work
 
-1. Remove built-in channel provider registrations from core runtime registries.
-2. Remove built-in web-search provider registrations from core runtime registries.
-3. Keep tool built-ins intact.
-4. Update empty-state and help text to reflect the new model:
-   - "install an extension" instead of "feature unavailable"
+- Removed all `BUILTIN_PROVIDERS`, `BUILTIN_WEB_SEARCH_PROVIDERS`, `BUILTIN_MEDIA_GENERATION_PROVIDERS` dicts and their discovery/registry infrastructure from core
+- Removed `provider_registry_service.py` built-in fallback paths — all provider lookups are now extension-only
+- Moved `work_wechat_socket.py` (664 lines) and `WorkWeChatBindingRuntime` (248 lines) out of `pivot/server/app/channels/` into the self-contained extension at `extensions/extensions/work_wechat/providers/work_wechat.py` (958 lines)
+- Added `resolve_media_attachment()` to the `ChannelProvider` protocol — `channel_service` no longer hardcodes any provider-specific media logic
+- Generalized `channel_service._prepare_channel_attachments()` to delegate to the provider protocol
+- `runtime.py` reduced from 458 to 186 lines — only the generic `ChannelRuntimeManager` remains
+- Added `requirements.txt` to work_wechat extension (`websockets`, `cryptography`, `requests`)
+- Updated `ChannelManifest.visibility` default from `"builtin"` to `"extension"`
+- Tool built-ins remain intact
+- Deleted dead code files: `web_search/providers/`, `web_search/registry.py`, `media_generation/providers.py`, `channels/providers.py`, `channels/work_wechat_socket.py`, `tests/channels/test_channel_providers.py`
 
 ### Acceptance criteria
 
 - normal operation no longer requires built-in non-tool providers
 - all supported non-tool providers are resolved from installed extensions
-- Studio copy matches the new mental model
+- pivot server core contains zero provider-specific implementation code
 
 ## Phase 5: Skills Convergence
 
@@ -1046,11 +1051,12 @@ Make extension packages the only source of non-tool providers.
 
 Align `Skill` with the same external-only direction as providers.
 
-### Scope
+### Current state
 
-- stop treating built-in/builder skill authoring as a strategic path
-- keep skills visible in inventory
-- make extension ownership explicit
+- Extension-contributed skills already appear in the Skill management list as `read_only: True`.
+- Skills have full Auth support (`ResourceType.SKILL`, use/edit access API, Auth tab on settings dialog).
+- Builder skills can be created manually or imported from GitHub/archive.
+- There is no "builtin" source type; skills are `manual`, `network`, `bundle`, `agent`, or extension-contributed.
 
 ### Work
 
@@ -1060,6 +1066,135 @@ Align `Skill` with the same external-only direction as providers.
 4. Avoid expanding builder/built-in skill investment further unless product direction changes.
 
 This phase is intentionally separate because the current conversation named concrete provider migrations first, and those have a clearer operational path.
+
+## Phase 6: Stale Session Detection and Migration
+
+### Objective
+
+Detect consumer sessions that belong to an outdated Agent release and provide a clean migration path.
+
+### Background
+
+Consumer sessions pin to `release_id` at creation time. When an Agent is republished (new `active_release_id`), existing sessions continue running on their original release indefinitely with no warning. The design doc specifies a "latest-release-only rule" and a stale-session blocking dialog with Migrate/Close options (see "Session impact and migration").
+
+### Current state
+
+- `Session.release_id` is pinned at creation (`session_service.py:109`).
+- `Session` model has no staleness field or detection logic.
+- Consumer session listing and access endpoints do not compare `session.release_id` against `agent.active_release_id`.
+- Runtime config is resolved from the pinned release snapshot (immutable), so old sessions continue working silently.
+
+### Work
+
+#### Backend
+
+1. Add staleness detection to session API responses:
+   - When returning sessions to consumers, compute `is_stale` by comparing `session.release_id` against `agent.active_release_id`.
+   - Include `is_stale` and `latest_release_id` in session list and detail responses.
+2. Block new tasks on stale sessions:
+   - When a consumer submits a task to a stale session, return a structured error indicating the session is outdated.
+   - The error should include the reason ("Agent has been republished") and the `latest_release_id`.
+3. Implement session migration endpoint:
+   - `POST /api/sessions/{session_id}/migrate`
+   - Creates a new session pinned to the latest release.
+   - Copies workspace contents from the old session to the new session.
+   - Marks the old session as `closed`.
+   - Returns the new session ID.
+4. Allow read-only access to stale session history (chat messages remain visible).
+
+#### Frontend (Consumer)
+
+1. Session list: show a visual indicator for stale sessions (e.g., badge, dimmed card).
+2. Stale session blocking dialog when user tries to continue an outdated session:
+   - Message: "This agent has been republished with a newer release. A new session is required to continue safely."
+   - Actions: `Migrate` (creates new session, copies workspace, redirects) / `Close` (closes old session, returns to session list).
+3. Stale session history view: allow viewing past messages in read-only mode.
+
+### Acceptance criteria
+
+- Consumer sessions with `release_id != agent.active_release_id` are detected as stale.
+- Stale sessions cannot start new tasks.
+- Migrate action creates a new session with workspace contents preserved.
+- Old session becomes read-only history.
+- New sessions are always created against the latest release.
+
+## Phase 7: Extension Upgrade Reconfiguration Tracking
+
+### Objective
+
+Track per-binding configuration changes after extension upgrades and gate Agent publishing on reconfiguration completion.
+
+### Background
+
+When an extension is upgraded, its provider schemas may change (e.g., new required fields, removed capabilities, changed config structure). Currently, the upgrade migrates bindings to the new installation version but does not track whether any binding needs reconfiguration. The design doc specifies a `needs_reconfiguration` state and per-binding warnings on AgentDetail (see "Upgrade and Uninstall Semantics", "AgentDetail behavior after extension change", "Publish gating rule").
+
+### Current state
+
+- `AgentExtensionBinding` has `enabled`, `priority`, `config_json` but no `status` field.
+- Extension upgrade (`_apply_package_upgrade`) swaps `extension_installation_id` to the new version without marking per-binding status.
+- Agent-level `upgrade_required` state is fully implemented (backend + frontend).
+- Publish unconditionally proceeds and resets `upgrade_required` — no binding-level gate.
+- No per-binding warnings shown on AgentDetail after extension upgrade.
+
+### Work
+
+#### Backend
+
+1. Add `status` field to `AgentExtensionBinding`:
+   ```text
+   status: str = "active"  # "active" | "needs_reconfiguration"
+   ```
+2. During `_apply_package_upgrade()`, compare old vs new manifest schemas for each bound extension:
+   - If `auth_schema` or `config_schema` changed → mark binding as `needs_reconfiguration`.
+   - If contributed capability keys were removed → mark binding as `needs_reconfiguration`.
+   - If no schema changes detected → keep `active`.
+3. Add reconfiguration validation:
+   - `AgentExtensionBinding` with `needs_reconfiguration` cannot be used for new runtime work.
+   - Provide an endpoint to check and clear `needs_reconfiguration` after builder reviews the config:
+     - `PUT /api/agents/{agent_id}/extensions/{installation_id}/confirm` — builder reviews and re-saves config, clears `needs_reconfiguration`.
+4. Gate publish on binding status:
+   - `publish_agent_release` must reject the request if any enabled `AgentExtensionBinding` has `needs_reconfiguration`.
+   - Error message should list which bindings need attention.
+5. Publish flow after upgrade:
+   - Builder repairs bindings in AgentDetail (review config, re-save).
+   - Builder publishes a new release.
+   - Successful publish clears `upgrade_required` → `client_state = "open"`.
+
+#### Frontend (Studio)
+
+1. AgentDetail sidebar: when `upgrade_required`, show a section listing affected extension bindings with per-binding status:
+   - `needs_reconfiguration` bindings: show warning icon, config diff summary, "Reconfigure" button that opens the binding config dialog with the new schema.
+   - `active` bindings: show green checkmark.
+2. Binding config dialog: when `needs_reconfiguration`, highlight new/changed/removed fields.
+3. Publish drawer: block publish with a clear message listing bindings that need reconfiguration.
+4. Publish button: show persistent hint ("Republish required") as described in the design doc.
+
+### Acceptance criteria
+
+- Extension upgrade marks affected bindings as `needs_reconfiguration` when schemas change.
+- Builder sees per-binding warnings on AgentDetail.
+- Builder can review and clear `needs_reconfiguration` per binding.
+- Publish is blocked until all bindings are `active`.
+- After publish, `client_state` resets to `open`.
+- Bindings with unchanged schemas stay `active` through the upgrade.
+
+## Dependency order
+
+```
+Phase 5 (Skills Convergence)
+  — independent, can start anytime
+
+Phase 6 (Stale Session Detection)
+  — independent of Phase 5 and 7
+  — consumer-facing, no Studio changes needed
+
+Phase 7 (Reconfiguration Tracking)
+  — independent of Phase 5 and 6
+  — extends the existing upgrade flow
+  — Studio-facing, builder experience
+```
+
+Phases 5, 6, and 7 are independent of each other and can be implemented in any order or in parallel.
 
 ## Data and API Design
 
@@ -1170,15 +1305,19 @@ Mitigation:
 
 ## Recommended Delivery Order
 
-1. Phase 1: inventory and read-only semantics
-2. Phase 2: Baidu and Tavily extensionization
-3. Phase 3: channel provider extensionization
-4. Phase 4: built-in non-tool provider retirement
+1. Phase 1: inventory and read-only semantics [COMPLETED]
+2. Phase 2: Baidu and Tavily extensionization [COMPLETED]
+3. Phase 3: channel provider extensionization [COMPLETED]
+4. Phase 4: built-in non-tool provider retirement [COMPLETED]
 5. Phase 5: skill model convergence
+6. Phase 6: stale session detection and migration
+7. Phase 7: extension upgrade reconfiguration tracking
 
 ## Recommendation
 
 This work should be implemented in phases, not as one large cutover.
+
+Phases 5, 6, and 7 are independent and can be implemented in parallel.
 
 The best immediate path is:
 

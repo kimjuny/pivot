@@ -1,4 +1,4 @@
-"""Services for resolving built-in and extension-backed providers."""
+"""Services for resolving extension-backed providers."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from app.channels.types import ChannelManifest, ChannelProvider
-from app.media_generation.providers import BUILTIN_MEDIA_GENERATION_PROVIDERS
 from app.media_generation.types import (
     MediaGenerationProvider,
     MediaGenerationProviderManifest,
@@ -19,7 +18,6 @@ from app.models.channel import AgentChannelBinding
 from app.models.extension import ExtensionInstallation
 from app.models.media_generation import AgentMediaProviderBinding
 from app.models.web_search import AgentWebSearchBinding
-from app.orchestration.web_search.providers import BUILTIN_WEB_SEARCH_PROVIDERS
 from app.orchestration.web_search.types import (
     WebSearchProvider,
     WebSearchProviderManifest,
@@ -293,24 +291,21 @@ class ProviderRegistryService:
 
     def list_web_search_providers(self) -> list[WebSearchProvider]:
         """Return every active web-search provider visible to the application."""
-        providers = dict(BUILTIN_WEB_SEARCH_PROVIDERS)
-        for provider in self._load_extension_web_search_providers().values():
-            providers[provider.manifest.key] = provider
-        return list(providers.values())
+        return list(self._load_extension_web_search_providers().values())
 
     def list_media_generation_providers(self) -> list[MediaGenerationProvider]:
         """Return every active media-generation provider visible to the app."""
-        providers = dict(BUILTIN_MEDIA_GENERATION_PROVIDERS)
-        for provider in self._load_extension_media_generation_providers().values():
-            providers[provider.manifest.key] = provider
-        return list(providers.values())
+        return list(self._load_extension_media_generation_providers().values())
 
     def get_web_search_provider(self, provider_key: str) -> WebSearchProvider:
         """Resolve one web-search provider by provider key."""
         provider = self._load_extension_web_search_providers().get(provider_key)
         if provider is not None:
             return provider
-        return BUILTIN_WEB_SEARCH_PROVIDERS[provider_key]
+        raise KeyError(
+            f"Web-search provider '{provider_key}' is not installed. "
+            "Install the corresponding extension to enable this provider."
+        )
 
     def get_media_generation_provider(
         self,
@@ -320,7 +315,10 @@ class ProviderRegistryService:
         provider = self._load_extension_media_generation_providers().get(provider_key)
         if provider is not None:
             return provider
-        return BUILTIN_MEDIA_GENERATION_PROVIDERS[provider_key]
+        raise KeyError(
+            f"Media-generation provider '{provider_key}' is not installed. "
+            "Install the corresponding extension to enable this provider."
+        )
 
     def analyze_manifest_provider_conflicts(
         self,
@@ -331,26 +329,6 @@ class ProviderRegistryService:
         """Return provider-key conflicts for one manifest against active providers."""
         conflicts: list[ProviderConflict] = []
         requested_keys = extract_provider_keys_from_manifest(manifest)
-
-        for provider_key in sorted(requested_keys["media"]):
-            if provider_key in BUILTIN_MEDIA_GENERATION_PROVIDERS:
-                conflicts.append(
-                    ProviderConflict(
-                        provider_type="media",
-                        provider_key=provider_key,
-                        source="builtin",
-                    )
-                )
-
-        for provider_key in sorted(requested_keys["web_search"]):
-            if provider_key in BUILTIN_WEB_SEARCH_PROVIDERS:
-                conflicts.append(
-                    ProviderConflict(
-                        provider_type="web_search",
-                        provider_key=provider_key,
-                        source="builtin",
-                    )
-                )
 
         statement = select(ExtensionInstallation).where(
             col(ExtensionInstallation.status) == "active"

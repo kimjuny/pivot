@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     CHANNEL_RUNTIME_SCAN_INTERVAL_SECONDS: int = 5
     CHANNEL_PROGRESS_MIN_INTERVAL_SECONDS: float = 1.0
     REACT_CURRENT_PLAN_HISTORY_LIMIT: int = 3
+    # Used by extensions/work_wechat
     WORK_WECHAT_WS_URL: str = "wss://openws.work.weixin.qq.com"
     WORK_WECHAT_WS_HEARTBEAT_SECONDS: int = 30
     WORK_WECHAT_WS_REQUEST_TIMEOUT_SECONDS: int = 10
