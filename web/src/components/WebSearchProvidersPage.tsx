@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search } from "@/lib/lucide";
+import { Globe, Search } from "@/lib/lucide";
 import { toast } from "sonner";
 
 import StaggeredFadeInList from "@/components/StaggeredFadeInList";
 import { Badge } from "@/components/ui/badge";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,8 +25,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
-
 import {
   getWebSearchProviders,
   type WebSearchCatalogItem,
@@ -143,13 +149,35 @@ function WebSearchProvidersPage() {
           Loading web search providers…
         </div>
       ) : filteredProviders.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
-          <p className="text-sm">
-            {manifests.length === 0
-              ? "No web search providers found."
-              : "No web search providers match your search."}
-          </p>
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Globe className="size-6" />
+            </EmptyMedia>
+            {manifests.length === 0 ? (
+              <>
+                <EmptyTitle>No web search providers yet</EmptyTitle>
+                <EmptyDescription>
+                  Install an extension that provides web search.
+                </EmptyDescription>
+              </>
+            ) : (
+              <>
+                <EmptyTitle>No web search providers found</EmptyTitle>
+                <EmptyDescription>
+                  No web search providers match your search.
+                </EmptyDescription>
+              </>
+            )}
+          </EmptyHeader>
+          {manifests.length === 0 ? (
+            <EmptyContent>
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/studio/assets/extensions">Install Extension</Link>
+              </Button>
+            </EmptyContent>
+          ) : null}
+        </Empty>
       ) : (
         <>
           <StaggeredFadeInList

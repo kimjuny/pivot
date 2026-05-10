@@ -5,6 +5,7 @@ import {
   ArrowRight as ArrowRightIcon,
   ArrowLeft as ArrowLeftIcon,
   ArrowUp as ArrowUpIcon,
+  Blocks as BlocksIcon,
   Bot as BotIcon,
   Brain as BrainIcon,
   BugPlay as BugPlayIcon,
@@ -104,6 +105,7 @@ export const AlertTriangle = withDefaultStroke(AlertTriangleIcon);
 export const ArrowRight = withDefaultStroke(ArrowRightIcon);
 export const ArrowLeft = withDefaultStroke(ArrowLeftIcon);
 export const ArrowUp = withDefaultStroke(ArrowUpIcon);
+export const Blocks = withDefaultStroke(BlocksIcon);
 export const Bot = withDefaultStroke(BotIcon);
 export const Brain = withDefaultStroke(BrainIcon);
 export const BugPlay = withDefaultStroke(BugPlayIcon);

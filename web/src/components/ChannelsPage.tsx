@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, X } from "@/lib/lucide";
+import { Radio, Search, X } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -200,11 +208,35 @@ function ChannelsPage() {
       {isLoading ? (
         <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading channels…</div>
       ) : filteredChannels.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
-          <p className="text-sm">
-            {manifests.length === 0 ? 'No channels found.' : 'No channels match your search.'}
-          </p>
-        </div>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Radio className="size-6" />
+            </EmptyMedia>
+            {manifests.length === 0 ? (
+              <>
+                <EmptyTitle>No channels yet</EmptyTitle>
+                <EmptyDescription>
+                  Install an extension that provides channels.
+                </EmptyDescription>
+              </>
+            ) : (
+              <>
+                <EmptyTitle>No channels found</EmptyTitle>
+                <EmptyDescription>
+                  No channels match your search.
+                </EmptyDescription>
+              </>
+            )}
+          </EmptyHeader>
+          {manifests.length === 0 ? (
+            <EmptyContent>
+              <Button size="sm" variant="outline" asChild>
+                <Link to="/studio/assets/extensions">Install Extension</Link>
+              </Button>
+            </EmptyContent>
+          ) : null}
+        </Empty>
       ) : (
         <>
           <StaggeredFadeInList

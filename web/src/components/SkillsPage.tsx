@@ -9,9 +9,18 @@ import {
   Trash2,
   Upload,
   X,
+  Zap,
 } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import {
   createSkill,
   deleteSkill,
@@ -522,19 +531,35 @@ function SkillsPage() {
       {isLoading ? (
         <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading skills…</div>
       ) : filteredRows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Zap className="size-6" />
+            </EmptyMedia>
+            {allRows.length === 0 ? (
+              <>
+                <EmptyTitle>No skills yet</EmptyTitle>
+                <EmptyDescription>
+                  Create your first skill to get started.
+                </EmptyDescription>
+              </>
+            ) : (
+              <>
+                <EmptyTitle>No skills found</EmptyTitle>
+                <EmptyDescription>
+                  No skills match your search.
+                </EmptyDescription>
+              </>
+            )}
+          </EmptyHeader>
           {allRows.length === 0 ? (
-            <>
-              <p className="text-sm">No skills found.</p>
+            <EmptyContent>
               <Button size="sm" variant="outline" onClick={() => void openCreateDialog()}>
-                <Plus className="w-4 h-4 mr-1.5" />
-                Create your first skill
+                Create Skill
               </Button>
-            </>
-          ) : (
-            <p className="text-sm">No skills match your search.</p>
-          )}
-        </div>
+            </EmptyContent>
+          ) : null}
+        </Empty>
       ) : (
         <>
           <Table>

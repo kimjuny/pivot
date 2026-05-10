@@ -7,12 +7,21 @@ import {
   Search,
   SlidersHorizontal,
   Trash2,
+  Wrench,
   X,
 } from '@/lib/lucide';
 import { toast } from 'sonner';
 
 import ResourceAuthTab from '@/components/ResourceAuthTab';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import {
@@ -560,19 +569,35 @@ function ToolsPage() {
             Loading tools…
           </div>
         ) : filteredRows.length === 0 ? (
-          <div className="flex h-40 flex-col items-center justify-center gap-3 text-muted-foreground">
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Wrench className="size-6" />
+              </EmptyMedia>
+              {allRows.length === 0 ? (
+                <>
+                  <EmptyTitle>No tools yet</EmptyTitle>
+                  <EmptyDescription>
+                    Create your first tool to get started.
+                  </EmptyDescription>
+                </>
+              ) : (
+                <>
+                  <EmptyTitle>No tools found</EmptyTitle>
+                  <EmptyDescription>
+                    No tools match your search.
+                  </EmptyDescription>
+                </>
+              )}
+            </EmptyHeader>
             {allRows.length === 0 ? (
-              <>
-                <p className="text-sm">No tools found.</p>
+              <EmptyContent>
                 <Button size="sm" variant="outline" onClick={() => void openCreateDialog()}>
-                  <Plus className="mr-1.5 h-4 w-4" />
-                  Create your first tool
+                  Create Tool
                 </Button>
-              </>
-            ) : (
-              <p className="text-sm">No tools match your search.</p>
-            )}
-          </div>
+              </EmptyContent>
+            ) : null}
+          </Empty>
         ) : (
           <>
             <Table>

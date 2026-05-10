@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   CheckCircle2,
+  Blocks,
   Info,
   Loader2,
   MoreHorizontal,
@@ -28,6 +29,14 @@ import ConfirmationModal from './ConfirmationModal';
 import { ExtensionLogoAvatar } from '@/components/ExtensionLogoAvatar';
 import StaggeredFadeInList from '@/components/StaggeredFadeInList';
 import { Badge } from '@/components/ui/badge';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from '@/components/ui/empty';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Card } from '@/components/ui/card';
@@ -834,15 +843,28 @@ function ExtensionsPage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : filteredPackages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
-            <p className="text-sm">
-              {packages.length === 0
-                ? 'No extensions installed yet.'
-                : searchQuery || contributorFilter !== 'all'
-                  ? 'No extensions match your current filters.'
-                  : 'No extensions match your search.'}
-            </p>
-          </div>
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Blocks className="size-6" />
+              </EmptyMedia>
+              {packages.length === 0 ? (
+                <>
+                  <EmptyTitle>No extensions yet</EmptyTitle>
+                  <EmptyDescription>
+                    Install your first extension to add capabilities.
+                  </EmptyDescription>
+                </>
+              ) : (
+                <>
+                  <EmptyTitle>No extensions found</EmptyTitle>
+                  <EmptyDescription>
+                    No extensions match your search.
+                  </EmptyDescription>
+                </>
+              )}
+            </EmptyHeader>
+          </Empty>
         ) : (
           <>
             <StaggeredFadeInList
