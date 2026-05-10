@@ -53,6 +53,7 @@ interface StudioMenuLinkItem {
   to?: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   requiredPermission?: string;
+  requiredPermissions?: string[];
   disabled?: boolean;
 }
 
@@ -253,25 +254,11 @@ function Navigation() {
       requiredPermission: 'operations.view',
     },
     {
-      title: 'Users',
-      description: 'Manage accounts, role assignment, and access status.',
-      icon: User,
-      to: '/studio/operations/users',
-      requiredPermission: 'users.manage',
-    },
-    {
-      title: 'Groups',
-      description: 'Manage batch authorization groups and their members.',
-      icon: Users,
-      to: '/studio/operations/groups',
-      requiredPermission: 'groups.manage',
-    },
-    {
-      title: 'Roles',
-      description: 'Configure system permissions for user roles.',
+      title: 'Access Management',
+      description: 'Manage users, groups, and role-based permissions.',
       icon: ShieldCheck,
-      to: '/studio/operations/roles',
-      requiredPermission: 'roles.manage',
+      to: '/studio/operations/access',
+      requiredPermissions: ['users.manage', 'groups.manage', 'roles.manage'],
     },
     {
       title: 'Tool and Sandbox Logs',
@@ -350,13 +337,25 @@ function Navigation() {
   const canAccessStudio = hasPermission(user, 'studio.access');
   const canManageAgents = hasPermission(user, 'agents.manage');
   const visibleAssetsMenuItems = assetsMenuItems.filter(
-    (item) => !item.requiredPermission || hasPermission(user, item.requiredPermission),
+    (item) => {
+      if (item.requiredPermissions) return item.requiredPermissions.some((p) => hasPermission(user, p));
+      if (item.requiredPermission) return hasPermission(user, item.requiredPermission);
+      return true;
+    },
   );
   const visibleConnectionsMenuItems = connectionsMenuItems.filter(
-    (item) => !item.requiredPermission || hasPermission(user, item.requiredPermission),
+    (item) => {
+      if (item.requiredPermissions) return item.requiredPermissions.some((p) => hasPermission(user, p));
+      if (item.requiredPermission) return hasPermission(user, item.requiredPermission);
+      return true;
+    },
   );
   const visibleOperationsMenuItems = operationsMenuItems.filter(
-    (item) => !item.requiredPermission || hasPermission(user, item.requiredPermission),
+    (item) => {
+      if (item.requiredPermissions) return item.requiredPermissions.some((p) => hasPermission(user, p));
+      if (item.requiredPermission) return hasPermission(user, item.requiredPermission);
+      return true;
+    },
   );
 
   return (

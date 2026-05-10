@@ -194,7 +194,6 @@ class ExtensionInstallationAccessUserOption(AppBaseModel):
 
     id: int
     username: str
-    display_name: str | None
     email: str | None
 
 

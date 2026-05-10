@@ -26,9 +26,7 @@ import ConsumerAgentPage from '@/consumer/ConsumerAgentPage'
 import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator'
 import SessionHistoryPage from '@/studio/operations/SessionHistoryPage'
 import SessionDetailPage from '@/studio/operations/SessionDetailPage'
-import UsersPage from '@/studio/operations/UsersPage'
-import RolesPage from '@/studio/operations/RolesPage'
-import GroupsPage from '@/studio/operations/GroupsPage'
+import AccessManagementPage from '@/studio/operations/AccessManagementPage'
 import './index.css'
 
 interface PermissionTarget {
@@ -47,9 +45,9 @@ const studioTargets: PermissionTarget[] = [
   { permission: 'media_generation.manage', to: '/studio/connections/media-generation' },
   { permission: 'web_search.manage', to: '/studio/connections/web-search' },
   { permission: 'operations.view', to: '/studio/operations/sessions' },
-  { permission: 'users.manage', to: '/studio/operations/users' },
-  { permission: 'groups.manage', to: '/studio/operations/groups' },
-  { permission: 'roles.manage', to: '/studio/operations/roles' },
+  { permission: 'users.manage', to: '/studio/operations/access' },
+  { permission: 'groups.manage', to: '/studio/operations/access' },
+  { permission: 'roles.manage', to: '/studio/operations/access' },
 ];
 
 const assetTargets: PermissionTarget[] = [
@@ -67,9 +65,9 @@ const connectionTargets: PermissionTarget[] = [
 
 const operationTargets: PermissionTarget[] = [
   { permission: 'operations.view', to: '/studio/operations/sessions' },
-  { permission: 'users.manage', to: '/studio/operations/users' },
-  { permission: 'groups.manage', to: '/studio/operations/groups' },
-  { permission: 'roles.manage', to: '/studio/operations/roles' },
+  { permission: 'users.manage', to: '/studio/operations/access' },
+  { permission: 'groups.manage', to: '/studio/operations/access' },
+  { permission: 'roles.manage', to: '/studio/operations/access' },
 ];
 
 function firstAllowedTarget(
@@ -123,6 +121,31 @@ export function PermissionRoute({
 
   if (!hasPermission(activeUser, permission)) {
     return <Navigate to={fallback} replace />;
+  }
+
+  return <>{children}</>;
+}
+
+/** Permission gate for Access Management page — allows entry with any of the three permissions. */
+function AccessManagementGate({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuth();
+  const activeUser = user ?? getStoredUser();
+
+  if (isLoading) {
+    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
+  }
+
+  if (!activeUser || !isTokenValid()) {
+    return <Navigate to="/" replace />;
+  }
+
+  const hasAnyPermission =
+    hasPermission(activeUser, 'users.manage') ||
+    hasPermission(activeUser, 'groups.manage') ||
+    hasPermission(activeUser, 'roles.manage');
+
+  if (!hasAnyPermission) {
+    return <Navigate to="/access-denied" replace />;
   }
 
   return <>{children}</>;
@@ -335,9 +358,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/studio/operations" element={<PermissionRedirect targets={operationTargets} />} />
             <Route path="/studio/operations/sessions" element={<PermissionRoute permission="operations.view"><AuthenticatedLayout><SessionHistoryPage /></AuthenticatedLayout></PermissionRoute>} />
             <Route path="/studio/operations/sessions/:sessionId" element={<PermissionRoute permission="operations.view"><AuthenticatedLayout><SessionDetailPage /></AuthenticatedLayout></PermissionRoute>} />
-            <Route path="/studio/operations/users" element={<PermissionRoute permission="users.manage"><AuthenticatedLayout><UsersPage /></AuthenticatedLayout></PermissionRoute>} />
-            <Route path="/studio/operations/groups" element={<PermissionRoute permission="groups.manage"><AuthenticatedLayout><GroupsPage /></AuthenticatedLayout></PermissionRoute>} />
-            <Route path="/studio/operations/roles" element={<PermissionRoute permission="roles.manage"><AuthenticatedLayout><RolesPage /></AuthenticatedLayout></PermissionRoute>} />
+            <Route path="/studio/operations/access" element={<AccessManagementGate><AuthenticatedLayout><AccessManagementPage /></AuthenticatedLayout></AccessManagementGate>} />
+            <Route path="/studio/operations/users" element={<Navigate to="/studio/operations/access" replace />} />
+            <Route path="/studio/operations/groups" element={<Navigate to="/studio/operations/access" replace />} />
+            <Route path="/studio/operations/roles" element={<Navigate to="/studio/operations/access" replace />} />
 
             <Route path="/agents" element={<PermissionRoute permission="agents.manage"><AgentListPage /></PermissionRoute>} />
             <Route path="/agent/:agentId" element={<PermissionRoute permission="agents.manage"><AgentDetailPage /></PermissionRoute>} />

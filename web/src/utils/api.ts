@@ -167,7 +167,6 @@ export interface AgentAccess {
 export interface AgentAccessUserOption {
   id: number;
   username: string;
-  display_name: string | null;
   email: string | null;
 }
 

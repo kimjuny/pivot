@@ -114,7 +114,6 @@ def _serialize_llm_access_options(
             LLMAccessUserOption(
                 id=user.id or 0,
                 username=user.username,
-                display_name=user.display_name,
                 email=user.email,
             )
             for user in users

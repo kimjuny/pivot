@@ -40,7 +40,7 @@ const EMPTY_ACCESS: ProjectAccess = {
 };
 
 function userLabel(user: ProjectAccessUserOption): string {
-  return user.display_name || user.username;
+  return user.username;
 }
 
 function userMatchesSearch(
@@ -49,7 +49,6 @@ function userMatchesSearch(
 ): boolean {
   const haystack = [
     user.username,
-    user.display_name ?? "",
     user.email ?? "",
   ].join(" ").toLowerCase();
   return haystack.includes(search.trim().toLowerCase());

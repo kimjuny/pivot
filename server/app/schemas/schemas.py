@@ -111,7 +111,6 @@ class AgentAccessUserOption(AppBaseModel):
 
     id: int
     username: str
-    display_name: str | None
     email: str | None
 
 
@@ -361,7 +360,6 @@ class LLMAccessUserOption(AppBaseModel):
 
     id: int
     username: str
-    display_name: str | None
     email: str | None
 
 

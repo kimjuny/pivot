@@ -123,7 +123,6 @@ def _serialize_agent_access_options(
             AgentAccessUserOption(
                 id=user.id or 0,
                 username=user.username,
-                display_name=user.display_name,
                 email=user.email,
             )
             for user in users

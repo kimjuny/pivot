@@ -33,7 +33,6 @@ class UserService:
                 password_hash=get_password_hash("123456"),
                 role_id=admin_role.id,
                 status="active",
-                display_name="Default Admin",
             )
         else:
             user.role_id = admin_role.id
@@ -55,7 +54,6 @@ class UserService:
         username: str,
         password: str,
         role_id: int,
-        display_name: str | None = None,
         email: str | None = None,
     ) -> User:
         """Create one user."""
@@ -77,7 +75,6 @@ class UserService:
             password_hash=get_password_hash(password),
             role_id=role_id,
             status="active",
-            display_name=display_name,
             email=email,
         )
         self.db.add(user)
@@ -104,7 +101,6 @@ class UserService:
         user_id: int,
         role_id: int | None = None,
         status: str | None = None,
-        display_name: str | None = None,
         email: str | None = None,
     ) -> User | None:
         """Update administrative user fields."""
@@ -120,8 +116,6 @@ class UserService:
             if status not in {"active", "disabled"}:
                 raise ValueError("Unsupported user status")
             user.status = status
-        if display_name is not None:
-            user.display_name = display_name.strip() or None
         if email is not None:
             user.email = email.strip() or None
         user.updated_at = datetime.now(UTC)

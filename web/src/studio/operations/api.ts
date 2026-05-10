@@ -205,7 +205,6 @@ export interface OperationsUser {
   role_id: number;
   role_key: string;
   status: "active" | "disabled";
-  display_name: string | null;
   email: string | null;
   created_at: string;
   updated_at: string;
@@ -235,7 +234,6 @@ export interface OperationsGroupMember {
   id: number;
   username: string;
   status: "active" | "disabled";
-  display_name: string | null;
   email: string | null;
 }
 
@@ -243,14 +241,12 @@ export interface OperationsUserCreatePayload {
   username: string;
   password: string;
   role_id: number;
-  display_name?: string | null;
   email?: string | null;
 }
 
 export interface OperationsUserUpdatePayload {
   role_id?: number;
   status?: "active" | "disabled";
-  display_name?: string | null;
   email?: string | null;
 }
 

@@ -97,7 +97,6 @@ class ToolAccessUserOption(BaseModel):
 
     id: int
     username: str
-    display_name: str | None
     email: str | None
 
 
@@ -160,7 +159,6 @@ def _serialize_tool_access_options(db: Session) -> ToolAccessOptionsResponse:
             ToolAccessUserOption(
                 id=user.id or 0,
                 username=user.username,
-                display_name=user.display_name,
                 email=user.email,
             )
             for user in UserService(db).list_users()

@@ -25,7 +25,6 @@ class User(SQLModel, table=True):
     password_hash: str = Field(max_length=255)
     role_id: int = Field(foreign_key="userrole.id", index=True)
     status: str = Field(default="active", index=True, max_length=32)
-    display_name: str | None = Field(default=None, max_length=120)
     email: str | None = Field(default=None, index=True, unique=True, max_length=255)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

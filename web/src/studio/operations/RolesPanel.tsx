@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
@@ -32,8 +32,9 @@ import {
   type OperationsPermission,
   type OperationsRole,
 } from "@/studio/operations/api";
-import { Plus, ShieldCheck } from "@/lib/lucide";
+import { ShieldCheck } from "@/lib/lucide";
 import { cn } from "@/lib/utils";
+import type { PanelHandle } from "@/studio/operations/UsersPanel";
 
 const EMPTY_ROLE_FORM = {
   key: "",
@@ -54,7 +55,8 @@ function groupPermissions(permissions: OperationsPermission[]) {
   );
 }
 
-export default function RolesPage() {
+/** Panel for managing roles and their permission assignments. */
+const RolesPanel = forwardRef<PanelHandle>(function RolesPanel(_props, ref) {
   const [roles, setRoles] = useState<OperationsRole[]>([]);
   const [permissions, setPermissions] = useState<OperationsPermission[]>([]);
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
@@ -73,6 +75,10 @@ export default function RolesPage() {
     () => groupPermissions(permissions),
     [permissions],
   );
+
+  useImperativeHandle(ref, () => ({
+    triggerCreate: () => setIsCreateOpen(true),
+  }));
 
   async function load() {
     setLoading(true);
@@ -161,20 +167,7 @@ export default function RolesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Roles</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Configure system permissions assigned to each role
-          </p>
-        </div>
-        <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          New Role
-        </Button>
-      </div>
-
+    <>
       {error && (
         <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
@@ -235,7 +228,7 @@ export default function RolesPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="h-4 w-4 text-primary" />
-                      <h2 className="font-semibold">{selectedRole.name}</h2>
+                      <h3 className="font-semibold">{selectedRole.name}</h3>
                       <Badge variant="outline">{selectedRole.key}</Badge>
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -251,7 +244,7 @@ export default function RolesPage() {
                   {Object.entries(groupedPermissions).map(
                     ([category, categoryPermissions]) => (
                       <section key={category}>
-                        <h3 className="mb-3 text-sm font-medium">{category}</h3>
+                        <h4 className="mb-3 text-sm font-medium">{category}</h4>
                         <div className="grid gap-3 sm:grid-cols-2">
                           {categoryPermissions.map((permission) => {
                             const checked = selectedPermissionKeys.has(permission.key);
@@ -351,6 +344,8 @@ export default function RolesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
-}
+});
+
+export default RolesPanel;

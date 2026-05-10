@@ -22,7 +22,6 @@ export interface ResourceAuthAccess {
 export interface ResourceAuthUserOption {
   id: number;
   username: string;
-  display_name: string | null;
   email: string | null;
 }
 
@@ -54,7 +53,7 @@ interface ResourceAuthTabProps {
 type AccessSection = 'use' | 'edit';
 
 function userLabel(user: ResourceAuthUserOption): string {
-  return user.display_name || user.username;
+  return user.username;
 }
 
 function toggleId(ids: number[], id: number, checked: boolean): number[] {

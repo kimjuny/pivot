@@ -29,7 +29,6 @@ class OperationsUserResponse(AppBaseModel):
     role_id: int
     role_key: str
     status: str
-    display_name: str | None
     email: str | None
     created_at: str
     updated_at: str
@@ -41,7 +40,6 @@ class OperationsUserCreate(AppBaseModel):
     username: str
     password: str
     role_id: int
-    display_name: str | None = None
     email: str | None = None
 
 
@@ -50,7 +48,6 @@ class OperationsUserUpdate(AppBaseModel):
 
     role_id: int | None = None
     status: str | None = None
-    display_name: str | None = None
     email: str | None = None
 
 
@@ -67,7 +64,6 @@ def _serialize_user(user: User, role_keys: dict[int, str]) -> OperationsUserResp
         role_id=user.role_id,
         role_key=role_keys.get(user.role_id, "unknown"),
         status=user.status,
-        display_name=user.display_name,
         email=user.email,
         created_at=user.created_at.replace(tzinfo=UTC).isoformat(),
         updated_at=user.updated_at.replace(tzinfo=UTC).isoformat(),
@@ -102,7 +98,6 @@ async def create_operations_user(
             username=payload.username,
             password=payload.password,
             role_id=payload.role_id,
-            display_name=payload.display_name,
             email=payload.email,
         )
     except ValueError as exc:
@@ -124,7 +119,6 @@ async def update_operations_user(
             user_id=user_id,
             role_id=payload.role_id,
             status=payload.status,
-            display_name=payload.display_name,
             email=payload.email,
         )
     except ValueError as exc:

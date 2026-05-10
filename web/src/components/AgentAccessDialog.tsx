@@ -41,13 +41,12 @@ const EMPTY_ACCESS: AgentAccess = {
 };
 
 function userLabel(user: AgentAccessUserOption): string {
-  return user.display_name || user.username;
+  return user.username;
 }
 
 function userMatchesSearch(user: AgentAccessUserOption, search: string): boolean {
   const haystack = [
     user.username,
-    user.display_name ?? '',
     user.email ?? '',
   ].join(' ').toLowerCase();
   return haystack.includes(search.trim().toLowerCase());

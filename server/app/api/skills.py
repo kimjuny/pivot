@@ -160,7 +160,6 @@ class SkillAccessUserOption(BaseModel):
 
     id: int
     username: str
-    display_name: str | None
     email: str | None
 
 
@@ -219,7 +218,6 @@ def _serialize_skill_access_options(db: Session) -> SkillAccessOptionsResponse:
             SkillAccessUserOption(
                 id=user.id or 0,
                 username=user.username,
-                display_name=user.display_name,
                 email=user.email,
             )
             for user in UserService(db).list_users()

@@ -53,7 +53,6 @@ class OperationsGroupMemberResponse(AppBaseModel):
     id: int
     username: str
     status: str
-    display_name: str | None
     email: str | None
 
 
@@ -83,7 +82,6 @@ def _serialize_member(user: User) -> OperationsGroupMemberResponse:
         id=user.id or 0,
         username=user.username,
         status=user.status,
-        display_name=user.display_name,
         email=user.email,
     )
 

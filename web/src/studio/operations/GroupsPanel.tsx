@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
@@ -15,7 +15,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Users } from "@/lib/lucide";
+import { Trash2, Users } from "@/lib/lucide";
 import { cn } from "@/lib/utils";
 import {
   createOperationsGroup,
@@ -29,6 +29,7 @@ import {
   type OperationsGroupMember,
 } from "@/studio/operations/api";
 import { formatTimestamp } from "@/utils/timestamp";
+import type { PanelHandle } from "@/studio/operations/UsersPanel";
 
 const EMPTY_GROUP_FORM = {
   name: "",
@@ -36,13 +37,12 @@ const EMPTY_GROUP_FORM = {
 };
 
 function memberLabel(user: OperationsGroupMember): string {
-  return user.display_name || user.username;
+  return user.username;
 }
 
 function matchesSearch(user: OperationsGroupMember, search: string): boolean {
   const haystack = [
     user.username,
-    user.display_name ?? "",
     user.email ?? "",
   ].join(" ").toLowerCase();
   return haystack.includes(search.trim().toLowerCase());
@@ -58,7 +58,8 @@ function toggleId(ids: Set<number>, id: number, checked: boolean): Set<number> {
   return next;
 }
 
-export default function GroupsPage() {
+/** Panel for managing authorization groups — master-detail with member assignment. */
+const GroupsPanel = forwardRef<PanelHandle>(function GroupsPanel(_props, ref) {
   const [groups, setGroups] = useState<OperationsGroup[]>([]);
   const [userOptions, setUserOptions] = useState<OperationsGroupMember[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
@@ -101,6 +102,10 @@ export default function GroupsPage() {
     }
     return false;
   }, [memberBaselineIds, selectedMemberIds]);
+
+  useImperativeHandle(ref, () => ({
+    triggerCreate: () => setIsCreateOpen(true),
+  }));
 
   async function load() {
     setLoading(true);
@@ -258,20 +263,7 @@ export default function GroupsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Groups</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Manage batch authorization groups
-          </p>
-        </div>
-        <Button onClick={() => setIsCreateOpen(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          New Group
-        </Button>
-      </div>
-
+    <>
       {error && (
         <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
@@ -316,7 +308,7 @@ export default function GroupsPage() {
               <section className="rounded-md border p-4">
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-base font-semibold">Group Details</h2>
+                    <h3 className="text-base font-semibold">Group Details</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
                       Created {formatTimestamp(selectedGroup.created_at)}
                     </p>
@@ -374,7 +366,7 @@ export default function GroupsPage() {
               <section className="rounded-md border p-4">
                 <div className="mb-4 flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="text-base font-semibold">Members</h2>
+                    <h3 className="text-base font-semibold">Members</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {selectedMemberIds.size} selected
                     </p>
@@ -478,6 +470,8 @@ export default function GroupsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
-}
+});
+
+export default GroupsPanel;

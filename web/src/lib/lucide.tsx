@@ -20,6 +20,8 @@ import {
   Circle as CircleIcon,
   CircleFadingArrowUp as CircleFadingArrowUpIcon,
   CircleCheck as CircleCheckIcon,
+  CirclePause as CirclePauseIcon,
+  CirclePlay as CirclePlayIcon,
   Copy as CopyIcon,
   Download as DownloadIcon,
   Expand as ExpandIcon,
@@ -47,6 +49,7 @@ import {
   ListTodo as ListTodoIcon,
   Loader2 as Loader2Icon,
   Lock as LockIcon,
+  Mail as MailIcon,
   LogIn as LogInIcon,
   LogOut as LogOutIcon,
   Maximize2 as Maximize2Icon,
@@ -122,6 +125,8 @@ export const ChevronRight = withDefaultStroke(ChevronRightIcon);
 export const ChevronUp = withDefaultStroke(ChevronUpIcon);
 export const ChevronsUpDown = withDefaultStroke(ChevronsUpDownIcon);
 export const Circle = withDefaultStroke(CircleIcon);
+export const CirclePause = withDefaultStroke(CirclePauseIcon);
+export const CirclePlay = withDefaultStroke(CirclePlayIcon);
 export const Copy = withDefaultStroke(CopyIcon);
 export const Download = withDefaultStroke(DownloadIcon);
 export const Expand = withDefaultStroke(ExpandIcon);
@@ -149,6 +154,7 @@ export const Link2 = withDefaultStroke(Link2Icon);
 export const ListTodo = withDefaultStroke(ListTodoIcon);
 export const Loader2 = withDefaultStroke(Loader2Icon);
 export const Lock = withDefaultStroke(LockIcon);
+export const Mail = withDefaultStroke(MailIcon);
 export const LogIn = withDefaultStroke(LogInIcon);
 export const LogOut = withDefaultStroke(LogOutIcon);
 export const Maximize2 = withDefaultStroke(Maximize2Icon);
