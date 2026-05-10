@@ -7,7 +7,7 @@ import {
   Info,
   Loader2,
   Upload,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from 'sonner';
 
 import type {

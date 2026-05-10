@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { ArrowRight, Info } from '@/lib/lucide';
+import { ArrowRight, Info } from 'lucide-react';
 import {
   Tooltip,
   TooltipContent,

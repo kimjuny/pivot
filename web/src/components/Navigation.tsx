@@ -20,7 +20,7 @@ import {
   FileText,
   Globe,
   ShieldCheck,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect, type ComponentType, type SVGProps } from 'react';
 import { getAgents } from '../utils/api';

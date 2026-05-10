@@ -1,4 +1,4 @@
-import { AlertTriangle, Loader2 } from "@/lib/lucide";
+import { AlertTriangle, Loader2 } from "lucide-react";
 import {
     AlertDialog,
     AlertDialogAction,

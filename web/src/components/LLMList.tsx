@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Plus, Pencil, Trash2, Server, X, Download, Upload, Copy } from "@/lib/lucide";
+import { Plus, Pencil, Trash2, Server, X, Download, Upload, Copy } from "lucide-react";
 import { toast } from 'sonner';
 import {
   getLLMs,

@@ -1,4 +1,4 @@
-import { AlertCircle } from "@/lib/lucide";
+import { AlertCircle } from "lucide-react";
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

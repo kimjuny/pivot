@@ -1,4 +1,4 @@
-import { Layers } from "@/lib/lucide";
+import { Layers } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ExternalLink, Inbox, Loader2, Plus, RefreshCcw } from "@/lib/lucide";
+import { ExternalLink, Inbox, Loader2, Plus, RefreshCcw } from "lucide-react";
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';

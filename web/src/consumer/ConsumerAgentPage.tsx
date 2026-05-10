@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot } from "@/lib/lucide";
+import { Bot } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";

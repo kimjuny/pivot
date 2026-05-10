@@ -7,7 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { History, Info, X } from '@/lib/lucide';
+import { History, Info, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import ChangeSummaryHoverCard from './ChangeSummaryHoverCard';
 import type { AgentClientState } from '@/types';

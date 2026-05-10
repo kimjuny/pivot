@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 
-import { Expand, Minimize2, X } from "@/lib/lucide";
+import { Expand, Minimize2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**

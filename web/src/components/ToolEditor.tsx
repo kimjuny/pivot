@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import * as Monaco from 'monaco-editor';
-import { AlertCircle, AlertTriangle, CheckCircle2, Loader2 } from "@/lib/lucide";
+import { AlertCircle, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 import { checkToolAst, checkToolRuff, checkToolPyright, type ToolDiagnostic } from '../utils/api';
 import { useTheme } from '@/lib/use-theme';
 import { Button } from '@/components/ui/button';

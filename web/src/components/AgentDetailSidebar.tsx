@@ -14,7 +14,7 @@ import {
     Settings2,
     PanelLeft,
     Globe,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
     Sidebar,

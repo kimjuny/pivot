@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bot, Plus } from "@/lib/lucide";
+import { Bot, Plus } from "lucide-react";
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/auth-core';
 import {

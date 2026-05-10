@@ -31,7 +31,7 @@ import {
   Copy,
   FileText,
   History,
-} from "@/lib/lucide";
+} from "lucide-react";
 
 /**
  * Maps the Operations task shape into the TaskMessage format that

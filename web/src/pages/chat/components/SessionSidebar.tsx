@@ -16,7 +16,7 @@ import {
   Share2,
   SquarePen,
   Trash2,
-} from "@/lib/lucide";
+} from "lucide-react";
 
 import {
   DropdownMenu,

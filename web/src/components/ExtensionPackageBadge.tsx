@@ -1,4 +1,4 @@
-import { Server } from "@/lib/lucide";
+import { Server } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 

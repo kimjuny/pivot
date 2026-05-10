@@ -19,7 +19,7 @@ import {
   Square,
   XCircle,
   Zap,
-} from "@/lib/lucide";
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import {

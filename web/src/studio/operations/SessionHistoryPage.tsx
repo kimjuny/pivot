@@ -41,7 +41,7 @@ import {
   ChevronRight,
   FileText,
   History,
-} from "@/lib/lucide";
+} from "lucide-react";
 
 /** Session status badge color mapping. */
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {

@@ -5,7 +5,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
-import { AlertTriangle } from "@/lib/lucide";
+import { AlertTriangle } from "lucide-react";
 import { getStorageStatus, type StorageStatus } from "@/utils/api";
 
 let cachedBannerStatus: StorageStatus | null | undefined;

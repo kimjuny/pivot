@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { Check, Copy } from "@/lib/lucide";
+import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";

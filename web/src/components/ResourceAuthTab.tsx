@@ -9,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Info } from '@/lib/lucide';
+import { Info } from 'lucide-react';
 
 export interface ResourceAuthAccess {
   use_scope: 'all' | 'selected';

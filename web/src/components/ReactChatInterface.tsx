@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BugPlay, Loader2 } from "@/lib/lucide";
+import { BugPlay, Loader2 } from "lucide-react";
 
 import ChatPage from "@/pages/chat/ChatPage";
 import { useChatDebugPanelSections } from "@/pages/chat/components/ChatDebugPanelContext";

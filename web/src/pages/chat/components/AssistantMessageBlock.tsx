@@ -7,7 +7,7 @@ import {
   MessagesSquare,
   Square,
   XCircle,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { copyTextToClipboard } from "@/utils/clipboard";

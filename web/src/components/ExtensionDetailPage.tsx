@@ -14,7 +14,7 @@ import {
   XCircle,
   Zap,
   type LucideIcon,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from "sonner";
 
 import ConfirmationModal from "@/components/ConfirmationModal";

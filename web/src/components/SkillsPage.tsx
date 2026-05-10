@@ -10,7 +10,7 @@ import {
   Upload,
   X,
   Zap,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import {

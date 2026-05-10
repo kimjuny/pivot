@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
   XCircle,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from 'sonner';
 import {
   getAgents,

@@ -1,4 +1,4 @@
-import { RefreshCcw } from "@/lib/lucide";
+import { RefreshCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

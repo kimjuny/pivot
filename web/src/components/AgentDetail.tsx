@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { X, Wrench, Zap } from "@/lib/lucide";
+import { X, Wrench, Zap } from "lucide-react";
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';

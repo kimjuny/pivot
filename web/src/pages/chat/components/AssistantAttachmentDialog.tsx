@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
-import { Download, Loader2 } from "@/lib/lucide";
+import { Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import DraggableDialog from "@/components/DraggableDialog";

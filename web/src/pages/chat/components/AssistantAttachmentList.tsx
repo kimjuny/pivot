@@ -6,7 +6,7 @@ import {
   FileText,
   ImagePlus,
   Presentation,
-} from "@/lib/lucide";
+} from "lucide-react";
 
 import type { AssistantAttachment } from "../types";
 import { AssistantAttachmentDialog } from "./AssistantAttachmentDialog";

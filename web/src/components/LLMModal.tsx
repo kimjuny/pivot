@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { Info, Plus, Trash2 } from "@/lib/lucide";
+import { Info, Plus, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,

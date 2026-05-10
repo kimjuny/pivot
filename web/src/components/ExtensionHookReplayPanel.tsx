@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Eye, RefreshCcw, Search } from "@/lib/lucide";
+import { Eye, RefreshCcw, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import ExtensionHookExecutionDialog from "@/components/ExtensionHookExecutionDialog";

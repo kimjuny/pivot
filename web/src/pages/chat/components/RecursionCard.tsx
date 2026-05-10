@@ -10,7 +10,7 @@ import {
   Loader2,
   Square,
   XCircle,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from "sonner";
 
 import type { RecursionRecord } from "../types";

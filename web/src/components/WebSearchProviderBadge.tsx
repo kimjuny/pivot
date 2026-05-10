@@ -1,4 +1,4 @@
-import { Globe } from "@/lib/lucide";
+import { Globe } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 

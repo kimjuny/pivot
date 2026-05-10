@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Loader2 } from "@/lib/lucide";
+import { Bot, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";

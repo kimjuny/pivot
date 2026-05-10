@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { MessageSquare } from "@/lib/lucide";
+import { MessageSquare } from "lucide-react";
 
 import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import { getChatMessageRenderKey } from "../utils/chatData";

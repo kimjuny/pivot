@@ -11,7 +11,7 @@ import {
   Loader2,
   MoreHorizontal,
   Trash2,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { useTheme } from '@/lib/use-theme';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

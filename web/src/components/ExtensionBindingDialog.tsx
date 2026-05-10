@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { AlertTriangle, ArrowUp, Loader2, Plus, Server } from "@/lib/lucide";
+import { AlertTriangle, ArrowUp, Loader2, Plus, Server } from "lucide-react";
 import { toast } from 'sonner';
 
 import DraggableDialog from './DraggableDialog';

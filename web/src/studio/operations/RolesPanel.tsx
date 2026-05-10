@@ -32,7 +32,7 @@ import {
   type OperationsPermission,
   type OperationsRole,
 } from "@/studio/operations/api";
-import { ShieldCheck } from "@/lib/lucide";
+import { ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PanelHandle } from "@/studio/operations/UsersPanel";
 

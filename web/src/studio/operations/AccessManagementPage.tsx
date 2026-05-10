@@ -5,7 +5,7 @@ import type { SVGProps } from "react";
 import { hasPermission, useAuth } from "@/contexts/auth-core";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, ShieldCheck, User, Users } from "@/lib/lucide";
+import { Plus, ShieldCheck, User, Users } from "lucide-react";
 
 import GroupsPanel from "@/studio/operations/GroupsPanel";
 import RolesPanel from "@/studio/operations/RolesPanel";

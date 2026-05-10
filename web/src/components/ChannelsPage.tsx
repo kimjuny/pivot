@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Radio, Search, X } from "@/lib/lucide";
+import { Radio, Search, X } from "lucide-react";
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import {

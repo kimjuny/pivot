@@ -1,4 +1,4 @@
-import { ChevronsUpDown, LogOut, Moon, Sun } from "@/lib/lucide";
+import { ChevronsUpDown, LogOut, Moon, Sun } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import {

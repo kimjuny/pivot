@@ -1,4 +1,4 @@
-import { ArrowRight, CircleCheck, Loader2, RefreshCw } from "@/lib/lucide";
+import { ArrowRight, CircleCheck, Loader2, RefreshCw } from "lucide-react";
 import {
     AlertDialog,
     AlertDialogAction,

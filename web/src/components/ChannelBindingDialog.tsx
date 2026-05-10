@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Copy, Inbox, Loader2, Plus, RefreshCcw } from "@/lib/lucide";
+import { Copy, Inbox, Loader2, Plus, RefreshCcw } from "lucide-react";
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

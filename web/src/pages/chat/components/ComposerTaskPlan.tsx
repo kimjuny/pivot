@@ -6,7 +6,7 @@ import {
   ListTodo,
   Loader2,
   XCircle,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { TaskPlanSnapshot } from "../types";

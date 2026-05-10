@@ -15,7 +15,7 @@ import {
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Trash2, Users } from "@/lib/lucide";
+import { Trash2, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   createOperationsGroup,

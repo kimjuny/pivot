@@ -6,8 +6,8 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Info, Loader2 } from "@/lib/lucide";
-import { ICON_MAP } from "@/lib/icon-map";
+import { Info, Loader2 } from "lucide-react";
+import { resolveIcon } from "@/lib/icon-resolver";
 
 import {
   ApiError,
@@ -3543,7 +3543,7 @@ function ChatContainer({
       const isActive =
         activeInstalledSurface?.packageId === surface.packageId &&
         activeInstalledSurface.surfaceKey === surface.surfaceKey;
-      const IconComponent = surface.icon ? ICON_MAP[surface.icon] : null;
+      const IconComponent = resolveIcon(surface.icon);
 
       if (IconComponent) {
         return (

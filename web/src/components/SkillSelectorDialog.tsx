@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Loader2, Inbox, Plus } from "@/lib/lucide";
+import { Search, Loader2, Inbox, Plus } from "lucide-react";
 import { toast } from 'sonner';
 import {
   getUsableSkills,

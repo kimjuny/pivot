@@ -22,7 +22,7 @@ import {
   Upload,
   X,
   XCircle,
-} from "@/lib/lucide";
+} from "lucide-react";
 import { toast } from 'sonner';
 
 import ConfirmationModal from './ConfirmationModal';

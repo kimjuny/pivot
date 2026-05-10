@@ -42,7 +42,7 @@ import {
   type OperationsRole,
   type OperationsUser,
 } from "@/studio/operations/api";
-import { CirclePause, CirclePlay, KeyRound, Mail, Pencil, User, Users } from "@/lib/lucide";
+import { CirclePause, CirclePlay, KeyRound, Mail, Pencil, User, Users } from "lucide-react";
 
 const EMPTY_USER_FORM = {
   username: "",

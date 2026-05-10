@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Globe, Search } from "@/lib/lucide";
+import { Globe, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import StaggeredFadeInList from "@/components/StaggeredFadeInList";

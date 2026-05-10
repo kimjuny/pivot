@@ -9,7 +9,7 @@ import {
   Trash2,
   Wrench,
   X,
-} from '@/lib/lucide';
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import ResourceAuthTab from '@/components/ResourceAuthTab';
