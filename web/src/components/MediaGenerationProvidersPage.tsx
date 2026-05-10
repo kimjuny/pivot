@@ -28,7 +28,7 @@ import { formatProviderExtensionLabel } from "@/utils/providerMetadata";
 
 const PAGE_SIZE = 6;
 
-type SourceFilter = "all" | "builtin" | "extension";
+type MediaTypeFilter = "all" | "image" | "video";
 
 /**
  * Build the page number list with ellipsis slots for a given total/current.
@@ -60,7 +60,7 @@ function MediaGenerationProvidersPage() {
   const [providers, setProviders] = useState<MediaProviderCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<MediaTypeFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
 
   const loadProviders = useCallback(async () => {
@@ -87,7 +87,7 @@ function MediaGenerationProvidersPage() {
   const filteredProviders = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     return manifests.filter((manifest) => {
-      if (sourceFilter !== "all" && manifest.visibility !== sourceFilter) {
+      if (mediaTypeFilter !== "all" && manifest.media_type !== mediaTypeFilter) {
         return false;
       }
       if (!query) {
@@ -98,24 +98,23 @@ function MediaGenerationProvidersPage() {
         || manifest.description.toLowerCase().includes(query)
         || manifest.supported_operations.some((item) => item.toLowerCase().includes(query))
         || manifest.supported_parameters.some((item) => item.toLowerCase().includes(query))
-        || manifest.visibility.toLowerCase().includes(query)
         || manifest.media_type.toLowerCase().includes(query)
       );
     });
-  }, [manifests, searchQuery, sourceFilter]);
+  }, [manifests, searchQuery, mediaTypeFilter]);
 
-  const sourceCounts = useMemo(
+  const mediaTypeCounts = useMemo(
     () => ({
       all: manifests.length,
-      builtin: manifests.filter((manifest) => manifest.visibility !== "extension").length,
-      extension: manifests.filter((manifest) => manifest.visibility === "extension").length,
+      image: manifests.filter((m) => m.media_type === "image").length,
+      video: manifests.filter((m) => m.media_type === "video").length,
     }),
     [manifests],
   );
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, sourceFilter]);
+  }, [searchQuery, mediaTypeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProviders.length / PAGE_SIZE));
 
@@ -135,64 +134,62 @@ function MediaGenerationProvidersPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {(
-              [
-                { value: "all", label: "All Sources", count: sourceCounts.all },
-                { value: "builtin", label: "Built-in", count: sourceCounts.builtin },
-                { value: "extension", label: "Extension", count: sourceCounts.extension },
-              ] as const
-            ).map(({ value, label, count }) => (
-              <button
-                key={value}
-                onClick={() => setSourceFilter(value)}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
-              >
-                <Badge
-                  variant={sourceFilter === value ? "default" : "outline"}
-                  className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
-                    sourceFilter === value ? "list-filter-badge-active" : ""
-                  }`}
-                >
-                  {label}
-                  <span className={sourceFilter === value ? "opacity-70" : "text-muted-foreground"}>
-                    {count}
-                  </span>
-                </Badge>
-              </button>
-            ))}
-            {sourceFilter !== "all" && (
-              <button
-                onClick={() => setSourceFilter("all")}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Clear source filter"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <ButtonGroup className="list-search-group">
-            <Input
-              placeholder="Search by provider, operation, or parameter…"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Search media providers"
-              autoComplete="off"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label="Search media providers"
-              tabIndex={-1}
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(
+            [
+              { value: "all", label: "All", count: mediaTypeCounts.all },
+              { value: "image", label: "Image", count: mediaTypeCounts.image },
+              { value: "video", label: "Video", count: mediaTypeCounts.video },
+            ] as const
+          ).map(({ value, label, count }) => (
+            <button
+              key={value}
+              onClick={() => setMediaTypeFilter(value)}
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
             >
-              <Search className="w-4 h-4" />
-              Search
-            </Button>
-          </ButtonGroup>
+              <Badge
+                variant={mediaTypeFilter === value ? "default" : "outline"}
+                className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
+                  mediaTypeFilter === value ? "list-filter-badge-active" : ""
+                }`}
+              >
+                {label}
+                <span className={mediaTypeFilter === value ? "opacity-70" : "text-muted-foreground"}>
+                  {count}
+                </span>
+              </Badge>
+            </button>
+          ))}
+          {mediaTypeFilter !== "all" && (
+            <button
+              onClick={() => setMediaTypeFilter("all")}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear media type filter"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
+
+        <ButtonGroup className="list-search-group">
+          <Input
+            placeholder="Search by provider, operation, or parameter…"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            aria-label="Search media providers"
+            autoComplete="off"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Search media providers"
+            tabIndex={-1}
+          >
+            <Search className="w-4 h-4" />
+            Search
+          </Button>
+        </ButtonGroup>
       </div>
 
       {isLoading ? (

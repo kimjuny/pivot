@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Search, X } from "@/lib/lucide";
+import { ExternalLink, Search } from "@/lib/lucide";
 import { toast } from "sonner";
 
 import { ProviderMetadataBadges } from "@/components/ProviderMetadataBadges";
@@ -27,8 +27,6 @@ import {
 import { formatProviderExtensionLabel } from "@/utils/providerMetadata";
 
 const PAGE_SIZE = 6;
-
-type SourceFilter = "all" | "builtin" | "extension";
 
 /**
  * Build the page number list with ellipsis slots for a given total/current.
@@ -60,7 +58,6 @@ function WebSearchProvidersPage() {
   const [providers, setProviders] = useState<WebSearchCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [currentPage, setCurrentPage] = useState(1);
 
   const loadProviders = useCallback(async () => {
@@ -87,9 +84,6 @@ function WebSearchProvidersPage() {
   const filteredProviders = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();
     return manifests.filter((manifest) => {
-      if (sourceFilter !== "all" && manifest.visibility !== sourceFilter) {
-        return false;
-      }
       if (!query) {
         return true;
       }
@@ -97,23 +91,13 @@ function WebSearchProvidersPage() {
         manifest.name.toLowerCase().includes(query)
         || manifest.description.toLowerCase().includes(query)
         || manifest.supported_parameters.some((item) => item.toLowerCase().includes(query))
-        || manifest.visibility.toLowerCase().includes(query)
       );
     });
-  }, [manifests, searchQuery, sourceFilter]);
-
-  const sourceCounts = useMemo(
-    () => ({
-      all: manifests.length,
-      builtin: manifests.filter((manifest) => manifest.visibility !== "extension").length,
-      extension: manifests.filter((manifest) => manifest.visibility === "extension").length,
-    }),
-    [manifests],
-  );
+  }, [manifests, searchQuery]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, sourceFilter]);
+  }, [searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProviders.length / PAGE_SIZE));
 
@@ -133,64 +117,25 @@ function WebSearchProvidersPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {(
-              [
-                { value: "all", label: "All Sources", count: sourceCounts.all },
-                { value: "builtin", label: "Built-in", count: sourceCounts.builtin },
-                { value: "extension", label: "Extension", count: sourceCounts.extension },
-              ] as const
-            ).map(({ value, label, count }) => (
-              <button
-                key={value}
-                onClick={() => setSourceFilter(value)}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
-              >
-                <Badge
-                  variant={sourceFilter === value ? "default" : "outline"}
-                  className={`cursor-pointer gap-1 px-2.5 py-0.5 text-xs transition-colors ${
-                    sourceFilter === value ? "list-filter-badge-active" : ""
-                  }`}
-                >
-                  {label}
-                  <span className={sourceFilter === value ? "opacity-70" : "text-muted-foreground"}>
-                    {count}
-                  </span>
-                </Badge>
-              </button>
-            ))}
-            {sourceFilter !== "all" && (
-              <button
-                onClick={() => setSourceFilter("all")}
-                className="text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Clear source filter"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <ButtonGroup className="list-search-group">
-            <Input
-              placeholder="Search by provider, source, or supported parameter…"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Search web search providers"
-              autoComplete="off"
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label="Search web search providers"
-              tabIndex={-1}
-            >
-              <Search className="w-4 h-4" />
-              Search
-            </Button>
-          </ButtonGroup>
-        </div>
+      <div className="mb-4 flex justify-end">
+        <ButtonGroup className="list-search-group">
+          <Input
+            placeholder="Search by provider or supported parameter…"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            aria-label="Search web search providers"
+            autoComplete="off"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label="Search web search providers"
+            tabIndex={-1}
+          >
+            <Search className="w-4 h-4" />
+            Search
+          </Button>
+        </ButtonGroup>
       </div>
 
       {isLoading ? (
