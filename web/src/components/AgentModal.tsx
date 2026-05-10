@@ -84,9 +84,9 @@ function createDefaultFormData(): AgentFormData {
     description: '',
     llm_id: undefined,
     session_idle_timeout_minutes: 15,
-    sandbox_timeout_seconds: 60,
-    compact_threshold_percent: 60,
-    max_iteration: 50,
+    sandbox_timeout_seconds: 120,
+    compact_threshold_percent: 80,
+    max_iteration: 100,
     access: { ...EMPTY_AGENT_ACCESS },
   };
 }
@@ -155,6 +155,10 @@ function AgentModal({
         ...current,
         access: {
           ...EMPTY_AGENT_ACCESS,
+          use_user_ids:
+            effectiveCreatorUserId !== null && effectiveCreatorUserId !== undefined
+              ? [effectiveCreatorUserId]
+              : [],
           edit_user_ids:
             effectiveCreatorUserId !== null && effectiveCreatorUserId !== undefined
               ? [effectiveCreatorUserId]
@@ -178,10 +182,10 @@ function AgentModal({
           llm_id: initialData.llm_id,
           session_idle_timeout_minutes:
             initialData.session_idle_timeout_minutes ?? 15,
-          sandbox_timeout_seconds: initialData.sandbox_timeout_seconds ?? 60,
+          sandbox_timeout_seconds: initialData.sandbox_timeout_seconds ?? 120,
           compact_threshold_percent:
-            initialData.compact_threshold_percent ?? 60,
-          max_iteration: initialData.max_iteration ?? 50,
+            initialData.compact_threshold_percent ?? 80,
+          max_iteration: initialData.max_iteration ?? 100,
           access: initialData.access ?? { ...EMPTY_AGENT_ACCESS },
         });
       } else {
@@ -474,12 +478,12 @@ function AgentModal({
                   });
                 }}
                 disabled={isSubmitting}
-                placeholder="60"
+                placeholder="120"
                 autoComplete="off"
               />
               <p className="text-sm text-muted-foreground">
                 Wait this many seconds for sandbox-backed function calls before
-                surfacing a timeout error. Default is 60.
+                surfacing a timeout error. Default is 120.
               </p>
             </div>
 
@@ -503,12 +507,12 @@ function AgentModal({
                   });
                 }}
                 disabled={isSubmitting}
-                placeholder="50"
+                placeholder="100"
                 autoComplete="off"
               />
               <p className="text-sm text-muted-foreground">
                 Limit how many ReAct iterations one task can use before the agent
-                is forced to stop. Default is 50.
+                is forced to stop. Default is 100.
               </p>
             </div>
 
@@ -533,7 +537,7 @@ function AgentModal({
                   });
                 }}
                 disabled={isSubmitting}
-                placeholder="60"
+                placeholder="80"
                 autoComplete="off"
               />
               <p className="text-sm text-muted-foreground">

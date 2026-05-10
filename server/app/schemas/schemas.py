@@ -44,18 +44,18 @@ class AgentCreate(AppBaseModel):
         description="Minutes of inactivity before a new chat session is created",
     )
     sandbox_timeout_seconds: int = Field(
-        default=60,
+        default=120,
         ge=1,
         description="Maximum seconds to wait for sandbox-manager responses",
     )
     compact_threshold_percent: int = Field(
-        default=60,
+        default=80,
         ge=1,
         le=100,
         description="Context percentage that triggers automatic compaction",
     )
     max_iteration: int = Field(
-        default=50, ge=1, description="Maximum iterations for ReAct recursion"
+        default=100, ge=1, description="Maximum iterations for ReAct recursion"
     )
     use_scope: Literal["all", "selected"] = "selected"
     use_user_ids: list[int] = Field(default_factory=list)

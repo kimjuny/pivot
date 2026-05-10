@@ -621,7 +621,9 @@ def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]
     ]
 
 
-def list_manageable_skills(session: Session, current_user: User) -> list[dict[str, Any]]:
+def list_manageable_skills(
+    session: Session, current_user: User
+) -> list[dict[str, Any]]:
     """List skill inventory rows visible in the Studio management page."""
     rows = list_visible_skills(session, current_user.username)
 

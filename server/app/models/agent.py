@@ -31,13 +31,13 @@ class Agent(SQLModel, table=True):
         ),
     )
     sandbox_timeout_seconds: int = Field(
-        default=60,
+        default=120,
         description=(
             "Maximum seconds to wait for sandbox-manager responses for this agent"
         ),
     )
     compact_threshold_percent: int = Field(
-        default=60,
+        default=80,
         description=(
             "Context-window percentage that triggers automatic runtime compaction"
         ),
@@ -63,7 +63,7 @@ class Agent(SQLModel, table=True):
         default=None, description="Deprecated: Use llm_id instead"
     )
     max_iteration: int = Field(
-        default=50, description="Maximum iterations for ReAct recursion"
+        default=100, description="Maximum iterations for ReAct recursion"
     )
     tool_ids: str | None = Field(
         default=None,

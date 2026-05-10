@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Search } from "@/lib/lucide";
+import { Search } from "@/lib/lucide";
 import { toast } from "sonner";
 
-import { ProviderMetadataBadges } from "@/components/ProviderMetadataBadges";
 import StaggeredFadeInList from "@/components/StaggeredFadeInList";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Pagination,
@@ -19,12 +18,13 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
+
 import {
   getWebSearchProviders,
   type WebSearchCatalogItem,
   type WebSearchProviderManifest,
 } from "@/utils/api";
-import { formatProviderExtensionLabel } from "@/utils/providerMetadata";
+import { Link } from "react-router-dom";
 
 const PAGE_SIZE = 6;
 
@@ -232,54 +232,47 @@ interface WebSearchProviderCardProps {
  * Presentation card for one web-search provider manifest.
  */
 function WebSearchProviderCard({ manifest }: WebSearchProviderCardProps) {
-  const extensionLabel = formatProviderExtensionLabel(
-    manifest.extension_display_name,
-    manifest.extension_name,
-    manifest.extension_version,
-  );
-
   return (
     <Card className="h-full border-border/70">
-      <CardHeader className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-2">
-            <WebSearchProviderBadge
-              name={manifest.name}
-              logoUrl={manifest.logo_url ?? null}
-              className="gap-2"
-              iconClassName="h-5 w-5"
-              textClassName="text-base font-semibold text-foreground"
-            />
-            <ProviderMetadataBadges
-              visibility={manifest.visibility}
-              status={manifest.status}
-            />
+      <CardHeader className="space-y-2">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            {manifest.logo_url ? (
+              <img
+                src={manifest.logo_url}
+                alt={`${manifest.name} logo`}
+                className="size-full rounded-lg object-cover"
+                loading="lazy"
+              />
+            ) : (
+              <span className="text-sm font-semibold text-primary">
+                {manifest.name.slice(0, 1)}
+              </span>
+            )}
           </div>
-          <Button asChild size="sm" variant="outline" className="shrink-0">
-            <a href={manifest.docs_url} target="_blank" rel="noreferrer">
-              <ExternalLink className="h-3.5 w-3.5" />
-              Docs
-            </a>
-          </Button>
+          <div className="min-w-0 space-y-0.5">
+            <CardTitle className="text-base truncate">{manifest.name}</CardTitle>
+            {manifest.extension_name ? (
+              <Link to={`/studio/assets/extensions/${manifest.extension_name.replace(/^@/, "")}`}>
+                <Badge variant="secondary" className="text-[10px] font-mono cursor-pointer hover:bg-secondary/80">
+                  {manifest.extension_name}
+                </Badge>
+              </Link>
+            ) : null}
+          </div>
         </div>
-        {extensionLabel ? (
-          <CardDescription className="leading-6">
-            Package: {extensionLabel}
-          </CardDescription>
-        ) : null}
         <CardDescription className="leading-6">
-          {manifest.description}
+          {manifest.description}{" "}
+          <a
+            href={manifest.docs_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+          >
+            Learn more
+          </a>
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          {manifest.supported_parameters.map((parameter) => (
-            <Badge key={parameter} variant="outline" className="text-[11px]">
-              {parameter}
-            </Badge>
-          ))}
-        </div>
-      </CardContent>
     </Card>
   );
 }

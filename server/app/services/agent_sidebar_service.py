@@ -115,13 +115,15 @@ class AgentSidebarService:
         allowed_tool_names = _parse_name_allowlist(agent.tool_ids)
         allowed_skill_names = _parse_name_allowlist(agent.skill_ids)
 
-        tool_selected_count = (
-            sum(1 for item in usable_tools if item.get("name") in allowed_tool_names)
-            + sum(1 for name in enabled_extension_tool_names if name in allowed_tool_names)
+        tool_selected_count = sum(
+            1 for item in usable_tools if item.get("name") in allowed_tool_names
+        ) + sum(
+            1 for name in enabled_extension_tool_names if name in allowed_tool_names
         )
-        skill_selected_count = (
-            sum(1 for item in visible_skills if item.get("name") in allowed_skill_names)
-            + sum(1 for name in enabled_extension_skill_names if name in allowed_skill_names)
+        skill_selected_count = sum(
+            1 for item in visible_skills if item.get("name") in allowed_skill_names
+        ) + sum(
+            1 for name in enabled_extension_skill_names if name in allowed_skill_names
         )
 
         channel_catalog = channel_service.list_catalog(agent_id, user=user)

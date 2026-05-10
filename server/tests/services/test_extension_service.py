@@ -2333,7 +2333,9 @@ class ExtensionServiceTestCase(unittest.TestCase):
         self.assertIsNotNone(summary)
         self.assertEqual(summary["running_task_count"], 1)
 
-    def test_reconcile_pending_upgrade_finalizes_when_running_tasks_finish(self) -> None:
+    def test_reconcile_pending_upgrade_finalizes_when_running_tasks_finish(
+        self,
+    ) -> None:
         """Reconciling a drained safe upgrade should move bindings and require republish."""
         service = ExtensionService(self.session)
         original_root = self._write_extension(version="0.1.0")
@@ -2390,9 +2392,7 @@ class ExtensionServiceTestCase(unittest.TestCase):
             upgraded_binding.extension_installation_id,
             upgraded_installation.id or 0,
         )
-        self.assertIsNone(
-            self.session.exec(select(ExtensionPendingUpgrade)).first()
-        )
+        self.assertIsNone(self.session.exec(select(ExtensionPendingUpgrade)).first())
 
     def test_install_bundle_requires_top_level_manifest(self) -> None:
         """Bundle imports should reject archives missing top-level manifest.json."""

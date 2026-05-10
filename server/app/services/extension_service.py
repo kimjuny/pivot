@@ -44,9 +44,6 @@ from app.models.user import User
 from app.models.web_search import AgentWebSearchBinding
 from app.orchestration.skills.skill_files import parse_front_matter
 from app.orchestration.tool import ToolManager, get_tool_manager
-from app.orchestration.tool.builtin.programmatic_tool_call import (
-    make_programmatic_tool_call,
-)
 from app.orchestration.tool.metadata import ToolMetadata
 from app.orchestration.web_search.types import WebSearchProviderManifest
 from app.services.access_service import AccessService
@@ -3592,11 +3589,6 @@ class ExtensionService:
         for metadata in bundle_tool_metadata:
             if request_tool_manager.get_tool(metadata.name) is None:
                 request_tool_manager.add_entry(metadata)
-
-        ptc_meta = request_tool_manager.get_tool("programmatic_tool_call")
-        if ptc_meta is not None:
-            full_callables = {m.name: m.func for m in request_tool_manager.list_tools()}
-            ptc_meta.func = make_programmatic_tool_call(full_callables)
 
         filtered_manager = ToolManager()
         for metadata in request_tool_manager.list_tools():

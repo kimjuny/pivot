@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Search, X } from "@/lib/lucide";
+import { Search, X } from "@/lib/lucide";
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import {
   Pagination,
@@ -15,15 +15,11 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination';
-import {
-  ProviderMetadataBadges,
-} from '@/components/ProviderMetadataBadges';
+
 import StaggeredFadeInList from '@/components/StaggeredFadeInList';
 import { getChannels, type ChannelCatalogItem, type ChannelManifest } from '@/utils/api';
-import {
-  formatProviderExtensionLabel,
-  formatProviderVisibilityLabel,
-} from '@/utils/providerMetadata';
+import { Link } from "react-router-dom";
+
 
 const PAGE_SIZE = 6;
 
@@ -110,7 +106,6 @@ function ChannelsPage() {
         manifest.name.toLowerCase().includes(query)
         || manifest.description.toLowerCase().includes(query)
         || manifest.transport_mode.toLowerCase().includes(query)
-        || formatProviderVisibilityLabel(manifest.visibility).toLowerCase().includes(query)
         || manifest.capabilities.some((capability) => capability.toLowerCase().includes(query))
       );
     });
@@ -292,23 +287,17 @@ interface ChannelCardProps {
  * Presentation card for one channel manifest.
  */
 function ChannelCard({ manifest }: ChannelCardProps) {
-  const extensionLabel = formatProviderExtensionLabel(
-    manifest.extension_display_name,
-    manifest.extension_name,
-    manifest.extension_version,
-  );
-
   return (
     <Card className="h-full border-border/70">
-        <CardHeader className="space-y-3">
-          <div className="flex items-start justify-between gap-3">
+      <CardHeader className="space-y-2">
+        <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
               {manifest.logo_url ? (
                 <img
                   src={manifest.logo_url}
                   alt={`${manifest.name} logo`}
-                  className="h-5 w-5"
+                  className="size-full rounded-lg object-cover"
                   loading="lazy"
                 />
               ) : (
@@ -317,43 +306,30 @@ function ChannelCard({ manifest }: ChannelCardProps) {
                 </span>
               )}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-0.5">
               <CardTitle className="text-base truncate">{manifest.name}</CardTitle>
-              <CardDescription className="mt-0.5">
-                {formatTransportLabel(manifest.transport_mode)}
-              </CardDescription>
+              {manifest.extension_name ? (
+                <Link to={`/studio/assets/extensions/${manifest.extension_name.replace(/^@/, "")}`}>
+                  <Badge variant="secondary" className="text-[10px] font-mono cursor-pointer hover:bg-secondary/80">
+                    {manifest.extension_name}
+                  </Badge>
+                </Link>
+              ) : null}
             </div>
           </div>
-          <Button asChild size="sm" variant="outline" className="shrink-0">
-            <a href={manifest.docs_url} target="_blank" rel="noreferrer">
-              <ExternalLink className="h-3.5 w-3.5" />
-              Docs
-            </a>
-          </Button>
         </div>
-        <ProviderMetadataBadges
-          visibility={manifest.visibility}
-          status={manifest.status}
-        />
-        {extensionLabel ? (
-          <CardDescription className="text-xs">
-            Package: {extensionLabel}
-          </CardDescription>
-        ) : null}
         <CardDescription className="leading-6">
-          {manifest.description}
+          {manifest.description}{" "}
+          <a
+            href={manifest.docs_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+          >
+            Learn more
+          </a>
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap gap-2">
-          {manifest.capabilities.map((capability) => (
-            <Badge key={capability} variant="outline" className="text-[11px]">
-              {capability}
-            </Badge>
-          ))}
-        </div>
-
-      </CardContent>
     </Card>
   );
 }

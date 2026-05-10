@@ -416,7 +416,9 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
     return sorted(rows, key=lambda row: str(row["name"]))
 
 
-def list_manageable_tools(db: Session, *, current_user: User) -> list[dict[str, object]]:
+def list_manageable_tools(
+    db: Session, *, current_user: User
+) -> list[dict[str, object]]:
     """List tool inventory rows visible in the Studio management page."""
     rows = list_usable_tools(db, current_user=current_user)
 

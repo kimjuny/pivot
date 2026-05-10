@@ -20,7 +20,14 @@ SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-EXTENSION_PATH = SERVER_ROOT.parent.parent / "extensions" / "extensions" / "work_wechat" / "providers" / "work_wechat.py"
+EXTENSION_PATH = (
+    SERVER_ROOT.parent.parent
+    / "extensions"
+    / "extensions"
+    / "work_wechat"
+    / "providers"
+    / "work_wechat.py"
+)
 
 _spec = importlib.util.spec_from_file_location("work_wechat_ext", EXTENSION_PATH)
 _module = importlib.util.module_from_spec(_spec)

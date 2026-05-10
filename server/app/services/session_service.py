@@ -786,9 +786,7 @@ class SessionService:
         )
 
         new_session.title = (
-            f"Migrate: {old_session.title}"
-            if old_session.title
-            else "Migrate"
+            f"Migrate: {old_session.title}" if old_session.title else "Migrate"
         )
 
         if old_session.project_id is None and old_session.workspace_id is not None:

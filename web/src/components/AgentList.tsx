@@ -49,6 +49,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import StaggeredFadeInList from '@/components/StaggeredFadeInList';
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -375,19 +383,35 @@ function AgentList() {
 
       {/* Empty states */}
       {filteredAgents.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Bot className="size-6" />
+            </EmptyMedia>
+            {agents.length === 0 ? (
+              <>
+                <EmptyTitle>No agents yet</EmptyTitle>
+                <EmptyDescription>
+                  Create your first agent to get started.
+                </EmptyDescription>
+              </>
+            ) : (
+              <>
+                <EmptyTitle>No agents found</EmptyTitle>
+                <EmptyDescription>
+                  No agents match your search.
+                </EmptyDescription>
+              </>
+            )}
+          </EmptyHeader>
           {agents.length === 0 ? (
-            <>
-              <p className="text-sm">No agents yet.</p>
+            <EmptyContent>
               <Button size="sm" variant="outline" onClick={handleCreateAgent}>
-                <Plus className="w-4 h-4 mr-1.5" />
-                Create your first agent
+                Create Agent
               </Button>
-            </>
-          ) : (
-            <p className="text-sm">No agents match your search.</p>
-          )}
-        </div>
+            </EmptyContent>
+          ) : null}
+        </Empty>
       ) : (
         <>
           {/* Agent card grid */}
