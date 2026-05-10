@@ -28,7 +28,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  forceExtensionUpgrade,
   getExtensionInstallationConfiguration,
   getExtensionInstallationAccess,
   getExtensionInstallationAccessOptions,
@@ -77,15 +76,6 @@ interface PackageStatusBadge {
   /** Operator-facing summary label. */
   label: string;
   /** Visual tone that distinguishes live usage from neutral state. */
-  tone: "provider" | "runtime";
-}
-
-interface ReferenceBadge {
-  /** Human-readable summary label for one reference type. */
-  label: string;
-  /** Count currently attached to this installation. */
-  count: number;
-  /** Tone keeps provider references visually distinct from runtime state. */
   tone: "provider" | "runtime";
 }
 
@@ -291,59 +281,6 @@ function buildPackageStatusBadges(pkg: ExtensionPackage): PackageStatusBadge[] {
     });
   }
   return badges;
-}
-
-/**
- * Build visible usage badges for one installed version.
- *
- * Why: once the list page becomes intentionally compact, version-level usage
- * counts still need a clear home in the detail page before operators decide to
- * disable or uninstall a specific installation.
- */
-function buildReferenceBadges(installation: ExtensionInstallation): ReferenceBadge[] {
-  const summary = installation.reference_summary;
-  if (!summary) {
-    return [];
-  }
-
-  const badges: ReferenceBadge[] = [
-    {
-      label: "Extension Bindings",
-      count: summary.extension_binding_count,
-      tone: "runtime",
-    },
-    {
-      label: "Channel Bindings",
-      count: summary.channel_binding_count,
-      tone: "provider",
-    },
-    {
-      label: "Image Bindings",
-      count: summary.media_provider_binding_count ?? 0,
-      tone: "provider",
-    },
-    {
-      label: "Web Search Bindings",
-      count: summary.web_search_binding_count,
-      tone: "provider",
-    },
-    {
-      label: "Releases",
-      count: summary.release_count,
-      tone: "runtime",
-    },
-    {
-      label: "Test Snapshots",
-      count: summary.test_snapshot_count,
-      tone: "runtime",
-    },
-    {
-      label: "Saved Drafts",
-      count: summary.saved_draft_count,
-      tone: "runtime",
-    },
-  ];
-  return badges.filter((badge) => badge.count > 0);
 }
 
 /**
@@ -564,7 +501,7 @@ export default function ExtensionDetailPage() {
   const pendingUpgrade = pkg?.pending_upgrade ?? null;
   const isLatestStatusUpdating = latestInstallation?.id === statusUpdatingId;
   const isLatestUninstalling = latestInstallation?.id === uninstallingId;
-  const [forcingUpgradeId, setForcingUpgradeId] = useState<number | null>(null);
+  const [isStatusUpdating, setIsStatusUpdating] = useState(false);
   const aggregatedContributions = useMemo(() => {
     if (!pkg) {
       return [];
@@ -600,7 +537,7 @@ export default function ExtensionDetailPage() {
       (installation) => installation.contribution_summary.hooks.length > 0,
     ),
   );
-  const detailTabCount = 3 + (hasSetupTab ? 1 : 0) + (hasHookReplayTab ? 1 : 0);
+  const detailTabCount = 2 + (hasSetupTab ? 1 : 0) + (hasHookReplayTab ? 1 : 0);
 
   const updateDraftValue = useCallback(
     (installationId: number, field: ExtensionConfigurationField, rawValue: string | boolean) => {
@@ -747,23 +684,6 @@ export default function ExtensionDetailPage() {
     [listPath, loadPackages, navigate, pkg?.versions.length],
   );
 
-  const handleForceUpgrade = useCallback(
-    async (upgrade: ExtensionPendingUpgrade) => {
-      setForcingUpgradeId(upgrade.id);
-      try {
-        await forceExtensionUpgrade(upgrade.id);
-        toast.success("Extension upgrade applied. Affected agents now require republish.");
-        await loadPackages();
-      } catch (error) {
-        console.error("Failed to force extension upgrade:", error);
-        toast.error(error instanceof Error ? error.message : "Failed to force extension upgrade");
-      } finally {
-        setForcingUpgradeId((current) => (current === upgrade.id ? null : current));
-      }
-    },
-    [loadPackages],
-  );
-
   useEffect(() => {
     if (!pendingUpgrade) {
       return;
@@ -904,9 +824,7 @@ export default function ExtensionDetailPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Badge variant="outline">{pkg.package_id}</Badge>
-                  <Badge variant="outline">Latest {pkg.latest_version}</Badge>
-                  <Badge variant="outline">Enabled Versions {pkg.active_version_count}</Badge>
-                  <Badge variant="outline">Disabled Versions {pkg.disabled_version_count}</Badge>
+                  <Badge variant="outline">v{pkg.latest_version}</Badge>
                   {buildPackageStatusBadges(pkg).map((badge) => (
                     <Badge
                       key={`${pkg.package_id}-${badge.label}`}
@@ -922,81 +840,6 @@ export default function ExtensionDetailPage() {
         </Card>
       </div>
 
-      {pendingUpgrade ? (
-        <div className="mb-6">
-          <Card className="border-blue-500/30 bg-blue-500/5">
-            <CardHeader className="space-y-3">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                <div className="space-y-2">
-                  <CardTitle className="text-base">Safe upgrade in progress</CardTitle>
-                  <CardDescription>
-                    Pivot has staged <code>{pendingUpgrade.target_version}</code> and is waiting
-                    for running tasks to finish before replacing <code>{pendingUpgrade.source_version}</code>.
-                    Affected agents are currently in <code>draining_for_upgrade</code> and will not
-                    accept new client tasks.
-                  </CardDescription>
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">From {pendingUpgrade.source_version}</Badge>
-                    <Badge variant="outline">To {pendingUpgrade.target_version}</Badge>
-                    <Badge variant="outline">Affected agents {pendingUpgrade.affected_agent_count}</Badge>
-                    <Badge variant="outline">Running tasks {pendingUpgrade.running_task_count}</Badge>
-                    {pendingUpgrade.created_at ? (
-                      <Badge variant="outline">
-                        Waiting {formatElapsed(pendingUpgrade.created_at, elapsedTick)}
-                      </Badge>
-                    ) : null}
-                  </div>
-                  {pendingUpgrade.affected_agent_names.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {pendingUpgrade.affected_agent_names.map((agentName) => (
-                        <Badge key={agentName} variant="secondary">
-                          {agentName}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
-                  {(pendingUpgrade.added_capabilities?.length ?? 0) > 0 ? (
-                    <div>
-                      <p className="text-xs font-medium text-emerald-700 dark:text-emerald-300">Added capabilities</p>
-                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
-                        {pendingUpgrade.added_capabilities?.map((item) => (
-                          <li key={`added-${item.type}-${item.name}`}>
-                            <code>{item.type}</code> · {item.name}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  {(pendingUpgrade.removed_capabilities?.length ?? 0) > 0 ? (
-                    <div>
-                      <p className="text-xs font-medium text-rose-700 dark:text-rose-300">Removed capabilities</p>
-                      <ul className="mt-1 list-disc pl-4 text-xs text-muted-foreground">
-                        {pendingUpgrade.removed_capabilities?.map((item) => (
-                          <li key={`removed-${item.type}-${item.name}`}>
-                            <code>{item.type}</code> · {item.name}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      void handleForceUpgrade(pendingUpgrade);
-                    }}
-                    disabled={forcingUpgradeId === pendingUpgrade.id}
-                  >
-                    {forcingUpgradeId === pendingUpgrade.id ? "Forcing…" : "Force upgrade now"}
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-          </Card>
-        </div>
-      ) : null}
-
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList
           className="grid h-auto w-full"
@@ -1007,7 +850,6 @@ export default function ExtensionDetailPage() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           {hasSetupTab ? <TabsTrigger value="setup">Setup</TabsTrigger> : null}
           <TabsTrigger value="auth">Auth</TabsTrigger>
-          <TabsTrigger value="versions">Versions</TabsTrigger>
           {hasHookReplayTab ? (
             <TabsTrigger value="hook-replay">Hook Replay</TabsTrigger>
           ) : null}
@@ -1096,12 +938,8 @@ export default function ExtensionDetailPage() {
                       <dd className="text-right text-foreground">{pkg.package_id}</dd>
                     </div>
                     <div className="flex items-start justify-between gap-3">
-                      <dt className="text-muted-foreground">Latest version</dt>
+                      <dt className="text-muted-foreground">Version</dt>
                       <dd className="text-right text-foreground">{pkg.latest_version}</dd>
-                    </div>
-                    <div className="flex items-start justify-between gap-3">
-                      <dt className="text-muted-foreground">Active versions</dt>
-                      <dd className="text-right text-foreground">{pkg.active_version_count}</dd>
                     </div>
                   </dl>
                 </div>
@@ -1138,9 +976,15 @@ export default function ExtensionDetailPage() {
 
         {hasSetupTab ? (
         <TabsContent value="setup" className="space-y-4">
-          {pkg.versions.map((installation) => {
+          {(() => {
+            const installation = latestInstallation;
+            if (!installation) return null;
             if (!installation.has_installation_configuration) {
-              return null;
+              return (
+                <div className="text-sm text-muted-foreground">
+                  This extension does not declare installation configuration fields.
+                </div>
+              );
             }
             const setupState = setupStates[installation.id];
             const setupDraft = setupDrafts[installation.id] ?? {};
@@ -1150,7 +994,7 @@ export default function ExtensionDetailPage() {
             const isSavingSetup = savingSetupIds.includes(installation.id);
 
             return (
-              <Card key={`setup-${installation.id}`}>
+              <Card>
                 <CardHeader className="space-y-3">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
@@ -1162,7 +1006,7 @@ export default function ExtensionDetailPage() {
                       </div>
                       <CardDescription className="mt-1">
                         Configure installation-level fields such as external service URLs,
-                        credentials, and defaults for this version.
+                        credentials, and defaults.
                       </CardDescription>
                     </div>
                     <div className="text-xs text-muted-foreground">
@@ -1177,7 +1021,7 @@ export default function ExtensionDetailPage() {
                     <>
                       {installationFields.length === 0 ? (
                         <div className="text-sm text-muted-foreground">
-                          This version does not declare installation configuration fields.
+                          This extension does not declare installation configuration fields.
                         </div>
                       ) : (
                         <div className="grid gap-4">
@@ -1253,45 +1097,30 @@ export default function ExtensionDetailPage() {
                 </CardContent>
               </Card>
             );
-          })}
+          })()}
         </TabsContent>
         ) : null}
 
         <TabsContent value="auth" className="space-y-4">
-          {pkg.versions.map((installation) => {
+          {(() => {
+            const installation = latestInstallation;
+            if (!installation) return null;
             const access = authStates[installation.id];
             const options = authOptions[installation.id];
             const isLoadingAuth = loadingAuthIds.includes(installation.id);
             const isSavingAuth = savingAuthIds.includes(installation.id);
 
             return (
-              <Card key={`auth-${installation.id}`}>
-                <CardHeader className="space-y-3">
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <CardTitle className="text-base">{installation.version}</CardTitle>
-                        <Badge variant={installation.status === "active" ? "default" : "outline"}>
-                          {installation.status}
-                        </Badge>
-                        {installation.read_only ? (
-                          <Badge variant="outline">Read only</Badge>
-                        ) : null}
-                      </div>
-                      <CardDescription className="mt-1">
-                        Control who can use or edit this installed extension version in Studio.
-                      </CardDescription>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Installed {formatTimestamp(installation.created_at)}
-                    </div>
-                  </div>
+              <Card>
+                <CardHeader>
+                  <CardDescription>
+                    Control who can use or edit this extension in Studio.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {installation.read_only ? (
                     <div className="rounded-md border bg-muted/30 px-3 py-6 text-sm text-muted-foreground">
-                      You can use this extension version, but you do not have permission to edit
-                      its Auth settings.
+                      You can use this extension, but you do not have permission to edit its Auth settings.
                     </div>
                   ) : isLoadingAuth || !access || !options ? (
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1327,78 +1156,7 @@ export default function ExtensionDetailPage() {
                 </CardContent>
               </Card>
             );
-          })}
-        </TabsContent>
-
-        <TabsContent value="versions" className="space-y-4">
-          {pkg.versions.map((installation) => (
-            <Card key={installation.id}>
-              <CardHeader className="space-y-3">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-base">{installation.version}</CardTitle>
-                      <Badge variant={installation.status === "active" ? "default" : "outline"}>
-                        {installation.status}
-                      </Badge>
-                      <Badge variant="outline">
-                        {formatTrustStatusLabel(installation.trust_status)}
-                      </Badge>
-                    </div>
-                    <CardDescription className="mt-1">
-                      {installation.source}
-                      {" · "}
-                      {installation.trust_source}
-                      {" · "}
-                      {installation.installed_by || "unknown"}
-                    </CardDescription>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Installed {formatTimestamp(installation.created_at)}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {buildReferenceBadges(installation).length > 0 ? (
-                  <div>
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Current Usage
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {buildReferenceBadges(installation).map((badge) => (
-                        <Badge
-                          key={`${installation.id}-${badge.label}`}
-                          variant={badge.tone === "provider" ? "default" : "outline"}
-                          className="font-normal"
-                        >
-                          {badge.label} {badge.count}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {buildContributionGroups(installation.contribution_summary).map((group) => (
-                  <div key={`${installation.id}-${group.label}`}>
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {group.label}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {group.values.map((value) => (
-                        <Badge
-                          key={`${installation.id}-${group.label}-${value}`}
-                          variant={getContributionBadgeVariant(group.tone)}
-                          className="font-normal"
-                        >
-                          {value}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          ))}
+          })()}
         </TabsContent>
 
         {hasHookReplayTab ? (

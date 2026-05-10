@@ -12,7 +12,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   CheckCircle2,
-  CircleCheck,
   Info,
   Loader2,
   MoreHorizontal,
@@ -311,20 +310,6 @@ function formatElapsed(isoTimestamp: string | null | undefined, nowMs: number): 
 }
 
 type ImportDialogPhase = 'review' | 'installing' | 'draining';
-
-/** Ordered progress steps shown during extension import. */
-const IMPORT_STEPS = [
-  { stage: 'upload_received', label: 'Upload received' },
-  { stage: 'validating', label: 'Validating manifest' },
-  { stage: 'analyzing', label: 'Analyzing upgrade impact' },
-  { stage: 'storing', label: 'Packaging and storing files' },
-  { stage: 'extracting', label: 'Extracting files' },
-  { stage: 'installing_deps', label: 'Installing dependencies' },
-  { stage: 'registering', label: 'Registering extension' },
-  { stage: 'staging', label: 'Staging safe upgrade' },
-  { stage: 'applying', label: 'Applying upgrade' },
-  { stage: 'complete', label: 'Complete' },
-] as const;
 
 function getImportActionLabel(preview: ExtensionImportPreview | null, isImporting: boolean): string {
   if (isImporting) {
@@ -746,8 +731,8 @@ function ExtensionsPage() {
       );
       toast.success(
         result.mode === 'physical'
-          ? 'Extension version uninstalled'
-          : 'Extension version disabled because it is still referenced',
+          ? `${pendingUninstall.installation.display_name} uninstalled`
+          : `${pendingUninstall.installation.display_name} disabled (still referenced)`,
       );
       setPendingUninstall(null);
       await loadPackages();
@@ -845,8 +830,8 @@ function ExtensionsPage() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
-            Loading extensions…
+          <div className="flex items-center justify-center min-h-[50vh]">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : filteredPackages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
@@ -1109,64 +1094,18 @@ function ExtensionsPage() {
               </DialogHeader>
 
               {importDialogPhase === 'installing' ? (
-                <div className="space-y-3 py-4">
-                  {(() => {
-                    const reachedStages = new Set<string>();
-                    let lastCompletedIndex = -1;
-                    if (importProgress) {
-                      reachedStages.add(importProgress.stage);
-                      const currentIdx = IMPORT_STEPS.findIndex((s) => s.stage === importProgress.stage);
-                      if (currentIdx >= 0) {
-                        lastCompletedIndex = currentIdx - 1;
-                      }
-                      if (importProgress.status === 'complete') {
-                        lastCompletedIndex = IMPORT_STEPS.length - 1;
-                      }
-                    }
-
-                    const isUpgrade = isUpgradePreview(pendingImport?.preview ?? null);
-                    const visibleSteps = IMPORT_STEPS.filter((step) => {
-                      if (!isUpgrade && (step.stage === 'analyzing' || step.stage === 'staging' || step.stage === 'applying')) {
-                        return false;
-                      }
-                      if (isUpgrade && step.stage === 'registering') {
-                        return false;
-                      }
-                      return true;
-                    });
-
-                    return visibleSteps.map((step, idx) => {
-                      const isCompleted = idx <= lastCompletedIndex;
-                      const isCurrent = importProgress?.stage === step.stage && importProgress?.status === 'running';
-                      const isFailed = importProgress?.stage === step.stage && importProgress?.status === 'failed';
-                      const isPending = !isCompleted && !isCurrent && !isFailed;
-
-                      return (
-                        <div
-                          key={step.stage}
-                          className="flex items-center gap-3 transition-opacity duration-200"
-                          style={{ opacity: isPending ? 0.4 : 1 }}
-                        >
-                          <div className="flex h-5 w-5 shrink-0 items-center justify-center">
-                            {isFailed ? (
-                              <XCircle className="h-4 w-4 text-destructive" />
-                            ) : isCompleted ? (
-                              <CircleCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                            ) : isCurrent ? (
-                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                            ) : (
-                              <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
-                            )}
-                          </div>
-                          <span className={`text-sm ${isCurrent ? 'text-foreground font-medium' : isFailed ? 'text-destructive' : 'text-muted-foreground'}`}>
-                            {step.label}
-                          </span>
-                        </div>
-                      );
-                    });
-                  })()}
+                <div className="space-y-2 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-foreground">
+                      {importProgress?.status === 'failed' ? 'Import failed' : importProgress?.label ?? 'Preparing…'}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {importProgress ? `${Math.round(importProgress.percent)}%` : '0%'}
+                    </span>
+                  </div>
+                  <Progress value={importProgress?.percent ?? 0} />
                   {importProgress?.detail && importProgress.status === 'failed' && (
-                    <p className="text-sm text-destructive pl-8">{importProgress.detail}</p>
+                    <p className="text-sm text-destructive">{importProgress.detail}</p>
                   )}
                 </div>
               ) : (
