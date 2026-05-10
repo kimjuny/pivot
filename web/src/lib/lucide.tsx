@@ -8,6 +8,7 @@ import {
   Blocks as BlocksIcon,
   Bot as BotIcon,
   Brain as BrainIcon,
+  Code as CodeIcon,
   BugPlay as BugPlayIcon,
   Check as CheckIcon,
   CheckCircle2 as CheckCircle2Icon,
@@ -41,6 +42,7 @@ import {
   Info as InfoIcon,
   KeyRound as KeyRoundIcon,
   Layers as LayersIcon,
+  LayoutDashboard as LayoutDashboardIcon,
   Link2 as Link2Icon,
   ListTodo as ListTodoIcon,
   Loader2 as Loader2Icon,
@@ -107,6 +109,7 @@ export const ArrowLeft = withDefaultStroke(ArrowLeftIcon);
 export const ArrowUp = withDefaultStroke(ArrowUpIcon);
 export const Blocks = withDefaultStroke(BlocksIcon);
 export const Bot = withDefaultStroke(BotIcon);
+export const Code = withDefaultStroke(CodeIcon);
 export const Brain = withDefaultStroke(BrainIcon);
 export const BugPlay = withDefaultStroke(BugPlayIcon);
 export const Check = withDefaultStroke(CheckIcon);
@@ -141,6 +144,7 @@ export const Inbox = withDefaultStroke(InboxIcon);
 export const Info = withDefaultStroke(InfoIcon);
 export const KeyRound = withDefaultStroke(KeyRoundIcon);
 export const Layers = withDefaultStroke(LayersIcon);
+export const LayoutDashboard = withDefaultStroke(LayoutDashboardIcon);
 export const Link2 = withDefaultStroke(Link2Icon);
 export const ListTodo = withDefaultStroke(ListTodoIcon);
 export const Loader2 = withDefaultStroke(Loader2Icon);

@@ -7,6 +7,7 @@ import {
   type FormEvent,
 } from "react";
 import { Info, Loader2 } from "@/lib/lucide";
+import { ICON_MAP } from "@/lib/icon-map";
 
 import {
   ApiError,
@@ -214,6 +215,7 @@ function toInstalledChatSurfaces(
               ? contributionItem.description.trim()
               : pkg.description,
           minWidth: normalizedMinWidth,
+          icon: contributionItem?.icon ?? null,
         });
       },
     );
@@ -3541,6 +3543,33 @@ function ChatContainer({
       const isActive =
         activeInstalledSurface?.packageId === surface.packageId &&
         activeInstalledSurface.surfaceKey === surface.surfaceKey;
+      const IconComponent = surface.icon ? ICON_MAP[surface.icon] : null;
+
+      if (IconComponent) {
+        return (
+          <Tooltip key={`installed:${surface.packageId}:${surface.surfaceKey}`}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleOpenInstalledSurface(surface);
+                }}
+                className={`pointer-events-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-background/95 shadow-sm backdrop-blur transition-colors ${
+                  isActive && isExtensionDockOpen
+                    ? "border-primary/50 text-foreground"
+                    : "border-border/70 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                }`}
+                aria-label={surface.displayName}
+              >
+                <IconComponent className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {surface.displayName}
+            </TooltipContent>
+          </Tooltip>
+        );
+      }
 
       return (
         <button
@@ -3805,9 +3834,11 @@ function ChatContainer({
           <SidebarTrigger className="pointer-events-auto h-8 w-8 rounded-lg bg-transparent text-muted-foreground shadow-none hover:bg-accent/70 hover:text-foreground" />
         </div>
         {headerSurfaceButtons.length > 0 ? (
-          <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-2">
-            {headerSurfaceButtons}
-          </div>
+          <TooltipProvider delayDuration={150}>
+            <div className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-2">
+              {headerSurfaceButtons}
+            </div>
+          </TooltipProvider>
         ) : null}
 
         {shouldRenderDockLayout ? (

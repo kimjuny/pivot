@@ -540,7 +540,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
     def test_create_installed_surface_session_serves_packaged_runtime(self) -> None:
         """Installed surfaces should create a packaged runtime session and serve HTML."""
         extension_root = Path(self.tmpdir.name) / "installed-surface"
-        runtime_dir = extension_root / "ui" / "workspace"
+        runtime_dir = extension_root / "surface" / "workspace"
         runtime_dir.mkdir(parents=True, exist_ok=True)
         (runtime_dir / "index.html").write_text(
             (
@@ -572,7 +572,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
                             {
                                 "key": "workspace-editor",
                                 "display_name": "Workspace Editor",
-                                "entrypoint": "ui/workspace/index.html",
+                                "entrypoint": "surface/workspace/index.html",
                             }
                         ]
                     },
@@ -620,7 +620,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
                 payload["runtime_url"],
                 (
                     "/api/chat-surfaces/installed-sessions/"
-                    f"{payload['surface_session_id']}/runtime/ui/workspace/"
+                    f"{payload['surface_session_id']}/runtime/surface/workspace/"
                 ),
             )
 
@@ -640,7 +640,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
             asset_response = self.client.get(
                 (
                     "/api/chat-surfaces/installed-sessions/"
-                    f"{payload['surface_session_id']}/runtime/ui/workspace/main.js"
+                    f"{payload['surface_session_id']}/runtime/surface/workspace/main.js"
                 ),
                 params={"surface_token": payload["surface_token"]},
             )

@@ -359,12 +359,14 @@ def _serialize_contribution_item(
     raw_description = payload.get("description")
     raw_key = payload.get("key")
     raw_min_width = payload.get("min_width")
+    raw_icon = payload.get("icon")
     return ExtensionContributionItemResponse(
         type=raw_type,
         name=raw_name,
         description=raw_description if isinstance(raw_description, str) else "",
         key=raw_key if isinstance(raw_key, str) else None,
         min_width=raw_min_width if isinstance(raw_min_width, int) else None,
+        icon=raw_icon if isinstance(raw_icon, str) else None,
     )
 
 

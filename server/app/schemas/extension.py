@@ -57,6 +57,7 @@ class ExtensionContributionItemResponse(AppBaseModel):
     description: str = ""
     key: str | None = None
     min_width: int | None = None
+    icon: str | None = None
 
 
 class ExtensionConfigurationFieldResponse(AppBaseModel):

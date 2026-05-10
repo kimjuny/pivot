@@ -1224,6 +1224,8 @@ export interface ExtensionContributionItem {
   description: string;
   /** Optional surface minimum width in pixels declared by the manifest. */
   min_width?: number | null;
+  /** Optional lucide icon name for the chat header button. */
+  icon?: string | null;
 }
 
 /**

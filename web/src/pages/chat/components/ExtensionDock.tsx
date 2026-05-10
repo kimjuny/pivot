@@ -22,6 +22,8 @@ export interface InstalledChatSurfaceDescriptor {
   description: string;
   /** Optional manifest-declared minimum width in pixels for this surface. */
   minWidth: number | null;
+  /** Optional lucide icon name declared in the manifest for the chat header button. */
+  icon: string | null;
 }
 
 interface ExtensionDockProps {

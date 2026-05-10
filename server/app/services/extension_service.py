@@ -434,6 +434,12 @@ def _build_contribution_items(manifest: dict[str, Any]) -> list[dict[str, Any]]:
                     if isinstance(raw_item.get("min_width"), int)
                     else None
                 )
+                raw_icon = raw_item.get("icon")
+                item["icon"] = (
+                    raw_icon.strip()
+                    if isinstance(raw_icon, str) and raw_icon.strip()
+                    else None
+                )
             items.append(item)
     return items
 
@@ -899,6 +905,7 @@ def _normalize_manifest(
                     raw_description = raw_item.get("description")
                     raw_placement = raw_item.get("placement")
                     raw_min_width = raw_item.get("min_width")
+                    raw_icon = raw_item.get("icon")
                     normalized_min_width: int | None = None
                     if raw_min_width is not None:
                         if not isinstance(raw_min_width, int) or raw_min_width <= 0:
@@ -928,6 +935,11 @@ def _normalize_manifest(
                                 else "right_dock"
                             ),
                             "min_width": normalized_min_width,
+                            "icon": (
+                                raw_icon.strip()
+                                if isinstance(raw_icon, str) and raw_icon.strip()
+                                else None
+                            ),
                         }
                     )
                     continue
@@ -3539,6 +3551,7 @@ class ExtensionService:
                 {
                     "key": surface["key"],
                     "display_name": surface.get("display_name", surface["key"]),
+                    "icon": surface.get("icon"),
                     "description": surface.get("description", ""),
                     "placement": surface.get("placement", "right_dock"),
                     "min_width": surface.get("min_width"),

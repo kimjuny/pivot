@@ -344,14 +344,14 @@ class ExtensionServiceTestCase(unittest.TestCase):
             )
 
         if chat_surface_key is not None:
-            surface_dir = extension_root / "ui" / chat_surface_key
+            surface_dir = extension_root / "surface" / chat_surface_key
             surface_dir.mkdir(parents=True, exist_ok=True)
             manifest["contributions"].setdefault("chat_surfaces", []).append(
                 {
                     "key": chat_surface_key,
                     "display_name": "Workspace Editor",
                     "description": "A coding workbench surface.",
-                    "entrypoint": f"ui/{chat_surface_key}/index.html",
+                    "entrypoint": f"surface/{chat_surface_key}/index.html",
                     "placement": "right_dock",
                     "min_width": 560,
                 }
