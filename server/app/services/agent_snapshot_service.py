@@ -193,7 +193,6 @@ class AgentSnapshotService:
                 "session_idle_timeout_minutes": agent.session_idle_timeout_minutes,
                 "sandbox_timeout_seconds": agent.sandbox_timeout_seconds,
                 "compact_threshold_percent": agent.compact_threshold_percent,
-                "is_active": agent.is_active,
                 "max_iteration": agent.max_iteration,
                 "tool_ids": _load_json_array(agent.tool_ids),
                 "skill_ids": _load_json_array(agent.skill_ids),
@@ -271,9 +270,6 @@ class AgentSnapshotService:
                     "compact_threshold_percent",
                     base_agent_payload["compact_threshold_percent"],
                 )
-            ),
-            "is_active": bool(
-                raw_agent_payload.get("is_active", base_agent_payload["is_active"])
             ),
             "max_iteration": int(
                 raw_agent_payload.get(
@@ -490,7 +486,7 @@ class AgentSnapshotService:
         before_agent = before_snapshot["agent"]
         after_agent = after_snapshot["agent"]
 
-        basics_keys = {"name", "description", "is_active"}
+        basics_keys = {"name", "description"}
         runtime_keys = {
             "llm_id",
             "session_idle_timeout_minutes",

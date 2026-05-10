@@ -126,8 +126,7 @@ function buildDraftChangeSummary(
   const changes: string[] = [];
   const basicsChanged =
     originalAgent.name !== workspaceAgent.name ||
-    originalAgent.description !== workspaceAgent.description ||
-    originalAgent.is_active !== workspaceAgent.is_active;
+    originalAgent.description !== workspaceAgent.description;
   const runtimeChanged =
     originalAgent.llm_id !== workspaceAgent.llm_id ||
     originalAgent.session_idle_timeout_minutes !==
@@ -533,7 +532,6 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
         sandbox_timeout_seconds: workspaceAgent.sandbox_timeout_seconds,
         compact_threshold_percent: workspaceAgent.compact_threshold_percent,
         max_iteration: workspaceAgent.max_iteration,
-        is_active: workspaceAgent.is_active,
         tool_ids: workspaceAgent.tool_ids ?? null,
         skill_ids: workspaceAgent.skill_ids ?? null,
       });

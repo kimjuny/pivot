@@ -18,8 +18,7 @@ export function compareAgents(agentA: Agent | null, agentB: Agent | null): boole
     agentA.max_iteration !== agentB.max_iteration ||
     agentA.tool_ids !== agentB.tool_ids ||
     agentA.skill_ids !== agentB.skill_ids ||
-    agentA.model_name !== agentB.model_name ||
-    agentA.is_active !== agentB.is_active
+    agentA.model_name !== agentB.model_name
   );
 }
 

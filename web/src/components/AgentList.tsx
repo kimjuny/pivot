@@ -103,7 +103,7 @@ function AgentList() {
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'paused' | 'upgrading'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [servingAgentIds, setServingAgentIds] = useState<number[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
@@ -138,14 +138,26 @@ function AgentList() {
   // Filter + pagination
   // ---------------------------------------------------------------------------
 
-  const activeCount = useMemo(() => agents.filter(a => a.is_active).length, [agents]);
-  const inactiveCount = agents.length - activeCount;
+  const openCount = useMemo(
+    () => agents.filter(a => (a.client_state ?? 'open') === 'open').length,
+    [agents],
+  );
+  const pausedCount = useMemo(
+    () => agents.filter(a => a.client_state === 'paused').length,
+    [agents],
+  );
+  const upgradingCount = useMemo(
+    () => agents.filter(a => a.client_state === 'draining_for_upgrade' || a.client_state === 'upgrade_required').length,
+    [agents],
+  );
 
   const filteredAgents = useMemo(() => {
     const q = searchQuery.toLowerCase();
     return agents.filter(a => {
-      if (statusFilter === 'active' && !a.is_active) return false;
-      if (statusFilter === 'inactive' && a.is_active) return false;
+      const cs = a.client_state ?? 'open';
+      if (statusFilter === 'open' && cs !== 'open') return false;
+      if (statusFilter === 'paused' && cs !== 'paused') return false;
+      if (statusFilter === 'upgrading' && cs !== 'draining_for_upgrade' && cs !== 'upgrade_required') return false;
       if (!q) return true;
       return a.name.toLowerCase().includes(q) || (a.description && a.description.toLowerCase().includes(q));
     });
@@ -312,8 +324,9 @@ function AgentList() {
           {(
             [
               { value: 'all', label: 'All', count: agents.length },
-              { value: 'active', label: 'Active', count: activeCount },
-              { value: 'inactive', label: 'Inactive', count: inactiveCount },
+              { value: 'open', label: 'Open', count: openCount },
+              { value: 'paused', label: 'Paused', count: pausedCount },
+              { value: 'upgrading', label: 'Upgrading', count: upgradingCount },
             ] as const
           ).map(({ value, label, count }) => (
             <button
@@ -413,7 +426,15 @@ function AgentList() {
                       <div className="flex items-center gap-1">
                         <span className="font-medium text-sm truncate leading-tight">{agent.name}</span>
                         <span
-                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${agent.is_active ? 'bg-primary' : 'bg-muted-foreground/40'}`}
+                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            (agent.client_state ?? 'open') === 'open'
+                              ? 'bg-emerald-500'
+                              : agent.client_state === 'upgrade_required'
+                                ? 'bg-blue-500'
+                                : agent.client_state === 'draining_for_upgrade'
+                                  ? 'bg-amber-500'
+                                  : 'bg-muted-foreground/40'
+                          }`}
                           aria-hidden="true"
                         />
                       </div>

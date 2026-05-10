@@ -7,6 +7,11 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['InterVariable', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI',
+          'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans',
+          'Helvetica Neue', 'sans-serif'],
+      },
       colors: {
         // shadcn CSS variable based colors - OKLCH color space
         border: "oklch(var(--border))",

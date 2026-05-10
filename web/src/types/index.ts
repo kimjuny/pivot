@@ -45,8 +45,6 @@ export interface Agent {
   client_state?: AgentClientState;
   /** Deprecated: Name of the LLM model used by this agent */
   model_name?: string;
-  /** Whether the agent is currently active */
-  is_active: boolean;
   /** Maximum recursion depth allowed for one ReAct task. */
   max_iteration: number;
   /**

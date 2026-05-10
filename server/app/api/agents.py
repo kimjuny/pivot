@@ -62,7 +62,6 @@ def _serialize_agent_response(
         "active_release_version": active_release_version,
         "client_state": agent.client_state,
         "model_name": model_display,
-        "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
         "tool_ids": agent.tool_ids,
         "skill_ids": agent.skill_ids,
@@ -212,7 +211,6 @@ async def create_agent(
         session_idle_timeout_minutes=agent_data.session_idle_timeout_minutes,
         sandbox_timeout_seconds=agent_data.sandbox_timeout_seconds,
         compact_threshold_percent=agent_data.compact_threshold_percent,
-        is_active=agent_data.is_active,
         max_iteration=agent_data.max_iteration,
     )
     AccessService(db).grant_creator_edit(agent=agent, user=current_user)
@@ -449,8 +447,6 @@ async def update_agent(
         update_data["sandbox_timeout_seconds"] = agent_data.sandbox_timeout_seconds
     if agent_data.compact_threshold_percent is not None:
         update_data["compact_threshold_percent"] = agent_data.compact_threshold_percent
-    if agent_data.is_active is not None:
-        update_data["is_active"] = agent_data.is_active
     if agent_data.max_iteration is not None:
         update_data["max_iteration"] = agent_data.max_iteration
     if "tool_ids" in agent_data.__fields_set__:

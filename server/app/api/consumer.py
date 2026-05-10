@@ -47,7 +47,6 @@ def _serialize_consumer_agent_response(
         "active_release_id": agent.active_release_id,
         "client_state": agent.client_state,
         "model_name": model_display,
-        "is_active": agent.is_active,
         "max_iteration": agent.max_iteration,
         "tool_ids": agent.tool_ids,
         "skill_ids": agent.skill_ids,

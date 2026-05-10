@@ -114,7 +114,6 @@ const baseAgent: Agent = {
   active_release_version: 3,
   client_state: "open",
   model_name: "qwen",
-  is_active: true,
   max_iteration: 8,
   tool_ids: null,
   skill_ids: null,

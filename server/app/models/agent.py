@@ -62,7 +62,6 @@ class Agent(SQLModel, table=True):
     model_name: str | None = Field(
         default=None, description="Deprecated: Use llm_id instead"
     )
-    is_active: bool = Field(default=True)
     max_iteration: int = Field(
         default=50, description="Maximum iterations for ReAct recursion"
     )

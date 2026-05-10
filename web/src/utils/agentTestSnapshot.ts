@@ -21,8 +21,6 @@ export interface StudioTestSnapshotAgent {
   sandbox_timeout_seconds: number;
   /** Context usage threshold used for compaction. */
   compact_threshold_percent: number;
-  /** Whether the agent is active in Studio. */
-  is_active: boolean;
   /** Maximum recursion depth. */
   max_iteration: number;
   /** Normalized tool allowlist or null for unrestricted access. */
@@ -98,7 +96,6 @@ export function buildStudioTestSnapshotPayload(
       session_idle_timeout_minutes: agent.session_idle_timeout_minutes,
       sandbox_timeout_seconds: agent.sandbox_timeout_seconds,
       compact_threshold_percent: agent.compact_threshold_percent,
-      is_active: agent.is_active,
       max_iteration: agent.max_iteration,
       tool_ids: normalizeAllowlist(agent.tool_ids),
       skill_ids: normalizeAllowlist(agent.skill_ids),

@@ -224,6 +224,15 @@ def ensure_agent_schema_compatibility() -> None:
                 "WHERE client_state IS NULL"
             )
         )
+        # Migrate legacy is_active=false to client_state=paused
+        if "is_active" in columns:
+            conn.execute(
+                text(
+                    "UPDATE agent "
+                    "SET client_state = 'paused' "
+                    "WHERE is_active = 0 AND client_state = 'open'"
+                )
+            )
 
 
 def ensure_session_schema_compatibility() -> None:

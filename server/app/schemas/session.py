@@ -17,7 +17,6 @@ class StudioTestSnapshotAgentPayload(AppBaseModel):
     session_idle_timeout_minutes: int = Field(default=15, ge=1)
     sandbox_timeout_seconds: int = Field(default=60, ge=1)
     compact_threshold_percent: int = Field(default=60, ge=1, le=100)
-    is_active: bool = True
     max_iteration: int = Field(default=30, ge=1)
     tool_ids: list[str] | None = None
     skill_ids: list[str] | None = None

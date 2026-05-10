@@ -54,7 +54,6 @@ class AgentCreate(AppBaseModel):
         le=100,
         description="Context percentage that triggers automatic compaction",
     )
-    is_active: bool = Field(default=True, description="Whether agent is active")
     max_iteration: int = Field(
         default=50, ge=1, description="Maximum iterations for ReAct recursion"
     )
@@ -70,7 +69,6 @@ class AgentUpdate(AppBaseModel):
     session_idle_timeout_minutes: int | None = Field(default=None, ge=1)
     sandbox_timeout_seconds: int | None = Field(default=None, ge=1)
     compact_threshold_percent: int | None = Field(default=None, ge=1, le=100)
-    is_active: bool | None = None
     max_iteration: int | None = Field(default=None, ge=1)
     # JSON-encoded list of tool names, or None to leave unchanged
     tool_ids: str | None = None
@@ -152,7 +150,6 @@ class AgentResponse(AppBaseModel):
         "upgrade_required",
     ]
     model_name: str | None
-    is_active: bool
     max_iteration: int
     tool_ids: str | None
     skill_ids: str | None

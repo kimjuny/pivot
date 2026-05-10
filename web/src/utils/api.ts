@@ -373,7 +373,6 @@ export const createAgent = async (agentData: {
   sandbox_timeout_seconds?: number;
   compact_threshold_percent?: number;
   max_iteration?: number;
-  is_active?: boolean;
   use_scope?: 'all' | 'selected';
   use_user_ids?: number[];
   use_group_ids?: number[];
@@ -477,7 +476,6 @@ export const updateAgent = async (
     sandbox_timeout_seconds?: number;
     compact_threshold_percent?: number;
     max_iteration?: number;
-    is_active?: boolean;
     tool_ids?: string | null;
     skill_ids?: string | null;
   }
