@@ -811,8 +811,8 @@ export default function ExtensionDetailPage() {
                   <ExtensionLogoAvatar
                     name={pkg.display_name}
                     logoUrl={pkg.logo_url ?? latestInstallation?.logo_url ?? null}
-                    fallback={<Server className="h-6 w-6 text-primary" aria-hidden="true" />}
-                    containerClassName="flex aspect-square size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted/20 p-2.5"
+                    fallback={<Server className="h-5 w-5 text-primary" aria-hidden="true" />}
+                    containerClassName="flex aspect-square size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted/20 p-2.5"
                     imageClassName="h-full w-full rounded-lg object-contain"
                   />
                   <div className="min-w-0 flex-1 space-y-1.5">

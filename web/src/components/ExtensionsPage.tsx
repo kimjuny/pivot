@@ -1415,8 +1415,8 @@ function ExtensionPackageCard({
         <ExtensionLogoAvatar
           name={pkg.display_name}
           logoUrl={pkg.logo_url ?? primaryInstallation?.logo_url ?? null}
-          fallback={<Server className="h-4.5 w-4.5" aria-hidden="true" />}
-          containerClassName="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+          fallback={<Server className="h-4 w-4" aria-hidden="true" />}
+          containerClassName="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
           imageClassName="size-full rounded-lg object-cover"
         />
 
