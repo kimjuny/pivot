@@ -100,20 +100,20 @@ export default function AccessManagementPage() {
             ))}
           </TabsList>
 
-          {/* Content panels */}
-          <div>
+          {/* Content panels with fade + slide-up transition */}
+          <div className="relative">
             {visibleTabs.some((t) => t.value === "users") && (
-              <TabsContent value="users" className="mt-0">
+              <TabsContent value="users" forceMount className="mt-0 data-[state=inactive]:hidden data-[state=inactive]:animate-none data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-200">
                 <UsersPanel ref={usersRef} />
               </TabsContent>
             )}
             {visibleTabs.some((t) => t.value === "groups") && (
-              <TabsContent value="groups" className="mt-0">
+              <TabsContent value="groups" forceMount className="mt-0 data-[state=inactive]:hidden data-[state=inactive]:animate-none data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-200">
                 <GroupsPanel ref={groupsRef} />
               </TabsContent>
             )}
             {visibleTabs.some((t) => t.value === "roles") && (
-              <TabsContent value="roles" className="mt-0">
+              <TabsContent value="roles" forceMount className="mt-0 data-[state=inactive]:hidden data-[state=inactive]:animate-none data-[state=active]:animate-in data-[state=active]:fade-in-0 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-200">
                 <RolesPanel ref={rolesRef} />
               </TabsContent>
             )}
