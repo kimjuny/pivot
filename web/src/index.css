@@ -668,6 +668,76 @@
   will-change: opacity, transform;
 }
 
+/*
+ * Dashboard motion design tokens.
+ *
+ * `--ease-spring` approximates a critically-damped spring with mild overshoot
+ * (~6%), used for staged reveals, KPI cards, and panel transitions.
+ * `--reveal-step` is the per-tier offset for layered entrance animations:
+ * navigation → KPIs → charts. Wrapped in `prefers-reduced-motion: no-preference`
+ * so the terminal state renders immediately for users who opt out of motion.
+ */
+:root {
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --reveal-step: 90ms;
+  --reveal-duration: 520ms;
+}
+
+@keyframes dashboardReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  60% {
+    transform: translateY(-2px) scale(1.005);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/*
+ * Dashboard staged-reveal + section cross-fade utilities.
+ *
+ * Run by default and disable only under `prefers-reduced-motion: reduce`.
+ * The inverse `no-preference` query can fail to match on systems that report
+ * neither preference explicitly, which would silently skip every animation.
+ */
+.dashboard-reveal {
+  animation: dashboardReveal var(--reveal-duration) var(--ease-spring) both;
+  animation-delay: calc(var(--reveal-index, 0) * var(--reveal-step));
+  will-change: opacity, transform;
+}
+
+/*
+ * Section-level cross-fade for panels while a refresh is in flight. Drops
+ * the whole section to 40% so the "this is being replaced" signal is loud,
+ * matching the spec's `opacity -> 0.4` stale step for 7d/30d switches.
+ */
+.section-stale {
+  opacity: 0.4;
+  transition: opacity 100ms var(--ease-spring);
+}
+
+.section-fresh {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-reveal {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .section-stale,
+  .section-fresh {
+    transition: none;
+    opacity: 1;
+  }
+}
+
 @layer components {
   .list-search-group {
     @apply w-full md:ml-auto md:w-[420px] md:flex-none;
