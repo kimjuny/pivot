@@ -251,7 +251,9 @@ async def get_usable_skills(
     current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> list[dict[str, Any]]:
     """List skills the current Studio user can select for agents."""
-    return list_visible_skills(db, current_user.username)
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    return list_visible_skills(db, current_user.id)
 
 
 @router.get("/skills/manage")
@@ -385,10 +387,12 @@ async def get_skill_file_tree(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> SkillFileTreeResponse:
     """Return direct children for one visible skill directory."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     try:
         entries = list_visible_skill_directory(
             db,
-            current_user.username,
+            current_user.id,
             skill_name,
             path,
         )
@@ -423,8 +427,10 @@ async def get_skill_file_content(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> SkillFileContentResponse:
     """Read one UTF-8 file from a visible skill directory."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     try:
-        content = read_visible_skill_file(db, current_user.username, skill_name, path)
+        content = read_visible_skill_file(db, current_user.id, skill_name, path)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -549,8 +555,10 @@ async def get_skill_source(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Read one skill source when the current user has use access."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     try:
-        return read_visible_skill_source(db, current_user.username, skill_name)
+        return read_visible_skill_source(db, current_user.id, skill_name)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
@@ -673,8 +681,10 @@ async def create_archive_import_job(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> SkillArchiveImportJobResponse:
     """Create one SSE-observable archive import job."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     job = get_skill_import_progress_service().create_job(
-        username=current_user.username,
+        user_id=current_user.id,
     )
     return SkillArchiveImportJobResponse(job_id=job.job_id)
 
@@ -687,8 +697,11 @@ async def stream_archive_import_job_events(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> StreamingResponse:
     """Stream progress events for one local skill archive import job."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    user_id = current_user.id
     progress_service = get_skill_import_progress_service()
-    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    job = progress_service.get_job(job_id=job_id, user_id=user_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Skill import job not found.")
 
@@ -696,12 +709,12 @@ async def stream_archive_import_job_events(
         cursor = after_id
         subscriber = await progress_service.subscribe(
             job_id=job_id,
-            username=current_user.username,
+            user_id=user_id,
         )
         try:
             for payload in progress_service.list_events(
                 job_id=job_id,
-                username=current_user.username,
+                user_id=user_id,
                 after_id=cursor,
             ):
                 event_id = payload.get("event_id")
@@ -748,8 +761,10 @@ async def import_archive_skill_endpoint(
     current_user: User = Depends(permissions(Permission.SKILLS_MANAGE)),
 ) -> dict[str, Any]:
     """Install one skill archive uploaded from the local machine."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     progress_service = get_skill_import_progress_service()
-    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    job = progress_service.get_job(job_id=job_id, user_id=current_user.id)
     if job is None:
         raise HTTPException(status_code=404, detail="Skill import job not found.")
     if job.completed:
@@ -797,10 +812,10 @@ async def import_archive_skill_endpoint(
     def run_import() -> dict[str, Any]:
         with managed_session() as worker_db:
             worker_user = worker_db.exec(
-                select(User).where(User.username == current_user.username)
+                select(User).where(User.id == current_user.id)
             ).first()
             if worker_user is None:
-                raise ValueError(f"User '{current_user.username}' not found.")
+                raise ValueError(f"User '{current_user.id}' not found.")
             return install_archive_skill(
                 worker_db,
                 worker_user,

@@ -51,12 +51,14 @@ async def _store_upload(
     current_user: User = Depends(get_current_user),
 ) -> FileAssetResponse:
     """Upload, verify, and persist a file in the current user's workspace."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     file_bytes = await file.read()
     filename = file.filename or ""
     service = FileService(db)
     try:
         stored_file = service.store_uploaded_file(
-            username=current_user.username,
+            user_id=current_user.id,
             filename=filename,
             source=source,
             file_bytes=file_bytes,
@@ -120,9 +122,11 @@ async def delete_image(
     current_user: User = Depends(get_current_user),
 ) -> Response:
     """Delete an uploaded file that has not been used in a conversation."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     service = FileService(db)
     try:
-        deleted = service.delete_file_for_user(file_id, current_user.username)
+        deleted = service.delete_file_for_user(file_id, current_user.id)
     except ValueError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
 
@@ -139,8 +143,10 @@ async def get_image_content(
     current_user: User = Depends(get_current_user),
 ):
     """Stream an uploaded file back to the authenticated owner."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     service = FileService(db)
-    resolved = service.get_file_content_for_user(file_id, current_user.username)
+    resolved = service.get_file_content_for_user(file_id, current_user.id)
     if resolved is None:
         raise HTTPException(status_code=404, detail="Image file not found")
     file_asset, payload = resolved

@@ -131,8 +131,10 @@ async def list_consumer_sessions(
         )
         if agent.id is not None
     }
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     sessions = SessionService(db).get_sessions_by_user(
-        user=current_user.username,
+        user_id=current_user.id,
         agent_ids=list(visible_agents),
         session_type="consumer",
         limit=limit,

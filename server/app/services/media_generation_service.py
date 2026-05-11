@@ -400,7 +400,7 @@ class MediaGenerationService:
         self,
         *,
         agent_id: int,
-        username: str,
+        user_id: int,
         workspace_id: str,
         workspace_backend_path: str,
         request: MediaGenerationRequest,
@@ -419,7 +419,7 @@ class MediaGenerationService:
         usage_log = self._create_usage_log(
             agent_id=agent_id,
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             provider_key=binding.provider_key,
             operation=prepared_request.operation,
         )
@@ -568,7 +568,7 @@ class MediaGenerationService:
         *,
         agent_id: int,
         workspace_id: str,
-        username: str,
+        user_id: int,
         provider_key: str,
         operation: str,
     ) -> MediaGenerationUsageLog:
@@ -576,7 +576,7 @@ class MediaGenerationService:
         row = MediaGenerationUsageLog(
             agent_id=agent_id,
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             provider_key=provider_key,
             operation=operation,
             status="running",

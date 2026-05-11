@@ -56,8 +56,8 @@ export interface OperationsSession {
   release_version: number | null;
   /** Session type discriminator. */
   type: "consumer" | "studio_test";
-  /** Username that owns the session. */
-  user: string;
+  /** User ID that owns the session. */
+  user_id: number;
   /** Session lifecycle status. */
   status: string;
   /** User-defined session display title. */
@@ -91,7 +91,7 @@ export interface OperationsSessionDetail {
   agent_name: string;
   release_version: number | null;
   type: "consumer" | "studio_test";
-  user: string;
+  user_id: number;
   status: string;
   title: string | null;
   diagnostics: OperationsSessionDiagnostics;

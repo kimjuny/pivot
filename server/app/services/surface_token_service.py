@@ -29,19 +29,19 @@ class SurfaceTokenClaims:
     """Validated claims extracted from one surface access token."""
 
     surface_session_id: str
-    username: str
+    user_id: int
 
 
 class SurfaceTokenService:
     """Issue and validate short-lived tokens bound to one surface session."""
 
     @staticmethod
-    def create_surface_token(*, surface_session_id: str, username: str) -> str:
+    def create_surface_token(*, surface_session_id: str, user_id: int) -> str:
         """Create one signed surface access token.
 
         Args:
             surface_session_id: Backend-issued surface session identifier.
-            username: Username that owns the surface session.
+            user_id: Database primary key of the user that owns the surface session.
 
         Returns:
             Encoded JWT token.
@@ -50,7 +50,7 @@ class SurfaceTokenService:
         payload = {
             "kind": _SURFACE_TOKEN_KIND,
             "surface_session_id": surface_session_id,
-            "username": username,
+            "user_id": user_id,
             "iat": int(now.timestamp()),
             "exp": int((now + _SURFACE_TOKEN_LIFETIME).timestamp()),
         }
@@ -86,15 +86,15 @@ class SurfaceTokenService:
             raise SurfaceTokenValidationError("Surface token kind is invalid.")
 
         surface_session_id = payload.get("surface_session_id")
-        username = payload.get("username")
+        user_id = payload.get("user_id")
         if not isinstance(surface_session_id, str) or not surface_session_id:
             raise SurfaceTokenValidationError(
                 "Surface token is missing surface_session_id."
             )
-        if not isinstance(username, str) or not username:
-            raise SurfaceTokenValidationError("Surface token is missing username.")
+        if not isinstance(user_id, int):
+            raise SurfaceTokenValidationError("Surface token is missing user_id.")
 
         return SurfaceTokenClaims(
             surface_session_id=surface_session_id,
-            username=username,
+            user_id=user_id,
         )

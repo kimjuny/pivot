@@ -25,7 +25,7 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
         """The tool should store launch metadata, then ensure the preview is reachable."""
         module = create_preview_endpoint_module
         context = SimpleNamespace(
-            username="alice",
+            user_id=42,
             session_id="session-1",
             sandbox_timeout_seconds=90,
             allowed_skills=({"name": "alpha", "location": "/workspace/skills/alpha"},),
@@ -73,7 +73,7 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
             )
 
         service.create_preview_endpoint.assert_called_once_with(
-            username="alice",
+            user_id=42,
             session_id="session-1",
             port=3000,
             path="/",
@@ -84,7 +84,7 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
         )
         service.connect_preview_endpoint.assert_called_once_with(
             preview_id="preview-1",
-            username="alice",
+            user_id=42,
             timeout_seconds=90,
         )
         self.assertTrue(result["has_launch_recipe"])
@@ -94,7 +94,7 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
         """The tool should fail fast on empty preview labels."""
         module = create_preview_endpoint_module
         context = SimpleNamespace(
-            username="alice",
+            user_id=42,
             session_id="session-1",
             sandbox_timeout_seconds=90,
             allowed_skills=(),
@@ -118,7 +118,7 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
         """The tool should fail fast on empty launch commands."""
         module = create_preview_endpoint_module
         context = SimpleNamespace(
-            username="alice",
+            user_id=42,
             session_id="session-1",
             sandbox_timeout_seconds=90,
             allowed_skills=(),

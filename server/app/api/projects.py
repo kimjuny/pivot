@@ -149,11 +149,13 @@ async def create_project(
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> ProjectResponse:
     """Create one project plus its shared workspace."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     _require_agent_use_access(db, current_user, request.agent_id)
     try:
         project = ProjectService(db).create_project(
             agent_id=request.agent_id,
-            username=current_user.username,
+            user_id=current_user.id,
             name=request.name,
             description=request.description,
         )

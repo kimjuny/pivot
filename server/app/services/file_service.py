@@ -154,23 +154,23 @@ class FileService:
     @staticmethod
     def build_upload_object_key(
         *,
-        username: str,
+        user_id: int,
         file_id: str,
         stored_name: str,
     ) -> str:
         """Build the canonical object key for one original upload payload."""
-        return f"users/{username}/uploads/{file_id}/original/{stored_name}"
+        return f"users/{user_id}/uploads/{file_id}/original/{stored_name}"
 
     @classmethod
     def build_upload_markdown_object_key(
         cls,
         *,
-        username: str,
+        user_id: int,
         file_id: str,
         stored_name: str,
     ) -> str:
         """Build the canonical object key for extracted upload markdown."""
-        return f"users/{username}/uploads/{file_id}/derived/{stored_name}.extracted.md"
+        return f"users/{user_id}/uploads/{file_id}/derived/{stored_name}.extracted.md"
 
     @staticmethod
     def _object_storage():
@@ -371,7 +371,7 @@ class FileService:
 
     def store_uploaded_file(
         self,
-        username: str,
+        user_id: int,
         filename: str,
         source: str,
         file_bytes: bytes,
@@ -387,12 +387,12 @@ class FileService:
             verified_document = self.verify_document_upload(normalized_name, file_bytes)
             stored_name = f"{file_id}.{verified_document.extension}"
             object_key = self.build_upload_object_key(
-                username=username,
+                user_id=user_id,
                 file_id=file_id,
                 stored_name=stored_name,
             )
             markdown_object_key = self.build_upload_markdown_object_key(
-                username=username,
+                user_id=user_id,
                 file_id=file_id,
                 stored_name=stored_name,
             )
@@ -414,7 +414,7 @@ class FileService:
 
             file_asset = FileAsset(
                 file_id=file_id,
-                user=username,
+                user_id=user_id,
                 source=source,
                 original_name=normalized_name,
                 stored_name=stored_name,
@@ -441,7 +441,7 @@ class FileService:
             verified_image = self.verify_image_upload(normalized_name, file_bytes)
             stored_name = f"{file_id}.{verified_image.extension}"
             object_key = self.build_upload_object_key(
-                username=username,
+                user_id=user_id,
                 file_id=file_id,
                 stored_name=stored_name,
             )
@@ -457,7 +457,7 @@ class FileService:
 
             file_asset = FileAsset(
                 file_id=file_id,
-                user=username,
+                user_id=user_id,
                 source=source,
                 original_name=normalized_name,
                 stored_name=stored_name,
@@ -488,14 +488,14 @@ class FileService:
 
     def store_uploaded_image(
         self,
-        username: str,
+        user_id: int,
         filename: str,
         source: str,
         file_bytes: bytes,
     ) -> FileAsset:
         """Compatibility wrapper for image-only upload endpoints."""
         stored_file = self.store_uploaded_file(
-            username=username,
+            user_id=user_id,
             filename=filename,
             source=source,
             file_bytes=file_bytes,
@@ -504,11 +504,11 @@ class FileService:
             raise ValueError("Uploaded file is not a supported image.")
         return stored_file
 
-    def get_file_for_user(self, file_id: str, username: str) -> FileAsset | None:
+    def get_file_for_user(self, file_id: str, user_id: int) -> FileAsset | None:
         """Return a file only when it belongs to the current user."""
         stmt = select(FileAsset).where(
             FileAsset.file_id == file_id,
-            FileAsset.user == username,
+            FileAsset.user_id == user_id,
         )
         return self.db.exec(stmt).first()
 
@@ -526,10 +526,10 @@ class FileService:
     def get_file_content_for_user(
         self,
         file_id: str,
-        username: str,
+        user_id: int,
     ) -> tuple[FileAsset, bytes] | None:
         """Resolve one owned file asset to the bytes streamed by the API."""
-        file_asset = self.get_file_for_user(file_id, username)
+        file_asset = self.get_file_for_user(file_id, user_id)
         if file_asset is None:
             return None
         return file_asset, self._read_object_bytes(file_asset)
@@ -540,13 +540,13 @@ class FileService:
             return self._object_storage().get_bytes(file_asset.object_key)
         raise ValueError("File asset does not have an object key.")
 
-    def delete_file_for_user(self, file_id: str, username: str) -> bool:
+    def delete_file_for_user(self, file_id: str, user_id: int) -> bool:
         """Delete one uploaded file owned by the current user.
 
         Why: queue-level removal should be reversible only before the file is
         attached to a conversation; deleting attached files would corrupt history.
         """
-        file_asset = self.get_file_for_user(file_id, username)
+        file_asset = self.get_file_for_user(file_id, user_id)
         if file_asset is None:
             return False
         if file_asset.session_id is not None or file_asset.task_id is not None:
@@ -559,7 +559,7 @@ class FileService:
     def attach_files_to_task(
         self,
         file_ids: list[str],
-        username: str,
+        user_id: int,
         session_id: str | None,
         task_id: str,
     ) -> list[FileAsset]:
@@ -575,7 +575,7 @@ class FileService:
                 continue
             seen_ids.add(normalized_id)
 
-            file_asset = self.get_file_for_user(normalized_id, username)
+            file_asset = self.get_file_for_user(normalized_id, user_id)
             if file_asset is None:
                 raise ValueError(f"File '{normalized_id}' does not exist.")
 
@@ -740,7 +740,7 @@ class FileService:
         )
         markdown_object_key = file_asset.markdown_object_key or (
             self.build_upload_markdown_object_key(
-                username=file_asset.user,
+                user_id=file_asset.user_id,
                 file_id=file_asset.file_id,
                 stored_name=file_asset.stored_name,
             )

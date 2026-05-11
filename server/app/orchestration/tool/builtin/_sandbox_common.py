@@ -8,11 +8,11 @@ from app.orchestration.tool import get_current_tool_execution_context
 from app.services.sandbox_service import get_sandbox_service
 
 
-def require_context() -> tuple[str, int, str, str, int, tuple[dict[str, str], ...]]:
+def require_context() -> tuple[int, int, str, str, int, tuple[dict[str, str], ...]]:
     """Read tool execution context for sandbox tools.
 
     Returns:
-        Tuple of ``(username, agent_id, workspace_id, workspace_backend_path,``
+        Tuple of ``(user_id, agent_id, workspace_id, workspace_backend_path,``
         ``sandbox_timeout_seconds, allowed_skills)``.
 
     Raises:
@@ -22,7 +22,7 @@ def require_context() -> tuple[str, int, str, str, int, tuple[dict[str, str], ..
     if ctx is None:
         raise RuntimeError("Sandbox tool execution context is missing.")
     return (
-        ctx.username,
+        ctx.user_id,
         ctx.agent_id,
         ctx.workspace_id,
         ctx.workspace_backend_path,
@@ -70,7 +70,7 @@ def exec_in_sandbox(cmd: list[str]) -> str:
         RuntimeError: If command exits with non-zero code.
     """
     (
-        username,
+        user_id,
         _agent_id,
         workspace_id,
         workspace_backend_path,
@@ -78,7 +78,7 @@ def exec_in_sandbox(cmd: list[str]) -> str:
         allowed_skills,
     ) = require_context()
     result = get_sandbox_service().exec(
-        username=username,
+        user_id=user_id,
         workspace_id=workspace_id,
         workspace_backend_path=workspace_backend_path,
         cmd=cmd,

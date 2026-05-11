@@ -14,7 +14,7 @@ class Workspace(SQLModel, table=True):
         id: Database primary key.
         workspace_id: Stable public identifier used by the backend and sandbox.
         agent_id: Owning agent identifier.
-        user: Username that owns this workspace.
+        user_id: Foreign key to the user who owns this workspace.
         scope: Either ``session_private`` or ``project_shared``.
         session_id: Session UUID for private workspaces.
         project_id: Project UUID for shared project workspaces.
@@ -28,7 +28,7 @@ class Workspace(SQLModel, table=True):
         index=True, unique=True, description="Public workspace ID"
     )
     agent_id: int = Field(foreign_key="agent.id", index=True)
-    user: str = Field(index=True, description="Workspace owner username")
+    user_id: int = Field(foreign_key="user.id", index=True)
     scope: str = Field(description="Workspace scope: session_private or project_shared")
     session_id: str | None = Field(default=None, index=True)
     project_id: str | None = Field(default=None, index=True)

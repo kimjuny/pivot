@@ -75,7 +75,7 @@ class SessionService:
     def create_session(
         self,
         agent_id: int,
-        user: str,
+        user_id: int,
         *,
         project_id: str | None = None,
         session_type: Literal["consumer", "studio_test"] = "consumer",
@@ -85,7 +85,7 @@ class SessionService:
 
         Args:
             agent_id: ID of the agent for this session.
-            user: Username of the session owner.
+            user_id: Foreign key of the session owner.
             project_id: Optional shared project UUID for project-backed sessions.
             session_type: Whether the session belongs to Consumer or Studio Test.
             test_snapshot_id: Frozen Studio working-copy snapshot pinned to the
@@ -123,7 +123,7 @@ class SessionService:
                 raise ValueError(f"Project {project_id} not found.")
             if project.agent_id != agent_id:
                 raise ValueError("Project does not belong to the requested agent.")
-            actor = self.db.exec(select(User).where(User.username == user)).first()
+            actor = self.db.get(User, user_id)
             if actor is None:
                 raise ValueError("User not found.")
             project_service.require_project_access(
@@ -137,7 +137,7 @@ class SessionService:
                 WorkspaceService(self.db)
                 .create_workspace(
                     agent_id=agent_id,
-                    username=user,
+                    user_id=user_id,
                     scope="session_private",
                     session_id=session_id,
                 )
@@ -151,7 +151,7 @@ class SessionService:
             type=session_type,
             release_id=release_id,
             test_snapshot_id=resolved_test_snapshot_id,
-            user=user,
+            user_id=user_id,
             status="active",
             runtime_status="idle",
             project_id=project_id,
@@ -445,7 +445,7 @@ class SessionService:
 
     def get_sessions_by_user(
         self,
-        user: str,
+        user_id: int,
         agent_id: int | None = None,
         agent_ids: list[int] | None = None,
         session_type: Literal["consumer", "studio_test"] | None = None,
@@ -454,7 +454,7 @@ class SessionService:
         """Get all sessions for a user, optionally filtered by agent.
 
         Args:
-            user: Username to filter by.
+            user_id: Foreign key of the user to filter by.
             agent_id: Optional agent ID to filter by.
             agent_ids: Optional set of agent IDs to include.
             session_type: Optional session type to filter by.
@@ -463,7 +463,7 @@ class SessionService:
         Returns:
             List of Session instances.
         """
-        stmt = select(Session).where(Session.user == user)
+        stmt = select(Session).where(Session.user_id == user_id)
         if agent_id is not None:
             stmt = stmt.where(Session.agent_id == agent_id)
         elif agent_ids is not None:
@@ -609,9 +609,15 @@ class SessionService:
         if workspace is None:
             return
 
+        workspace_user = self.db.get(User, workspace.user_id)
+        if workspace_user is None:
+            return
+
         try:
+            if workspace_user.id is None:
+                return
             get_sandbox_service().destroy(
-                username=workspace.user,
+                user_id=workspace_user.id,
                 workspace_id=workspace.workspace_id,
                 workspace_backend_path=WorkspaceService(
                     self.db
@@ -780,7 +786,7 @@ class SessionService:
 
         new_session = self.create_session(
             agent_id=old_session.agent_id,
-            user=old_session.user,
+            user_id=old_session.user_id,
             project_id=old_session.project_id,
             session_type="consumer",
         )

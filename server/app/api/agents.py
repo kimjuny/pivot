@@ -223,7 +223,7 @@ async def create_agent(
     )
     AgentSnapshotService(db).save_draft(
         agent.id or 0,
-        saved_by=current_user.username,
+        saved_by_user_id=current_user.id,
     )
 
     return _serialize_agent_response(
@@ -303,7 +303,7 @@ async def save_agent_draft(
     )
     snapshot_service = AgentSnapshotService(db)
     try:
-        snapshot_service.save_draft(agent_id, saved_by=current_user.username)
+        snapshot_service.save_draft(agent_id, saved_by_user_id=current_user.id)
         return snapshot_service.get_draft_state(agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -356,7 +356,7 @@ async def publish_agent_release(
         draft_state = AgentSnapshotService(db).publish_saved_draft(
             agent_id,
             release_note=payload.release_note,
-            published_by=current_user.username,
+            published_by_user_id=current_user.id,
         )
         if agent.client_state == "upgrade_required":
             AgentService(db).set_client_state(agent_id, "open")

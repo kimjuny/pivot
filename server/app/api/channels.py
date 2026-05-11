@@ -133,7 +133,7 @@ async def create_agent_channel(
         )
         AgentSnapshotService(db).save_draft(
             agent_id,
-            saved_by=current_user.username,
+            saved_by_user_id=current_user.id,
         )
         return binding
     except KeyError as exc:
@@ -163,7 +163,7 @@ async def update_agent_channel(
         )
         AgentSnapshotService(db).save_draft(
             binding_row.agent_id,
-            saved_by=current_user.username,
+            saved_by_user_id=current_user.id,
         )
         return binding
     except ValueError as exc:
@@ -182,7 +182,7 @@ async def delete_agent_channel(
         ChannelService(db).delete_binding(binding_id)
         AgentSnapshotService(db).save_draft(
             binding.agent_id,
-            saved_by=current_user.username,
+            saved_by_user_id=current_user.id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

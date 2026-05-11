@@ -31,18 +31,18 @@ class SkillArtifactStorageService:
     def build_artifact_key(
         self,
         *,
-        username: str,
+        user_id: int,
         skill_name: str,
         artifact_digest: str,
     ) -> str:
         """Return the canonical artifact key for one skill directory snapshot."""
-        return f"users/{username}/skills/{skill_name}/artifact/{artifact_digest}.tar.gz"
+        return f"users/{user_id}/skills/{skill_name}/artifact/{artifact_digest}.tar.gz"
 
     def store_directory(
         self,
         *,
         source_dir: Path,
-        username: str,
+        user_id: int,
         skill_name: str,
     ) -> StoredSkillArtifact:
         """Archive one skill directory and persist it through object storage."""
@@ -55,7 +55,7 @@ class SkillArtifactStorageService:
             payload = archive_path.read_bytes()
             artifact_digest = hashlib.sha256(payload).hexdigest()
             artifact_key = self.build_artifact_key(
-                username=username,
+                user_id=user_id,
                 skill_name=skill_name,
                 artifact_digest=artifact_digest,
             )

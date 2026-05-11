@@ -18,9 +18,11 @@ async def get_task_attachment_content(
     current_user: User = Depends(get_current_user),
 ):
     """Stream the current live attachment file back to its owner."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     resolved = TaskAttachmentService(db).get_live_attachment_for_user(
         attachment_id,
-        current_user.username,
+        current_user.id,
     )
     if resolved is None:
         raise HTTPException(status_code=404, detail="Task attachment not found")

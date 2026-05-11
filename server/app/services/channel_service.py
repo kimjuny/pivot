@@ -417,7 +417,6 @@ class ChannelService:
                 external_user_id=row.external_user_id,
                 external_conversation_id=row.external_conversation_id,
                 pivot_user_id=current_user.id,
-                workspace_owner=current_user.username,
                 status="linked",
                 auth_method="link_page",
                 created_at=now,
@@ -427,7 +426,6 @@ class ChannelService:
             self.db.add(identity)
         else:
             existing.pivot_user_id = current_user.id
-            existing.workspace_owner = current_user.username
             existing.status = "linked"
             existing.auth_method = "link_page"
             existing.updated_at = now
@@ -441,7 +439,6 @@ class ChannelService:
             status="linked",
             message="External account linked successfully.",
             pivot_user_id=current_user.id,
-            workspace_owner=current_user.username,
             linked_at=now.replace(tzinfo=UTC).isoformat(),
         )
 
@@ -615,9 +612,12 @@ class ChannelService:
                     now=now,
                 )
             ):
+                if user.id is None:
+                    msg = "User must be persisted before creating a session"
+                    raise ValueError(msg)
                 fresh_session = session_service.create_session(
                     agent_id=binding.agent_id,
-                    user=user.username,
+                    user_id=user.id,
                 )
                 existing.pivot_session_id = fresh_session.session_id
 
@@ -633,9 +633,12 @@ class ChannelService:
         if user is None:
             raise ValueError("Linked Pivot user not found.")
 
+        if user.id is None:
+            msg = "User must be persisted before creating a session"
+            raise ValueError(msg)
         session_row = session_service.create_session(
             agent_id=binding.agent_id,
-            user=user.username,
+            user_id=user.id,
         )
         channel_session = ChannelSession(
             channel_binding_id=binding.id or 0,
@@ -743,15 +746,12 @@ class ChannelService:
         channel_file_ids: list[str] = []
         if event.attachments:
             linked_user = self.db.get(User, identity.pivot_user_id)
-            channel_file_ids = await self._prepare_channel_attachments(
-                binding=binding,
-                username=(
-                    linked_user.username
-                    if linked_user is not None
-                    else identity.workspace_owner
-                ),
-                external_event=event,
-            )
+            if linked_user is not None and linked_user.id is not None:
+                channel_file_ids = await self._prepare_channel_attachments(
+                    binding=binding,
+                    user_id=linked_user.id,
+                    external_event=event,
+                )
         async for action in self._run_agent_turn(
             agent_id=binding.agent_id,
             pivot_user_id=identity.pivot_user_id,
@@ -818,6 +818,15 @@ class ChannelService:
             )
             return
 
+        if user.id is None:
+            yield ChannelOutboundAction(
+                kind="error",
+                text="The linked Pivot user is not persisted.",
+                delivery_hint="append",
+                is_terminal=True,
+            )
+            return
+
         try:
             runtime_config = AgentReleaseRuntimeService(self.db).resolve_for_session(
                 session_id
@@ -847,7 +856,7 @@ class ChannelService:
                 ReactTaskLaunchRequest(
                     agent_id=agent_id,
                     message=message,
-                    username=user.username,
+                    user_id=user.id,
                     session_id=session_id,
                     file_ids=channel_file_ids or [],
                     task_id=resumable_task.task_id if resumable_task else None,
@@ -1056,7 +1065,7 @@ class ChannelService:
         self,
         *,
         binding: AgentChannelBinding,
-        username: str,
+        user_id: int,
         external_event: ChannelInboundEvent,
     ) -> list[str]:
         """Download, decrypt, and persist channel media attachments."""
@@ -1071,11 +1080,12 @@ class ChannelService:
         file_service = FileService(self.db)
         stored_file_ids: list[str] = []
         for attachment in external_event.attachments:
-            resolved = await run_in_threadpool(resolve, attachment)
-            if resolved is None:
+            resolved_raw = await run_in_threadpool(resolve, attachment)
+            if resolved_raw is None:
                 continue
+            resolved: dict[str, Any] = resolved_raw  # type: ignore[assignment]
             stored_file = file_service.store_uploaded_file(
-                username=username,
+                user_id=user_id,
                 filename=resolved["filename"],
                 source=f"channel:{binding.channel_key}",
                 file_bytes=resolved["data"],
@@ -1258,14 +1268,14 @@ class ChannelService:
     def _build_request_tool_manager(
         self,
         *,
-        username: str,
+        user_id: int,
         agent_id: int,
         raw_tool_ids: str | None,
         extension_bundle: list[dict[str, Any]],
     ) -> ToolManager:
         """Build the request-scoped tool manager used by ReAct execution."""
         return ExtensionService(self.db).build_request_tool_manager(
-            username=username,
+            user_id=user_id,
             agent_id=agent_id,
             raw_tool_ids=raw_tool_ids,
             extension_bundle=extension_bundle,

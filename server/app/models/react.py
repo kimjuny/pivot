@@ -7,6 +7,7 @@ which implements a recursive state machine for autonomous task execution.
 from datetime import UTC, datetime
 from typing import Optional
 
+from sqlalchemy import Index
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -25,7 +26,7 @@ class ReactTask(SQLModel, table=True):
         task_id: UUID string for global unique task identification.
         session_id: UUID string linking to the parent session.
         agent_id: Foreign key to the agent executing this task.
-        user: Username of the user who initiated the task.
+        user_id: Foreign key to the user who initiated the task.
         user_message: Original user input message.
         user_intent: Task-level user intent (raw user input).
         mandatory_skill_names_json: Serialized ordered mandatory skill names
@@ -54,7 +55,7 @@ class ReactTask(SQLModel, table=True):
         description="UUID for session (optional)",
     )
     agent_id: int = Field(foreign_key="agent.id", index=True)
-    user: str = Field(index=True, description="Username")
+    user_id: int = Field(foreign_key="user.id", index=True)
     user_message: str = Field(description="Original user input")
     user_intent: str = Field(description="Task user intent")
     mandatory_skill_names_json: str | None = Field(
@@ -104,6 +105,13 @@ class ReactTask(SQLModel, table=True):
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        Index("ix_reacttask_agent_created", "agent_id", "created_at"),
+        Index("ix_reacttask_user_created", "user_id", "created_at"),
+        Index("ix_reacttask_status_created", "status", "created_at"),
+        Index("ix_reacttask_agent_status", "agent_id", "status"),
+    )
 
     # Relationships
     recursions: list["ReactRecursion"] = Relationship(

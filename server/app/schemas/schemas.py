@@ -163,7 +163,7 @@ class AgentReleaseResponse(AppBaseModel):
     version: int
     release_note: str | None
     change_summary: list[str] = Field(default_factory=list)
-    published_by: str | None
+    published_by_user_id: int | None
     created_at: datetime
 
 
@@ -171,7 +171,7 @@ class AgentSavedDraftInfoResponse(AppBaseModel):
     """Current saved-draft metadata for one agent."""
 
     saved_at: datetime
-    saved_by: str | None
+    saved_by_user_id: int | None
     snapshot_hash: str
 
 

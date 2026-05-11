@@ -56,7 +56,7 @@ class SurfaceSessionRecord:
     mode: str
     surface_key: str
     display_name: str
-    username: str
+    user_id: int
     agent_id: int
     session_id: str
     workspace_id: str
@@ -87,7 +87,7 @@ class SurfaceSessionService:
     def create_dev_surface_session(
         self,
         *,
-        username: str,
+        user_id: int,
         session_id: str,
         surface_key: str,
         dev_server_url: str,
@@ -96,7 +96,7 @@ class SurfaceSessionService:
         """Create one in-memory development surface session.
 
         Args:
-            username: Authenticated operator username.
+            user_id: Database primary key of the authenticated operator.
             session_id: Chat session that owns the workspace.
             surface_key: Stable development surface key.
             dev_server_url: Author-local development runtime URL. This may be a
@@ -117,7 +117,7 @@ class SurfaceSessionService:
 
         normalized_dev_server_url = self._normalize_dev_server_url(dev_server_url)
         chat_session, workspace = self._resolve_owned_chat_session(
-            username=username,
+            user_id=user_id,
             session_id=session_id,
         )
 
@@ -129,7 +129,7 @@ class SurfaceSessionService:
             display_name=display_name.strip()
             if isinstance(display_name, str) and display_name.strip()
             else normalized_surface_key,
-            username=username,
+            user_id=user_id,
             agent_id=chat_session.agent_id,
             session_id=chat_session.session_id,
             workspace_id=workspace.workspace_id,
@@ -150,7 +150,7 @@ class SurfaceSessionService:
     def create_installed_surface_session(
         self,
         *,
-        username: str,
+        user_id: int,
         session_id: str,
         extension_installation_id: int,
         surface_key: str,
@@ -158,7 +158,7 @@ class SurfaceSessionService:
         """Create one in-memory installed surface session.
 
         Args:
-            username: Authenticated operator username.
+            user_id: Database primary key of the authenticated operator.
             session_id: Chat session that owns the workspace.
             extension_installation_id: Installed extension version bound to the
                 current agent.
@@ -178,7 +178,7 @@ class SurfaceSessionService:
             raise SurfaceSessionValidationError("Surface key is required.")
 
         chat_session, workspace = self._resolve_owned_chat_session(
-            username=username,
+            user_id=user_id,
             session_id=session_id,
         )
 
@@ -245,7 +245,7 @@ class SurfaceSessionService:
             display_name=str(
                 installed_surface.get("display_name", normalized_surface_key)
             ),
-            username=username,
+            user_id=user_id,
             agent_id=chat_session.agent_id,
             session_id=chat_session.session_id,
             workspace_id=workspace.workspace_id,
@@ -269,13 +269,13 @@ class SurfaceSessionService:
         self,
         *,
         surface_session_id: str,
-        username: str,
+        user_id: int,
     ) -> SurfaceSessionRecord:
         """Return one owned surface session record.
 
         Args:
             surface_session_id: Public surface session identifier.
-            username: Authenticated operator username.
+            user_id: Database primary key of the authenticated operator.
 
         Returns:
             Matching surface session record.
@@ -288,12 +288,12 @@ class SurfaceSessionService:
             record = _SURFACE_SESSIONS.get(surface_session_id)
         if record is None:
             raise SurfaceSessionNotFoundError("Surface session not found.")
-        if record.username != username:
+        if record.user_id != user_id:
             raise SurfaceSessionPermissionError(
                 "Surface session is not owned by the caller."
             )
         self._resolve_owned_chat_session(
-            username=username,
+            user_id=user_id,
             session_id=record.session_id,
         )
         if record.mode == "installed":
@@ -382,13 +382,13 @@ class SurfaceSessionService:
     def _resolve_owned_chat_session(
         self,
         *,
-        username: str,
+        user_id: int,
         session_id: str,
     ):
         """Resolve one owned chat session plus its workspace.
 
         Args:
-            username: Authenticated operator username.
+            user_id: Database primary key of the authenticated operator.
             session_id: Chat session identifier to resolve.
 
         Returns:
@@ -402,7 +402,7 @@ class SurfaceSessionService:
         chat_session = SessionService(self.db).get_session(session_id)
         if chat_session is None:
             raise SurfaceSessionNotFoundError("Chat session not found.")
-        if chat_session.user != username:
+        if chat_session.user_id != user_id:
             raise SurfaceSessionPermissionError(
                 "Chat session is not owned by the caller."
             )
@@ -414,7 +414,7 @@ class SurfaceSessionService:
         workspace = WorkspaceService(self.db).get_workspace(chat_session.workspace_id)
         if workspace is None:
             raise SurfaceSessionNotFoundError("Workspace not found.")
-        user = self._user_by_username(username)
+        user = self._user_by_id(user_id)
         if user is None:
             raise SurfaceSessionPermissionError("Chat session is not accessible.")
         try:
@@ -428,7 +428,7 @@ class SurfaceSessionService:
         ):
             raise SurfaceSessionPermissionError("Chat session is not accessible.")
         self._require_workspace_access(
-            username=username,
+            user_id=user_id,
             workspace_id=workspace.workspace_id,
             access_level=AccessLevel.EDIT,
         )
@@ -466,7 +466,7 @@ class SurfaceSessionService:
     def _require_workspace_access(
         self,
         *,
-        username: str,
+        user_id: int,
         workspace_id: str,
         access_level: AccessLevel,
     ) -> None:
@@ -474,7 +474,7 @@ class SurfaceSessionService:
         workspace = WorkspaceService(self.db).get_workspace(workspace_id)
         if workspace is None:
             raise SurfaceSessionNotFoundError("Workspace not found.")
-        user = self._user_by_username(username)
+        user = self._user_by_id(user_id)
         if user is None or not AccessService(self.db).has_workspace_access(
             user=user,
             workspace=workspace,
@@ -482,11 +482,11 @@ class SurfaceSessionService:
         ):
             raise SurfaceSessionPermissionError("Workspace is not accessible.")
 
-    def _user_by_username(self, username: str) -> User | None:
-        """Return one persisted user by username."""
+    def _user_by_id(self, user_id: int) -> User | None:
+        """Return one persisted user by primary key."""
         from app.models.user import User
 
-        return self.db.exec(select(User).where(User.username == username)).first()
+        return self.db.get(User, user_id)
 
     @staticmethod
     def _normalize_dev_server_url(raw_url: str) -> str:

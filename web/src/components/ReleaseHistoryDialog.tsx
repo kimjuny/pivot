@@ -50,7 +50,7 @@ function ReleaseHistoryDialog({
                     {new Date(release.created_at).toLocaleString()}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    by {release.published_by ?? 'Unknown'}
+                    by {release.published_by_user_id != null ? `User #${release.published_by_user_id}` : 'Unknown'}
                   </span>
                 </div>
 

@@ -25,7 +25,7 @@ class TaskAttachment(SQLModel, table=True):
         description="Owning workspace UUID that currently hosts the live file.",
     )
     agent_id: int = Field(index=True, description="Owning agent identifier.")
-    user: str = Field(index=True, description="Owner username.")
+    user_id: int = Field(foreign_key="user.id", index=True)
     display_name: str = Field(description="User-facing filename shown in the UI.")
     original_name: str = Field(
         description="Original artifact filename derived from the workspace path."

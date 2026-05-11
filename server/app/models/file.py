@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 
@@ -10,7 +11,7 @@ class FileAsset(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     file_id: str = Field(index=True, unique=True, description="Public UUID for file")
-    user: str = Field(index=True, description="Owner username")
+    user_id: int = Field(foreign_key="user.id", index=True)
     source: str = Field(description="Upload source such as local or clipboard")
     original_name: str = Field(description="Original client-side filename")
     stored_name: str = Field(description="Stored filename on disk")
@@ -72,3 +73,5 @@ class FileAsset(SQLModel, table=True):
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    __table_args__ = (Index("ix_fileasset_user_created", "user_id", "created_at"),)

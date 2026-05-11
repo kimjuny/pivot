@@ -127,7 +127,7 @@ async def list_operations_sessions(
         current_user: Authenticated admin user.
 
     Returns:
-        Paginated session list with agent name, release version, and task count.
+        Paginated session list with agent name, release version, user ID, and task count.
     """
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
@@ -165,7 +165,7 @@ async def list_operations_sessions(
                     else None
                 ),
                 "type": session.type,
-                "user": session.user,
+                "user_id": session.user_id,
                 "status": session.status,
                 "title": session.title,
                 "task_count": task_counts.get(session.session_id, 0),
@@ -193,7 +193,7 @@ async def get_operations_session_detail(
 ) -> dict[str, Any]:
     """Get a single session with its full conversation history for Operations.
 
-    Unlike the user-scoped endpoint, this does not check session.user ownership.
+    Unlike the user-scoped endpoint, this does not check session.user_id ownership.
 
     Args:
         session_id: UUID of the session to inspect.
@@ -299,7 +299,7 @@ async def get_operations_session_detail(
             "agent_name": agent_name,
             "release_version": release_version,
             "type": session.type,
-            "user": session.user,
+            "user_id": session.user_id,
             "status": session.status,
             "title": session.title,
             "diagnostics": _serialize_operations_diagnostics(diagnostics),

@@ -18,7 +18,6 @@ from app.services.agent_service import AgentService
 from app.services.sandbox_service import get_sandbox_service
 from app.services.session_service import SessionService
 from app.services.workspace_service import WorkspaceService
-from sqlmodel import select
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -46,7 +45,7 @@ class PreviewEndpointRecord:
     """In-memory preview endpoint metadata."""
 
     preview_id: str
-    username: str
+    user_id: int
     agent_id: int
     session_id: str
     workspace_id: str
@@ -78,7 +77,7 @@ class PreviewEndpointService:
     def create_preview_endpoint(
         self,
         *,
-        username: str,
+        user_id: int,
         session_id: str,
         port: int,
         path: str | None = None,
@@ -94,7 +93,7 @@ class PreviewEndpointService:
         normalized_start_server = self._normalize_start_server(start_server)
         normalized_skills = self._normalize_skills(skills)
         chat_session, workspace = self._resolve_owned_chat_session(
-            username=username,
+            user_id=user_id,
             session_id=session_id,
         )
         normalized_title = (
@@ -107,7 +106,7 @@ class PreviewEndpointService:
                 (
                     candidate
                     for candidate in _PREVIEW_ENDPOINTS.values()
-                    if candidate.username == username
+                    if candidate.user_id == user_id
                     and candidate.session_id == chat_session.session_id
                     and candidate.port == normalized_port
                     and candidate.path == normalized_path
@@ -117,7 +116,7 @@ class PreviewEndpointService:
             if existing_record is not None:
                 record = PreviewEndpointRecord(
                     preview_id=existing_record.preview_id,
-                    username=existing_record.username,
+                    user_id=existing_record.user_id,
                     agent_id=existing_record.agent_id,
                     session_id=existing_record.session_id,
                     workspace_id=existing_record.workspace_id,
@@ -134,7 +133,7 @@ class PreviewEndpointService:
 
             record = PreviewEndpointRecord(
                 preview_id=str(uuid4()),
-                username=username,
+                user_id=user_id,
                 agent_id=chat_session.agent_id,
                 session_id=chat_session.session_id,
                 workspace_id=workspace.workspace_id,
@@ -153,11 +152,11 @@ class PreviewEndpointService:
         self,
         *,
         preview_id: str,
-        username: str,
+        user_id: int,
         timeout_seconds: int = 60,
     ) -> PreviewEndpointRecord:
         """Ensure one preview runtime is reachable, recreating it from recipe when needed."""
-        record = self.get_preview_endpoint(preview_id=preview_id, username=username)
+        record = self.get_preview_endpoint(preview_id=preview_id, user_id=user_id)
         if record.start_server is None or record.cwd is None:
             raise PreviewEndpointValidationError(
                 "This preview cannot be reconnected because no start_server recipe was recorded."
@@ -167,7 +166,7 @@ class PreviewEndpointService:
         if workspace is None:
             raise PreviewEndpointNotFoundError("Workspace not found.")
         self._require_workspace_access(
-            username=username,
+            user_id=user_id,
             workspace_id=workspace.workspace_id,
             access_level=AccessLevel.EDIT,
         )
@@ -184,7 +183,7 @@ class PreviewEndpointService:
 
         sandbox_service = get_sandbox_service()
         sandbox_service.create(
-            username=record.username,
+            user_id=record.user_id,
             workspace_id=record.workspace_id,
             workspace_backend_path=workspace_backend_path,
             skills=list(record.allowed_skills),
@@ -192,7 +191,7 @@ class PreviewEndpointService:
         )
 
         launch_result = sandbox_service.exec(
-            username=record.username,
+            user_id=record.user_id,
             workspace_id=record.workspace_id,
             workspace_backend_path=workspace_backend_path,
             cmd=["bash", "-lc", self._build_launch_command(record=record)],
@@ -216,7 +215,7 @@ class PreviewEndpointService:
         self,
         *,
         source_record: PreviewEndpointRecord,
-        username: str,
+        user_id: int,
         session_id: str,
     ) -> PreviewEndpointRecord:
         """Copy one reconnectable preview recipe into another owned chat session."""
@@ -226,7 +225,7 @@ class PreviewEndpointService:
             )
 
         return self.create_preview_endpoint(
-            username=username,
+            user_id=user_id,
             session_id=session_id,
             port=source_record.port,
             path=source_record.path,
@@ -240,19 +239,19 @@ class PreviewEndpointService:
         self,
         *,
         preview_id: str,
-        username: str,
+        user_id: int,
     ) -> PreviewEndpointRecord:
         """Return one owned preview endpoint."""
         with _PREVIEW_ENDPOINTS_LOCK:
             record = _PREVIEW_ENDPOINTS.get(preview_id)
         if record is None:
             raise PreviewEndpointNotFoundError("Preview endpoint not found.")
-        if record.username != username:
+        if record.user_id != user_id:
             raise PreviewEndpointPermissionError(
                 "Preview endpoint is not owned by the caller."
             )
         self._resolve_owned_chat_session(
-            username=username,
+            user_id=user_id,
             session_id=record.session_id,
         )
         return record
@@ -267,19 +266,19 @@ class PreviewEndpointService:
     def list_preview_endpoints(
         self,
         *,
-        username: str,
+        user_id: int,
         session_id: str,
     ) -> list[PreviewEndpointRecord]:
         """Return all owned preview endpoints for one chat session."""
         chat_session, _workspace = self._resolve_owned_chat_session(
-            username=username,
+            user_id=user_id,
             session_id=session_id,
         )
         with _PREVIEW_ENDPOINTS_LOCK:
             records = [
                 record
                 for record in _PREVIEW_ENDPOINTS.values()
-                if record.username == username
+                if record.user_id == user_id
                 and record.session_id == chat_session.session_id
             ]
         return sorted(records, key=lambda record: record.created_at)
@@ -293,14 +292,14 @@ class PreviewEndpointService:
     def _resolve_owned_chat_session(
         self,
         *,
-        username: str,
+        user_id: int,
         session_id: str,
     ):
         """Resolve one owned chat session plus its workspace."""
         chat_session = SessionService(self.db).get_session(session_id)
         if chat_session is None:
             raise PreviewEndpointNotFoundError("Chat session not found.")
-        if chat_session.user != username:
+        if chat_session.user_id != user_id:
             raise PreviewEndpointPermissionError(
                 "Chat session is not owned by the caller."
             )
@@ -312,7 +311,7 @@ class PreviewEndpointService:
         workspace = WorkspaceService(self.db).get_workspace(chat_session.workspace_id)
         if workspace is None:
             raise PreviewEndpointNotFoundError("Workspace not found.")
-        user = self._user_by_username(username)
+        user = self._user_by_id(user_id)
         if user is None:
             raise PreviewEndpointPermissionError("Chat session is not accessible.")
         try:
@@ -326,7 +325,7 @@ class PreviewEndpointService:
         ):
             raise PreviewEndpointPermissionError("Chat session is not accessible.")
         self._require_workspace_access(
-            username=username,
+            user_id=user_id,
             workspace_id=workspace.workspace_id,
             access_level=AccessLevel.EDIT,
         )
@@ -335,7 +334,7 @@ class PreviewEndpointService:
     def _require_workspace_access(
         self,
         *,
-        username: str,
+        user_id: int,
         workspace_id: str,
         access_level: AccessLevel,
     ) -> None:
@@ -343,7 +342,7 @@ class PreviewEndpointService:
         workspace = WorkspaceService(self.db).get_workspace(workspace_id)
         if workspace is None:
             raise PreviewEndpointNotFoundError("Workspace not found.")
-        user = self._user_by_username(username)
+        user = self._user_by_id(user_id)
         if user is None or not AccessService(self.db).has_workspace_access(
             user=user,
             workspace=workspace,
@@ -351,11 +350,11 @@ class PreviewEndpointService:
         ):
             raise PreviewEndpointPermissionError("Workspace is not accessible.")
 
-    def _user_by_username(self, username: str) -> User | None:
-        """Return one persisted user by username."""
+    def _user_by_id(self, user_id: int) -> User | None:
+        """Return one persisted user by primary key."""
         from app.models.user import User
 
-        return self.db.exec(select(User).where(User.username == username)).first()
+        return self.db.get(User, user_id)
 
     @staticmethod
     def _normalize_port(raw_port: int) -> int:
@@ -476,7 +475,7 @@ class PreviewEndpointService:
         """Probe one preview target through sandbox-manager."""
         try:
             get_sandbox_service().proxy_http(
-                username=record.username,
+                user_id=record.user_id,
                 workspace_id=record.workspace_id,
                 workspace_backend_path=workspace_backend_path,
                 skills=list(record.allowed_skills),

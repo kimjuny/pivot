@@ -183,7 +183,7 @@ export default function SessionDetailPage() {
               </p>
             )}
             <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-              <span>User: {sessionMeta.user}</span>
+              <span>User: #{sessionMeta.user_id}</span>
               <span>
                 Created: {formatTimestamp(sessionMeta.created_at)}
               </span>

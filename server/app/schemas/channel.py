@@ -107,5 +107,4 @@ class ChannelLinkCompletionResponse(AppBaseModel):
     status: str
     message: str
     pivot_user_id: int
-    workspace_owner: str
     linked_at: str

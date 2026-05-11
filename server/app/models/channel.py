@@ -49,7 +49,7 @@ class ExternalIdentityBinding(SQLModel, table=True):
         external_user_id: Provider-side sender/user identifier.
         external_conversation_id: Provider-side chat/thread identifier.
         pivot_user_id: Authenticated Pivot user bound to this external identity.
-        workspace_owner: Current V1 workspace key, aligned with Pivot username.
+        workspace_owner: Removed — use ``pivot_user_id`` instead.
         status: Current mapping state, usually ``linked``.
         auth_method: Binding method, such as ``link_page``.
         created_at: UTC timestamp when the mapping was created.
@@ -63,7 +63,6 @@ class ExternalIdentityBinding(SQLModel, table=True):
     external_user_id: str = Field(index=True, max_length=255)
     external_conversation_id: str | None = Field(default=None, max_length=255)
     pivot_user_id: int = Field(foreign_key="user.id", index=True)
-    workspace_owner: str = Field(max_length=120)
     status: str = Field(default="linked", max_length=32)
     auth_method: str = Field(default="link_page", max_length=64)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

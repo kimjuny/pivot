@@ -88,14 +88,18 @@ class _DiscoveredSkill:
     updated_at: datetime
 
 
-def _user_skills_dir(username: str, *, create: bool) -> Path:
+def _user_skills_dir(user_id: int, *, create: bool = False) -> Path:
     """Return the unified user skill root.
 
-    Why: the filesystem now stores all creator-owned skills under one directory.
+    Args:
+        user_id: Primary key of the owning user.
+        create: If True, create the directory tree if it does not exist.
+
+    Why: the filesystem stores all creator-owned skills under one directory.
     Visibility and sharing rules live in persistent metadata instead of the
     on-disk path shape, which keeps future ACL changes out of storage layout.
     """
-    base = workspace_root() / "users" / username / _SKILLS_DIRNAME
+    base = workspace_root() / "users" / str(user_id) / _SKILLS_DIRNAME
     if create:
         base.mkdir(parents=True, exist_ok=True)
     return base
@@ -266,9 +270,11 @@ def _source_for_discovered_skill(
     existing_by_location: dict[str, Skill],
 ) -> str:
     """Resolve persisted source for a unified user skill directory."""
+    if user.id is None:
+        raise ValueError("User must be persisted before resolving skill source.")
     location = str(
         _skill_location_for_path(
-            _user_skills_dir(user.username, create=False), skill_path
+            _user_skills_dir(user.id, create=False), skill_path
         ).resolve()
     )
     existing = existing_by_location.get(location) or existing_by_name.get(skill_name)
@@ -285,7 +291,9 @@ def _discover_user_skills(
 ) -> list[_DiscoveredSkill]:
     discovered: list[_DiscoveredSkill] = []
     for user in users:
-        unified_root = _user_skills_dir(user.username, create=False)
+        if user.id is None:
+            continue
+        unified_root = _user_skills_dir(user.id, create=False)
         if unified_root.exists():
             for skill_path in _list_skill_paths(unified_root):
                 fallback_name = _fallback_skill_name(unified_root, skill_path)
@@ -341,9 +349,11 @@ def _restage_skill_artifact(
     owner: User,
 ) -> None:
     """Persist the current skill directory into artifact storage."""
+    if owner.id is None:
+        raise ValueError("Owner must be persisted before restaging skill artifacts.")
     stored_artifact = SkillArtifactStorageService().store_directory(
         source_dir=Path(skill.location),
-        username=owner.username,
+        user_id=owner.id,
         skill_name=skill.name,
     )
     old_artifact_key = skill.artifact_key
@@ -383,10 +393,11 @@ def _creator_name_map(session: Session) -> dict[int, str]:
     return {user.id: user.username for user in users if user.id is not None}
 
 
-def _user_by_username(session: Session, username: str) -> User:
-    user = session.exec(select(User).where(User.username == username)).first()
+def _user_by_id(session: Session, user_id: int) -> User:
+    """Look up a user by primary key, raising ValueError when absent."""
+    user = session.exec(select(User).where(User.id == user_id)).first()
     if user is None or user.id is None:
-        raise ValueError(f"User '{username}' not found.")
+        raise ValueError(f"User with id {user_id} not found.")
     return user
 
 
@@ -473,8 +484,8 @@ def _all_skills_query(session: Session) -> list[Skill]:
     return list(session.exec(select(Skill).order_by(Skill.name)).all())
 
 
-def _visible_skills_query(session: Session, username: str) -> list[Skill]:
-    user = _user_by_username(session, username)
+def _visible_skills_query(session: Session, user_id: int) -> list[Skill]:
+    user = _user_by_id(session, user_id)
 
     return [
         skill
@@ -591,25 +602,25 @@ def sync_skill_registry(session: Session) -> None:
         session.commit()
 
 
-def list_visible_skills(session: Session, username: str) -> list[dict[str, Any]]:
+def list_visible_skills(session: Session, user_id: int) -> list[dict[str, Any]]:
     """List compact metadata for every skill visible to a user.
 
     Args:
         session: Active database session.
-        username: Authenticated username.
+        user_id: Primary key of the authenticated user.
 
     Returns:
         Serialized metadata for Skills visible through unified Auth.
     """
     sync_skill_registry(session)
     creator_lookup = _creator_name_map(session)
-    user = _user_by_username(session, username)
-    skills = _visible_skills_query(session, username)
+    user = _user_by_id(session, user_id)
+    skills = _visible_skills_query(session, user_id)
     return [
         _serialize_skill(
             skill,
             creator_lookup=creator_lookup,
-            current_username=username,
+            current_username=user.username,
             can_edit=_has_skill_access(
                 session,
                 user=user,
@@ -625,7 +636,9 @@ def list_manageable_skills(
     session: Session, current_user: User
 ) -> list[dict[str, Any]]:
     """List skill inventory rows visible in the Studio management page."""
-    rows = list_visible_skills(session, current_user.username)
+    if current_user.id is None:
+        raise ValueError("Current user must be persisted before listing skills.")
+    rows = list_visible_skills(session, current_user.id)
 
     from app.services.extension_service import ExtensionService
 
@@ -677,13 +690,26 @@ def list_manageable_skills(
 
 def read_visible_skill_source(
     session: Session,
-    username: str,
+    user_id: int,
     skill_name: str,
 ) -> dict[str, Any]:
-    """Read one skill source when the current user has use or edit access."""
+    """Read one skill source when the current user has use or edit access.
+
+    Args:
+        session: Active database session.
+        user_id: Primary key of the authenticated user.
+        skill_name: Globally unique skill name.
+
+    Returns:
+        Serialized skill payload with source text and metadata.
+
+    Raises:
+        FileNotFoundError: If the skill does not exist.
+        PermissionError: If the user cannot see the skill.
+    """
     _validate_skill_name(skill_name)
     sync_skill_registry(session)
-    user = _user_by_username(session, username)
+    user = _user_by_id(session, user_id)
     skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if skill is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found.")
@@ -694,7 +720,7 @@ def read_visible_skill_source(
         access_level=AccessLevel.USE,
     ):
         raise PermissionError(f"Skill '{skill_name}' is not visible.")
-    return _read_skill_payload(session, skill=skill, username=username)
+    return _read_skill_payload(session, skill=skill, user_id=user_id)
 
 
 def get_skill_by_name(session: Session, skill_name: str) -> Skill | None:
@@ -733,6 +759,8 @@ def update_skill_source(
     )
     if owner is None:
         raise ValueError("Skill creator not found.")
+    if owner.id is None:
+        raise ValueError("Skill creator must be persisted before updating artifacts.")
 
     normalized_source = rewrite_skill_name(source, skill_name)
     skill_dir = Path(skill.location)
@@ -748,7 +776,7 @@ def update_skill_source(
     )
     stored_artifact = SkillArtifactStorageService().store_directory(
         source_dir=canonical_path.parent,
-        username=owner.username,
+        user_id=owner.id,
         skill_name=skill_name,
     )
     old_artifact_key = skill.artifact_key
@@ -780,14 +808,28 @@ def update_skill_source(
 
 def list_visible_skill_directory(
     session: Session,
-    username: str,
+    user_id: int,
     skill_name: str,
     path: str | None = None,
 ) -> list[WorkspaceFileTreeEntry]:
-    """Return direct children for one skill directory visible to the user."""
+    """Return direct children for one skill directory visible to the user.
+
+    Args:
+        session: Active database session.
+        user_id: Primary key of the authenticated user.
+        skill_name: Globally unique skill name.
+        path: Optional sub-path inside the skill directory.
+
+    Returns:
+        File tree entries for the requested directory.
+
+    Raises:
+        FileNotFoundError: If the skill or directory does not exist.
+        PermissionError: If the user cannot see the skill.
+    """
     _validate_skill_name(skill_name)
     sync_skill_registry(session)
-    user = _user_by_username(session, username)
+    user = _user_by_id(session, user_id)
     skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if skill is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found.")
@@ -816,14 +858,28 @@ def list_visible_skill_directory(
 
 def read_visible_skill_file(
     session: Session,
-    username: str,
+    user_id: int,
     skill_name: str,
     path: str,
 ) -> str:
-    """Read one UTF-8 file from a visible skill directory."""
+    """Read one UTF-8 file from a visible skill directory.
+
+    Args:
+        session: Active database session.
+        user_id: Primary key of the authenticated user.
+        skill_name: Globally unique skill name.
+        path: Relative file path inside the skill directory.
+
+    Returns:
+        UTF-8 text content of the requested file.
+
+    Raises:
+        FileNotFoundError: If the skill or file does not exist.
+        PermissionError: If the user cannot see the skill.
+    """
     _validate_skill_name(skill_name)
     sync_skill_registry(session)
-    user = _user_by_username(session, username)
+    user = _user_by_id(session, user_id)
     skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
     if skill is None:
         raise FileNotFoundError(f"Skill '{skill_name}' not found.")
@@ -1144,7 +1200,7 @@ def set_skill_access(
 
 def list_allowed_visible_skills(
     session: Session,
-    username: str,
+    user_id: int,
     *,
     raw_skill_ids: str | None,
     extra_skills: list[dict[str, str]] | None = None,
@@ -1153,7 +1209,7 @@ def list_allowed_visible_skills(
 
     Args:
         session: Active database session.
-        username: Authenticated username kept for API compatibility.
+        user_id: Primary key of the authenticated user.
         raw_skill_ids: Optional JSON allowlist matching the agent row format.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
@@ -1165,8 +1221,6 @@ def list_allowed_visible_skills(
     allowed_names = _parse_name_allowlist(raw_skill_ids)
     results: list[dict[str, str]] = []
     seen_names: set[str] = set()
-
-    del username
     for skill_name in sorted(allowed_names):
         skill = session.exec(select(Skill).where(Skill.name == skill_name)).first()
         if skill is None:
@@ -1222,17 +1276,17 @@ def _read_skill_payload(
     session: Session,
     *,
     skill: Skill,
-    username: str,
+    user_id: int,
 ) -> dict[str, Any]:
     creator_lookup = _creator_name_map(session)
-    user = _user_by_username(session, username)
+    user = _user_by_id(session, user_id)
     return {
         "name": skill.name,
         "source": _read_markdown(_skill_content_path(skill)),
         "metadata": _serialize_skill(
             skill,
             creator_lookup=creator_lookup,
-            current_username=username,
+            current_username=user.username,
             can_edit=_has_skill_access(
                 session,
                 user=user,
@@ -1245,7 +1299,7 @@ def _read_skill_payload(
 
 def build_skills_metadata_prompt_json(
     session: Session,
-    username: str,
+    user_id: int,
     raw_skill_ids: str | None,
     extra_skills: list[dict[str, str]] | None = None,
 ) -> str:
@@ -1253,7 +1307,7 @@ def build_skills_metadata_prompt_json(
 
     Args:
         session: Active database session.
-        username: Authenticated username.
+        user_id: Primary key of the authenticated user.
         raw_skill_ids: Optional JSON allowlist matching the agent row format.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
@@ -1263,7 +1317,7 @@ def build_skills_metadata_prompt_json(
     """
     prompt_payload = build_skills_metadata_prompt_payload(
         session,
-        username,
+        user_id,
         raw_skill_ids=raw_skill_ids,
         extra_skills=extra_skills,
     )
@@ -1272,7 +1326,7 @@ def build_skills_metadata_prompt_json(
 
 def build_skills_metadata_prompt_payload(
     session: Session,
-    username: str,
+    user_id: int,
     raw_skill_ids: str | None,
     extra_skills: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
@@ -1280,7 +1334,7 @@ def build_skills_metadata_prompt_payload(
 
     Args:
         session: Active database session.
-        username: Authenticated username.
+        user_id: Primary key of the authenticated user.
         raw_skill_ids: Optional JSON allowlist matching the agent row format.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
@@ -1291,7 +1345,7 @@ def build_skills_metadata_prompt_payload(
     """
     visible_skills = list_allowed_visible_skills(
         session,
-        username,
+        user_id,
         raw_skill_ids=raw_skill_ids,
         extra_skills=extra_skills,
     )
@@ -1307,7 +1361,7 @@ def build_skills_metadata_prompt_payload(
 
 def build_mandatory_skills_prompt_json(
     session: Session,
-    username: str,
+    user_id: int,
     *,
     raw_skill_ids: str | None,
     selected_skill_names: list[str],
@@ -1317,7 +1371,7 @@ def build_mandatory_skills_prompt_json(
 
     Args:
         session: Active database session.
-        username: Authenticated username.
+        user_id: Primary key of the authenticated user.
         raw_skill_ids: Optional JSON allowlist matching the agent row format.
         selected_skill_names: Ordered skill names explicitly selected by the
             user for the current task.
@@ -1346,7 +1400,7 @@ def build_mandatory_skills_prompt_json(
 
     visible_skills = list_allowed_visible_skills(
         session,
-        username,
+        user_id,
         raw_skill_ids=raw_skill_ids,
         extra_skills=extra_skills,
     )
@@ -1375,7 +1429,7 @@ def build_mandatory_skills_prompt_json(
 
 def build_skill_mounts(
     session: Session,
-    username: str,
+    user_id: int,
     skill_names: list[str],
     extra_skills: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
@@ -1383,7 +1437,7 @@ def build_skill_mounts(
 
     Args:
         session: Active database session.
-        username: Authenticated username kept for API compatibility.
+        user_id: Primary key of the authenticated user.
         skill_names: Allowed globally unique skill names.
         extra_skills: Optional non-registry skill payloads such as extension
             package skills.
@@ -1392,7 +1446,6 @@ def build_skill_mounts(
         List of ``{"name": ..., "location": ...}`` payloads for sandbox-manager.
     """
     sync_skill_registry(session)
-    del username
     allowed_names = {name for name in skill_names if name}
     by_name = {
         skill.name: skill
@@ -1947,7 +2000,7 @@ def _install_skill_from_directory(
     if current_user.id is None:
         raise ValueError("Current user must be persisted before importing skills.")
 
-    base_dir = _user_skills_dir(current_user.username, create=True)
+    base_dir = _user_skills_dir(current_user.id, create=True)
     target_dir = base_dir / skill_name
     if target_dir.exists():
         raise ValueError(f"Skill directory '{skill_name}' already exists.")
@@ -1982,7 +2035,7 @@ def _install_skill_from_directory(
     )
     stored_artifact = SkillArtifactStorageService().store_directory(
         source_dir=target_dir,
-        username=current_user.username,
+        user_id=current_user.id,
         skill_name=skill_name,
     )
 
@@ -2102,13 +2155,13 @@ def apply_skill_directory(
     )
     entry_path.write_text(rewritten_source, encoding="utf-8")
 
-    base_dir = _user_skills_dir(current_user.username, create=True)
+    base_dir = _user_skills_dir(current_user.id, create=True)
     target_dir = base_dir / skill_name
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     _replace_directory_contents(source_dir, target_dir)
     stored_artifact = SkillArtifactStorageService().store_directory(
         source_dir=target_dir,
-        username=current_user.username,
+        user_id=current_user.id,
         skill_name=skill_name,
     )
 
@@ -2194,7 +2247,7 @@ def save_user_skill_source(
         )
 
     normalized_source = rewrite_skill_name(source, skill_name)
-    base_dir = _user_skills_dir(current_user.username, create=True)
+    base_dir = _user_skills_dir(current_user.id, create=True)
     canonical_path = _canonical_skill_path(base_dir, skill_name)
     canonical_path.parent.mkdir(parents=True, exist_ok=True)
     canonical_path.write_text(normalized_source, encoding="utf-8")
@@ -2207,7 +2260,7 @@ def save_user_skill_source(
     )
     stored_artifact = SkillArtifactStorageService().store_directory(
         source_dir=canonical_path.parent,
-        username=current_user.username,
+        user_id=current_user.id,
         skill_name=skill_name,
     )
     old_artifact_key: str | None = None

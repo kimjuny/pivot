@@ -85,7 +85,7 @@ class TaskAttachmentService:
     def create_from_answer_paths(
         self,
         *,
-        username: str,
+        user_id: int,
         task_id: str,
         session_id: str | None,
         paths: list[str],
@@ -93,7 +93,7 @@ class TaskAttachmentService:
         """Validate sandbox paths and persist live workspace references.
 
         Args:
-            username: Authenticated owner username.
+            user_id: Authenticated owner user ID.
             task_id: Owning task UUID.
             session_id: Owning session UUID, if present.
             paths: Sandbox-local file paths declared by the model.
@@ -147,7 +147,7 @@ class TaskAttachmentService:
                 session_id=session_id,
                 workspace_id=workspace.workspace_id,
                 agent_id=session_row.agent_id,
-                user=username,
+                user_id=user_id,
                 display_name=host_path.name,
                 original_name=host_path.name,
                 mime_type=str(detected["mime_type"]),
@@ -188,22 +188,22 @@ class TaskAttachmentService:
     def get_attachment_for_user(
         self,
         attachment_id: str,
-        username: str,
+        user_id: int,
     ) -> TaskAttachment | None:
         """Return an attachment only when it belongs to the authenticated user."""
         stmt = select(TaskAttachment).where(
             TaskAttachment.attachment_id == attachment_id,
-            TaskAttachment.user == username,
+            TaskAttachment.user_id == user_id,
         )
         return self.db.exec(stmt).first()
 
     def get_live_attachment_for_user(
         self,
         attachment_id: str,
-        username: str,
+        user_id: int,
     ) -> tuple[TaskAttachment, Path] | None:
         """Resolve one owned attachment to its current live workspace path."""
-        attachment = self.get_attachment_for_user(attachment_id, username)
+        attachment = self.get_attachment_for_user(attachment_id, user_id)
         if attachment is None:
             return None
 

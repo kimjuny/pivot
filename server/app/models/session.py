@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 
 # Current version for chat_history schema
@@ -26,7 +27,7 @@ class Session(SQLModel, table=True):
         release_id: Published release fixed to this session at creation time.
         test_snapshot_id: Frozen Studio working-copy snapshot pinned to this
             session when ``type`` is ``studio_test``.
-        user: Username of the user who owns this session.
+        user_id: Foreign key to the user who owns this session.
         status: Current session lifecycle status (active, waiting_input, closed).
         runtime_status: Live aggregate execution state derived from child tasks.
         project_id: Owning project UUID for shared-workspace sessions.
@@ -70,7 +71,7 @@ class Session(SQLModel, table=True):
             "Consumer sessions keep this field null."
         ),
     )
-    user: str = Field(index=True, description="Username")
+    user_id: int = Field(foreign_key="user.id", index=True)
     status: str = Field(
         default="active",
         description="Status: active, waiting_input, closed",
@@ -142,3 +143,9 @@ class Session(SQLModel, table=True):
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        Index("ix_session_agent_created", "agent_id", "created_at"),
+        Index("ix_session_user_created", "user_id", "created_at"),
+        Index("ix_session_type_created", "type", "created_at"),
+    )

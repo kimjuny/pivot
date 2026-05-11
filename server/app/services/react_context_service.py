@@ -55,7 +55,7 @@ class ReactContextUsageService:
         self,
         *,
         agent_id: int,
-        username: str,
+        user_id: int,
         session_id: str | None = None,
         task_id: str | None = None,
         draft_message: str = "",
@@ -68,7 +68,7 @@ class ReactContextUsageService:
 
         Args:
             agent_id: Agent whose prompt should be estimated.
-            username: Authenticated username used for user-authored tool and file access.
+            user_id: Authenticated user ID used for ownership checks and file access.
             session_id: Optional conversation session for session-memory lookup.
             task_id: Optional active task whose runtime messages should be measured.
             draft_message: Current unsent composer text.
@@ -88,11 +88,11 @@ class ReactContextUsageService:
         normalized_file_ids = self._normalize_file_ids(file_ids or [])
         attachment_blocks = self._build_attachment_blocks(
             file_ids=normalized_file_ids,
-            username=username,
+            user_id=user_id,
         )
 
         task = (
-            self._load_task(task_id, agent_id=agent_id, username=username)
+            self._load_task(task_id, agent_id=agent_id, user_id=user_id)
             if task_id
             else None
         )
@@ -133,7 +133,7 @@ class ReactContextUsageService:
                     resume_prompt_object = build_runtime_task_bootstrap_message(
                         self._build_user_prompt(
                             runtime_config=runtime_config,
-                            username=username,
+                            user_id=user_id,
                             session_id=effective_session_id,
                             mandatory_skill_names=mandatory_skill_names,
                         )
@@ -160,7 +160,7 @@ class ReactContextUsageService:
         elif draft_message or attachment_blocks:
             preview_messages = self._build_new_task_preview_messages(
                 runtime_config=runtime_config,
-                username=username,
+                user_id=user_id,
                 session_id=effective_session_id,
                 draft_message=draft_message,
                 attachment_blocks=attachment_blocks,
@@ -229,16 +229,29 @@ class ReactContextUsageService:
         task_id: str,
         *,
         agent_id: int,
-        username: str,
+        user_id: int,
     ) -> ReactTask:
-        """Load one task and ensure it belongs to the current agent."""
+        """Load one task and verify it belongs to the current agent and user.
+
+        Args:
+            task_id: UUID string of the task to load.
+            agent_id: Expected agent ID for ownership verification.
+            user_id: Expected user ID for ownership verification.
+
+        Returns:
+            The loaded ReactTask row.
+
+        Raises:
+            ValueError: If the task is not found or does not belong to the
+                requested agent or user.
+        """
         statement = select(ReactTask).where(ReactTask.task_id == task_id)
         task = self.db.exec(statement).first()
         if task is None:
             raise ValueError(f"Task {task_id} not found.")
         if task.agent_id != agent_id:
             raise ValueError("Task does not belong to the requested agent.")
-        if task.user not in {username, "web-user"}:
+        if task.user_id != user_id:
             raise ValueError("Task does not belong to the current user.")
         return task
 
@@ -246,14 +259,27 @@ class ReactContextUsageService:
         self,
         *,
         runtime_config: AgentRuntimeConfig,
-        username: str,
+        user_id: int,
         session_id: str | None,
         draft_message: str,
         attachment_blocks: list[dict[str, Any]],
         include_system_prompt: bool,
         mandatory_skill_names: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Build preview messages for the next new task in a session."""
+        """Build preview messages for the next new task in a session.
+
+        Args:
+            runtime_config: Resolved agent runtime configuration.
+            user_id: Authenticated user ID for skill/tool access resolution.
+            session_id: Optional session whose workspace guidance should be injected.
+            draft_message: Current unsent composer text.
+            attachment_blocks: Pre-built multimodal attachment blocks.
+            include_system_prompt: Whether to prepend the system prompt message.
+            mandatory_skill_names: Ordered mandatory skill names to include.
+
+        Returns:
+            Ordered list of preview messages for token estimation.
+        """
         messages: list[dict[str, Any]] = []
         if include_system_prompt:
             messages.append(
@@ -262,7 +288,7 @@ class ReactContextUsageService:
 
         user_prompt = self._build_user_prompt(
             runtime_config=runtime_config,
-            username=username,
+            user_id=user_id,
             session_id=session_id,
             mandatory_skill_names=mandatory_skill_names,
         )
@@ -285,13 +311,25 @@ class ReactContextUsageService:
         self,
         *,
         runtime_config: AgentRuntimeConfig,
-        username: str,
+        user_id: int,
         session_id: str | None,
         mandatory_skill_names: list[str] | None = None,
     ) -> str:
-        """Build the task bootstrap user prompt used for next-turn previews."""
+        """Build the task bootstrap user prompt used for next-turn previews.
+
+        Args:
+            runtime_config: Resolved agent runtime configuration.
+            user_id: Authenticated user ID used to look up the username for
+                downstream skill and extension services that have not yet been
+                migrated to user_id.
+            session_id: Optional session whose workspace guidance should be injected.
+            mandatory_skill_names: Ordered mandatory skill names to include.
+
+        Returns:
+            Rendered user prompt string for the task bootstrap message.
+        """
         tool_manager = self._build_request_tool_manager(
-            username=username,
+            user_id=user_id,
             runtime_config=runtime_config,
         )
         extension_skills = ExtensionService(self.db).build_bundle_skill_payloads(
@@ -301,13 +339,13 @@ class ReactContextUsageService:
             tool_manager=tool_manager,
             skills=build_skills_metadata_prompt_json(
                 self.db,
-                username,
+                user_id,
                 raw_skill_ids=runtime_config.raw_skill_ids,
                 extra_skills=extension_skills,
             ),
             mandatory_skills=build_mandatory_skills_prompt_json(
                 self.db,
-                username,
+                user_id,
                 raw_skill_ids=runtime_config.raw_skill_ids,
                 selected_skill_names=mandatory_skill_names or [],
                 extra_skills=extension_skills,
@@ -346,7 +384,7 @@ class ReactContextUsageService:
         self,
         *,
         agent_id: int,
-        username: str,
+        user_id: int,
         session_id: str | None = None,
         session_type: str = "consumer",
         test_snapshot: dict[str, Any] | None = None,
@@ -355,7 +393,7 @@ class ReactContextUsageService:
 
         Args:
             agent_id: Agent whose runtime-visible skills should be listed.
-            username: Authenticated username.
+            user_id: Authenticated user ID.
             session_id: Optional session ID used for release-pinned resolution.
             session_type: Session type used before a session exists.
             test_snapshot: Optional Studio working-copy snapshot for previews.
@@ -375,7 +413,7 @@ class ReactContextUsageService:
         )
         return build_skills_metadata_prompt_payload(
             self.db,
-            username,
+            user_id,
             raw_skill_ids=runtime_config.raw_skill_ids,
             extra_skills=extension_skills,
         )
@@ -383,12 +421,12 @@ class ReactContextUsageService:
     def _build_request_tool_manager(
         self,
         *,
-        username: str,
+        user_id: int,
         runtime_config: AgentRuntimeConfig,
     ) -> ToolManager:
         """Rebuild the request-scoped tool catalog used in ReAct prompts."""
         return ExtensionService(self.db).build_request_tool_manager(
-            username=username,
+            user_id=user_id,
             agent_id=runtime_config.agent_id,
             raw_tool_ids=runtime_config.raw_tool_ids,
             extension_bundle=runtime_config.extension_bundle,
@@ -463,15 +501,27 @@ class ReactContextUsageService:
         self,
         *,
         file_ids: list[str],
-        username: str,
+        user_id: int,
     ) -> list[dict[str, Any]]:
-        """Build neutral multimodal blocks for uploaded draft attachments."""
+        """Build neutral multimodal blocks for uploaded draft attachments.
+
+        Args:
+            file_ids: Deduplicated file IDs to resolve and preprocess.
+            user_id: Authenticated user ID for file ownership verification.
+
+        Returns:
+            Flattened list of multimodal content blocks for LLM prompt injection.
+
+        Raises:
+            ValueError: If any referenced file does not exist or is not owned by
+                the requesting user.
+        """
         if not file_ids:
             return []
 
         files = []
         for file_id in file_ids:
-            file_asset = self.file_service.get_file_for_user(file_id, username)
+            file_asset = self.file_service.get_file_for_user(file_id, user_id)
             if file_asset is None:
                 raise ValueError(f"File '{file_id}' does not exist.")
             files.append(file_asset)

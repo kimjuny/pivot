@@ -107,8 +107,8 @@ export interface AgentReleaseRecord {
   release_note: string | null;
   /** Audit summary rendered from the published snapshot diff. */
   change_summary: string[];
-  /** Username that published this release, if known. */
-  published_by: string | null;
+  /** User ID that published this release, if known. */
+  published_by_user_id: number | null;
   /** UTC timestamp when the release was created. */
   created_at: string;
 }
@@ -119,8 +119,8 @@ export interface AgentReleaseRecord {
 export interface AgentSavedDraftInfo {
   /** UTC timestamp of the latest saved draft baseline. */
   saved_at: string;
-  /** Username that last updated the saved draft, if known. */
-  saved_by: string | null;
+  /** User ID that last updated the saved draft, if known. */
+  saved_by_user_id: number | null;
   /** Stable content hash for the normalized saved-draft snapshot. */
   snapshot_hash: string;
 }
@@ -777,10 +777,10 @@ export const getChannelLinkStatus = async (
  */
 export const completeChannelLink = async (
   token: string
-): Promise<{ status: string; message: string; pivot_user_id: number; workspace_owner: string; linked_at: string }> => {
+): Promise<{ status: string; message: string; pivot_user_id: number; linked_at: string }> => {
   return apiRequest(`/channel-link/${encodeURIComponent(token)}/complete`, {
     method: 'POST',
-  }) as Promise<{ status: string; message: string; pivot_user_id: number; workspace_owner: string; linked_at: string }>;
+  }) as Promise<{ status: string; message: string; pivot_user_id: number; linked_at: string }>;
 };
 
 // ---------------------------------------------------------------------------
@@ -1137,8 +1137,6 @@ export interface ExtensionInstallation {
   hub_package_version_id: string | null;
   /** Verified artifact digest returned by the official Hub. */
   hub_artifact_digest: string | null;
-  /** Username that installed the package, if known. */
-  installed_by: string | null;
   /** User id that owns this installation's edit grant. */
   creator_id: number | null;
   /** Resource use scope for Studio-side extension visibility. */
@@ -2296,7 +2294,7 @@ export interface SessionResponse {
   workspace_id?: string | null;
   workspace_scope?: "session_private" | "project_shared" | null;
   test_workspace_hash?: string | null;
-  user: string;
+  user_id: number;
   status: string;
   runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;

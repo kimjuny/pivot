@@ -47,7 +47,7 @@ describe("SessionDetailPage", () => {
         agent_name: "Support Agent",
         release_version: 3,
         type: "studio_test",
-        user: "alice",
+        user_id: 1,
         status: "failed",
         title: "Diagnose billing issue",
         diagnostics: {

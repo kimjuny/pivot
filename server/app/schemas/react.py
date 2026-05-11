@@ -31,7 +31,7 @@ class ReactChatRequest(AppBaseModel):
         default=None,
         description="User message/task description for text turns",
     )
-    user: str = Field(default="default_user", description="Username")
+    user_id: int = Field(default=1, description="User ID who initiated the task")
     task_id: str | None = Field(
         default=None, description="Task ID for resuming a conversation"
     )
@@ -292,7 +292,7 @@ class ReactTaskResponse(AppBaseModel):
     id: int
     task_id: str
     agent_id: int
-    user: str
+    user_id: int
     user_message: str
     user_intent: str
     status: str

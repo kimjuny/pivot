@@ -150,7 +150,6 @@ class ExtensionInstallationResponse(AppBaseModel):
     hub_package_id: str | None = None
     hub_package_version_id: str | None = None
     hub_artifact_digest: str | None = None
-    installed_by: str | None = None
     creator_id: int | None = None
     use_scope: str
     read_only: bool
@@ -305,6 +304,7 @@ class ExtensionPendingUpgradeResponse(AppBaseModel):
     source_version: str
     target_version: str
     mode: ExtensionUpgradeMode = "safe"
+    created_by_user_id: int | None = None
     created_at: str | None = None
     affected_agent_count: int
     affected_agent_names: list[str] = Field(default_factory=list)

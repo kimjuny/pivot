@@ -90,7 +90,7 @@ def ensure_manual_tool_resource(
     """Ensure auth metadata exists for one user-created tool."""
     if owner.id is None:
         raise ValueError("Tool owner must be persisted.")
-    read_user_tool(owner.username, tool_name)
+    read_user_tool(owner.id, tool_name)
 
     key = manual_tool_key(owner.id, tool_name)
     tool = _get_by_key(db, key)
@@ -194,7 +194,9 @@ def load_runtime_manual_tool_metadata(
         if tool.name not in tool_names:
             continue
         owner = _manual_tool_owner(db, tool)
-        metadata = load_user_tool_metadata(owner.username, tool.name)
+        if owner.id is None:
+            continue
+        metadata = load_user_tool_metadata(owner.id, tool.name)
         if metadata is not None:
             results.append(metadata)
     return results
@@ -214,7 +216,9 @@ def read_manual_tool_source(
         access_level=AccessLevel.USE,
     )
     owner = _manual_tool_owner(db, tool)
-    return read_user_tool(owner.username, tool.name)
+    if owner.id is None:
+        raise ValueError("Tool owner must be persisted.")
+    return read_user_tool(owner.id, tool.name)
 
 
 def update_manual_tool_source(
@@ -232,7 +236,9 @@ def update_manual_tool_source(
         access_level=AccessLevel.EDIT,
     )
     owner = _manual_tool_owner(db, tool)
-    write_user_tool(owner.username, tool.name, source)
+    if owner.id is None:
+        raise ValueError("Tool owner must be persisted.")
+    write_user_tool(owner.id, tool.name, source)
     tool.updated_at = datetime.now(UTC)
     db.add(tool)
     db.commit()
@@ -247,7 +253,9 @@ def create_manual_tool_source(
     source: str,
 ) -> ToolResource:
     """Create one manual tool source and initialize auth metadata."""
-    write_user_tool(current_user.username, tool_name, source)
+    if current_user.id is None:
+        raise ValueError("User must be persisted.")
+    write_user_tool(current_user.id, tool_name, source)
     return ensure_manual_tool_resource(db, owner=current_user, tool_name=tool_name)
 
 
@@ -265,7 +273,9 @@ def delete_manual_tool(
         access_level=AccessLevel.EDIT,
     )
     owner = _manual_tool_owner(db, tool)
-    delete_user_tool(owner.username, tool.name)
+    if owner.id is None:
+        raise ValueError("Tool owner must be persisted.")
+    delete_user_tool(owner.id, tool.name)
     AccessService(db)._delete_resource_grants_in_session(
         resource_type=ResourceType.TOOL,
         resource_id=tool.key,
@@ -347,7 +357,9 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
     access_service = AccessService(db)
     rows: list[dict[str, object]] = []
 
-    for entry in list_user_tools(current_user.username):
+    if current_user.id is None:
+        return []
+    for entry in list_user_tools(current_user.id):
         tool_name = entry.get("name")
         if isinstance(tool_name, str):
             ensure_manual_tool_resource(db, owner=current_user, tool_name=tool_name)
@@ -385,9 +397,9 @@ def list_usable_tools(db: Session, *, current_user: User) -> list[dict[str, obje
         if tool.creator_id is None:
             continue
         owner = db.get(User, tool.creator_id)
-        if owner is None:
+        if owner is None or owner.id is None:
             continue
-        metadata = load_user_tool_metadata(owner.username, tool.name)
+        metadata = load_user_tool_metadata(owner.id, tool.name)
         can_edit = access_service.has_resource_access(
             user=current_user,
             resource_type=ResourceType.TOOL,

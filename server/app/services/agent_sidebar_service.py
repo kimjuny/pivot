@@ -86,6 +86,9 @@ class AgentSidebarService:
         user: User,
     ) -> dict[str, dict[str, int]]:
         """Return compact count summaries for Agent detail sidebar sections."""
+        if user.id is None:
+            msg = "User must be persisted before fetching sidebar stats"
+            raise ValueError(msg)
         agent = AgentService(self.db).get_required_agent(agent_id)
         extension_service = ExtensionService(self.db)
         channel_service = ChannelService(self.db)
@@ -93,7 +96,7 @@ class AgentSidebarService:
         web_search_service = WebSearchService(self.db)
 
         usable_tools = list_usable_tools(self.db, current_user=user)
-        visible_skills = list_visible_skills(self.db, user.username)
+        visible_skills = list_visible_skills(self.db, user.id)
         extension_packages = extension_service.list_agent_package_choices(
             agent_id, user
         )

@@ -30,7 +30,11 @@ EXTENSION_PATH = (
 )
 
 _spec = importlib.util.spec_from_file_location("work_wechat_ext", EXTENSION_PATH)
+if _spec is None:
+    raise RuntimeError(f"Cannot load module spec from {EXTENSION_PATH}")
 _module = importlib.util.module_from_spec(_spec)
+if _spec.loader is None:
+    raise RuntimeError(f"Module spec has no loader: {EXTENSION_PATH}")
 _spec.loader.exec_module(_module)
 
 

@@ -204,7 +204,6 @@ def _serialize_installation(
         hub_package_id=installation.hub_package_id,
         hub_package_version_id=installation.hub_package_version_id,
         hub_artifact_digest=installation.hub_artifact_digest,
-        installed_by=installation.installed_by,
         creator_id=installation.creator_id,
         use_scope=installation.use_scope,
         read_only=(
@@ -956,7 +955,7 @@ async def install_extension(
     try:
         installation = service.install_from_path(
             source_dir=body.source_dir,
-            installed_by=current_user.username,
+            user_id=current_user.id,
             trust_confirmed=body.trust_confirmed,
             overwrite_confirmed=body.overwrite_confirmed,
             upgrade_mode=body.upgrade_mode,
@@ -1041,7 +1040,7 @@ async def import_bundle_extension(
         installation = service.install_bundle(
             bundle_name=bundle_name,
             files=bundle_files,
-            installed_by=current_user.username,
+            user_id=current_user.id,
             trust_confirmed=trust_confirmed,
             overwrite_confirmed=overwrite_confirmed,
             upgrade_mode=upgrade_mode,
@@ -1063,8 +1062,10 @@ async def create_bundle_import_job(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionBundleImportJobResponse:
     """Create one SSE-observable extension bundle import job."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     job = get_extension_import_progress_service().create_job(
-        username=current_user.username,
+        user_id=current_user.id,
     )
     return ExtensionBundleImportJobResponse(job_id=job.job_id)
 
@@ -1077,8 +1078,11 @@ async def stream_bundle_import_job_events(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> StreamingResponse:
     """Stream progress events for one extension bundle import job."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    user_id = current_user.id
     progress_service = get_extension_import_progress_service()
-    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    job = progress_service.get_job(job_id=job_id, user_id=user_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Extension import job not found.")
 
@@ -1086,12 +1090,12 @@ async def stream_bundle_import_job_events(
         cursor = after_id
         subscriber = await progress_service.subscribe(
             job_id=job_id,
-            username=current_user.username,
+            user_id=user_id,
         )
         try:
             for payload in progress_service.list_events(
                 job_id=job_id,
-                username=current_user.username,
+                user_id=user_id,
                 after_id=cursor,
             ):
                 event_id = payload.get("event_id")
@@ -1142,8 +1146,10 @@ async def import_bundle_with_progress(
     current_user: User = Depends(permissions(Permission.EXTENSIONS_MANAGE)),
 ) -> ExtensionInstallationResponse:
     """Upload and install one extension bundle with SSE progress tracking."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     progress_service = get_extension_import_progress_service()
-    job = progress_service.get_job(job_id=job_id, username=current_user.username)
+    job = progress_service.get_job(job_id=job_id, user_id=current_user.id)
     if job is None:
         raise HTTPException(status_code=404, detail="Extension import job not found.")
     if job.completed:
@@ -1208,7 +1214,7 @@ async def import_bundle_with_progress(
             installation = service.install_bundle(
                 bundle_name=bundle_name_raw,
                 files=bundle_files,
-                installed_by=current_user.username,
+                user_id=current_user.id,
                 trust_confirmed=trust_raw == "true",
                 overwrite_confirmed=overwrite_raw == "true",
                 upgrade_mode=(

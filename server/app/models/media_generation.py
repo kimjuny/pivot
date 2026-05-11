@@ -47,7 +47,7 @@ class MediaGenerationUsageLog(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int = Field(foreign_key="agent.id", index=True)
     workspace_id: str = Field(index=True, max_length=255)
-    username: str = Field(index=True, max_length=120)
+    user_id: int = Field(foreign_key="user.id", index=True)
     provider_key: str = Field(index=True, max_length=100)
     operation: str = Field(max_length=64)
     status: str = Field(index=True, max_length=32)

@@ -120,7 +120,7 @@ def create_dev_surface_session(
     service = SurfaceSessionService(db)
     try:
         record = service.create_dev_surface_session(
-            username=current_user.username,
+            user_id=current_user.id,
             session_id=request.session_id,
             surface_key=request.surface_key,
             dev_server_url=request.dev_server_url,
@@ -135,7 +135,7 @@ def create_dev_surface_session(
 
     surface_token = SurfaceTokenService.create_surface_token(
         surface_session_id=record.surface_session_id,
-        username=record.username,
+        user_id=record.user_id,
     )
     bootstrap = _serialize_bootstrap(
         service.build_bootstrap(record=record),
@@ -170,7 +170,7 @@ def create_installed_surface_session(
     service = SurfaceSessionService(db)
     try:
         record = service.create_installed_surface_session(
-            username=current_user.username,
+            user_id=current_user.id,
             session_id=request.session_id,
             extension_installation_id=request.extension_installation_id,
             surface_key=request.surface_key,
@@ -184,7 +184,7 @@ def create_installed_surface_session(
 
     surface_token = SurfaceTokenService.create_surface_token(
         surface_session_id=record.surface_session_id,
-        username=record.username,
+        user_id=record.user_id,
     )
     bootstrap = _serialize_installed_bootstrap(
         service.build_bootstrap(record=record),
@@ -221,7 +221,7 @@ def create_preview_endpoint(
     service = PreviewEndpointService(db)
     try:
         record = service.create_preview_endpoint(
-            username=current_user.username,
+            user_id=current_user.id,
             session_id=request.session_id,
             port=request.port,
             path=request.path,
@@ -231,7 +231,7 @@ def create_preview_endpoint(
         )
         record = service.connect_preview_endpoint(
             preview_id=record.preview_id,
-            username=current_user.username,
+            user_id=current_user.id,
         )
     except PreviewEndpointNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -266,7 +266,7 @@ def list_preview_endpoints(
     service = PreviewEndpointService(db)
     try:
         records = service.list_preview_endpoints(
-            username=current_user.username,
+            user_id=current_user.id,
             session_id=session_id,
         )
     except PreviewEndpointNotFoundError as err:
@@ -314,7 +314,7 @@ def reconnect_surface_preview(
     try:
         preview_record = service.get_preview_endpoint(
             preview_id=preview_id,
-            username=surface_record.username,
+            user_id=surface_record.user_id,
         )
         if preview_record.session_id != surface_record.session_id:
             if preview_record.agent_id != surface_record.agent_id:
@@ -324,15 +324,15 @@ def reconnect_surface_preview(
                 )
             preview_record = service.create_preview_endpoint_from_existing(
                 source_record=preview_record,
-                username=surface_record.username,
+                user_id=surface_record.user_id,
                 session_id=surface_record.session_id,
             )
         preview_record = service.connect_preview_endpoint(
             preview_id=preview_record.preview_id,
-            username=surface_record.username,
+            user_id=surface_record.user_id,
         )
         preview_records = service.list_preview_endpoints(
-            username=surface_record.username,
+            user_id=surface_record.user_id,
             session_id=surface_record.session_id,
         )
     except PreviewEndpointNotFoundError as err:
@@ -382,7 +382,7 @@ def get_dev_surface_bootstrap(
     service = SurfaceSessionService(db)
     surface_token = SurfaceTokenService.create_surface_token(
         surface_session_id=record.surface_session_id,
-        username=record.username,
+        user_id=record.user_id,
     )
     return _serialize_bootstrap(
         service.build_bootstrap(record=record),
@@ -409,7 +409,7 @@ def get_installed_surface_bootstrap(
     service = SurfaceSessionService(db)
     surface_token = SurfaceTokenService.create_surface_token(
         surface_session_id=record.surface_session_id,
-        username=record.username,
+        user_id=record.user_id,
     )
     return _serialize_installed_bootstrap(
         service.build_bootstrap(record=record),
@@ -438,7 +438,7 @@ def list_dev_surface_workspace_directory(
     try:
         entries = service.list_directory(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -474,7 +474,7 @@ def read_dev_surface_workspace_text_file(
     try:
         content = service.read_text_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except UnicodeDecodeError as err:
@@ -511,7 +511,7 @@ def write_dev_surface_workspace_text_file(
     try:
         service.write_text_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=request.path,
             content=request.content,
         )
@@ -545,7 +545,7 @@ def create_dev_surface_workspace_directory(
     try:
         service.create_directory(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=request.path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -578,7 +578,7 @@ def delete_dev_surface_workspace_path(
     try:
         service.delete_path(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -608,7 +608,7 @@ def read_dev_surface_workspace_blob(
     try:
         blob = service.read_binary_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -647,7 +647,7 @@ async def write_dev_surface_workspace_blob(
     try:
         result = service.write_binary_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
             content=await file.read(),
             mime_type=file.content_type,
@@ -686,7 +686,7 @@ def list_dev_surface_workspace_tree(
     try:
         entries = service.list_tree(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             root_path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -722,7 +722,7 @@ def read_dev_surface_workspace_file(
     try:
         file_payload = service.read_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -760,7 +760,7 @@ def write_dev_surface_workspace_file(
     try:
         service.write_text_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=request.path,
             content=request.content,
         )
@@ -794,7 +794,7 @@ def list_installed_surface_workspace_directory(
     try:
         entries = service.list_directory(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -830,7 +830,7 @@ def read_installed_surface_workspace_text_file(
     try:
         content = service.read_text_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except UnicodeDecodeError as err:
@@ -868,7 +868,7 @@ def write_installed_surface_workspace_text_file(
     try:
         service.write_text_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=request.path,
             content=request.content,
         )
@@ -902,7 +902,7 @@ def create_installed_surface_workspace_directory(
     try:
         service.create_directory(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=request.path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -935,7 +935,7 @@ def delete_installed_surface_workspace_path(
     try:
         service.delete_path(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -965,7 +965,7 @@ def read_installed_surface_workspace_blob(
     try:
         blob = service.read_binary_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -1004,7 +1004,7 @@ async def write_installed_surface_workspace_blob(
     try:
         result = service.write_binary_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
             content=await file.read(),
             mime_type=file.content_type,
@@ -1043,7 +1043,7 @@ def list_installed_surface_workspace_tree(
     try:
         entries = service.list_tree(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             root_path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -1079,7 +1079,7 @@ def read_installed_surface_workspace_file(
     try:
         file_payload = service.read_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=path,
         )
     except WorkspaceFileNotFoundError as err:
@@ -1118,7 +1118,7 @@ def write_installed_surface_workspace_file(
     try:
         service.write_text_file(
             workspace_id=record.workspace_id,
-            username=record.username,
+            user_id=record.user_id,
             path=request.path,
             content=request.content,
         )
@@ -1169,7 +1169,7 @@ async def proxy_chat_preview(
 
     try:
         proxy_result = get_sandbox_service().proxy_http(
-            username=record.username,
+            user_id=record.user_id,
             workspace_id=record.workspace_id,
             workspace_backend_path=WorkspaceService(db).get_workspace_backend_path(
                 workspace
@@ -1276,7 +1276,7 @@ async def proxy_chat_preview_websocket(
             await manager_websocket.send(
                 json.dumps(
                     {
-                        "username": record.username,
+                        "user_id": record.user_id,
                         "workspace_id": record.workspace_id,
                         "workspace_backend_path": WorkspaceService(
                             db
@@ -1389,7 +1389,7 @@ def proxy_dev_surface_runtime(
     if _is_html_response(content_type=content_type, payload=payload):
         surface_token = SurfaceTokenService.create_surface_token(
             surface_session_id=record.surface_session_id,
-            username=record.username,
+            user_id=record.user_id,
         )
         bootstrap = _serialize_bootstrap(
             SurfaceSessionService(db).build_bootstrap(record=record),
@@ -1496,7 +1496,7 @@ def serve_installed_surface_runtime(
     if _is_html_response(content_type=asset.content_type, payload=asset.content):
         surface_token = SurfaceTokenService.create_surface_token(
             surface_session_id=record.surface_session_id,
-            username=record.username,
+            user_id=record.user_id,
         )
         bootstrap = _serialize_installed_bootstrap(
             SurfaceSessionService(db).build_bootstrap(record=record),
@@ -1669,7 +1669,7 @@ def _authenticate_surface_request(
         try:
             return service.get_surface_session(
                 surface_session_id=surface_session_id,
-                username=claims.username,
+                user_id=claims.user_id,
             )
         except SurfaceSessionNotFoundError as err:
             raise HTTPException(status_code=404, detail=str(err)) from err
@@ -1683,10 +1683,12 @@ def _authenticate_surface_request(
         )
 
     user = resolve_user_from_access_token(bearer_token, db)
+    if user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     try:
         return service.get_surface_session(
             surface_session_id=surface_session_id,
-            username=user.username,
+            user_id=user.id,
         )
     except SurfaceSessionNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -1718,11 +1720,11 @@ def _authenticate_preview_request(
         try:
             surface_record = SurfaceSessionService(db).get_surface_session(
                 surface_session_id=claims.surface_session_id,
-                username=claims.username,
+                user_id=claims.user_id,
             )
             preview_record = preview_service.get_preview_endpoint(
                 preview_id=preview_id,
-                username=claims.username,
+                user_id=claims.user_id,
             )
         except SurfaceSessionNotFoundError as err:
             raise HTTPException(status_code=404, detail=str(err)) from err
@@ -1746,10 +1748,12 @@ def _authenticate_preview_request(
         )
 
     user = resolve_user_from_access_token(bearer_token, db)
+    if user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     try:
         return preview_service.get_preview_endpoint(
             preview_id=preview_id,
-            username=user.username,
+            user_id=user.id,
         )
     except PreviewEndpointNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -1789,7 +1793,7 @@ def _authenticate_surface_websocket(
     try:
         return service.get_surface_session(
             surface_session_id=surface_session_id,
-            username=claims.username,
+            user_id=claims.user_id,
         )
     except SurfaceSessionNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err
@@ -1823,11 +1827,11 @@ def _authenticate_preview_websocket(
     try:
         surface_record = SurfaceSessionService(db).get_surface_session(
             surface_session_id=claims.surface_session_id,
-            username=claims.username,
+            user_id=claims.user_id,
         )
         preview_record = preview_service.get_preview_endpoint(
             preview_id=preview_id,
-            username=claims.username,
+            user_id=claims.user_id,
         )
     except SurfaceSessionNotFoundError as err:
         raise HTTPException(status_code=404, detail=str(err)) from err

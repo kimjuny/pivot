@@ -443,9 +443,9 @@ class SandboxManagerHttpProxyTestCase(unittest.TestCase):
                     "Remote end closed connection without response"
                 ),
             ),
+            self.assertRaises(module.HTTPException) as exc_info,
         ):
-            with self.assertRaises(module.HTTPException) as exc_info:
-                module.proxy_http_in_sandbox(payload)
+            module.proxy_http_in_sandbox(payload)
 
         self.assertEqual(exc_info.exception.status_code, 502)
         self.assertIn(

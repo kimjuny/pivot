@@ -314,9 +314,18 @@ class AgentSnapshotService:
         agent_id: int,
         *,
         working_copy_snapshot: dict[str, Any],
-        created_by: str | None = None,
+        created_by_user_id: int | None = None,
     ) -> AgentTestSnapshot:
-        """Freeze one Studio working copy into an immutable test snapshot."""
+        """Freeze one Studio working copy into an immutable test snapshot.
+
+        Args:
+            agent_id: Agent whose working copy should be frozen.
+            working_copy_snapshot: Frontend-authored working copy payload.
+            created_by_user_id: User who initiated the test snapshot.
+
+        Returns:
+            The persisted ``AgentTestSnapshot`` row.
+        """
         runtime_snapshot = self.build_studio_test_snapshot(
             agent_id,
             working_copy_snapshot=working_copy_snapshot,
@@ -330,7 +339,7 @@ class AgentSnapshotService:
             snapshot_json=_dump_json(runtime_snapshot),
             snapshot_hash=_hash_payload(runtime_snapshot),
             workspace_hash=_hash_payload(workspace_hash_payload),
-            created_by=created_by,
+            created_by_user_id=created_by_user_id,
         )
         self.db.add(snapshot)
         self.db.commit()
@@ -366,7 +375,7 @@ class AgentSnapshotService:
             "version": release.version,
             "release_note": release.release_note,
             "change_summary": json.loads(release.change_summary_json),
-            "published_by": release.published_by,
+            "published_by_user_id": release.published_by_user_id,
             "created_at": release.created_at.replace(tzinfo=UTC).isoformat(),
         }
 
@@ -565,9 +574,17 @@ class AgentSnapshotService:
         return changes
 
     def get_or_create_saved_draft(
-        self, agent_id: int, *, saved_by: str | None = None
+        self, agent_id: int, *, saved_by_user_id: int | None = None
     ) -> AgentSavedDraft:
-        """Return the saved draft row for one agent, creating it if needed."""
+        """Return the saved draft row for one agent, creating it if needed.
+
+        Args:
+            agent_id: Agent whose draft should be loaded or created.
+            saved_by_user_id: User who initiated the save.
+
+        Returns:
+            The existing or newly created ``AgentSavedDraft`` row.
+        """
         self._get_agent_or_raise(agent_id)
         existing = self.db.exec(
             select(AgentSavedDraft).where(AgentSavedDraft.agent_id == agent_id)
@@ -580,7 +597,7 @@ class AgentSnapshotService:
             agent_id=agent_id,
             snapshot_json=_dump_json(snapshot),
             snapshot_hash=_hash_payload(snapshot),
-            saved_by=saved_by,
+            saved_by_user_id=saved_by_user_id,
             saved_at=now,
         )
         self.db.add(draft)
@@ -589,9 +606,17 @@ class AgentSnapshotService:
         return draft
 
     def save_draft(
-        self, agent_id: int, *, saved_by: str | None = None
+        self, agent_id: int, *, saved_by_user_id: int | None = None
     ) -> AgentSavedDraft:
-        """Persist the current normalized agent snapshot as the saved draft."""
+        """Persist the current normalized agent snapshot as the saved draft.
+
+        Args:
+            agent_id: Agent whose current state should be persisted.
+            saved_by_user_id: User who initiated the save.
+
+        Returns:
+            The upserted ``AgentSavedDraft`` row.
+        """
         snapshot = self.build_current_snapshot(agent_id)
         now = datetime.now(UTC)
         draft = self.db.exec(
@@ -602,13 +627,13 @@ class AgentSnapshotService:
                 agent_id=agent_id,
                 snapshot_json=_dump_json(snapshot),
                 snapshot_hash=_hash_payload(snapshot),
-                saved_by=saved_by,
+                saved_by_user_id=saved_by_user_id,
                 saved_at=now,
             )
         else:
             draft.snapshot_json = _dump_json(snapshot)
             draft.snapshot_hash = _hash_payload(snapshot)
-            draft.saved_by = saved_by
+            draft.saved_by_user_id = saved_by_user_id
             draft.saved_at = now
         self.db.add(draft)
         self.db.commit()
@@ -647,7 +672,7 @@ class AgentSnapshotService:
         return {
             "saved_draft": {
                 "saved_at": draft.saved_at.replace(tzinfo=UTC).isoformat(),
-                "saved_by": draft.saved_by,
+                "saved_by_user_id": draft.saved_by_user_id,
                 "snapshot_hash": draft.snapshot_hash,
             },
             "latest_release": (
@@ -668,9 +693,22 @@ class AgentSnapshotService:
         agent_id: int,
         *,
         release_note: str | None,
-        published_by: str | None,
+        published_by_user_id: int | None,
     ) -> dict[str, Any]:
-        """Create one immutable release from the current saved draft."""
+        """Create one immutable release from the current saved draft.
+
+        Args:
+            agent_id: Agent whose saved draft should be published.
+            release_note: Optional human-authored release note.
+            published_by_user_id: User who initiated the publish.
+
+        Returns:
+            Updated draft-state payload for the editor toolbar.
+
+        Raises:
+            ValueError: If the draft is already published or extensions need
+                reconfiguration.
+        """
         draft = self.get_or_create_saved_draft(agent_id)
         latest_release = self._get_latest_release_model(agent_id)
         if (
@@ -731,7 +769,7 @@ class AgentSnapshotService:
             snapshot_hash=draft.snapshot_hash,
             release_note=(release_note.strip() or None) if release_note else None,
             change_summary_json=_dump_json(change_summary),
-            published_by=published_by,
+            published_by_user_id=published_by_user_id,
             created_at=datetime.now(UTC),
         )
         self.db.add(release)

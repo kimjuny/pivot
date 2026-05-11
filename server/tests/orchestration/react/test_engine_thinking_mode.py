@@ -64,7 +64,7 @@ class ReactEngineThinkingModeTestCase(unittest.TestCase):
         session_row = SessionModel(
             session_id="session-thinking",
             agent_id=agent.id or 0,
-            user="alice",
+            user_id=1,
             react_llm_messages="[]",
         )
         self.session.add(session_row)
@@ -82,7 +82,7 @@ class ReactEngineThinkingModeTestCase(unittest.TestCase):
             task_id="task-thinking",
             session_id=self.session_row.session_id,
             agent_id=self.agent.id or 0,
-            user="alice",
+            user_id=1,
             user_message="hello",
             user_intent="hello",
             iteration=1,

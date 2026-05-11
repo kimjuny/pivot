@@ -180,7 +180,7 @@ class SandboxService:
 
     def exec(
         self,
-        username: str,
+        user_id: int,
         workspace_id: str,
         workspace_backend_path: str,
         cmd: list[str],
@@ -193,7 +193,7 @@ class SandboxService:
         data = self._post(
             "/sandboxes/exec",
             {
-                "username": username,
+                "user_id": user_id,
                 "workspace_id": workspace_id,
                 "workspace_backend_path": workspace_backend_path,
                 "cmd": cmd,
@@ -209,7 +209,7 @@ class SandboxService:
 
     def create(
         self,
-        username: str,
+        user_id: int,
         workspace_id: str,
         workspace_backend_path: str,
         skills: list[dict[str, str]] | None = None,
@@ -221,7 +221,7 @@ class SandboxService:
         self._post(
             "/sandboxes/create",
             {
-                "username": username,
+                "user_id": user_id,
                 "workspace_id": workspace_id,
                 "workspace_backend_path": workspace_backend_path,
                 "skills": skills,
@@ -232,7 +232,7 @@ class SandboxService:
     def destroy(
         self,
         *,
-        username: str,
+        user_id: int,
         workspace_id: str,
         workspace_backend_path: str,
         timeout_seconds: int | None = None,
@@ -241,7 +241,7 @@ class SandboxService:
         self._post(
             "/sandboxes/destroy",
             {
-                "username": username,
+                "user_id": user_id,
                 "workspace_id": workspace_id,
                 "workspace_backend_path": workspace_backend_path,
                 "skills": [],
@@ -252,7 +252,7 @@ class SandboxService:
     def proxy_http(
         self,
         *,
-        username: str,
+        user_id: int,
         workspace_id: str,
         workspace_backend_path: str,
         skills: list[dict[str, str]] | None = None,
@@ -269,7 +269,7 @@ class SandboxService:
         """Proxy one HTTP request through sandbox-manager into a sandbox."""
         request_timeout = timeout_seconds or self._timeout
         payload: dict[str, Any] = {
-            "username": username,
+            "user_id": user_id,
             "workspace_id": workspace_id,
             "workspace_backend_path": workspace_backend_path,
             "skills": skills or [],

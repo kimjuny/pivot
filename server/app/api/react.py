@@ -89,7 +89,7 @@ def _get_owned_task(
     task = db.exec(select(ReactTask).where(ReactTask.task_id == task_id)).first()
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.user != user.username:
+    if task.user_id != user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     return task
 
@@ -104,7 +104,7 @@ def _get_owned_session(
     session = SessionService(db).get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.user != user.username:
+    if session.user_id != user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     return session
 
@@ -246,6 +246,8 @@ async def start_react_task(
     current_user: User = Depends(get_current_user),
 ) -> ReactTaskStartResponse:
     """Queue one ReAct task for background execution."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     if request.message is None or request.message.strip() == "":
         raise HTTPException(status_code=400, detail="message is required")
     _resolve_runtime_agent_for_request(
@@ -260,7 +262,7 @@ async def start_react_task(
             ReactTaskLaunchRequest(
                 agent_id=request.agent_id,
                 message=request.message,
-                username=current_user.username,
+                user_id=current_user.id,
                 session_id=request.session_id,
                 file_ids=request.file_ids,
                 web_search_provider=request.web_search_provider,
@@ -290,6 +292,8 @@ async def submit_react_user_action(
     current_user: User = Depends(get_current_user),
 ) -> ReactTaskStartResponse:
     """Submit one structured approve/reject decision for a waiting task."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     task = _get_owned_task(db=db, task_id=task_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
     session_type = "consumer"
@@ -314,7 +318,7 @@ async def submit_react_user_action(
     try:
         launch_result = await supervisor.submit_pending_user_action(
             task_id=task_id,
-            username=current_user.username,
+            user_id=current_user.id,
             decision=request.decision,
         )
     except ValueError as exc:
@@ -334,11 +338,13 @@ async def cancel_react_task(
     current_user: User = Depends(get_current_user),
 ) -> ReactTaskCancelResponse:
     """Request cancellation for one running ReAct task."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     supervisor = get_react_task_supervisor()
     task = supervisor.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.user != current_user.username:
+    if task.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     cancel_requested = await supervisor.request_cancel(task_id)
@@ -394,6 +400,8 @@ async def react_chat_stream(
     current_user: User = Depends(get_current_user),
 ):
     """Compatibility stream that starts a task then tails its events."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     session_id = request.session_id
     if session_id is None:
         raise HTTPException(
@@ -414,7 +422,7 @@ async def react_chat_stream(
             ReactTaskLaunchRequest(
                 agent_id=request.agent_id,
                 message=request.message,
-                username=current_user.username,
+                user_id=current_user.id,
                 session_id=session_id,
                 file_ids=request.file_ids,
                 web_search_provider=request.web_search_provider,
@@ -456,6 +464,8 @@ async def estimate_react_context_usage(
     Raises:
         HTTPException: If the agent, task, or uploaded files cannot be resolved.
     """
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     agent = AgentService(db).get_required_agent(request.agent_id)
     _require_runtime_permission(
         db=db,
@@ -472,7 +482,7 @@ async def estimate_react_context_usage(
     try:
         return service.estimate(
             agent_id=request.agent_id,
-            username=current_user.username,
+            user_id=current_user.id,
             session_id=request.session_id,
             task_id=request.task_id,
             draft_message=request.draft_message,
@@ -499,6 +509,8 @@ async def list_react_runtime_skills(
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, str]]:
     """List the skills currently visible to one chat runtime."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     agent = AgentService(db).get_required_agent(request.agent_id)
     _require_runtime_permission(
         db=db,
@@ -515,7 +527,7 @@ async def list_react_runtime_skills(
     try:
         return service.list_runtime_skills(
             agent_id=request.agent_id,
-            username=current_user.username,
+            user_id=current_user.id,
             session_id=request.session_id,
             session_type=request.session_type,
             test_snapshot=(

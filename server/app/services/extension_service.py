@@ -1344,7 +1344,14 @@ class ExtensionService:
         self.artifact_storage = ExtensionArtifactStorageService()
 
     def _user_by_username(self, username: str | None) -> User | None:
-        """Return a persisted user by username when available."""
+        """Return a persisted user by username when available.
+
+        Args:
+            username: Raw username string to look up.
+
+        Returns:
+            The matching User row, or None if the input is empty or missing.
+        """
         if username is None:
             return None
         normalized_username = username.strip()
@@ -1354,14 +1361,32 @@ class ExtensionService:
             select(User).where(User.username == normalized_username)
         ).first()
 
+    def _user_by_id(self, user_id: int | None) -> User | None:
+        """Return a persisted user by primary key.
+
+        Args:
+            user_id: Primary key of the user to look up.
+
+        Returns:
+            The matching User row, or None if the input is None.
+        """
+        if user_id is None:
+            return None
+        return self.db.get(User, user_id)
+
     def _grant_installer_edit(
         self,
         *,
         installation: ExtensionInstallation,
-        installed_by: str | None,
+        user_id: int | None,
     ) -> None:
-        """Grant extension edit access to the installing user."""
-        installer = self._user_by_username(installed_by)
+        """Grant extension edit access to the installing user.
+
+        Args:
+            installation: The newly created extension installation row.
+            user_id: Primary key of the user who initiated the installation.
+        """
+        installer = self._user_by_id(user_id)
         if installation.id is None or installer is None or installer.id is None:
             return
         installation.creator_id = installer.id
@@ -2270,9 +2295,17 @@ class ExtensionService:
         source_version: str,
         target_installation_id: int,
         affected_agent_ids: set[int],
-        created_by: str | None,
+        created_by_user_id: int | None,
     ) -> None:
-        """Persist one safe-upgrade drain and block new client traffic."""
+        """Persist one safe-upgrade drain and block new client traffic.
+
+        Args:
+            package_id: Canonical ``@scope/name`` package identifier.
+            source_version: Version string being upgraded away from.
+            target_installation_id: Primary key of the new installation row.
+            affected_agent_ids: Agent ids whose bindings will shift during upgrade.
+            created_by_user_id: Primary key of the user who initiated the upgrade.
+        """
         if self._get_package_pending_upgrade(package_id=package_id) is not None:
             raise ValueError(
                 "A safe upgrade is already draining for this extension package."
@@ -2284,7 +2317,7 @@ class ExtensionService:
             target_installation_id=target_installation_id,
             mode="safe",
             affected_agent_ids_json=_dump_json(sorted(affected_agent_ids)),
-            created_by=created_by,
+            created_by_user_id=created_by_user_id,
             created_at=now,
             updated_at=now,
         )
@@ -2374,7 +2407,7 @@ class ExtensionService:
         self,
         *,
         source_dir: str | Path,
-        installed_by: str | None,
+        user_id: int | None,
         source: str = "manual",
         trust_confirmed: bool,
         overwrite_confirmed: bool = False,
@@ -2385,7 +2418,7 @@ class ExtensionService:
 
         Args:
             source_dir: Absolute or relative path to the source package folder.
-            installed_by: Username that initiated the installation.
+            user_id: Primary key of the user that initiated the installation.
             source: Installation source label such as ``manual`` or ``bundle``.
             trust_confirmed: Whether the operator explicitly trusted the local
                 package before installation.
@@ -2511,7 +2544,7 @@ class ExtensionService:
                 self._ensure_materialized_installation_root(existing)
                 self._grant_installer_edit(
                     installation=existing,
-                    installed_by=installed_by,
+                    user_id=user_id,
                 )
                 return existing
 
@@ -2601,7 +2634,7 @@ class ExtensionService:
             existing.source = source
             existing.trust_status = trust_status
             existing.trust_source = trust_source
-            existing.installed_by = installed_by
+            existing.creator_id = user_id
             existing.updated_at = now
             self.db.add(existing)
             self.db.commit()
@@ -2609,7 +2642,7 @@ class ExtensionService:
             self.artifact_storage.delete_artifact(artifact_key=old_artifact_key)
             self._grant_installer_edit(
                 installation=existing,
-                installed_by=installed_by,
+                user_id=user_id,
             )
             return existing
 
@@ -2651,7 +2684,7 @@ class ExtensionService:
             hub_package_id=None,
             hub_package_version_id=None,
             hub_artifact_digest=None,
-            installed_by=installed_by,
+            creator_id=user_id,
             status=(
                 "disabled"
                 if provider_conflicts
@@ -2678,7 +2711,7 @@ class ExtensionService:
             raise
         self._grant_installer_edit(
             installation=installation,
-            installed_by=installed_by,
+            user_id=user_id,
         )
         if is_package_upgrade:
             if (
@@ -2698,7 +2731,7 @@ class ExtensionService:
                     affected_agent_ids=self._collect_package_upgrade_agent_ids(
                         package_id=package_id
                     ),
-                    created_by=installed_by,
+                    created_by_user_id=user_id,
                 )
             else:
                 _emit_import_progress(
@@ -2875,7 +2908,7 @@ class ExtensionService:
         *,
         bundle_name: str,
         files: list[ExtensionBundleImportFile],
-        installed_by: str | None,
+        user_id: int | None,
         trust_confirmed: bool,
         overwrite_confirmed: bool = False,
         upgrade_mode: str = "force",
@@ -2886,7 +2919,11 @@ class ExtensionService:
         Args:
             bundle_name: Root folder name selected by the user.
             files: Uploaded bundle files with relative paths.
-            installed_by: Username that initiated the installation.
+            user_id: Primary key of the user that initiated the installation.
+            trust_confirmed: Whether the operator explicitly trusted the bundle.
+            overwrite_confirmed: Whether the operator approved overwriting an
+                existing installation at the same scope/name/version.
+            upgrade_mode: Upgrade strategy, either ``safe`` or ``force``.
             progress: Optional SSE progress callback ``(stage, label, percent, detail)``.
 
         Returns:
@@ -2907,7 +2944,7 @@ class ExtensionService:
             )
             return self.install_from_path(
                 source_dir=extracted_dir,
-                installed_by=installed_by,
+                user_id=user_id,
                 source="bundle",
                 trust_confirmed=trust_confirmed,
                 overwrite_confirmed=overwrite_confirmed,
@@ -3572,7 +3609,7 @@ class ExtensionService:
     def build_request_tool_manager(
         self,
         *,
-        username: str,
+        user_id: int,
         agent_id: int,
         raw_tool_ids: str | None,
         extension_bundle: list[dict[str, Any]],
@@ -3582,8 +3619,17 @@ class ExtensionService:
         Why: extension bindings decide which packaged tools become available
         to the Agent configuration UI, while the persisted tool allowlist still
         decides which of those available tools are enabled at runtime.
+
+        Args:
+            user_id: Primary key of the user who owns the request.
+            agent_id: Primary key of the agent being executed.
+            raw_tool_ids: JSON-encoded tool allowlist string.
+            extension_bundle: Resolved extension bundle for the agent.
+
+        Returns:
+            A filtered ToolManager containing only the allowed tools.
         """
-        ensure_agent_workspace(username, agent_id)
+        ensure_agent_workspace(user_id, agent_id)
         shared_manager = get_tool_manager()
         request_tool_manager = ToolManager()
         for metadata in shared_manager.list_tools():

@@ -40,7 +40,7 @@ class ExtensionInstallation(SQLModel, table=True):
         hub_package_id: Canonical Hub package id such as ``@acme/providers``.
         hub_package_version_id: Stable Hub-side package version identifier.
         hub_artifact_digest: Verified artifact digest reported by the Hub.
-        installed_by: Username that installed the package, if known.
+        installed_by: Removed — use ``creator_id`` instead.
         status: Lifecycle state such as ``active`` or ``disabled``.
         created_at: UTC timestamp when the package version was installed.
         updated_at: UTC timestamp when the row last changed.
@@ -69,7 +69,6 @@ class ExtensionInstallation(SQLModel, table=True):
     hub_package_id: str | None = Field(default=None, max_length=255)
     hub_package_version_id: str | None = Field(default=None, max_length=255)
     hub_artifact_digest: str | None = Field(default=None, max_length=255)
-    installed_by: str | None = Field(default=None, max_length=120)
     creator_id: int | None = Field(default=None, foreign_key="user.id", index=True)
     use_scope: str = Field(default="selected", max_length=20)
     status: str = Field(default="active", index=True, max_length=32)
@@ -129,7 +128,7 @@ class ExtensionPendingUpgrade(SQLModel, table=True):
     )
     mode: str = Field(default="safe", max_length=16)
     affected_agent_ids_json: str = Field(default="[]")
-    created_by: str | None = Field(default=None, max_length=120)
+    created_by_user_id: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

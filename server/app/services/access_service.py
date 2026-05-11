@@ -292,13 +292,8 @@ class AccessService:
         )
 
     def _workspace_owner_user_id(self, workspace: Workspace) -> int | None:
-        """Return the creator user id for one workspace owner username."""
-        from app.models.user import User
-
-        owner = self.db.exec(
-            select(User).where(User.username == workspace.user)
-        ).first()
-        return owner.id if owner is not None else None
+        """Return the owner user id for one workspace."""
+        return workspace.user_id
 
     def has_workspace_access(
         self,

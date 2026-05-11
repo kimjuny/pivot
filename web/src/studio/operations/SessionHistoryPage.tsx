@@ -331,7 +331,7 @@ export default function SessionHistoryPage() {
                         {session.title || "Untitled session"}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        User: {session.user}
+                        User: #{session.user_id}
                       </div>
                     </div>
                   </TableCell>

@@ -5,14 +5,17 @@ from __future__ import annotations
 import uuid
 from contextlib import suppress
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from app.models.access import AccessLevel, PrincipalType, ResourceType
 from app.models.project import Project
-from app.models.user import User
 from app.services.access_service import AccessService
 from app.services.sandbox_service import get_sandbox_service
 from app.services.workspace_service import WorkspaceService
 from sqlmodel import Session as DBSession, col, select
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class ProjectService:
@@ -31,11 +34,6 @@ class ProjectService:
         statement = select(Project).where(Project.project_id == project_id)
         return self.db.exec(statement).first()
 
-    def _owner_user_id(self, project: Project) -> int | None:
-        """Return the owning user's id for one project."""
-        owner = self.db.exec(select(User).where(User.username == project.user)).first()
-        return owner.id if owner is not None else None
-
     def has_project_access(
         self,
         *,
@@ -49,7 +47,7 @@ class ProjectService:
             resource_type=ResourceType.PROJECT,
             resource_id=project.project_id,
             access_level=access_level,
-            creator_user_id=self._owner_user_id(project),
+            creator_user_id=project.user_id,
         )
 
     def require_project_access(
@@ -65,7 +63,7 @@ class ProjectService:
             resource_type=ResourceType.PROJECT,
             resource_id=project.project_id,
             access_level=access_level,
-            creator_user_id=self._owner_user_id(project),
+            creator_user_id=project.user_id,
         )
 
     def list_projects(self, *, user: User, agent_id: int) -> list[Project]:
@@ -89,7 +87,7 @@ class ProjectService:
         self,
         *,
         agent_id: int,
-        username: str,
+        user_id: int,
         name: str,
         description: str | None = None,
     ) -> Project:
@@ -97,7 +95,7 @@ class ProjectService:
 
         Args:
             agent_id: Owning agent identifier.
-            username: Owner username.
+            user_id: Owner user integer identifier.
             name: Project display name.
             description: Optional project note.
 
@@ -111,14 +109,14 @@ class ProjectService:
         now = datetime.now(UTC)
         workspace = WorkspaceService(self.db).create_workspace(
             agent_id=agent_id,
-            username=username,
+            user_id=user_id,
             scope="project_shared",
             project_id=str(uuid.uuid4()),
         )
         project = Project(
             project_id=workspace.project_id or str(uuid.uuid4()),
             agent_id=agent_id,
-            user=username,
+            user_id=user_id,
             name=trimmed_name,
             description=description.strip() if description else None,
             workspace_id=workspace.workspace_id,
@@ -128,21 +126,19 @@ class ProjectService:
         self.db.add(project)
         self.db.commit()
         self.db.refresh(project)
-        owner = self.db.exec(select(User).where(User.username == username)).first()
-        if owner is not None and owner.id is not None:
-            access_service = AccessService(self.db)
-            for resource_type, resource_id in (
-                (ResourceType.PROJECT, project.project_id),
-                (ResourceType.WORKSPACE, project.workspace_id),
-            ):
-                for access_level in (AccessLevel.USE, AccessLevel.EDIT):
-                    access_service.grant_access(
-                        resource_type=resource_type,
-                        resource_id=resource_id,
-                        principal_type=PrincipalType.USER,
-                        principal_id=owner.id,
-                        access_level=access_level,
-                    )
+        access_service = AccessService(self.db)
+        for resource_type, resource_id in (
+            (ResourceType.PROJECT, project.project_id),
+            (ResourceType.WORKSPACE, project.workspace_id),
+        ):
+            for access_level in (AccessLevel.USE, AccessLevel.EDIT):
+                access_service.grant_access(
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    principal_type=PrincipalType.USER,
+                    principal_id=user_id,
+                    access_level=access_level,
+                )
         return project
 
     def update_project(
@@ -195,7 +191,7 @@ class ProjectService:
         edit_group_ids: set[int],
     ) -> None:
         """Replace selected project access and mirror it to its workspace."""
-        owner_id = self._owner_user_id(project)
+        owner_id = project.user_id
         if owner_id is not None:
             use_user_ids = set(use_user_ids)
             edit_user_ids = set(edit_user_ids)
@@ -257,7 +253,7 @@ class ProjectService:
         if workspace is not None:
             with suppress(RuntimeError):
                 get_sandbox_service().destroy(
-                    username=workspace.user,
+                    user_id=workspace.user_id,
                     workspace_id=workspace.workspace_id,
                     workspace_backend_path=workspace_service.get_workspace_backend_path(
                         workspace

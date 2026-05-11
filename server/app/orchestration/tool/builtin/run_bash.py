@@ -25,7 +25,7 @@ def run_bash(command: str, fail_on_nonzero: bool = False) -> dict[str, Any]:
         RuntimeError: If ``fail_on_nonzero`` is true and command fails.
     """
     (
-        username,
+        user_id,
         _agent_id,
         workspace_id,
         workspace_backend_path,
@@ -33,7 +33,7 @@ def run_bash(command: str, fail_on_nonzero: bool = False) -> dict[str, Any]:
         allowed_skills,
     ) = require_context()
     result = get_sandbox_service().exec(
-        username=username,
+        user_id=user_id,
         workspace_id=workspace_id,
         workspace_backend_path=workspace_backend_path,
         cmd=["bash", "-lc", command],

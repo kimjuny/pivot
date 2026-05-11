@@ -58,9 +58,9 @@ class SkillChangeApprovalRequest:
         }
 
 
-def _submission_root(username: str) -> Path:
+def _submission_root(user_id: int) -> Path:
     """Return the per-user storage root for staged skill change submissions."""
-    root = workspace_root() / "users" / username / "skills" / ".submissions"
+    root = workspace_root() / "users" / str(user_id) / "skills" / ".submissions"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -143,7 +143,7 @@ print(json.dumps(payload))
 
 def _export_draft_snapshot(
     *,
-    username: str,
+    user_id: int,
     agent_id: int,
     workspace_id: str,
     workspace_backend_path: str,
@@ -151,7 +151,7 @@ def _export_draft_snapshot(
 ) -> tuple[bytes, int, int]:
     """Archive one sandbox draft skill directory and return its bytes."""
     result = get_sandbox_service().exec(
-        username=username,
+        user_id=user_id,
         workspace_id=workspace_id,
         workspace_backend_path=workspace_backend_path,
         cmd=_sandbox_export_command(draft_dir_path),
@@ -297,7 +297,7 @@ def stage_skill_change_submission(
 
     normalized_path = _normalize_draft_dir_path(draft_dir_path)
     archive_bytes, file_count, total_bytes = _export_draft_snapshot(
-        username=current_user.username,
+        user_id=current_user.id,
         agent_id=agent_id,
         workspace_id=workspace_id,
         workspace_backend_path=workspace_backend_path,
@@ -321,9 +321,7 @@ def stage_skill_change_submission(
     session.commit()
     session.refresh(submission)
 
-    snapshot_dir = (
-        _submission_root(current_user.username) / str(submission.id) / "source"
-    )
+    snapshot_dir = _submission_root(current_user.id) / str(submission.id) / "source"
     try:
         _extract_snapshot_archive(archive_bytes, snapshot_dir)
         skill_name = _resolve_submission_skill_name(
@@ -381,7 +379,7 @@ def stage_skill_change_submission(
 
 def submit_skill_change_for_agent(
     *,
-    username: str,
+    user_id: int,
     agent_id: int,
     workspace_id: str,
     workspace_backend_path: str,
@@ -394,7 +392,7 @@ def submit_skill_change_for_agent(
     service layer so database access patterns remain centralized and testable.
 
     Args:
-        username: Authenticated username from the tool execution context.
+        user_id: Authenticated user ID from the tool execution context.
         agent_id: Agent workspace that authored the draft.
         workspace_id: Owning runtime workspace identifier.
         workspace_backend_path: Backend-container workspace path.
@@ -408,11 +406,9 @@ def submit_skill_change_for_agent(
         ValueError: If the user cannot be resolved or the draft is invalid.
     """
     with managed_session() as session:
-        current_user = session.exec(
-            select(User).where(User.username == username)
-        ).first()
+        current_user = session.get(User, user_id)
         if current_user is None:
-            raise ValueError(f"User '{username}' not found.")
+            raise ValueError(f"User with id {user_id} not found.")
 
         return stage_skill_change_submission(
             session,

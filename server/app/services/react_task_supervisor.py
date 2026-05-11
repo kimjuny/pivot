@@ -59,7 +59,7 @@ class ReactTaskLaunchRequest:
 
     agent_id: int
     message: str | None
-    username: str
+    user_id: int
     session_id: str | None
     file_ids: list[str]
     web_search_provider: str | None = None
@@ -135,7 +135,7 @@ class ReactTaskSupervisor:
         self,
         *,
         task_id: str,
-        username: str,
+        user_id: int,
         decision: Literal["approve", "reject"],
     ) -> ReactTaskLaunchResult:
         """Apply one structured waiting action and resume the task."""
@@ -144,7 +144,7 @@ class ReactTaskSupervisor:
             task = db.exec(statement).first()
             if task is None:
                 raise ValueError(f"Task {task_id} not found")
-            if task.user != username:
+            if task.user_id != user_id:
                 raise ValueError("Task does not belong to the current user")
             if task.status != "waiting_input":
                 raise ValueError("Task is not waiting for a user action")
@@ -162,11 +162,9 @@ class ReactTaskSupervisor:
             if not isinstance(submission_id, int) or submission_id <= 0:
                 raise ValueError("Pending user action is missing submission_id")
 
-            current_user = db.exec(
-                select(User).where(User.username == username)
-            ).first()
+            current_user = db.get(User, user_id)
             if current_user is None:
-                raise ValueError(f"User '{username}' not found.")
+                raise ValueError(f"User '{user_id}' not found.")
 
             apply_result = apply_skill_change_submission(
                 db,
@@ -201,7 +199,7 @@ class ReactTaskSupervisor:
             launch = ReactTaskLaunchRequest(
                 agent_id=task.agent_id,
                 message=None,
-                username=username,
+                user_id=user_id,
                 session_id=task.session_id,
                 file_ids=[],
                 task_id=task.task_id,
@@ -381,7 +379,7 @@ class ReactTaskSupervisor:
             session = SessionService(db).get_session(launch.session_id)
             if session is None:
                 raise ValueError(f"Session {launch.session_id} not found")
-            if session.user != launch.username:
+            if session.user_id != launch.user_id:
                 raise ValueError("Session does not belong to the current user")
         elif launch.task_id:
             existing_task = db.exec(
@@ -416,7 +414,7 @@ class ReactTaskSupervisor:
                 skill["name"]
                 for skill in list_allowed_visible_skills(
                     db,
-                    launch.username,
+                    launch.user_id,
                     raw_skill_ids=runtime_config.raw_skill_ids,
                     extra_skills=extension_skills,
                 )
@@ -441,7 +439,7 @@ class ReactTaskSupervisor:
             if existing_task is None:
                 raise ValueError(f"Task {launch.task_id} not found")
 
-            if existing_task.user != launch.username:
+            if existing_task.user_id != launch.user_id:
                 raise ValueError("Task does not belong to the current user")
             if session is None and existing_task.session_id is not None:
                 session = SessionService(db).get_session(existing_task.session_id)
@@ -487,7 +485,7 @@ class ReactTaskSupervisor:
                 task_id=str(uuid.uuid4()),
                 session_id=launch.session_id,
                 agent_id=launch.agent_id,
-                user=launch.username,
+                user_id=launch.user_id,
                 user_message=launch.message,
                 user_intent=launch.message,
                 mandatory_skill_names_json=(
@@ -626,7 +624,7 @@ class ReactTaskSupervisor:
                     file_service = FileService(db)
                     attached_files = file_service.attach_files_to_task(
                         file_ids=launch.file_ids,
-                        username=launch.username,
+                        user_id=launch.user_id,
                         session_id=task.session_id,
                         task_id=task.task_id,
                     )
@@ -641,7 +639,7 @@ class ReactTaskSupervisor:
 
                 request_tool_manager = self._build_request_tool_manager(
                     db=db,
-                    username=launch.username,
+                    user_id=launch.user_id,
                     agent_id=agent.id or 0,
                     raw_tool_ids=runtime_config.raw_tool_ids,
                     extension_bundle=runtime_config.extension_bundle,
@@ -652,7 +650,7 @@ class ReactTaskSupervisor:
                 )
                 allowed_visible_skills = list_allowed_visible_skills(
                     db,
-                    launch.username,
+                    launch.user_id,
                     raw_skill_ids=runtime_config.raw_skill_ids,
                     extra_skills=extension_skills,
                 )
@@ -665,13 +663,13 @@ class ReactTaskSupervisor:
                 ]
                 skills_metadata_json = build_skills_metadata_prompt_json(
                     db,
-                    launch.username,
+                    launch.user_id,
                     raw_skill_ids=runtime_config.raw_skill_ids,
                     extra_skills=extension_skills,
                 )
                 mandatory_skills_json = build_mandatory_skills_prompt_json(
                     db,
-                    launch.username,
+                    launch.user_id,
                     raw_skill_ids=runtime_config.raw_skill_ids,
                     selected_skill_names=launch.mandatory_skill_names or [],
                     extra_skills=extension_skills,
@@ -685,7 +683,7 @@ class ReactTaskSupervisor:
                     tool_manager=request_tool_manager,
                     db=db,
                     tool_execution_context=ToolExecutionContext(
-                        username=launch.username,
+                        user_id=launch.user_id,
                         agent_id=agent.id or 0,
                         session_id=task.session_id,
                         workspace_id=workspace.workspace_id,
@@ -820,14 +818,14 @@ class ReactTaskSupervisor:
         self,
         *,
         db: Session,
-        username: str,
+        user_id: int,
         agent_id: int,
         raw_tool_ids: str | None,
         extension_bundle: list[dict[str, Any]],
     ) -> ToolManager:
         """Build the request-scoped tool registry used for one task."""
         return ExtensionService(db).build_request_tool_manager(
-            username=username,
+            user_id=user_id,
             agent_id=agent_id,
             raw_tool_ids=raw_tool_ids,
             extension_bundle=extension_bundle,
@@ -899,7 +897,7 @@ class ReactTaskSupervisor:
             "trace_id": None,
             "iteration": task.iteration,
             "agent_id": task.agent_id,
-            "user": self._build_hook_user_snapshot(db=db, username=task.user),
+            "user": self._build_hook_user_snapshot(db=db, user_id=task.user_id),
             "release_id": runtime_config.release_id,
             "execution_mode": "live",
             "timestamp": datetime.now(UTC).isoformat(),
@@ -960,7 +958,7 @@ class ReactTaskSupervisor:
         self,
         *,
         db: Session,
-        username: str,
+        user_id: int,
     ) -> dict[str, Any]:
         """Build stable user metadata exposed to lifecycle hooks.
 
@@ -969,10 +967,10 @@ class ReactTaskSupervisor:
         query Pivot models directly, so the supervisor provides a small user
         snapshot as part of the hook context.
         """
-        user = db.exec(select(User).where(User.username == username)).first()
+        user = db.get(User, user_id)
         return {
             "id": user.id if user is not None else None,
-            "username": username,
+            "username": user.username if user is not None else None,
         }
 
     def _extract_task_agent_answer(
@@ -1035,7 +1033,7 @@ class ReactTaskSupervisor:
             "trace_id": event_data.get("trace_id"),
             "iteration": int(event_data.get("iteration", task.iteration) or 0),
             "agent_id": task.agent_id,
-            "user": self._build_hook_user_snapshot(db=db, username=task.user),
+            "user": self._build_hook_user_snapshot(db=db, user_id=task.user_id),
             "release_id": runtime_config.release_id,
             "execution_mode": "live",
             "timestamp": event_data.get("timestamp") or datetime.now(UTC).isoformat(),

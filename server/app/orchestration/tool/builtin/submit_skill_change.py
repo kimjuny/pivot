@@ -46,7 +46,7 @@ def submit_skill_change(
         raise RuntimeError("Tool execution context is missing.")
 
     return submit_skill_change_for_agent(
-        username=context.username,
+        user_id=context.user_id,
         agent_id=context.agent_id,
         workspace_id=context.workspace_id,
         workspace_backend_path=context.workspace_backend_path,

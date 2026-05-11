@@ -129,17 +129,16 @@ def _require_token(x_sandbox_token: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid sandbox token.")
 
 
-def _sandbox_name(username: str, workspace_id: str) -> str:
+def _sandbox_name(user_id: int, workspace_id: str) -> str:
     """Build deterministic sandbox container name."""
     prefix = get_settings().SANDBOX_CONTAINER_PREFIX
-    user = username.strip() or "default"
     workspace = workspace_id.strip() or "default"
-    return f"{prefix}-{user}-{workspace}"
+    return f"{prefix}-{user_id}-{workspace}"
 
 
-def _skills_volume_name(username: str, workspace_id: str) -> str:
+def _skills_volume_name(user_id: int, workspace_id: str) -> str:
     """Build deterministic named-volume identifier for sandbox-local skills."""
-    return f"{_sandbox_name(username, workspace_id)}-skills"
+    return f"{_sandbox_name(user_id, workspace_id)}-skills"
 
 
 def _to_nano_cpus(cpu_limit: float) -> int | None:
@@ -550,9 +549,9 @@ def _remove_container_fast(
     return elapsed_ms
 
 
-def _ensure_skills_volume(username: str, workspace_id: str) -> str:
+def _ensure_skills_volume(user_id: int, workspace_id: str) -> str:
     """Create the sandbox-local named volume used for ``/workspace/skills``."""
-    volume_name = _skills_volume_name(username, workspace_id)
+    volume_name = _skills_volume_name(user_id, workspace_id)
     client = get_client()
     try:
         client.volumes.get(volume_name)
@@ -560,7 +559,7 @@ def _ensure_skills_volume(username: str, workspace_id: str) -> str:
         client.volumes.create(
             name=volume_name,
             labels={
-                "pivot.sandbox.username": username,
+                "pivot.sandbox.user_id": str(user_id),
                 "pivot.sandbox.workspace_id": workspace_id,
                 "pivot.sandbox.kind": "skills",
             },
@@ -872,7 +871,7 @@ def _is_broken_exec_environment_error(message: str) -> bool:
 
 
 def _ensure_sandbox(
-    username: str,
+    user_id: int,
     workspace_id: str,
     workspace_backend_path: str,
     skills: Sequence[SandboxSkillMount | dict[str, Any]] | None = None,
@@ -883,8 +882,8 @@ def _ensure_sandbox(
     """Create or start a reusable sidecar sandbox container."""
     op_started = time.perf_counter()
     settings = get_settings()
-    name = _sandbox_name(username, workspace_id)
-    skills_volume_name = _ensure_skills_volume(username, workspace_id)
+    name = _sandbox_name(user_id, workspace_id)
+    skills_volume_name = _ensure_skills_volume(user_id, workspace_id)
     _ensure_workspace_dir(workspace_backend_path)
     normalized_skills = _normalize_skill_mounts(skills)
     skill_volumes, expected_skill_sources = _build_skill_mounts(normalized_skills)
@@ -928,9 +927,9 @@ def _ensure_sandbox(
                 detail=f"Failed to remove legacy sandbox '{name}': {exc}",
             ) from exc
         logger.info(
-            "sandbox.recreate_remove name=%s username=%s workspace_id=%s reason=%s",
+            "sandbox.recreate_remove name=%s user_id=%s workspace_id=%s reason=%s",
             name,
-            username,
+            user_id,
             workspace_id,
             recreate_reason,
         )
@@ -969,7 +968,7 @@ def _ensure_sandbox(
                 # backend paths (``/app/server/...``). Passing normalized host paths
                 # back through ``_normalize_skill_mounts`` would strip every skill.
                 return _ensure_sandbox(
-                    username,
+                    user_id,
                     workspace_id,
                     workspace_backend_path,
                     skills,
@@ -983,9 +982,9 @@ def _ensure_sandbox(
                 ) from exc
         _touch_container(name)
         logger.info(
-            "sandbox.ensure name=%s username=%s workspace_id=%s mode=reuse start_ms=%d total_ms=%d",
+            "sandbox.ensure name=%s user_id=%s workspace_id=%s mode=reuse start_ms=%d total_ms=%d",
             name,
-            username,
+            user_id,
             workspace_id,
             int((time.perf_counter() - start_started) * 1000),
             int((time.perf_counter() - op_started) * 1000),
@@ -1041,9 +1040,9 @@ def _ensure_sandbox(
         container.start()
         start_ms = int((time.perf_counter() - start_started) * 1000)
         logger.info(
-            "sandbox.ensure name=%s username=%s workspace_id=%s mode=create create_ms=%d start_ms=%d total_ms=%d",
+            "sandbox.ensure name=%s user_id=%s workspace_id=%s mode=create create_ms=%d start_ms=%d total_ms=%d",
             name,
-            username,
+            user_id,
             workspace_id,
             create_ms,
             start_ms,
@@ -1072,7 +1071,7 @@ class SandboxSkillMount(BaseModel):
 class SandboxRequest(BaseModel):
     """Request payload for create/destroy operations."""
 
-    username: str = Field(min_length=1)
+    user_id: int = Field(ge=1)
     workspace_id: str = Field(min_length=1)
     workspace_backend_path: str = Field(min_length=1)
     skills: list[SandboxSkillMount] = Field(default_factory=list)
@@ -1366,13 +1365,13 @@ def healthz() -> dict[str, str]:
 def create_sandbox(payload: SandboxRequest) -> dict[str, str]:
     """Create sandbox container for one workspace (idempotent)."""
     container = _ensure_sandbox(
-        payload.username,
+        payload.user_id,
         payload.workspace_id,
         payload.workspace_backend_path,
         payload.skills,
     )
     return {
-        "container_name": _sandbox_name(payload.username, payload.workspace_id),
+        "container_name": _sandbox_name(payload.user_id, payload.workspace_id),
         "container_id": container.id,
     }
 
@@ -1381,15 +1380,15 @@ def create_sandbox(payload: SandboxRequest) -> dict[str, str]:
 def destroy_sandbox(payload: SandboxRequest) -> dict[str, str]:
     """Stop and remove sandbox container for one workspace."""
     started = time.perf_counter()
-    name = _sandbox_name(payload.username, payload.workspace_id)
+    name = _sandbox_name(payload.user_id, payload.workspace_id)
     container = _find_container(name)
     if container is None:
         with _pool_lock:
             _last_used_by_name.pop(name, None)
         logger.info(
-            "sandbox.destroy name=%s username=%s workspace_id=%s status=not_found total_ms=%d",
+            "sandbox.destroy name=%s user_id=%s workspace_id=%s status=not_found total_ms=%d",
             name,
-            payload.username,
+            payload.user_id,
             payload.workspace_id,
             int((time.perf_counter() - started) * 1000),
         )
@@ -1408,9 +1407,9 @@ def destroy_sandbox(payload: SandboxRequest) -> dict[str, str]:
     with _pool_lock:
         _last_used_by_name.pop(name, None)
     logger.info(
-        "sandbox.destroy name=%s username=%s workspace_id=%s status=destroyed total_ms=%d",
+        "sandbox.destroy name=%s user_id=%s workspace_id=%s status=destroyed total_ms=%d",
         name,
-        payload.username,
+        payload.user_id,
         payload.workspace_id,
         int((time.perf_counter() - started) * 1000),
     )
@@ -1423,7 +1422,7 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
     started = time.perf_counter()
     ensure_started = time.perf_counter()
     container = _ensure_sandbox(
-        payload.username,
+        payload.user_id,
         payload.workspace_id,
         payload.workspace_backend_path,
         payload.skills,
@@ -1448,15 +1447,15 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
         if _is_broken_exec_environment_error(message):
             logger.warning(
                 "sandbox.exec detected broken runtime state; recreating container "
-                "username=%s workspace_id=%s err=%s",
-                payload.username,
+                "user_id=%s workspace_id=%s err=%s",
+                payload.user_id,
                 payload.workspace_id,
                 message,
             )
             with suppress(Exception):
                 _remove_container_fast(container, reason="recreate:exec_runtime_error")
             container = _ensure_sandbox(
-                payload.username,
+                payload.user_id,
                 payload.workspace_id,
                 payload.workspace_backend_path,
                 payload.skills,
@@ -1496,9 +1495,9 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
 
     total_ms = int((time.perf_counter() - started) * 1000)
     logger.info(
-        "sandbox.exec name=%s username=%s workspace_id=%s exit_code=%d ensure_ms=%d exec_ms=%d total_ms=%d",
-        _sandbox_name(payload.username, payload.workspace_id),
-        payload.username,
+        "sandbox.exec name=%s user_id=%s workspace_id=%s exit_code=%d ensure_ms=%d exec_ms=%d total_ms=%d",
+        _sandbox_name(payload.user_id, payload.workspace_id),
+        payload.user_id,
         payload.workspace_id,
         exit_code,
         ensure_ms,
@@ -1510,7 +1509,7 @@ def exec_in_sandbox(payload: SandboxExecRequest) -> SandboxExecResponse:
         exit_code=exit_code,
         stdout=stdout,
         stderr=stderr,
-        container_name=_sandbox_name(payload.username, payload.workspace_id),
+        container_name=_sandbox_name(payload.user_id, payload.workspace_id),
     )
 
 
@@ -1519,7 +1518,7 @@ def proxy_http_in_sandbox(payload: SandboxHttpProxyRequest) -> Response:
     """Proxy one HTTP request through the sandbox container network."""
     try:
         container = _ensure_sandbox(
-            payload.username,
+            payload.user_id,
             payload.workspace_id,
             payload.workspace_backend_path,
             payload.skills,
@@ -1612,7 +1611,7 @@ async def proxy_websocket_in_sandbox(websocket: WebSocket) -> None:
 
     try:
         container = _ensure_sandbox(
-            payload.username,
+            payload.user_id,
             payload.workspace_id,
             payload.workspace_backend_path,
             payload.skills,

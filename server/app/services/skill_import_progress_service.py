@@ -23,7 +23,7 @@ class SkillImportJob:
     """Mutable import job state shared between upload and SSE endpoints."""
 
     job_id: str
-    username: str
+    user_id: int
     created_at: datetime
     events: list[dict[str, Any]] = field(default_factory=list)
     subscribers: list[SkillImportSubscriber] = field(default_factory=list)
@@ -37,11 +37,11 @@ class SkillImportProgressService:
         self._jobs: dict[str, SkillImportJob] = {}
         self._lock = threading.Lock()
 
-    def create_job(self, *, username: str) -> SkillImportJob:
+    def create_job(self, *, user_id: int) -> SkillImportJob:
         """Create one import job owned by a user."""
         job = SkillImportJob(
             job_id=uuid.uuid4().hex,
-            username=username,
+            user_id=user_id,
             created_at=datetime.now(UTC),
         )
         with self._lock:
@@ -55,19 +55,19 @@ class SkillImportProgressService:
         )
         return job
 
-    def get_job(self, *, job_id: str, username: str) -> SkillImportJob | None:
+    def get_job(self, *, job_id: str, user_id: int) -> SkillImportJob | None:
         """Return one user-owned job when present."""
         with self._lock:
             job = self._jobs.get(job_id)
-            if job is None or job.username != username:
+            if job is None or job.user_id != user_id:
                 return None
             return job
 
     def list_events(
-        self, *, job_id: str, username: str, after_id: int = 0
+        self, *, job_id: str, user_id: int, after_id: int = 0
     ) -> list[dict[str, Any]]:
         """Return persisted progress events newer than a cursor."""
-        job = self.get_job(job_id=job_id, username=username)
+        job = self.get_job(job_id=job_id, user_id=user_id)
         if job is None:
             return []
         with self._lock:
@@ -77,10 +77,10 @@ class SkillImportProgressService:
         self,
         *,
         job_id: str,
-        username: str,
+        user_id: int,
     ) -> SkillImportSubscriber:
         """Register one live subscriber for a job."""
-        job = self.get_job(job_id=job_id, username=username)
+        job = self.get_job(job_id=job_id, user_id=user_id)
         if job is None:
             raise ValueError("Skill import job not found.")
         subscriber = SkillImportSubscriber(

@@ -85,7 +85,7 @@ def create_preview_endpoint(
     with managed_session() as db:
         service = PreviewEndpointService(db)
         record = service.create_preview_endpoint(
-            username=context.username,
+            user_id=context.user_id,
             session_id=context.session_id,
             port=port,
             path=path,
@@ -96,11 +96,11 @@ def create_preview_endpoint(
         )
         record = service.connect_preview_endpoint(
             preview_id=record.preview_id,
-            username=context.username,
+            user_id=context.user_id,
             timeout_seconds=context.sandbox_timeout_seconds,
         )
         preview_records = service.list_preview_endpoints(
-            username=context.username,
+            user_id=context.user_id,
             session_id=context.session_id,
         )
         workspace = WorkspaceService(db).get_workspace(record.workspace_id)

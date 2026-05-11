@@ -94,7 +94,7 @@ def _build_session_response(
         workspace_id=session.workspace_id,
         workspace_scope=SessionService.get_workspace_scope(session),
         test_workspace_hash=test_workspace_hash,
-        user=session.user,
+        user_id=session.user_id,
         status=session.status,
         runtime_status=session.runtime_status,
         title=session.title,
@@ -123,6 +123,8 @@ async def create_session(
     Returns:
         Created session information.
     """
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     service = SessionService(db)
     try:
         _require_session_permission(db, current_user, request.type)
@@ -144,12 +146,12 @@ async def create_session(
             test_snapshot = AgentSnapshotService(db).create_test_snapshot(
                 request.agent_id,
                 working_copy_snapshot=request.test_snapshot.model_dump(),
-                created_by=current_user.username,
+                created_by_user_id=current_user.id,
             )
             test_snapshot_id = test_snapshot.id
         session = service.create_session(
             agent_id=request.agent_id,
-            user=current_user.username,
+            user_id=current_user.id,
             project_id=request.project_id,
             session_type=request.type,
             test_snapshot_id=test_snapshot_id,
@@ -197,6 +199,8 @@ async def list_sessions(
     Returns:
         List of sessions with brief information.
     """
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
     if session_type is not None:
         _require_session_permission(db, current_user, session_type)
     else:
@@ -206,7 +210,7 @@ async def list_sessions(
         )
     service = SessionService(db)
     sessions = service.get_sessions_by_user(
-        user=current_user.username,
+        user_id=current_user.id,
         agent_id=agent_id,
         session_type=session_type,
         limit=limit,
@@ -290,7 +294,7 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
@@ -337,7 +341,7 @@ async def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
@@ -399,7 +403,7 @@ async def get_session_history(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
@@ -443,7 +447,7 @@ async def get_full_session_history(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
@@ -550,7 +554,7 @@ async def delete_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
@@ -575,7 +579,7 @@ async def close_session(
     session = service.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
@@ -616,7 +620,7 @@ async def migrate_session(
     session = service.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.user != current_user.username:
+    if session.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 

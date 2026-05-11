@@ -16,7 +16,7 @@ class AgentSavedDraft(SQLModel, table=True):
         agent_id: Unique agent that owns this saved draft snapshot.
         snapshot_json: Canonical JSON payload representing the saved draft.
         snapshot_hash: Stable content hash for quick equality checks.
-        saved_by: Username that last saved this draft, if known.
+        saved_by_user_id: Foreign key to the user who last saved this draft.
         saved_at: UTC timestamp of the latest persisted draft save.
     """
 
@@ -26,7 +26,7 @@ class AgentSavedDraft(SQLModel, table=True):
     agent_id: int = Field(foreign_key="agent.id", index=True)
     snapshot_json: str = Field()
     snapshot_hash: str = Field(index=True, max_length=64)
-    saved_by: str | None = Field(default=None, max_length=120)
+    saved_by_user_id: int | None = Field(default=None, foreign_key="user.id")
     saved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -39,7 +39,7 @@ class AgentTestSnapshot(SQLModel, table=True):
         snapshot_json: Canonical runtime snapshot used for test execution.
         snapshot_hash: Stable content hash for the full runtime snapshot.
         workspace_hash: Stable content hash for the Studio working-copy anchor.
-        created_by: Username that created the test snapshot, if known.
+        created_by_user_id: Foreign key to the user who created the test snapshot.
         created_at: UTC timestamp when the snapshot was frozen.
     """
 
@@ -48,7 +48,7 @@ class AgentTestSnapshot(SQLModel, table=True):
     snapshot_json: str = Field()
     snapshot_hash: str = Field(index=True, max_length=64)
     workspace_hash: str = Field(index=True, max_length=64)
-    created_by: str | None = Field(default=None, max_length=120)
+    created_by_user_id: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -63,7 +63,7 @@ class AgentRelease(SQLModel, table=True):
         snapshot_hash: Stable content hash for quick equality checks.
         release_note: Optional human-written release note captured at publish time.
         change_summary_json: JSON array of summary strings for audit surfaces.
-        published_by: Username that published this release, if known.
+        published_by_user_id: Foreign key to the user who published this release.
         created_at: UTC timestamp when the release was published.
     """
 
@@ -76,5 +76,5 @@ class AgentRelease(SQLModel, table=True):
     snapshot_hash: str = Field(index=True, max_length=64)
     release_note: str | None = Field(default=None)
     change_summary_json: str = Field(default="[]")
-    published_by: str | None = Field(default=None, max_length=120)
+    published_by_user_id: int | None = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

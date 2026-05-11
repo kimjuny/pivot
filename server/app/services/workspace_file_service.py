@@ -10,10 +10,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
 from app.models.access import AccessLevel
-from app.models.user import User
 from app.services.access_service import AccessService
 from app.services.workspace_service import WorkspaceService
-from sqlmodel import select
 
 if TYPE_CHECKING:
     from app.models.workspace import Workspace
@@ -274,14 +272,14 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         root_path: str | None = None,
     ) -> list[WorkspaceFileTreeEntry]:
         """Return a recursive flat listing for one owned workspace subtree.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             root_path: Optional directory path relative to the workspace root.
 
         Returns:
@@ -294,7 +292,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.USE,
         )
         workspace_root = (
@@ -345,14 +343,14 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str | None = None,
     ) -> list[WorkspaceFileTreeEntry]:
         """Return direct children for one owned workspace directory.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             path: Optional directory path relative to the workspace root.
 
         Returns:
@@ -365,7 +363,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.USE,
         )
         workspace_root = (
@@ -408,14 +406,14 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
     ) -> str:
         """Read one UTF-8 text file from an owned workspace.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             path: Workspace-relative file path.
 
         Returns:
@@ -429,7 +427,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.USE,
         )
         target_path = self._resolve_workspace_path(
@@ -447,14 +445,14 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
     ) -> WorkspaceFileReadResult:
         """Read one previewable workspace file from an owned workspace.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             path: Workspace-relative file path.
 
         Returns:
@@ -468,7 +466,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.USE,
         )
         target_path = self._resolve_workspace_path(
@@ -504,7 +502,7 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
         content: str,
     ) -> None:
@@ -512,7 +510,7 @@ class WorkspaceFileService:
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             path: Workspace-relative file path.
             content: Full UTF-8 file content to persist.
 
@@ -523,7 +521,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.EDIT,
         )
         target_path = self._resolve_workspace_path(
@@ -538,13 +536,13 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
     ) -> None:
         """Create one directory inside an editable workspace."""
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.EDIT,
         )
         target_path = self._resolve_workspace_path(
@@ -560,13 +558,13 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
     ) -> None:
         """Delete one file or directory inside an editable workspace."""
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.EDIT,
         )
         target_path = self._resolve_workspace_path(
@@ -585,14 +583,14 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
     ) -> WorkspaceBinaryFileReadResult:
         """Read one binary file inside an owned workspace.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             path: Workspace-relative file path.
 
         Returns:
@@ -605,7 +603,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.USE,
         )
         target_path = self._resolve_workspace_path(
@@ -630,7 +628,7 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         path: str,
         content: bytes,
         mime_type: str | None = None,
@@ -639,7 +637,7 @@ class WorkspaceFileService:
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username that must own the workspace.
+            user_id: Authenticated user's numeric ID that must own the workspace.
             path: Workspace-relative file path.
             content: Full binary payload to persist.
             mime_type: Optional caller-provided MIME type.
@@ -654,7 +652,7 @@ class WorkspaceFileService:
         """
         workspace = self._get_workspace_for_user(
             workspace_id=workspace_id,
-            username=username,
+            user_id=user_id,
             access_level=AccessLevel.EDIT,
         )
         target_path = self._resolve_workspace_path(
@@ -675,14 +673,14 @@ class WorkspaceFileService:
         self,
         *,
         workspace_id: str,
-        username: str,
+        user_id: int,
         access_level: AccessLevel,
     ) -> Workspace:
         """Return one workspace row accessible to a user.
 
         Args:
             workspace_id: Public workspace identifier.
-            username: Authenticated username.
+            user_id: Authenticated user's numeric ID.
             access_level: Required workspace access level.
 
         Returns:
@@ -695,10 +693,10 @@ class WorkspaceFileService:
         workspace = WorkspaceService(self.db).get_workspace(workspace_id)
         if workspace is None:
             raise WorkspaceFileNotFoundError("Workspace not found.")
-        user = self.db.exec(select(User).where(User.username == username)).first()
-        if user is None:
-            raise WorkspaceFilePermissionError("Workspace is not accessible.")
-        if not AccessService(self.db).has_workspace_access(
+        from app.models.user import User
+
+        user = self.db.get(User, user_id)
+        if user is None or not AccessService(self.db).has_workspace_access(
             user=user,
             workspace=workspace,
             access_level=access_level,

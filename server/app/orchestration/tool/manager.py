@@ -21,7 +21,7 @@ _tool_execution_context: ContextVar["ToolExecutionContext | None"] = ContextVar(
 class ToolExecutionContext:
     """Execution context for a single tool call."""
 
-    username: str
+    user_id: int
     agent_id: int
     workspace_id: str
     workspace_backend_path: str

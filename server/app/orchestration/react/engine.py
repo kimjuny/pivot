@@ -336,7 +336,7 @@ class ReactEngine:
 
         attachment_service = TaskAttachmentService(self.db)
         attachments = attachment_service.create_from_answer_paths(
-            username=task.user,
+            user_id=task.user_id,
             task_id=task.task_id,
             session_id=task.session_id,
             paths=declared_paths,

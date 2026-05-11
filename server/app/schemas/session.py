@@ -33,7 +33,7 @@ class SessionCreate(AppBaseModel):
     """Request schema for creating a new session."""
 
     agent_id: int = Field(..., description="Agent ID for this session")
-    user: str = Field(default="default_user", description="Username")
+    user_id: int = Field(default=1, description="User ID who owns this session")
     project_id: str | None = Field(
         default=None,
         description="Optional project UUID for shared-workspace sessions",
@@ -63,7 +63,7 @@ class SessionResponse(AppBaseModel):
     workspace_id: str | None = None
     workspace_scope: Literal["session_private", "project_shared"] | None = None
     test_workspace_hash: str | None = None
-    user: str
+    user_id: int
     status: str
     runtime_status: str = "idle"
     title: str | None = None
