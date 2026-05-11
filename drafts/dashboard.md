@@ -661,7 +661,7 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 
 ---
 
-### Phase 1: Foundation — Studio Dashboard Skeleton
+### Phase 1: Foundation — Studio Dashboard Skeleton — COMPLETED (2025-05-11)
 
 **Goal**: Replace the placeholder with a working dashboard showing KPI cards and one chart.
 
@@ -677,9 +677,17 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 
 **Deliverable**: A live dashboard with 5 KPI cards and a session activity area chart.
 
+**Completion summary**:
+- `server/app/services/analytics_service.py` — AnalyticsService with overview (agents/sessions/users/tasks/success_rate + period-over-period deltas) and session trends (daily buckets by type, SQLite/PostgreSQL dialect-aware)
+- `server/app/api/analytics.py` — 2 GET endpoints (`/analytics/studio/overview`, `/analytics/studio/session-trends`) gated by `studio.access` permission
+- `web/src/components/analytics/` — 3 reusable components (KpiCard with trend arrows, DateRangeSelector 7d/30d/90d, SessionTrendChart stacked area chart)
+- `web/src/components/StudioDashboardPage.tsx` — replaced placeholder with live dashboard grid
+- `web/src/utils/api.ts` — added StudioOverview + DailySessionCount types and 2 API client functions
+- Ruff lint + Pyright + Frontend type-check: 0 new errors
+
 ---
 
-### Phase 2: Studio Dashboard — Core Charts
+### Phase 2: Studio Dashboard — Core Charts — COMPLETED (2025-05-11)
 
 **Goal**: Complete all dashboard chart modules.
 
@@ -694,9 +702,17 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 
 **Deliverable**: Full studio dashboard with 9 modules (KPI cards + 5 charts + runtime health + activity feed).
 
+**Completion summary**:
+- `AnalyticsService` — 5 new methods: `get_task_stats()` (status group-by), `get_token_usage()` (daily prompt/completion/cached sums), `get_agent_popularity()` (top N agents by consumer sessions with JOIN), `get_runtime_health()` (sandbox count via HTTP + storage profile + failed tasks 24h), `get_recent_activity()` (latest sessions with agent/user JOINs)
+- `analytics.py` router — 5 new GET endpoints (`task-stats`, `token-usage`, `agent-popularity`, `runtime-health`, `recent-activity`)
+- `web/src/components/analytics/` — 5 new components: `TaskStatusChart` (PieChart donut with center label), `TokenUsageChart` (stacked BarChart), `AgentPopularityChart` (horizontal BarChart), `RuntimeHealthCard` (status card), `ActivityFeed` (feed list with status dots and timestamps)
+- `StudioDashboardPage.tsx` — expanded to 3 chart rows (Session+TaskStatus, TokenUsage+AgentPopularity, RuntimeHealth+ActivityFeed) with loading skeletons
+- `api.ts` — added 5 types (TaskStats, DailyTokenUsage, AgentPopularity, RuntimeHealth, RecentActivityItem) and 5 API client functions
+- Ruff lint + Pyright + Frontend type-check: 0 new errors
+
 ---
 
-### Phase 3: Studio Dashboard — User Analytics
+### Phase 3: Studio Dashboard — User Analytics — COMPLETED (2025-05-11)
 
 **Goal**: Add client-side user dimension analytics.
 
@@ -709,6 +725,14 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 - Add to dashboard page layout
 
 **Deliverable**: Dashboard now shows DAU/WAU/MAU trend and new user registration chart.
+
+**Completion summary**:
+- `AnalyticsService` — 2 new methods: `get_user_activity()` (daily distinct consumer users with rolling WAU/MAU from extended query window), `get_user_growth()` (daily new user registration counts via User.created_at bucketing)
+- `analytics.py` router — 2 new GET endpoints (`user-activity`, `user-growth`)
+- `web/src/components/analytics/` — 2 new components: `UserActivityChart` (LineChart with DAU/WAU/MAU lines + legend), `UserGrowthChart` (BarChart for new users/day)
+- `StudioDashboardPage.tsx` — added 4th chart row (UserActivity + UserGrowth)
+- `api.ts` — added DailyUserActivity, DailyUserGrowth types and 2 API client functions
+- Ruff lint + Pyright + Frontend type-check: 0 new errors
 
 ---
 

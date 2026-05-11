@@ -18,6 +18,7 @@ sys.path.append(str(Path(server_dir).parent))
 # Import core modules after path is set up (noqa: E402 - must be after sys.path setup)
 # Import server modules (noqa: E402 - must be after sys.path setup)
 from app.api.agents import router as agents_router  # noqa: E402
+from app.api.analytics import router as analytics_router  # noqa: E402
 from app.api.auth import router as auth_router  # noqa: E402
 from app.api.channels import router as channels_router  # noqa: E402
 from app.api.chat_surfaces import router as chat_surfaces_router  # noqa: E402
@@ -103,6 +104,7 @@ app.add_middleware(TimingMiddleware)
 
 # Include API routes
 app.include_router(agents_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")
 app.include_router(models_router, prefix="/api")

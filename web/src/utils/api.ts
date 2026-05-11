@@ -4041,3 +4041,127 @@ export const checkToolPyright = async (source: string): Promise<ToolDiagnostic[]
     body: JSON.stringify({ source }),
   }) as Promise<ToolDiagnostic[]>;
 };
+
+// ---------------------------------------------------------------------------
+// Analytics API
+// ---------------------------------------------------------------------------
+
+/** Studio dashboard KPI summary returned by the overview endpoint. */
+export interface StudioOverview {
+  agents_total: number;
+  agents_new: number;
+  sessions_total: number;
+  sessions_delta: number;
+  users_total: number;
+  users_new: number;
+  tasks_total: number;
+  tasks_daily_avg: number;
+  success_rate: number;
+  success_rate_delta: number;
+}
+
+/** One day's session counts broken down by type. */
+export interface DailySessionCount {
+  date: string;
+  consumer: number;
+  studio_test: number;
+}
+
+/** Fetch studio dashboard KPI overview for the given time range. */
+export const getStudioOverview = async (range: string): Promise<StudioOverview> => {
+  return apiRequest(`/analytics/studio/overview?range=${encodeURIComponent(range)}`) as Promise<StudioOverview>;
+};
+
+/** Fetch daily session counts by type for the given time range. */
+export const getStudioSessionTrends = async (range: string): Promise<DailySessionCount[]> => {
+  return apiRequest(`/analytics/studio/session-trends?range=${encodeURIComponent(range)}`) as Promise<DailySessionCount[]>;
+};
+
+/** Task status counts for the donut chart. */
+export interface TaskStats {
+  completed: number;
+  failed: number;
+  cancelled: number;
+  running: number;
+  pending: number;
+}
+
+/** One day's token usage broken down by type. */
+export interface DailyTokenUsage {
+  date: string;
+  prompt: number;
+  completion: number;
+  cached: number;
+}
+
+/** One agent's popularity rank by consumer session count. */
+export interface AgentPopularity {
+  agent_id: number;
+  agent_name: string;
+  session_count: number;
+}
+
+/** Runtime infrastructure health summary. */
+export interface RuntimeHealth {
+  active_sandboxes: number;
+  storage_status: string;
+  failed_tasks_24h: number;
+}
+
+/** One recent session event for the activity feed. */
+export interface RecentActivityItem {
+  agent_name: string;
+  username: string;
+  session_type: string;
+  status: string;
+  created_at: string;
+}
+
+/** Fetch task status counts for the donut chart. */
+export const getStudioTaskStats = async (range: string): Promise<TaskStats> => {
+  return apiRequest(`/analytics/studio/task-stats?range=${encodeURIComponent(range)}`) as Promise<TaskStats>;
+};
+
+/** Fetch daily token usage broken down by prompt/completion/cached. */
+export const getStudioTokenUsage = async (range: string): Promise<DailyTokenUsage[]> => {
+  return apiRequest(`/analytics/studio/token-usage?range=${encodeURIComponent(range)}`) as Promise<DailyTokenUsage[]>;
+};
+
+/** Fetch top agents ranked by consumer session count. */
+export const getStudioAgentPopularity = async (range: string, limit: number = 10): Promise<AgentPopularity[]> => {
+  return apiRequest(`/analytics/studio/agent-popularity?range=${encodeURIComponent(range)}&limit=${limit}`) as Promise<AgentPopularity[]>;
+};
+
+/** Fetch runtime infrastructure health summary. */
+export const getStudioRuntimeHealth = async (): Promise<RuntimeHealth> => {
+  return apiRequest('/analytics/studio/runtime-health') as Promise<RuntimeHealth>;
+};
+
+/** Fetch recent session events for the activity feed. */
+export const getStudioRecentActivity = async (limit: number = 20): Promise<RecentActivityItem[]> => {
+  return apiRequest(`/analytics/studio/recent-activity?limit=${limit}`) as Promise<RecentActivityItem[]>;
+};
+
+/** One day's user activity metrics. */
+export interface DailyUserActivity {
+  date: string;
+  dau: number;
+  wau: number;
+  mau: number;
+}
+
+/** One day's new user registrations. */
+export interface DailyUserGrowth {
+  date: string;
+  new_users: number;
+}
+
+/** Fetch daily DAU/WAU/MAU for consumer sessions. */
+export const getStudioUserActivity = async (range: string): Promise<DailyUserActivity[]> => {
+  return apiRequest(`/analytics/studio/user-activity?range=${encodeURIComponent(range)}`) as Promise<DailyUserActivity[]>;
+};
+
+/** Fetch daily new user registration counts. */
+export const getStudioUserGrowth = async (range: string): Promise<DailyUserGrowth[]> => {
+  return apiRequest(`/analytics/studio/user-growth?range=${encodeURIComponent(range)}`) as Promise<DailyUserGrowth[]>;
+};
