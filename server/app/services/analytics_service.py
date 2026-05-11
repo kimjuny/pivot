@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.models.agent import Agent
 from app.models.agent_release import AgentRelease
 from app.models.channel import AgentChannelBinding, ChannelEventLog, ChannelSession
+from app.models.llm import LLM
 from app.models.react import ReactTask
 from app.models.session import Session
 from app.models.user import User
@@ -414,15 +415,16 @@ class AnalyticsService:
             select(  # pyright: ignore[reportArgumentType]
                 Session.agent_id,
                 Agent.name,
-                Agent.model_name,  # type: ignore[reportArgumentType]
+                LLM.model,
                 func.count(Session.id),  # type: ignore[reportArgumentType, reportCallIssue]
             )
             .join(Agent, Session.agent_id == Agent.id)  # type: ignore[reportArgumentType]
+            .join(LLM, Agent.llm_id == LLM.id, isouter=True)  # type: ignore[reportArgumentType]
             .where(
                 col(Session.type) == "consumer",
                 col(Session.created_at) >= range_start,
             )
-            .group_by(Session.agent_id, Agent.name, Agent.model_name)
+            .group_by(Session.agent_id, Agent.name, LLM.model)
             .order_by(func.count(Session.id).desc())  # type: ignore[reportArgumentType, reportCallIssue]
             .limit(limit)
         )
@@ -431,10 +433,10 @@ class AnalyticsService:
             AgentPopularity(
                 agent_id=agent_id,
                 agent_name=agent_name,
-                model_name=model_name or "",
+                model_name=model or "",
                 session_count=count,
             )
-            for agent_id, agent_name, model_name, count in self.db.exec(stmt)
+            for agent_id, agent_name, model, count in self.db.exec(stmt)
         ]
 
     async def get_runtime_health(self) -> RuntimeHealth:

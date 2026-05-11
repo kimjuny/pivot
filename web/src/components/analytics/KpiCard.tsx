@@ -25,29 +25,31 @@ export interface KpiCardProps {
 export function KpiCard({ title, value, subtitle, trend }: KpiCardProps) {
   return (
     <Card>
-      <CardContent className="p-4">
+      <CardContent className="p-4 text-center">
         <p className="text-xs font-medium text-muted-foreground">{title}</p>
-        <div className="mt-1 flex items-baseline gap-2">
-          <span className="text-2xl font-bold">{value}</span>
-          {trend && (
-            <span
-              className={`flex items-center text-xs font-medium ${
-                trend.direction === "up"
-                  ? "text-emerald-600"
-                  : "text-red-500"
-              }`}
-            >
-              {trend.direction === "up" ? (
-                <ArrowUp className="h-3 w-3" />
-              ) : (
-                <ArrowDown className="h-3 w-3" />
-              )}
-              {Math.abs(trend.value)}%
-            </span>
-          )}
-        </div>
-        {subtitle && (
-          <p className="mt-1 text-xs text-muted-foreground">{subtitle}</p>
+        <span className="mt-1 block text-2xl font-bold">{value}</span>
+        {(trend || subtitle) && (
+          <div className="mt-1 flex items-center justify-center gap-1">
+            {trend && (
+              <span
+                className={`flex items-center text-xs font-medium ${
+                  trend.direction === "up"
+                    ? "text-emerald-600"
+                    : "text-red-500"
+                }`}
+              >
+                {trend.direction === "up" ? (
+                  <ArrowUp className="h-3 w-3" />
+                ) : (
+                  <ArrowDown className="h-3 w-3" />
+                )}
+                {Math.abs(trend.value)}%
+              </span>
+            )}
+            {subtitle && (
+              <span className="text-xs text-muted-foreground">{subtitle}</span>
+            )}
+          </div>
         )}
       </CardContent>
     </Card>

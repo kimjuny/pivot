@@ -1,8 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -69,7 +67,6 @@ export function TaskStatusChart({ data }: TaskStatusChartProps) {
             <ChartContainer config={chartConfig} className="mx-auto h-[220px] w-full">
               <PieChart>
                 <ChartTooltip content={<ChartTooltipContent />} />
-                <ChartLegend content={<ChartLegendContent />} />
                 <Pie
                   data={chartData}
                   dataKey="value"

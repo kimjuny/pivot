@@ -14,7 +14,6 @@ import { TaskStatusChart } from "@/components/analytics/TaskStatusChart";
 import { TokenUsageChart } from "@/components/analytics/TokenUsageChart";
 import { UserActivityChart } from "@/components/analytics/UserActivityChart";
 import { UserGrowthChart } from "@/components/analytics/UserGrowthChart";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   getStudioAgentPopularity,
@@ -48,7 +47,7 @@ function ChartSkeleton() {
 
 /** Studio-level dashboard showing KPI cards, charts, and activity. */
 function StudioDashboardPage() {
-  const [dateRange, setDateRange] = useState("30d");
+  const [dateRange, setDateRange] = useState("7d");
   const [overview, setOverview] = useState<StudioOverview | null>(null);
   const [trends, setTrends] = useState<DailySessionCount[]>([]);
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null);
@@ -122,10 +121,7 @@ function StudioDashboardPage() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
       <div className="flex items-start justify-between">
         <div>
-          <Badge variant="outline" className="w-fit">
-            Studio
-          </Badge>
-          <h1 className="mt-3 text-xl font-semibold text-foreground">
+          <h1 className="text-xl font-semibold text-foreground">
             Dashboard
           </h1>
           <p className="mt-0.5 max-w-3xl text-sm leading-6 text-muted-foreground">

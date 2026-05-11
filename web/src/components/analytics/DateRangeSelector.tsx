@@ -8,7 +8,7 @@ export interface DateRangeSelectorProps {
   onChange: (range: string) => void;
 }
 
-const RANGES = ["7d", "30d", "90d"] as const;
+const RANGES = ["7d", "30d"] as const;
 
 /** Three-button toggle group for selecting the analytics time range. */
 export function DateRangeSelector({ value, onChange }: DateRangeSelectorProps) {

@@ -43,7 +43,7 @@ export interface AgentAnalyticsTabProps {
 
 /** Container component that fetches and renders agent-scoped analytics. */
 export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
-  const [dateRange, setDateRange] = useState("30d");
+  const [dateRange, setDateRange] = useState("7d");
   const [overview, setOverview] = useState<AgentOverview | null>(null);
   const [sessionTrends, setSessionTrends] = useState<DailySessionCount[]>([]);
   const [taskStats, setTaskStats] = useState<TaskStats | null>(null);
