@@ -613,7 +613,7 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 
 ## Phased Implementation Plan
 
-### Phase 0: User FK Migration
+### Phase 0: User FK Migration — COMPLETED (2025-05-11)
 
 **Goal**: Replace all `user: str` fields with `user_id: int` FK across the entire codebase.
 
@@ -647,6 +647,17 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 - Add composite indexes for analytics query patterns (see Index Strategy section above)
 
 **Deliverable**: Clean codebase where all user references are via `user_id` FK. Database can be recreated from scratch (user deletes `pivot.db`).
+
+**Completion summary**:
+- 12 model tables migrated (`user: str` / `username: str` → `user_id: int FK`)
+- 20+ service files updated (eliminated all reverse User lookups)
+- 12+ API route files updated (all pass `current_user.id`)
+- 5 schema files, 5+ orchestration files updated
+- Sandbox manager (`sandbox_manager/main.py`) migrated (`username: str` → `user_id: int`)
+- Filesystem paths: `users/{username}/` → `users/{user_id}/`
+- Composite indexes added for analytics query patterns
+- Frontend types, components, and test mocks updated to match API changes
+- Ruff lint + Pyright type-check: 0 errors
 
 ---
 
