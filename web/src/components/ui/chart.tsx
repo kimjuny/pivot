@@ -1,5 +1,6 @@
 import * as React from "react"
 import * as RechartsPrimitive from "recharts"
+import { type Payload } from "recharts/types/component/DefaultTooltipContent"
 
 import { cn } from "@/lib/utils"
 
@@ -141,7 +142,7 @@ const ChartTooltipContent = React.forwardRef<
       const itemConfig = getPayloadConfigFromPayload(config, item, key)
       const value =
         !labelKey && typeof label === "string"
-          ? config[label as keyof typeof config]?.label || label
+          ? config[label]?.label || label
           : itemConfig?.label
 
       if (labelFormatter) {
@@ -188,7 +189,12 @@ const ChartTooltipContent = React.forwardRef<
             .map((item, index) => {
               const key = `${nameKey || item.name || item.dataKey || "value"}`
               const itemConfig = getPayloadConfigFromPayload(config, item, key)
-              const indicatorColor = color || item.payload.fill || item.color
+              let payloadFill: string | undefined
+              if (item.payload && typeof item.payload === "object" && "fill" in item.payload) {
+                const fill = (item.payload as Record<string, unknown>).fill
+                payloadFill = typeof fill === "string" ? fill : undefined
+              }
+              const indicatorColor = color || payloadFill || item.color
 
               return (
                 <div
@@ -199,7 +205,7 @@ const ChartTooltipContent = React.forwardRef<
                   )}
                 >
                   {formatter && item?.value !== undefined && item.name ? (
-                    formatter(item.value, item.name, item, index, item.payload)
+                    formatter(item.value, item.name, item, index, item.payload as Payload<number, string>[])
                   ) : (
                     <>
                       {itemConfig?.icon ? (
@@ -219,8 +225,8 @@ const ChartTooltipContent = React.forwardRef<
                             )}
                             style={
                               {
-                                "--color-bg": indicatorColor,
-                                "--color-border": indicatorColor,
+                                "--color-bg": indicatorColor ?? "",
+                                "--color-border": indicatorColor ?? "",
                               } as React.CSSProperties
                             }
                           />
@@ -288,12 +294,12 @@ const ChartLegendContent = React.forwardRef<
         {payload
           .filter((item) => item.type !== "none")
           .map((item) => {
-            const key = `${nameKey || item.dataKey || "value"}`
+            const key = String(nameKey || item.dataKey || "value")
             const itemConfig = getPayloadConfigFromPayload(config, item, key)
 
             return (
               <div
-                key={item.value}
+                key={String(item.value)}
                 className={cn(
                   "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground"
                 )}
@@ -354,7 +360,7 @@ function getPayloadConfigFromPayload(
 
   return configLabelKey in config
     ? config[configLabelKey]
-    : config[key as keyof typeof config]
+    : config[key]
 }
 
 export {

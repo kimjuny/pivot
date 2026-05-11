@@ -14,6 +14,7 @@ import { TaskStatusChart } from "@/components/analytics/TaskStatusChart";
 import { TokenUsageChart } from "@/components/analytics/TokenUsageChart";
 import { UserActivityChart } from "@/components/analytics/UserActivityChart";
 import { UserGrowthChart } from "@/components/analytics/UserGrowthChart";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   getStudioAgentPopularity,
   getStudioOverview,
@@ -135,37 +136,38 @@ function StudioDashboardPage() {
   const sectionClass = refreshing ? "section-stale" : "section-fresh";
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
-      <div
-        className="dashboard-reveal flex items-start justify-between"
-        style={revealStyle(0)}
-      >
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">
-            Dashboard
-          </h1>
-          <p className="mt-0.5 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Platform overview: health, usage, and engagement metrics.
-          </p>
+    <ScrollArea className="h-[calc(100vh-3rem)]">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
+        <div
+          className="dashboard-reveal flex items-start justify-between"
+          style={revealStyle(0)}
+        >
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">
+              Dashboard
+            </h1>
+            <p className="mt-0.5 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Platform overview: health, usage, and engagement metrics.
+            </p>
+          </div>
+          <DateRangeSelector value={dateRange} onChange={setDateRange} />
         </div>
-        <DateRangeSelector value={dateRange} onChange={setDateRange} />
-      </div>
 
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3">
-          <AlertCircle className="size-4 shrink-0 text-destructive" />
-          <p className="text-sm text-destructive flex-1">{error}</p>
-          <button
-            type="button"
-            onClick={() => void fetchData(dateRange)}
-            className="text-sm font-medium text-destructive hover:underline"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+        {error && (
+          <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3">
+            <AlertCircle className="size-4 shrink-0 text-destructive" />
+            <p className="text-sm text-destructive flex-1">{error}</p>
+            <button
+              type="button"
+              onClick={() => void fetchData(dateRange)}
+              className="text-sm font-medium text-destructive hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
-      {overview && (
+        {overview && (
         <>
           <div
             key={`kpi-${revealToken}`}
@@ -258,7 +260,8 @@ function StudioDashboardPage() {
           </div>
         </>
       )}
-    </div>
+      </div>
+    </ScrollArea>
   );
 }
 

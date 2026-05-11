@@ -189,6 +189,7 @@
 #root {
   height: 100vh;
   width: 100%;
+  overflow: hidden;
 }
 
 /* React Flow dark mode */
@@ -288,18 +289,20 @@
   color: #facc15;
 }
 
-/* Scrollbar styling — uses theme variables so it adapts to light/dark mode */
-::-webkit-scrollbar {
+/* Scrollbar styling — uses theme variables so it adapts to light/dark mode.
+ * Scoped away from Radix ScrollArea (which uses data-radix-scroll-area-viewport)
+ * so the ScrollArea hide-on-idle behaviour is preserved. */
+:not([data-radix-scroll-area-viewport])::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-::-webkit-scrollbar-track {
+:not([data-radix-scroll-area-viewport])::-webkit-scrollbar-track {
   /* Light: near-white background; Dark: matches the dark background (#0A0A0A) */
   background: oklch(var(--background));
 }
 
-::-webkit-scrollbar-thumb {
+:not([data-radix-scroll-area-viewport])::-webkit-scrollbar-thumb {
   /* Light: visible but subtle neutral grey; Dark: the existing dark-mode grey */
   background: oklch(var(--muted-foreground) / 0.3);
   border-radius: 4px;
@@ -307,7 +310,7 @@
   border: 2px solid oklch(var(--background));
 }
 
-::-webkit-scrollbar-thumb:hover {
+:not([data-radix-scroll-area-viewport])::-webkit-scrollbar-thumb:hover {
   background: oklch(var(--muted-foreground) / 0.5);
 }
 
