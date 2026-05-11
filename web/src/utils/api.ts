@@ -4098,6 +4098,7 @@ export interface DailyTokenUsage {
 export interface AgentPopularity {
   agent_id: number;
   agent_name: string;
+  model_name: string;
   session_count: number;
 }
 
@@ -4110,7 +4111,9 @@ export interface RuntimeHealth {
 
 /** One recent session event for the activity feed. */
 export interface RecentActivityItem {
+  session_id: string;
   agent_name: string;
+  model_name: string;
   username: string;
   session_type: string;
   status: string;
@@ -4138,7 +4141,7 @@ export const getStudioRuntimeHealth = async (): Promise<RuntimeHealth> => {
 };
 
 /** Fetch recent session events for the activity feed. */
-export const getStudioRecentActivity = async (limit: number = 20): Promise<RecentActivityItem[]> => {
+export const getStudioRecentActivity = async (limit: number = 5): Promise<RecentActivityItem[]> => {
   return apiRequest(`/analytics/studio/recent-activity?limit=${limit}`) as Promise<RecentActivityItem[]>;
 };
 
@@ -4164,4 +4167,103 @@ export const getStudioUserActivity = async (range: string): Promise<DailyUserAct
 /** Fetch daily new user registration counts. */
 export const getStudioUserGrowth = async (range: string): Promise<DailyUserGrowth[]> => {
   return apiRequest(`/analytics/studio/user-growth?range=${encodeURIComponent(range)}`) as Promise<DailyUserGrowth[]>;
+};
+
+// ---------------------------------------------------------------------------
+// Agent analytics
+// ---------------------------------------------------------------------------
+
+/** Agent-scoped KPI overview. */
+export interface AgentOverview {
+  sessions: number;
+  tasks: number;
+  success_rate: number;
+  avg_tokens: number;
+  avg_iterations: number;
+}
+
+/** One iteration range bucket. */
+export interface IterationBucket {
+  range: string;
+  count: number;
+}
+
+/** One user's usage stats for a specific agent. */
+export interface AgentUserStats {
+  user_id: number;
+  username: string;
+  sessions: number;
+  tasks: number;
+  total_tokens: number;
+  last_active: string;
+}
+
+/** One release entry for the release timeline. */
+export interface AgentReleaseItem {
+  version: number;
+  release_note: string | null;
+  change_summary: string[];
+  published_by: string | null;
+  created_at: string;
+}
+
+/** Fetch agent-scoped KPI overview. */
+export const getAgentAnalyticsOverview = async (agentId: number, range: string): Promise<AgentOverview> => {
+  return apiRequest(`/analytics/agents/${agentId}/overview?range=${encodeURIComponent(range)}`) as Promise<AgentOverview>;
+};
+
+/** Fetch agent-scoped session trends. */
+export const getAgentSessionTrends = async (agentId: number, range: string): Promise<DailySessionCount[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/session-trends?range=${encodeURIComponent(range)}`) as Promise<DailySessionCount[]>;
+};
+
+/** Fetch agent-scoped task status counts. */
+export const getAgentTaskStats = async (agentId: number, range: string): Promise<TaskStats> => {
+  return apiRequest(`/analytics/agents/${agentId}/task-stats?range=${encodeURIComponent(range)}`) as Promise<TaskStats>;
+};
+
+/** Fetch agent-scoped token usage. */
+export const getAgentTokenUsage = async (agentId: number, range: string): Promise<DailyTokenUsage[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/token-usage?range=${encodeURIComponent(range)}`) as Promise<DailyTokenUsage[]>;
+};
+
+/** Fetch agent-scoped iteration distribution. */
+export const getAgentIterationDistribution = async (agentId: number, range: string): Promise<IterationBucket[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/iteration-distribution?range=${encodeURIComponent(range)}`) as Promise<IterationBucket[]>;
+};
+
+/** Fetch top users for a specific agent. */
+export const getAgentTopUsers = async (agentId: number, range: string, limit: number = 20): Promise<AgentUserStats[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/top-users?range=${encodeURIComponent(range)}&limit=${limit}`) as Promise<AgentUserStats[]>;
+};
+
+/** Fetch release timeline for a specific agent. */
+export const getAgentReleases = async (agentId: number): Promise<AgentReleaseItem[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/releases`) as Promise<AgentReleaseItem[]>;
+};
+
+/** One day's consumer usage for a specific agent. */
+export interface DailyConsumerUsage {
+  date: string;
+  sessions: number;
+  dau: number;
+}
+
+/** Per-channel activity stats for a specific agent. */
+export interface ChannelActivityItem {
+  channel_key: string;
+  channel_name: string;
+  inbound_events: number;
+  active_sessions: number;
+  last_event_at: string;
+}
+
+/** Fetch agent-scoped consumer usage over time. */
+export const getAgentConsumerUsage = async (agentId: number, range: string): Promise<DailyConsumerUsage[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/consumer-usage?range=${encodeURIComponent(range)}`) as Promise<DailyConsumerUsage[]>;
+};
+
+/** Fetch per-channel activity stats for a specific agent. */
+export const getAgentChannelActivity = async (agentId: number, range: string): Promise<ChannelActivityItem[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/channel-activity?range=${encodeURIComponent(range)}`) as Promise<ChannelActivityItem[]>;
 };

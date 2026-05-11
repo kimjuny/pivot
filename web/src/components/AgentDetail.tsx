@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { X, Wrench, Zap } from "lucide-react";
+import { X, Wrench, Zap, BarChart3 } from "lucide-react";
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
@@ -16,6 +16,7 @@ import PublishReleaseDrawer from './PublishReleaseDrawer';
 import ReleaseHistoryDialog from './ReleaseHistoryDialog';
 import ToolEditor from './ToolEditor';
 import SkillEditor from './SkillEditor';
+import { AgentAnalyticsTab } from './analytics/AgentAnalyticsTab';
 import {
   updateAgent,
   getAgentDraftState,
@@ -167,7 +168,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
     markAsCommitted,
     setSubmitting,
   } = useAgentWorkStore();
-  const { tabs, activeTabId, setActiveTab, closeTab } = useAgentTabStore();
+  const { tabs, activeTabId, setActiveTab, closeTab, openTab } = useAgentTabStore();
 
   const [isReactChatOpen, setIsReactChatOpen] = useState<boolean>(false);
   const [toolEditors, setToolEditors] = useState<Record<string, TabEditorState>>({});
@@ -250,6 +251,17 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
       initialize(agent);
     }
   }, [agent, initialize]);
+
+  // Auto-open Analytics tab when no tabs are open and agent has loaded.
+  useEffect(() => {
+    if (agent && tabs.length === 0) {
+      openTab({
+        type: 'analytics',
+        name: 'Analytics',
+        resourceId: 'analytics',
+      });
+    }
+  }, [agent, tabs.length, openTab]);
 
   useEffect(() => {
     setDraftState(null);
@@ -667,9 +679,11 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
               <div className="bg-muted border-b border-border px-2 pr-72 pt-1.5 lg:pr-[27rem]">
                 <TabsList className="h-auto bg-transparent p-0 gap-1 w-full justify-start items-end -mb-px">
                   {tabs.map((tab) => {
-                    const TabIcon = tab.type === 'tool' || tab.type === 'function'
-                      ? Wrench
-                      : Zap;
+                    const TabIcon = tab.type === 'analytics'
+                      ? BarChart3
+                      : tab.type === 'tool' || tab.type === 'function'
+                        ? Wrench
+                        : Zap;
 
                     return (
                       <div key={tab.id} className="relative group">
@@ -717,7 +731,9 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
                   value={tab.id}
                   className="flex-1 m-0 relative overflow-hidden data-[state=inactive]:hidden"
                 >
-                  {tab.type === 'tool' || tab.type === 'function' ? (
+                  {tab.type === 'analytics' ? (
+                    <AgentAnalyticsTab agentId={agentId} />
+                  ) : tab.type === 'tool' || tab.type === 'function' ? (
                     <div className="relative h-full">
                       <div className="h-full">
                         {(() => {

@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -18,44 +20,39 @@ export interface TaskStatusChartProps {
 const chartConfig: ChartConfig = {
   completed: {
     label: "Completed",
-    color: "hsl(var(--chart-2))",
+    color: "oklch(var(--chart-4))",
   },
   failed: {
     label: "Failed",
-    color: "hsl(var(--chart-destructive))",
+    color: "oklch(var(--destructive))",
   },
   cancelled: {
     label: "Cancelled",
-    color: "hsl(var(--chart-5))",
+    color: "oklch(var(--chart-5))",
   },
   running: {
     label: "Running",
-    color: "hsl(var(--chart-3))",
+    color: "oklch(var(--chart-3))",
   },
   pending: {
     label: "Pending",
-    color: "hsl(var(--chart-4))",
+    color: "oklch(var(--chart-2))",
   },
 };
 
-const COLORS = [
-  "var(--color-completed)",
-  "var(--color-failed)",
-  "var(--color-cancelled)",
-  "var(--color-running)",
-  "var(--color-pending)",
-];
+const STATUS_KEYS = ["completed", "failed", "cancelled", "running", "pending"] as const;
+const COLORS = STATUS_KEYS.map((key) => `var(--color-${key})`);
 
 /** Donut chart showing task status breakdown. */
 export function TaskStatusChart({ data }: TaskStatusChartProps) {
   const total = data.completed + data.failed + data.cancelled + data.running + data.pending;
-  const chartData = [
-    { name: "Completed", value: data.completed, key: "completed" },
-    { name: "Failed", value: data.failed, key: "failed" },
-    { name: "Cancelled", value: data.cancelled, key: "cancelled" },
-    { name: "Running", value: data.running, key: "running" },
-    { name: "Pending", value: data.pending, key: "pending" },
-  ].filter((d) => d.value > 0);
+  const chartData = STATUS_KEYS
+    .filter((key) => data[key as keyof TaskStats] > 0)
+    .map((key) => ({
+      name: chartConfig[key].label as string,
+      value: data[key as keyof TaskStats],
+      key,
+    }));
 
   return (
     <Card>
@@ -68,10 +65,11 @@ export function TaskStatusChart({ data }: TaskStatusChartProps) {
             No tasks in this period.
           </p>
         ) : (
-          <div className="relative">
+          <div>
             <ChartContainer config={chartConfig} className="mx-auto h-[220px] w-full">
               <PieChart>
                 <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Pie
                   data={chartData}
                   dataKey="value"
@@ -82,13 +80,13 @@ export function TaskStatusChart({ data }: TaskStatusChartProps) {
                   outerRadius={85}
                   strokeWidth={2}
                 >
-                  {chartData.map((_, idx) => (
-                    <Cell key={chartData[idx].key} fill={COLORS[["completed", "failed", "cancelled", "running", "pending"].indexOf(chartData[idx].key)]} />
+                  {chartData.map((item) => (
+                    <Cell key={item.key} fill={COLORS[STATUS_KEYS.indexOf(item.key)]} />
                   ))}
                 </Pie>
               </PieChart>
             </ChartContainer>
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="pointer-events-none -mt-[138px] flex items-center justify-center pb-[138px]">
               <span className="text-2xl font-bold">{total.toLocaleString()}</span>
             </div>
           </div>

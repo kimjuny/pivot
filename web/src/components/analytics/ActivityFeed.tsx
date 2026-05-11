@@ -1,4 +1,7 @@
+import { useNavigate } from "react-router-dom";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 import type { RecentActivityItem } from "@/utils/api";
 import { formatTimestamp } from "@/utils/timestamp";
@@ -19,10 +22,20 @@ const STATUS_COLORS: Record<string, string> = {
 
 /** Feed list showing recent session events with agent name, user, and time. */
 export function ActivityFeed({ data }: ActivityFeedProps) {
+  const navigate = useNavigate();
+
   return (
     <Card>
-      <CardHeader className="pb-2">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm font-medium">Recent Activity</CardTitle>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-auto px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => navigate("/studio/operations/sessions")}
+        >
+          See more
+        </Button>
       </CardHeader>
       <CardContent>
         {data.length === 0 ? (
@@ -32,7 +45,11 @@ export function ActivityFeed({ data }: ActivityFeedProps) {
         ) : (
           <ul className="space-y-3">
             {data.map((item, idx) => (
-              <li key={idx} className="flex items-start gap-3">
+              <li
+                key={idx}
+                className="flex cursor-pointer items-start gap-3 rounded-md px-1 py-1 transition-colors hover:bg-muted/50"
+                onClick={() => navigate(`/studio/operations/sessions/${item.session_id}`)}
+              >
                 <span
                   className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${STATUS_COLORS[item.status] ?? "bg-blue-500"}`}
                 />
@@ -42,7 +59,7 @@ export function ActivityFeed({ data }: ActivityFeedProps) {
                     <span className="text-muted-foreground"> — {item.username}</span>
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {item.session_type} · {item.status} · {formatTimestamp(item.created_at)}
+                    {item.session_type === "consumer" ? "Client" : "Studio"} · {item.status} · {formatTimestamp(item.created_at)}
                   </p>
                 </div>
               </li>

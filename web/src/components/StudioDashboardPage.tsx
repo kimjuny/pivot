@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { AlertCircle } from "lucide-react";
 
 import { ActivityFeed } from "@/components/analytics/ActivityFeed";
 import { AgentPopularityChart } from "@/components/analytics/AgentPopularityChart";
@@ -58,9 +59,11 @@ function StudioDashboardPage() {
   const [userActivity, setUserActivity] = useState<DailyUserActivity[]>([]);
   const [userGrowth, setUserGrowth] = useState<DailyUserGrowth[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async (range: string) => {
     setLoading(true);
+    setError(null);
     try {
       const [
         ov,
@@ -92,6 +95,9 @@ function StudioDashboardPage() {
       setRecentActivity(ra);
       setUserActivity(ua);
       setUserGrowth(ug);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -129,7 +135,21 @@ function StudioDashboardPage() {
         <DateRangeSelector value={dateRange} onChange={setDateRange} />
       </div>
 
-      {loading || !overview ? (
+      {error && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3">
+          <AlertCircle className="size-4 shrink-0 text-destructive" />
+          <p className="text-sm text-destructive flex-1">{error}</p>
+          <button
+            type="button"
+            onClick={() => void fetchData(dateRange)}
+            className="text-sm font-medium text-destructive hover:underline"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!overview ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="space-y-2 rounded-lg border p-4">
@@ -191,61 +211,53 @@ function StudioDashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {loading ? (
-          <>
-            <ChartSkeleton />
-            <ChartSkeleton />
-          </>
-        ) : (
-          <>
-            <SessionTrendChart data={trends} />
-            {taskStats && <TaskStatusChart data={taskStats} />}
-          </>
-        )}
-      </div>
+      {!overview ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ChartSkeleton />
+          <ChartSkeleton />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <SessionTrendChart data={trends} />
+          {taskStats && <TaskStatusChart data={taskStats} />}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {loading ? (
-          <>
-            <ChartSkeleton />
-            <ChartSkeleton />
-          </>
-        ) : (
-          <>
-            <TokenUsageChart data={tokenUsage} />
-            <AgentPopularityChart data={agentPopularity} />
-          </>
-        )}
-      </div>
+      {!overview ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ChartSkeleton />
+          <ChartSkeleton />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <TokenUsageChart data={tokenUsage} />
+          <AgentPopularityChart data={agentPopularity} />
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {loading || !runtimeHealth ? (
-          <>
-            <ChartSkeleton />
-            <ChartSkeleton />
-          </>
-        ) : (
-          <>
-            <RuntimeHealthCard data={runtimeHealth} />
-            <ActivityFeed data={recentActivity} />
-          </>
-        )}
-      </div>
+      {!overview ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ChartSkeleton />
+          <ChartSkeleton />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <RuntimeHealthCard data={runtimeHealth ?? { active_sandboxes: -1, storage_status: "unknown", failed_tasks_24h: 0 }} />
+          <ActivityFeed data={recentActivity} />
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {loading ? (
-          <>
-            <ChartSkeleton />
-            <ChartSkeleton />
-          </>
-        ) : (
-          <>
-            <UserActivityChart data={userActivity} />
-            <UserGrowthChart data={userGrowth} />
-          </>
-        )}
-      </div>
+      {!overview ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ChartSkeleton />
+          <ChartSkeleton />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <UserActivityChart data={userActivity} />
+          <UserGrowthChart data={userGrowth} />
+        </div>
+      )}
     </div>
   );
 }

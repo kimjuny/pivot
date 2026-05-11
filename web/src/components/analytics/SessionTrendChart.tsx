@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -22,12 +24,12 @@ export interface SessionTrendChartProps {
 
 const chartConfig: ChartConfig = {
   consumer: {
-    label: "Consumer",
-    color: "hsl(var(--chart-1))",
+    label: "Client",
+    color: "oklch(var(--chart-4))",
   },
   studio_test: {
-    label: "Studio Test",
-    color: "hsl(var(--chart-2))",
+    label: "Studio",
+    color: "oklch(var(--chart-2))",
   },
 };
 
@@ -52,8 +54,9 @@ export function SessionTrendChart({ data }: SessionTrendChartProps) {
                 axisLine={false}
                 tickFormatter={(v: string) => v.slice(5)}
               />
-              <YAxis tickLine={false} axisLine={false} width={40} />
+              <YAxis tickLine={false} axisLine={false} width={40} allowDecimals={false} />
               <ChartTooltip content={<ChartTooltipContent />} />
+              <ChartLegend content={<ChartLegendContent />} />
               <Area
                 type="monotone"
                 dataKey="consumer"

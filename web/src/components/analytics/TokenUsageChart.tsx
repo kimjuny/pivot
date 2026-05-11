@@ -1,6 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -20,15 +22,15 @@ export interface TokenUsageChartProps {
 const chartConfig: ChartConfig = {
   prompt: {
     label: "Prompt",
-    color: "hsl(var(--chart-1))",
+    color: "oklch(var(--chart-4))",
   },
   completion: {
     label: "Completion",
-    color: "hsl(var(--chart-2))",
+    color: "oklch(var(--chart-3))",
   },
   cached: {
     label: "Cached",
-    color: "hsl(var(--chart-3))",
+    color: "oklch(var(--chart-2))",
   },
 };
 
@@ -53,8 +55,9 @@ export function TokenUsageChart({ data }: TokenUsageChartProps) {
                 axisLine={false}
                 tickFormatter={(v: string) => v.slice(5)}
               />
-              <YAxis tickLine={false} axisLine={false} width={50} />
+              <YAxis tickLine={false} axisLine={false} width={50} allowDecimals={false} />
               <ChartTooltip content={<ChartTooltipContent />} />
+              <ChartLegend content={<ChartLegendContent />} />
               <Bar
                 dataKey="prompt"
                 stackId="tokens"

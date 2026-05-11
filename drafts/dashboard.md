@@ -736,26 +736,35 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 
 ---
 
-### Phase 4: Agent Analytics Tab — Core Metrics
+### Phase 4: Agent Analytics Tab — Core Metrics — COMPLETED (2025-05-11)
 
 **Goal**: Add analytics tab to agent detail page with agent-scoped metrics.
 
 **Backend**:
-- Add to `AnalyticsService`: `get_agent_overview()`, `get_agent_session_trends()`, `get_agent_token_usage()`, `get_agent_iteration_distribution()`, `get_agent_top_users()`, `get_agent_releases()`
-- Add `/api/analytics/agents/{agent_id}/*` endpoints
+- Add to `AnalyticsService`: `get_agent_overview()`, `get_agent_session_trends()`, `get_agent_task_stats()`, `get_agent_token_usage()`, `get_agent_iteration_distribution()`, `get_agent_top_users()`, `get_agent_releases()`
+- Add `/api/analytics/agents/{agent_id}/*` endpoints (7 endpoints)
 
 **Frontend**:
 - Add `'analytics'` tab type to `agentTabStore`
 - Auto-open Analytics tab when agent detail page loads with no other tabs
-- Create: `IterationDistributionChart.tsx`, `ConsumerUsageChart.tsx`, `TopUsersTable.tsx`, `ReleaseTimeline.tsx`
-- Reuse: `SessionTrendChart.tsx`, `TaskStatusChart.tsx`, `TokenUsageChart.tsx` with agent-scoped data
-- Add API client functions
+- Create: `IterationDistributionChart.tsx`, `TopUsersTable.tsx`, `ReleaseTimeline.tsx`, `AgentAnalyticsTab.tsx`
+- Reuse: `SessionTrendChart.tsx`, `TaskStatusChart.tsx`, `TokenUsageChart.tsx`, `KpiCard.tsx`, `DateRangeSelector.tsx` with agent-scoped data
+- Add API client functions (7 functions + types)
 
 **Deliverable**: Agent detail page auto-opens an Analytics tab with KPI cards, charts, top users table, and release timeline.
 
+**Completion summary**:
+- `AnalyticsService` — 7 new agent-scoped methods: `get_agent_overview()` (sessions/tasks/success_rate/avg_tokens/avg_iterations), `get_agent_session_trends()` (daily by type, zero-filled), `get_agent_task_stats()` (status counts), `get_agent_token_usage()` (daily prompt/completion/cached), `get_agent_iteration_distribution()` (0-5, 6-10, 11-20, 21-30, 31+ buckets), `get_agent_top_users()` (top N users by session count with tasks/tokens/last_active), `get_agent_releases()` (version timeline with change summaries)
+- `analytics.py` router — 7 new GET endpoints under `/analytics/agents/{agent_id}/`
+- `web/src/components/analytics/` — 4 new components: `IterationDistributionChart` (BarChart by iteration ranges), `TopUsersTable` (table with user/sessions/tasks/tokens/last_active), `ReleaseTimeline` (vertical timeline with version/release note/change summary), `AgentAnalyticsTab` (container fetching 7 data sources with DateRangeSelector)
+- `agentTabStore.ts` — added `'analytics'` to `AgentTabType` union
+- `AgentDetail.tsx` — auto-opens Analytics tab when no tabs open; renders `AgentAnalyticsTab` with `BarChart3` icon
+- `api.ts` — added 4 types (AgentOverview, IterationBucket, AgentUserStats, AgentReleaseItem) and 7 API client functions
+- Ruff lint + Pyright + Frontend type-check: 0 new errors
+
 ---
 
-### Phase 5: Agent Analytics — Channel & Consumer Deep Dive
+### Phase 5: Agent Analytics — Channel & Consumer Deep Dive — COMPLETED (2025-05-11)
 
 **Goal**: Add channel activity and consumer usage analytics to the agent cockpit.
 
@@ -769,9 +778,17 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 
 **Deliverable**: Agent analytics shows per-channel activity cards and consumer DAU/message trend for the specific agent.
 
+**Completion summary**:
+- `AnalyticsService` — 2 new agent-scoped methods: `get_agent_consumer_usage()` (daily consumer sessions + distinct users/DAU for this agent, zero-filled), `get_agent_channel_activity()` (per-channel inbound events, active sessions, last event time via ChannelEventLog + ChannelSession JOINs)
+- `analytics.py` router — 2 new GET endpoints (`/analytics/agents/{agent_id}/consumer-usage`, `/analytics/agents/{agent_id}/channel-activity`)
+- `web/src/components/analytics/` — 2 new components: `ConsumerUsageChart` (LineChart with sessions + distinct users lines), `ChannelActivityCard` (per-channel stats cards with events/sessions/last event)
+- `AgentAnalyticsTab.tsx` — added 4th chart row (ConsumerUsage + ChannelActivity), fetches 9 data sources in parallel
+- `api.ts` — added DailyConsumerUsage, ChannelActivityItem types and 2 API client functions
+- Ruff lint + Pyright + Frontend type-check: 0 new errors
+
 ---
 
-### Phase 6: Polish & Optimization
+### Phase 6: Polish & Optimization — COMPLETED (2025-05-11)
 
 **Goal**: Performance tuning and UX refinement.
 
@@ -782,3 +799,11 @@ shadcn/ui Charts already installed. Component at `web/src/components/ui/chart.ts
 - Add empty states for agents with no analytics data
 - Ensure responsive layout for smaller screens
 - Run lint and type-check passes
+
+**Completion summary**:
+- StudioDashboardPage: replaced `loading` gate with `!overview` check — avoids skeleton flash on date range refetch, keeps stale data visible during reload
+- Both StudioDashboardPage and AgentAnalyticsTab: added error state banner with AlertCircle icon, error message, and Retry button (calls fetchData)
+- AgentAnalyticsTab: added responsive breakpoints — `grid-cols-1 lg:grid-cols-2` for chart rows, `grid-cols-2 sm:grid-cols-3 lg:grid-cols-5` for KPI cards
+- Verified all 8 composite indexes exist in models (ix_session_agent_created, ix_session_user_created, ix_session_type_created, ix_reacttask_agent_created, ix_reacttask_user_created, ix_reacttask_status_created, ix_reacttask_agent_status, ix_fileasset_user_created)
+- Each chart component already has empty state messages ("No tasks in this period.", etc.)
+- Ruff lint + Pyright + Frontend type-check + ESLint: 0 new errors

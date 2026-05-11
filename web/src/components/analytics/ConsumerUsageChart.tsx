@@ -9,42 +9,40 @@ import {
 } from "@/components/ui/chart";
 import { Line, LineChart, XAxis, YAxis } from "recharts";
 
-import type { DailyUserActivity } from "@/utils/api";
+import type { DailyConsumerUsage } from "@/utils/api";
 
-export type { DailyUserActivity } from "@/utils/api";
+export type { DailyConsumerUsage } from "@/utils/api";
 
-/** Props for the user activity line chart. */
-export interface UserActivityChartProps {
-  /** Daily DAU/WAU/MAU data for the selected range. */
-  data: DailyUserActivity[];
+/** Props for the consumer usage line chart. */
+export interface ConsumerUsageChartProps {
+  /** Daily consumer sessions and distinct users for an agent. */
+  data: DailyConsumerUsage[];
 }
 
 const chartConfig: ChartConfig = {
-  dau: {
-    label: "DAU",
+  sessions: {
+    label: "Sessions",
     color: "oklch(var(--chart-4))",
   },
-  wau: {
-    label: "WAU",
-    color: "oklch(var(--chart-3))",
-  },
-  mau: {
-    label: "MAU",
+  dau: {
+    label: "Distinct Users",
     color: "oklch(var(--chart-2))",
   },
 };
 
-/** Line chart showing DAU/WAU/MAU trend over time. */
-export function UserActivityChart({ data }: UserActivityChartProps) {
+/** Line chart showing daily consumer sessions and distinct users for one agent. */
+export function ConsumerUsageChart({ data }: ConsumerUsageChartProps) {
+  const totalSessions = data.reduce((sum, d) => sum + d.sessions, 0);
+
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">User Activity</CardTitle>
+        <CardTitle className="text-sm font-medium">Consumer Usage</CardTitle>
       </CardHeader>
       <CardContent>
-        {data.length === 0 ? (
+        {totalSessions === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            No user activity data for this period.
+            No consumer sessions in this period.
           </p>
         ) : (
           <ChartContainer config={chartConfig} className="h-[250px] w-full">
@@ -60,22 +58,15 @@ export function UserActivityChart({ data }: UserActivityChartProps) {
               <ChartLegend content={<ChartLegendContent />} />
               <Line
                 type="monotone"
+                dataKey="sessions"
+                stroke="var(--color-sessions)"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
                 dataKey="dau"
                 stroke="var(--color-dau)"
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="wau"
-                stroke="var(--color-wau)"
-                strokeWidth={2}
-                dot={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="mau"
-                stroke="var(--color-mau)"
                 strokeWidth={2}
                 dot={false}
               />

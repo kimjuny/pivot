@@ -4,7 +4,7 @@ import { create } from 'zustand';
  * Represents a tab in the agent detail page.
  * Each tab can display different content types: tools, skills, or functions.
  */
-export type AgentTabType = 'tool' | 'skill' | 'function';
+export type AgentTabType = 'tool' | 'skill' | 'function' | 'analytics';
 
 /**
  * Optional metadata attached to tool/skill tabs.
