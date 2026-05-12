@@ -19,6 +19,7 @@ import { formatTimestamp } from "@/utils/timestamp";
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -165,7 +166,8 @@ export default function SessionHistoryPage() {
   );
 
   return (
-    <div className="max-w-5xl mx-auto px-6 py-8">
+    <ScrollArea className="h-full">
+      <div className="max-w-5xl mx-auto px-6 py-8">
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight">Session History</h1>
@@ -450,6 +452,7 @@ export default function SessionHistoryPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </ScrollArea>
   );
 }

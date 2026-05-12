@@ -194,10 +194,12 @@ export function AccessDeniedPage() {
 export function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="flex h-screen flex-col bg-background text-foreground">
         <Navigation />
         <StorageStatusBanner />
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {children}
+        </div>
       </div>
     </ProtectedRoute>
   );

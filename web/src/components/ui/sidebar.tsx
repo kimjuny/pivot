@@ -7,6 +7,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -407,17 +408,20 @@ SidebarSeparator.displayName = "SidebarSeparator"
 const SidebarContent = React.forwardRef<
     HTMLDivElement,
     React.ComponentProps<"div">
->(({ className, ...props }, ref) => {
+>(({ className, children, ...props }, ref) => {
     return (
-        <div
+        <ScrollArea
             ref={ref}
             data-sidebar="content"
             className={cn(
-                "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+                "flex-1 group-data-[collapsible=icon]:overflow-hidden",
                 className
             )}
-            {...props}
-        />
+        >
+            <div className="flex min-h-0 flex-col gap-2" {...props}>
+                {children}
+            </div>
+        </ScrollArea>
     )
 })
 SidebarContent.displayName = "SidebarContent"

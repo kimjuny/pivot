@@ -4,6 +4,7 @@ import type { SVGProps } from "react";
 
 import { hasPermission, useAuth } from "@/contexts/auth-core";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, ShieldCheck, User, Users } from "lucide-react";
 
@@ -59,13 +60,14 @@ export default function AccessManagementPage() {
   }
 
   return (
-    <Tabs
-      value={activeTab}
-      onValueChange={(value) => setActiveTab(value as AccessTab)}
-      orientation="vertical"
-    >
-      {/* Content area — same max-w-5xl mx-auto as other list pages */}
-      <div className="max-w-5xl mx-auto px-6 py-8">
+    <ScrollArea className="h-full">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as AccessTab)}
+        orientation="vertical"
+      >
+        {/* Content area — same max-w-5xl mx-auto as other list pages */}
+        <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">
@@ -120,6 +122,7 @@ export default function AccessManagementPage() {
           </div>
         </div>
       </div>
-    </Tabs>
+      </Tabs>
+    </ScrollArea>
   );
 }

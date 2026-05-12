@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -738,7 +739,8 @@ export default function ExtensionDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <ScrollArea className="h-full">
+      <div className="mx-auto max-w-5xl px-6 py-8">
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button asChild variant="ghost" className="-ml-3 w-fit">
           <Link to={listPath}>
@@ -1190,6 +1192,7 @@ export default function ExtensionDetailPage() {
           }
         }}
       />
-    </div>
+      </div>
+    </ScrollArea>
   );
 }

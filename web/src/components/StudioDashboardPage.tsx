@@ -136,7 +136,7 @@ function StudioDashboardPage() {
   const sectionClass = refreshing ? "section-stale" : "section-fresh";
 
   return (
-    <ScrollArea className="h-[calc(100vh-3rem)]">
+    <ScrollArea className="h-full">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-8">
         <div
           className="dashboard-reveal flex items-start justify-between"

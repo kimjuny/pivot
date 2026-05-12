@@ -47,6 +47,7 @@ import {
 } from "@/utils/api";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   SidebarInset,
   SidebarProvider,
@@ -3672,9 +3673,9 @@ function ChatContainer({
       aria-busy={isLoadingSession}
     >
       <SessionLoadingOverlay isActive={isLoadingSession} />
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto [overflow-anchor:none] [scrollbar-gutter:stable_both-edges]"
+      <ScrollArea
+        viewportRef={scrollContainerRef}
+        className="flex-1"
         onScroll={handleScroll}
       >
         <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
@@ -3729,7 +3730,7 @@ function ChatContainer({
           )}
           <div className="h-1" />
         </div>
-      </div>
+      </ScrollArea>
 
       {sessionType === "studio_test" && agentClientState === "draining_for_upgrade" ? (
         <div className="mx-3 mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">

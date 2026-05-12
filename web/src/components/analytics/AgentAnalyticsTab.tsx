@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { AlertCircle } from "lucide-react";
 
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   getAgentAnalyticsOverview,
@@ -127,59 +128,61 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
   }
 
   return (
-    <div className="space-y-6 p-6 overflow-y-auto h-full">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Analytics</h2>
-        <DateRangeSelector value={dateRange} onChange={handleRangeChange} />
-      </div>
-
-      {error && (
-        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3">
-          <AlertCircle className="size-4 shrink-0 text-destructive" />
-          <p className="text-sm text-destructive flex-1">{error}</p>
-          <button
-            type="button"
-            onClick={() => void fetchData(dateRange)}
-            className="text-sm font-medium text-destructive hover:underline"
-          >
-            Retry
-          </button>
+    <ScrollArea className="h-full">
+      <div className="space-y-6 p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Analytics</h2>
+          <DateRangeSelector value={dateRange} onChange={handleRangeChange} />
         </div>
-      )}
 
-      {/* KPI Cards */}
-      {overview && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          <KpiCard title="Sessions" value={overview.sessions.toLocaleString()} />
-          <KpiCard title="Tasks" value={overview.tasks.toLocaleString()} />
-          <KpiCard title="Success Rate" value={`${overview.success_rate}%`} />
-          <KpiCard title="Avg Tokens" value={overview.avg_tokens.toLocaleString()} />
-          <KpiCard title="Avg Iterations" value={overview.avg_iterations.toString()} />
+        {error && (
+          <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/5 px-4 py-3">
+            <AlertCircle className="size-4 shrink-0 text-destructive" />
+            <p className="text-sm text-destructive flex-1">{error}</p>
+            <button
+              type="button"
+              onClick={() => void fetchData(dateRange)}
+              className="text-sm font-medium text-destructive hover:underline"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* KPI Cards */}
+        {overview && (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+            <KpiCard title="Sessions" value={overview.sessions.toLocaleString()} />
+            <KpiCard title="Tasks" value={overview.tasks.toLocaleString()} />
+            <KpiCard title="Success Rate" value={`${overview.success_rate}%`} />
+            <KpiCard title="Avg Tokens" value={overview.avg_tokens.toLocaleString()} />
+            <KpiCard title="Avg Iterations" value={overview.avg_iterations.toString()} />
+          </div>
+        )}
+
+        {/* Row 1: Session Timeline + Task Status */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <SessionTrendChart data={sessionTrends} />
+          {taskStats && <TaskStatusChart data={taskStats} />}
         </div>
-      )}
 
-      {/* Row 1: Session Timeline + Task Status */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <SessionTrendChart data={sessionTrends} />
-        {taskStats && <TaskStatusChart data={taskStats} />}
-      </div>
+        {/* Row 2: Token Usage + Iteration Distribution */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <IterationDistributionChart data={iterations} />
+        </div>
 
-      {/* Row 2: Token Usage + Iteration Distribution */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <IterationDistributionChart data={iterations} />
-      </div>
+        {/* Row 3: Consumer Usage + Channel Activity */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <ConsumerUsageChart data={consumerUsage} />
+          <ChannelActivityCard data={channelActivity} />
+        </div>
 
-      {/* Row 3: Consumer Usage + Channel Activity */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ConsumerUsageChart data={consumerUsage} />
-        <ChannelActivityCard data={channelActivity} />
+        {/* Row 4: Top Users + Release Timeline */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <TopUsersTable data={topUsers} />
+          <ReleaseTimeline data={releases} />
+        </div>
       </div>
-
-      {/* Row 4: Top Users + Release Timeline */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TopUsersTable data={topUsers} />
-        <ReleaseTimeline data={releases} />
-      </div>
-    </div>
+    </ScrollArea>
   );
 }
