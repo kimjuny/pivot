@@ -4089,9 +4089,9 @@ export interface TaskStats {
 /** One day's token usage broken down by type. */
 export interface DailyTokenUsage {
   date: string;
-  prompt: number;
-  completion: number;
-  cached: number;
+  uncached_input: number;
+  cached_input: number;
+  output: number;
 }
 
 /** One agent's popularity rank by consumer session count. */

@@ -94,9 +94,9 @@ def get_token_usage(
     return [
         {
             "date": item.date,
-            "prompt": item.prompt,
-            "completion": item.completion,
-            "cached": item.cached,
+            "uncached_input": item.uncached_input,
+            "cached_input": item.cached_input,
+            "output": item.output,
         }
         for item in service.get_token_usage(days)
     ]
@@ -276,9 +276,9 @@ def get_agent_token_usage(
     return [
         {
             "date": item.date,
-            "prompt": item.prompt,
-            "completion": item.completion,
-            "cached": item.cached,
+            "uncached_input": item.uncached_input,
+            "cached_input": item.cached_input,
+            "output": item.output,
         }
         for item in service.get_agent_token_usage(agent_id, days)
     ]

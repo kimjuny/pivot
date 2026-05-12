@@ -161,15 +161,6 @@ CLARIFY的`action.output`形态：
 - `answer_payload`中写最终输出给用户的完整内容，建议使用markdown格式。
 - `answer_payload`不要包Markdown代码围栏；它本身就是最终答案正文。
 
-ANSWER的`action.output`形态：
-
-{
-  "answer": {
-    "$payload_ref": "answer_payload"
-  },
-  "attachments": []
-}
-
 ANSWER输出示例。实际输出时从`{`开始，到最后一个payload END标记结束，不要添加其它文字：
 
 {
@@ -183,7 +174,7 @@ ANSWER输出示例。实际输出时从`{`开始，到最后一个payload END标
       "answer": {
         "$payload_ref": "answer_payload"
       },
-      "attachments": []
+      "attachments": [] // 附件需要提供文件在`/workspace`中的具体path，只有你挂载出来的附件用户才能浏览或下载
     }
   },
   "task_summary": {

@@ -64,9 +64,9 @@ class DailyTokenUsage:
     """One day's token usage broken down by type."""
 
     date: str
-    prompt: int
-    completion: int
-    cached: int
+    uncached_input: int
+    cached_input: int
+    output: int
 
 
 @dataclass(frozen=True)
@@ -385,23 +385,25 @@ class AnalyticsService:
 
         raw: dict[str, dict[str, int]] = {}
         for row in self.db.exec(stmt):
+            prompt = row[1] or 0
+            cached = row[3] or 0
             raw[row[0]] = {
-                "prompt": row[1] or 0,
-                "completion": row[2] or 0,
-                "cached": row[3] or 0,
+                "uncached_input": max(prompt - cached, 0),
+                "cached_input": cached,
+                "output": row[2] or 0,
             }
 
         filled = _fill_date_range(
             raw,
             days,
-            lambda d: {"prompt": 0, "completion": 0, "cached": 0},
+            lambda d: {"uncached_input": 0, "cached_input": 0, "output": 0},
         )
         return [
             DailyTokenUsage(
                 date=date_str,
-                prompt=vals["prompt"],
-                completion=vals["completion"],
-                cached=vals["cached"],
+                uncached_input=vals["uncached_input"],
+                cached_input=vals["cached_input"],
+                output=vals["output"],
             )
             for date_str, vals in filled.items()
         ]
@@ -728,23 +730,25 @@ class AnalyticsService:
 
         raw: dict[str, dict[str, int]] = {}
         for row in self.db.exec(stmt):
+            prompt = row[1] or 0
+            cached = row[3] or 0
             raw[row[0]] = {
-                "prompt": row[1] or 0,
-                "completion": row[2] or 0,
-                "cached": row[3] or 0,
+                "uncached_input": max(prompt - cached, 0),
+                "cached_input": cached,
+                "output": row[2] or 0,
             }
 
         filled = _fill_date_range(
             raw,
             days,
-            lambda d: {"prompt": 0, "completion": 0, "cached": 0},
+            lambda d: {"uncached_input": 0, "cached_input": 0, "output": 0},
         )
         return [
             DailyTokenUsage(
                 date=date_str,
-                prompt=vals["prompt"],
-                completion=vals["completion"],
-                cached=vals["cached"],
+                uncached_input=vals["uncached_input"],
+                cached_input=vals["cached_input"],
+                output=vals["output"],
             )
             for date_str, vals in filled.items()
         ]

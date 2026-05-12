@@ -20,19 +20,24 @@ export interface TokenUsageChartProps {
 }
 
 const chartConfig: ChartConfig = {
-  prompt: {
-    label: "Prompt",
+  uncached_input: {
+    label: "Uncached Input",
     color: "oklch(var(--chart-4))",
   },
-  completion: {
-    label: "Completion",
-    color: "oklch(var(--chart-3))",
-  },
-  cached: {
-    label: "Cached",
+  cached_input: {
+    label: "Cached Input",
     color: "oklch(var(--chart-2))",
   },
+  output: {
+    label: "Output",
+    color: "oklch(var(--chart-3))",
+  },
 };
+
+const compactFormatter = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 /** Stacked bar chart showing daily token usage broken down by type. */
 export function TokenUsageChart({ data }: TokenUsageChartProps) {
@@ -55,24 +60,50 @@ export function TokenUsageChart({ data }: TokenUsageChartProps) {
                 axisLine={false}
                 tickFormatter={(v: string) => v.slice(5)}
               />
-              <YAxis tickLine={false} axisLine={false} width={50} allowDecimals={false} />
-              <ChartTooltip content={<ChartTooltipContent />} />
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                width={52}
+                allowDecimals={false}
+                tickFormatter={(v: number) => compactFormatter.format(v)}
+              />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={(value, name, item, index) => (
+                      <>
+                        <div
+                          className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                          style={{ backgroundColor: `var(--color-${name})` }}
+                        />
+                        {chartConfig[name as keyof typeof chartConfig]?.label ?? String(name)}
+                        <div className="ml-auto font-mono font-medium tabular-nums text-foreground">
+                          {typeof value === "number" ? value.toLocaleString() : String(value)}
+                        </div>
+                        {index === 2 && (
+                          <div className="mt-1.5 flex basis-full items-center border-t pt-1.5 text-xs font-medium text-foreground">
+                            Total
+                            <div className="ml-auto font-mono font-medium tabular-nums">
+                              {(() => {
+                                const p = item.payload as Record<string, unknown>;
+                                const total =
+                                  Number(p.uncached_input ?? 0) +
+                                  Number(p.cached_input ?? 0) +
+                                  Number(p.output ?? 0);
+                                return total.toLocaleString();
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  />
+                }
+              />
               <ChartLegend content={<ChartLegendContent />} />
-              <Bar
-                dataKey="prompt"
-                stackId="tokens"
-                fill="var(--color-prompt)"
-              />
-              <Bar
-                dataKey="completion"
-                stackId="tokens"
-                fill="var(--color-completion)"
-              />
-              <Bar
-                dataKey="cached"
-                stackId="tokens"
-                fill="var(--color-cached)"
-              />
+              <Bar dataKey="uncached_input" stackId="tokens" fill="var(--color-uncached_input)" />
+              <Bar dataKey="cached_input" stackId="tokens" fill="var(--color-cached_input)" />
+              <Bar dataKey="output" stackId="tokens" fill="var(--color-output)" />
             </BarChart>
           </ChartContainer>
         )}
