@@ -18,7 +18,7 @@ def _serialize_preview_record(
     service: PreviewEndpointService,
 ) -> dict[str, object]:
     """Return one tool-facing preview payload."""
-    return {
+    result = {
         "preview_id": record.preview_id,
         "session_id": record.session_id,
         "workspace_id": record.workspace_id,
@@ -31,6 +31,18 @@ def _serialize_preview_record(
         "created_at": record.created_at.isoformat(),
     }
 
+    # If running in background mode, include log file information
+    if record.run_in_background and record.start_server:
+        log_file = f"/workspace/.tmp/preview-{record.preview_id}.log"
+        result.update({
+            "detached": True,
+            "log_file": log_file,
+        })
+    else:
+        result["detached"] = False
+
+    return result
+
 
 @tool
 def create_preview_endpoint(
@@ -39,28 +51,31 @@ def create_preview_endpoint(
     port: int,
     path: str = "/",
     cwd: str = ".",
+    run_in_background: bool = True,
 ) -> dict[str, object]:
     """Create/reconnect a web preview for this chat session.
-
-    ``start_server`` is replayed now and on reconnect, so it must be idempotent,
-    start the server in the background, and return quickly. Prefer a small
-    script or detached command such as
-    ``nohup npm run dev -- --host 0.0.0.0 > /tmp/preview.log 2>&1 &``.
 
     The preview server must bind ``0.0.0.0`` inside the sandbox; ``localhost``
     and ``127.0.0.1`` are not reachable through the proxy.
 
     Args:
         preview_name (required, str): Label shown in the preview picker.
-        start_server (required, str): Idempotent detached shell command that
-            ensures the server is running and exits promptly.
+        start_server (required, str): Shell command to start the preview server.
+            Write a simple foreground command like ``npm run dev -- --host 0.0.0.0``
+            or ``python -m http.server 8000 --bind 0.0.0.0``. The tool will
+            automatically detach it if ``run_in_background`` is True.
         port (required, int): Sandbox-local HTTP port to expose.
         path (optional, str): Initial HTTP path. Defaults to ``/``.
         cwd (optional, str): Workspace-relative or absolute ``/workspace`` directory for
             ``start_server``. Defaults to ``.``.
+        run_in_background (optional, bool): If True (default), automatically detach
+            the server process so it runs in the background and the command returns
+            immediately. Server output will be logged to
+            ``/workspace/.tmp/preview-{preview_id}.log``. Set to False only if
+            ``start_server`` is a quick setup script that exits on its own.
 
     Returns:
-        Preview metadata, proxy URL, and UI intent.
+        Preview metadata, proxy URL, log file path, and UI intent.
 
     Raises:
         RuntimeError: If tool execution context is missing or not session-backed.
@@ -93,6 +108,7 @@ def create_preview_endpoint(
             cwd=cwd,
             start_server=normalized_start_server,
             skills=context.allowed_skills,
+            run_in_background=run_in_background,
         )
         record = service.connect_preview_endpoint(
             preview_id=record.preview_id,

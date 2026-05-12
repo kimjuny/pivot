@@ -56,6 +56,7 @@ class PreviewEndpointRecord:
     cwd: str | None = None
     start_server: str | None = None
     allowed_skills: tuple[dict[str, str], ...] = ()
+    run_in_background: bool = True
 
 
 _PREVIEW_ENDPOINTS: dict[str, PreviewEndpointRecord] = {}
@@ -85,6 +86,7 @@ class PreviewEndpointService:
         cwd: str | None = None,
         start_server: str | None = None,
         skills: tuple[dict[str, str], ...] | list[dict[str, str]] | None = None,
+        run_in_background: bool = True,
     ) -> PreviewEndpointRecord:
         """Create or update one in-memory preview endpoint for an owned chat session."""
         normalized_port = self._normalize_port(port)
@@ -127,6 +129,7 @@ class PreviewEndpointService:
                     cwd=normalized_cwd,
                     start_server=normalized_start_server,
                     allowed_skills=normalized_skills,
+                    run_in_background=run_in_background,
                 )
                 _PREVIEW_ENDPOINTS[record.preview_id] = record
                 return record
@@ -144,6 +147,7 @@ class PreviewEndpointService:
                 cwd=normalized_cwd,
                 start_server=normalized_start_server,
                 allowed_skills=normalized_skills,
+                run_in_background=run_in_background,
             )
             _PREVIEW_ENDPOINTS[record.preview_id] = record
         return record
@@ -204,11 +208,15 @@ class PreviewEndpointService:
                 f"Preview startup command failed (exit={launch_result.exit_code}): {message}"
             )
 
-        self._wait_until_preview_reachable(
-            record=record,
-            workspace_backend_path=workspace_backend_path,
-            timeout_seconds=timeout_seconds,
-        )
+        # When running in background mode the server starts asynchronously, so
+        # there is no point blocking here until it becomes reachable — the tool
+        # returns immediately and the Agent can open the preview URL once ready.
+        if not record.run_in_background:
+            self._wait_until_preview_reachable(
+                record=record,
+                workspace_backend_path=workspace_backend_path,
+                timeout_seconds=timeout_seconds,
+            )
         return record
 
     def create_preview_endpoint_from_existing(
@@ -233,6 +241,7 @@ class PreviewEndpointService:
             cwd=source_record.cwd,
             start_server=source_record.start_server,
             skills=list(source_record.allowed_skills),
+            run_in_background=source_record.run_in_background,
         )
 
     def get_preview_endpoint(
@@ -442,7 +451,22 @@ class PreviewEndpointService:
         """Return one bash command that replays a preview launch recipe."""
         if record.cwd is None or record.start_server is None:
             raise PreviewEndpointValidationError("Preview launch recipe is incomplete.")
-        return f"cd {shlex.quote(record.cwd)} && {record.start_server}"
+
+        base_cmd = f"cd {shlex.quote(record.cwd)} && {record.start_server}"
+
+        if record.run_in_background:
+            log_file = f"/workspace/.tmp/preview-{record.preview_id}.log"
+            # setsid creates a new session, fully detaching the process from the parent.
+            # Even if start_server already contains & or nohup, this provides double insurance.
+            # mkdir -p ensures the log directory exists before redirecting output.
+            wrapped = (
+                f"mkdir -p /workspace/.tmp && "
+                f"setsid bash -c {shlex.quote(base_cmd)} "
+                f"> {log_file} 2>&1 < /dev/null &"
+            )
+            return wrapped
+        else:
+            return base_cmd
 
     def _wait_until_preview_reachable(
         self,

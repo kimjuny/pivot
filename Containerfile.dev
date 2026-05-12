@@ -34,17 +34,18 @@ FROM docker.io/library/python:3.11-slim AS sandbox-base
 
 # Provide the default runtime utilities needed by sandboxed function execution.
 # We keep them in the image so every sidecar can start immediately without a
-# bootstrap step. Node/npm are installed here because some skills and sandboxed
-# tasks need a JavaScript runtime in addition to Python, Chromium supports
-# browser-driven workflows, and git/curl are bundled because sandboxed tasks
-# commonly need source control metadata and HTTP fetch helpers.
+# bootstrap step. Node/npm are installed from NodeSource so the npm version
+# stays paired with Node 20.x — Debian's own `nodejs` apt package ships a
+# node binary without npm, which silently broke `npm i` inside sandboxes.
+# Chromium supports browser-driven workflows, and git/curl are bundled because
+# sandboxed tasks commonly need source control metadata and HTTP fetch helpers.
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y --no-install-recommends \
     chromium \
-    curl \
     git \
     nodejs \
-    npm \
     ripgrep && \
     rm -rf /var/lib/apt/lists/*
 
