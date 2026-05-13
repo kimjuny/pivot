@@ -182,6 +182,7 @@ function StudioDashboardPage() {
                   ? `+${overview.agents_new} new`
                   : undefined
               }
+              tooltip="Total number of agents created on the platform during the selected period."
             />
             <KpiCard
               title="Sessions"
@@ -191,6 +192,7 @@ function StudioDashboardPage() {
                 overview.sessions_total,
                 overview.sessions_delta,
               )}
+              tooltip="Total consumer conversation sessions in the selected period. The delta compares against the equal-length period immediately before it."
             />
             <KpiCard
               title="Users"
@@ -200,11 +202,13 @@ function StudioDashboardPage() {
                   ? `+${overview.users_new} new`
                   : undefined
               }
+              tooltip="Total registered users on the platform, including newly signed-up users in the selected period."
             />
             <KpiCard
               title="Tasks"
               value={overview.tasks_total.toLocaleString()}
               subtitle={`${overview.tasks_daily_avg}/day avg`}
+              tooltip="Total tasks executed by all agents and the average number of tasks completed per day during the selected period."
             />
             <KpiCard
               title="Success Rate"
@@ -220,6 +224,7 @@ function StudioDashboardPage() {
                     }
                   : undefined
               }
+              tooltip="Percentage of tasks that completed without errors. The trend arrow shows the change vs the previous period (percentage points)."
             />
           </div>
 

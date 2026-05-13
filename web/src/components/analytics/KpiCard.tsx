@@ -1,7 +1,13 @@
 import { useMemo } from "react";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Info } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useCountUp } from "@/hooks/use-count-up";
 
 /** Trend direction shown beside the KPI value. */
@@ -22,6 +28,8 @@ export interface KpiCardProps {
   subtitle?: string;
   /** Optional trend indicator showing period-over-period change. */
   trend?: KpiTrend;
+  /** Hover explanation shown beside the title. */
+  tooltip?: string;
 }
 
 /** Decomposed numeric formatting parsed from a `string | number` KPI value. */
@@ -82,6 +90,7 @@ export function KpiCard({
   value,
   subtitle,
   trend,
+  tooltip,
 }: KpiCardProps) {
   const parsed = useMemo(() => parseKpiValue(value), [value]);
   const animatable = !Number.isNaN(parsed.numeric);
@@ -94,7 +103,28 @@ export function KpiCard({
   return (
     <Card>
       <CardContent className="p-4 text-center">
-        <p className="text-xs font-medium text-muted-foreground">{title}</p>
+        <p className="text-xs font-medium text-muted-foreground">
+          <span className="relative inline">
+            {title}
+            {tooltip ? (
+              <span className="absolute top-1/2 -translate-y-1/2" style={{ left: "100%", paddingLeft: 2 }}>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3 w-3 cursor-help text-muted-foreground/60" />
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      className="max-w-56 text-xs leading-relaxed"
+                    >
+                      {tooltip}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </span>
+            ) : null}
+          </span>
+        </p>
         <span className="mt-1 block text-2xl font-bold tabular-nums">
           {display}
         </span>

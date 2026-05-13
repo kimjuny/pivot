@@ -26,11 +26,11 @@ const chartConfig: ChartConfig = {
   },
   cached_input: {
     label: "Cached Input",
-    color: "oklch(var(--chart-2))",
+    color: "oklch(var(--chart-3))",
   },
   output: {
     label: "Output",
-    color: "oklch(var(--chart-3))",
+    color: "oklch(var(--chart-2))",
   },
 };
 

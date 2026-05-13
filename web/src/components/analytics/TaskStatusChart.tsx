@@ -5,7 +5,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { Cell, Pie, PieChart } from "recharts";
+import { Cell, Label, Pie, PieChart } from "recharts";
 
 import type { TaskStats } from "@/utils/api";
 
@@ -63,30 +63,52 @@ export function TaskStatusChart({ data }: TaskStatusChartProps) {
             No tasks in this period.
           </p>
         ) : (
-          <div>
-            <ChartContainer config={chartConfig} className="mx-auto h-[220px] w-full">
-              <PieChart>
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Pie
-                  data={chartData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={55}
-                  outerRadius={85}
-                  strokeWidth={2}
-                >
-                  {chartData.map((item) => (
-                    <Cell key={item.key} fill={COLORS[STATUS_KEYS.indexOf(item.key)]} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ChartContainer>
-            <div className="pointer-events-none -mt-[138px] flex items-center justify-center pb-[138px]">
-              <span className="text-2xl font-bold">{total.toLocaleString()}</span>
-            </div>
-          </div>
+          <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[220px]">
+            <PieChart>
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Pie
+                data={chartData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={55}
+                outerRadius={85}
+                strokeWidth={2}
+              >
+                {chartData.map((item) => (
+                  <Cell key={item.key} fill={COLORS[STATUS_KEYS.indexOf(item.key)]} />
+                ))}
+                <Label
+                  content={({ viewBox }) => {
+                    if (viewBox && "cx" in viewBox && "cy" in viewBox) {
+                      return (
+                        <text
+                          x={viewBox.cx}
+                          y={viewBox.cy}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          <tspan
+                            x={viewBox.cx}
+                            y={viewBox.cy}
+                            className="fill-foreground text-2xl font-bold"
+                          >
+                            {total.toLocaleString()}
+                          </tspan>
+                          <tspan
+                            x={viewBox.cx}
+                            y={(viewBox.cy || 0) + 20}
+                            className="fill-muted-foreground text-xs"
+                          >
+                            Tasks
+                          </tspan>
+                        </text>
+                      );
+                    }
+                  }}
+                />
+              </Pie>
+            </PieChart>
+          </ChartContainer>
         )}
       </CardContent>
     </Card>
