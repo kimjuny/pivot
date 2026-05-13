@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC
+from urllib.parse import quote
 
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
@@ -155,6 +156,8 @@ async def get_image_content(
         content=payload,
         media_type=file_asset.mime_type,
         headers={
-            "Content-Disposition": (f'inline; filename="{file_asset.original_name}"')
+            "Content-Disposition": (
+                f"inline; filename*=UTF-8''{quote(file_asset.original_name, safe='')}"
+            ),
         },
     )

@@ -1,5 +1,12 @@
 import { useState } from "react";
-import { Loader2, Trash2, XCircle } from "lucide-react";
+import {
+  FileSpreadsheet,
+  FileText,
+  Loader2,
+  Presentation,
+  Trash2,
+  XCircle,
+} from "lucide-react";
 
 import {
   Tooltip,
@@ -11,6 +18,28 @@ import {
 import type { ChatAttachment, PendingUploadItem } from "../types";
 import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 import { AttachmentThumbnail } from "./AttachmentThumbnail";
+import { ChatAttachmentFileDialog } from "./ChatAttachmentFileDialog";
+
+/** Formats bytes into compact labels (e.g. "4.9KB"). */
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) return `${sizeBytes}B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)}KB`;
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/** Renders a compact file-type icon for document attachments. */
+function getDocumentIcon(extension: string) {
+  const ext = extension.toLowerCase();
+  if (ext === "pptx") {
+    return <Presentation className="h-4 w-4 shrink-0 text-muted-foreground" />;
+  }
+  if (ext === "xlsx") {
+    return (
+      <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />
+    );
+  }
+  return <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />;
+}
 
 interface AttachmentListProps {
   attachments?: ChatAttachment[];
@@ -29,6 +58,8 @@ export function AttachmentList({
   const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(
     null,
   );
+  const [fileDialogAttachment, setFileDialogAttachment] =
+    useState<ChatAttachment | null>(null);
 
   if (!attachments || attachments.length === 0) {
     return null;
@@ -74,7 +105,7 @@ export function AttachmentList({
                   </Tooltip>
                 </TooltipProvider>
               ) : null;
-            const cardClassName = `relative flex h-full w-full overflow-hidden rounded-lg border bg-muted ${
+            const cardClassName = `relative flex h-full w-full overflow-hidden rounded-lg border bg-background/80 ${
               queueItem.status === "error"
                 ? "border-destructive/60 bg-destructive/[0.035] shadow-[0_0_0_1px_oklch(var(--destructive)/0.18)]"
                 : "border-border/80"
@@ -138,48 +169,51 @@ export function AttachmentList({
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-end gap-1.5">
         {attachments.map((attachment) => {
           const isPreviewableImage =
             attachment.kind === "image" ||
             attachment.mimeType.startsWith("image/");
-          const cardContent = (
-            <>
-              <div className="h-28 w-28">
-                <AttachmentThumbnail
-                  attachment={attachment}
-                  alt={attachment.originalName}
-                />
-              </div>
-              <div className="max-w-28 border-t border-border/60 px-2 py-1 text-[10px] text-muted-foreground">
-                <div className="truncate">{attachment.originalName}</div>
-                {attachment.kind === "document" && (
-                  <div className="truncate uppercase">
-                    {attachment.extension}
-                    {attachment.pageCount ? ` · ${attachment.pageCount}p` : ""}
-                  </div>
-                )}
-              </div>
-            </>
-          );
 
-          return isPreviewableImage ? (
+          if (isPreviewableImage) {
+            return (
+              <button
+                key={attachment.fileId}
+                type="button"
+                onClick={() => setPreviewAttachment(attachment)}
+                className="overflow-hidden rounded-xl border border-border/60 transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                aria-label={`Preview ${attachment.originalName}`}
+              >
+                <div className="h-24 w-24">
+                  <AttachmentThumbnail
+                    attachment={attachment}
+                    alt={attachment.originalName}
+                  />
+                </div>
+              </button>
+            );
+          }
+
+          return (
             <button
               key={attachment.fileId}
               type="button"
-              onClick={() => setPreviewAttachment(attachment)}
-              className="overflow-hidden rounded-xl border border-border bg-background/70 text-left transition-colors hover:border-border/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              aria-label={`Preview ${attachment.originalName}`}
+              onClick={() => setFileDialogAttachment(attachment)}
+              className="flex items-center gap-2 overflow-hidden rounded-lg border border-border/60 bg-background/80 px-2.5 py-1.5 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              aria-label={`View ${attachment.originalName}`}
             >
-              {cardContent}
+              {getDocumentIcon(attachment.extension)}
+              <div className="flex flex-col overflow-hidden">
+                <span className="max-w-[140px] truncate text-[11px] font-medium text-foreground">
+                  {attachment.originalName}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {attachment.format.charAt(0).toUpperCase() + attachment.format.slice(1).toLowerCase()}
+                  {" · "}
+                  {formatFileSize(attachment.sizeBytes)}
+                </span>
+              </div>
             </button>
-          ) : (
-            <div
-              key={attachment.fileId}
-              className="overflow-hidden rounded-xl border border-border bg-background/70"
-            >
-              {cardContent}
-            </div>
           );
         })}
       </div>
@@ -189,6 +223,15 @@ export function AttachmentList({
         onOpenChange={(open) => {
           if (!open) {
             setPreviewAttachment(null);
+          }
+        }}
+      />
+      <ChatAttachmentFileDialog
+        attachment={fileDialogAttachment}
+        open={fileDialogAttachment !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFileDialogAttachment(null);
           }
         }}
       />

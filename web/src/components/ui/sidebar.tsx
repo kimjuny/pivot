@@ -418,7 +418,7 @@ const SidebarContent = React.forwardRef<
                 className
             )}
         >
-            <div className="flex min-h-0 flex-col gap-2" {...props}>
+            <div className="flex min-h-0 min-w-0 flex-col gap-2" {...props}>
                 {children}
             </div>
         </ScrollArea>

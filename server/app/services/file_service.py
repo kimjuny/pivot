@@ -384,14 +384,36 @@ class FileService:
         object_storage = self._object_storage()
 
         if upload_kind == "document":
-            verified_document = self.verify_document_upload(normalized_name, file_bytes)
-            stored_name = f"{file_id}.{verified_document.extension}"
+            extension = self._extract_extension(normalized_name)
+            replacement = _LEGACY_OFFICE_REPLACEMENTS.get(extension)
+            if replacement is not None:
+                raise ValueError(
+                    "Legacy Office formats are not supported. "
+                    f"Please upload '.{replacement}' instead."
+                )
+
+            format_config = _ALLOWED_DOCUMENT_TYPES.get(extension)
+            if format_config is None:
+                allowed = ", ".join(
+                    f".{ext}" for ext in sorted(_ALLOWED_DOCUMENT_TYPES.keys())
+                )
+                raise ValueError(
+                    f"Unsupported file format. Allowed formats: {allowed}."
+                )
+
+            format_name, mime_type = format_config
+            size_bytes = len(file_bytes)
+            if size_bytes == 0:
+                raise ValueError("Uploaded file is empty.")
+            max_file_size = int(self.settings.MAX_FILE_SIZE)
+            if size_bytes > max_file_size:
+                raise ValueError(
+                    f"File exceeds the {max_file_size // (1024 * 1024)}MB upload limit."
+                )
+            text_encoding = self._detect_text_encoding(file_bytes, extension)
+
+            stored_name = f"{file_id}.{extension}"
             object_key = self.build_upload_object_key(
-                user_id=user_id,
-                file_id=file_id,
-                stored_name=stored_name,
-            )
-            markdown_object_key = self.build_upload_markdown_object_key(
                 user_id=user_id,
                 file_id=file_id,
                 stored_name=stored_name,
@@ -399,17 +421,11 @@ class FileService:
             try:
                 stored_original = object_storage.put_bytes(
                     object_key,
-                    verified_document.file_bytes,
-                    content_type=verified_document.mime_type,
-                )
-                object_storage.put_bytes(
-                    markdown_object_key,
-                    verified_document.markdown_text.encode("utf-8"),
-                    content_type="text/markdown",
+                    file_bytes,
+                    content_type=mime_type,
                 )
             except OSError as err:
                 object_storage.delete(object_key)
-                object_storage.delete(markdown_object_key)
                 raise ValueError("Failed to persist uploaded file.") from err
 
             file_asset = FileAsset(
@@ -421,17 +437,17 @@ class FileService:
                 storage_backend=stored_original.storage_backend,
                 object_key=stored_original.object_key,
                 kind="document",
-                mime_type=verified_document.mime_type,
-                format=verified_document.format,
-                extension=verified_document.extension,
-                size_bytes=verified_document.size_bytes,
+                mime_type=mime_type,
+                format=format_name,
+                extension=extension,
+                size_bytes=size_bytes,
                 width=0,
                 height=0,
-                page_count=verified_document.page_count,
-                markdown_object_key=markdown_object_key,
-                can_extract_text=verified_document.can_extract_text,
-                suspected_scanned=verified_document.suspected_scanned,
-                text_encoding=verified_document.text_encoding,
+                page_count=None,
+                markdown_object_key=None,
+                can_extract_text=False,
+                suspected_scanned=False,
+                text_encoding=text_encoding,
                 expires_at=now
                 + timedelta(minutes=int(self.settings.FILE_EXPIRE_MINUTES)),
                 created_at=now,
@@ -515,6 +531,14 @@ class FileService:
     def get_file_by_id(self, file_id: str) -> FileAsset | None:
         """Return a file by public ID without applying ownership rules."""
         stmt = select(FileAsset).where(FileAsset.file_id == file_id)
+        return self.db.exec(stmt).first()
+
+    def get_file_by_workspace_path(
+        self, workspace_relative_path: str
+    ) -> FileAsset | None:
+        """Return a file asset by its projected workspace-relative path."""
+        normalized = workspace_relative_path.strip().lstrip("/")
+        stmt = select(FileAsset).where(FileAsset.workspace_relative_path == normalized)
         return self.db.exec(stmt).first()
 
     def resolve_file_content_path(self, file_asset: FileAsset) -> Path:

@@ -6,7 +6,6 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
 } from "react";
-import { toast } from "sonner";
 
 import {
   deleteChatFile,
@@ -29,7 +28,6 @@ import { getUniqueClipboardFiles, toChatAttachment } from "../utils/chatData";
  */
 export function useChatUploads(primaryLlmId?: number) {
   const [pendingFiles, setPendingFiles] = useState<PendingUploadItem[]>([]);
-  const [supportsImageInput, setSupportsImageInput] = useState<boolean>(false);
   const [supportsThinkingSelector, setSupportsThinkingSelector] =
     useState<boolean>(false);
   const [thinkingModes, setThinkingModes] = useState<ChatThinkingMode[]>([]);
@@ -47,7 +45,6 @@ export function useChatUploads(primaryLlmId?: number) {
     let isCancelled = false;
 
     if (!primaryLlmId) {
-      setSupportsImageInput(false);
       setSupportsThinkingSelector(false);
       setThinkingModes([]);
       setDefaultThinkingMode("fast");
@@ -56,7 +53,6 @@ export function useChatUploads(primaryLlmId?: number) {
       };
     }
 
-    setSupportsImageInput(false);
     setSupportsThinkingSelector(false);
     setThinkingModes([]);
     setDefaultThinkingMode("fast");
@@ -65,7 +61,6 @@ export function useChatUploads(primaryLlmId?: number) {
       try {
         const llm = await getLLMById(primaryLlmId);
         if (!isCancelled) {
-          setSupportsImageInput(llm.image_input);
           setSupportsThinkingSelector(llmHasThinkingSelector(llm));
           setThinkingModes(getChatThinkingModes(llm));
           setDefaultThinkingMode(getDefaultChatThinkingMode(llm));
@@ -73,7 +68,6 @@ export function useChatUploads(primaryLlmId?: number) {
       } catch (error) {
         if (!isCancelled) {
           console.error("Failed to load primary LLM capabilities:", error);
-          setSupportsImageInput(false);
           setSupportsThinkingSelector(false);
           setThinkingModes([]);
           setDefaultThinkingMode("fast");
@@ -113,20 +107,9 @@ export function useChatUploads(primaryLlmId?: number) {
    */
   const partitionFilesByImageCapability = useCallback(
     (files: File[]) => {
-      const acceptedFiles: File[] = [];
-      let blockedImageCount = 0;
-
-      files.forEach((file) => {
-        if (file.type.startsWith("image/") && !supportsImageInput) {
-          blockedImageCount += 1;
-          return;
-        }
-        acceptedFiles.push(file);
-      });
-
-      return { acceptedFiles, blockedImageCount };
+      return { acceptedFiles: files, blockedImageCount: 0 };
     },
-    [supportsImageInput],
+    [],
   );
 
   /**
@@ -289,12 +272,8 @@ export function useChatUploads(primaryLlmId?: number) {
   const handleFileInputChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
       const selectedFiles = Array.from(event.target.files ?? []);
-      const { acceptedFiles, blockedImageCount } =
-        partitionFilesByImageCapability(selectedFiles);
+      const { acceptedFiles } = partitionFilesByImageCapability(selectedFiles);
 
-      if (blockedImageCount > 0) {
-        toast.error("The primary LLM does not accept image input.");
-      }
       if (acceptedFiles.length > 0) {
         enqueueFiles(acceptedFiles, "local");
       }
@@ -329,19 +308,13 @@ export function useChatUploads(primaryLlmId?: number) {
         return;
       }
 
-      const { acceptedFiles, blockedImageCount } =
+      const { acceptedFiles } =
         partitionFilesByImageCapability(filesToUpload);
       if (acceptedFiles.length === 0) {
-        if (blockedImageCount > 0) {
-          toast.error("The primary LLM does not accept image input.");
-        }
         return;
       }
 
       event.preventDefault();
-      if (blockedImageCount > 0) {
-        toast.error("The primary LLM does not accept image input.");
-      }
       enqueueFiles(acceptedFiles, "clipboard");
     },
     [enqueueFiles, partitionFilesByImageCapability],
@@ -358,7 +331,7 @@ export function useChatUploads(primaryLlmId?: number) {
     pendingFiles,
     readyPendingFiles,
     hasUploadingFiles,
-    supportsImageInput,
+    supportsImageInput: true,
     supportsThinkingSelector,
     thinkingModes,
     defaultThinkingMode,

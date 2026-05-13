@@ -1,18 +1,101 @@
-"""Built-in sandbox tool: read a focused chunk from a workspace file."""
+"""Built-in tool: read a workspace file with automatic multimodal support."""
 
 from __future__ import annotations
 
 import json
+import posixpath
+from typing import TYPE_CHECKING
 
-from app.orchestration.tool import tool
+from app.orchestration.tool import get_current_tool_execution_context, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
+
+if TYPE_CHECKING:
+    from app.orchestration.tool.manager import ToolExecutionContext
+
+_TEXT_EXTENSIONS = frozenset(
+    {
+        "md",
+        "markdown",
+        "txt",
+        "py",
+        "js",
+        "ts",
+        "jsx",
+        "tsx",
+        "json",
+        "yaml",
+        "yml",
+        "toml",
+        "cfg",
+        "ini",
+        "sh",
+        "bash",
+        "zsh",
+        "css",
+        "html",
+        "xml",
+        "sql",
+        "r",
+        "go",
+        "rs",
+        "java",
+        "c",
+        "cpp",
+        "h",
+        "hpp",
+        "rb",
+        "php",
+        "swift",
+        "kt",
+        "scala",
+        "lua",
+        "pl",
+        "ex",
+        "exs",
+        "hs",
+        "ml",
+        "vim",
+        "dockerfile",
+        "makefile",
+        "cmake",
+        "gitignore",
+        "env",
+        "log",
+        "csv",
+        "tsv",
+        "rst",
+        "tex",
+        "diff",
+        "patch",
+        "lock",
+        "conf",
+        "properties",
+        "tf",
+        "hcl",
+        "proto",
+        "graphql",
+        "gql",
+        "prisma",
+        "sol",
+        "move",
+        "zig",
+        "nim",
+        "v",
+        "sv",
+        "vue",
+        "svelte",
+    }
+)
+
+_DOCUMENT_EXTENSIONS = frozenset({"pdf", "docx", "pptx", "xlsx"})
+
+_IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "webp"})
 
 _READ_FILE_SCRIPT = """
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -78,39 +161,65 @@ payload = {
 print(json.dumps(payload, ensure_ascii=False))
 """.strip()
 
+_READ_IMAGE_BASE64_SCRIPT = """
+from __future__ import annotations
 
-@tool(tool_type="sandbox")
-def read_file(
+import base64
+import json
+import mimetypes
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+display_path = str(path).removeprefix("/workspace/") or "."
+if not path.exists():
+    print(f"File not found: {display_path}", file=sys.stderr)
+    raise SystemExit(1)
+if path.is_dir():
+    print(f"Path is a directory, not a file: {display_path}", file=sys.stderr)
+    raise SystemExit(1)
+
+data = base64.b64encode(path.read_bytes()).decode("ascii")
+mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+payload = {"data": data, "mime_type": mime_type, "size_bytes": path.stat().st_size}
+print(json.dumps(payload, ensure_ascii=False))
+""".strip()
+
+
+def _classify_extension(path: str) -> str:
+    """Return 'text', 'document', 'image', or 'unknown' based on file extension."""
+    normalized = posixpath.basename(path).rsplit(".", 1)[-1].lower()
+    if normalized in _TEXT_EXTENSIONS:
+        return "text"
+    if normalized in _DOCUMENT_EXTENSIONS:
+        return "document"
+    if normalized in _IMAGE_EXTENSIONS:
+        return "image"
+    return "unknown"
+
+
+def _resolve_workspace_relative_path(abs_path: str) -> str:
+    """Strip /workspace/ prefix to get the workspace-relative path."""
+    if abs_path.startswith("/workspace/"):
+        return abs_path[len("/workspace/") :]
+    if abs_path.startswith("/workspace"):
+        return abs_path[len("/workspace") :]
+    return abs_path
+
+
+def _require_db_session(ctx: ToolExecutionContext):
+    """Return a db session from the context factory, or raise."""
+    if ctx.db_session_factory is None:
+        raise RuntimeError("read_file requires database access for this file type.")
+    return ctx.db_session_factory()
+
+
+def _read_text_in_sandbox(
     path: str,
-    start_line: int = 1,
-    max_lines: int = 400,
+    start_line: int,
+    max_lines: int,
 ) -> dict[str, object]:
-    """Read numbered UTF-8 lines from a file under ``/workspace``.
-
-    Use this for ``search -> read -> edit`` workflows. The returned line numbers
-    are only a snapshot of the file at read time. After any successful
-    ``edit_file`` or ``write_file`` on that path, re-run ``read_file`` before
-    editing again because the old line numbers may be stale immediately.
-
-    Use the returned numbers for ``edit_file`` hunk headers only. Do not copy
-    the ``N | `` prefixes into diff body lines.
-
-    Args:
-        path (required, str): Relative or absolute workspace path to a text
-            file.
-        start_line (optional, int): 1-based starting line. Defaults to ``1``.
-        max_lines (optional, int): Maximum returned lines. Defaults to ``400``.
-
-    Returns:
-        A dict with chunk bounds, pagination hints, and numbered ``content``.
-    """
-    if start_line < 1:
-        raise ValueError("start_line must be greater than or equal to 1.")
-    if max_lines < 1:
-        raise ValueError("max_lines must be greater than or equal to 1.")
-    if max_lines > 800:
-        raise ValueError("max_lines must be less than or equal to 800.")
-
+    """Read a text file inside the sandbox with line-numbered output."""
     target = workspace_path(path)
     try:
         output = exec_in_sandbox(
@@ -142,3 +251,151 @@ def read_file(
     if not isinstance(payload, dict):
         raise RuntimeError("Sandbox read_file returned an invalid payload.")
     return payload
+
+
+def _read_document(path: str) -> dict[str, object]:
+    """Read a document file using just-in-time Docling conversion."""
+    from app.services.file_service import FileService
+
+    ctx = get_current_tool_execution_context()
+    if ctx is None:
+        raise RuntimeError("Tool execution context is missing.")
+    target = workspace_path(path)
+    relative_path = _resolve_workspace_relative_path(target)
+
+    with _require_db_session(ctx) as db:
+        service = FileService(db)
+        file_asset = service.get_file_by_workspace_path(relative_path)
+        if file_asset is None:
+            raise FileNotFoundError(
+                f"File not found in workspace uploads: {relative_path}"
+            )
+        markdown_text = service._load_document_markdown(file_asset)
+        return {
+            "path": relative_path,
+            "kind": "document",
+            "content": markdown_text,
+        }
+
+
+def _read_image(path: str) -> dict[str, object]:
+    """Read an image file from the sandbox and return multimodal blocks."""
+
+    from app.services.file_service import FileService
+
+    ctx = get_current_tool_execution_context()
+    if ctx is None:
+        raise RuntimeError("Tool execution context is missing.")
+    target = workspace_path(path)
+    relative_path = _resolve_workspace_relative_path(target)
+
+    # Read image bytes directly from the sandbox filesystem
+    try:
+        raw_output = exec_in_sandbox(
+            ["python3", "-c", _READ_IMAGE_BASE64_SCRIPT, target]
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        not_found_prefix = "Sandbox command failed (exit=1): File not found: "
+        if message.startswith(not_found_prefix):
+            raise FileNotFoundError(
+                f"File not found: {message.removeprefix(not_found_prefix)}"
+            ) from exc
+        raise
+
+    payload = json.loads(raw_output)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Sandbox read_image returned an invalid payload.")
+
+    # Look up metadata from DB if available
+    original_name = relative_path
+    mime_type = payload.get("mime_type", "")
+    dimensions = payload.get("dimensions", "unknown")
+
+    if ctx.db_session_factory is not None:
+        with ctx.db_session_factory() as db:
+            service = FileService(db)
+            file_asset = service.get_file_by_workspace_path(relative_path)
+            if file_asset is not None:
+                original_name = file_asset.original_name
+                dimensions = (
+                    f"{file_asset.width}x{file_asset.height}"
+                    if file_asset.width and file_asset.height
+                    else dimensions
+                )
+
+    encoded_data = payload["data"]
+    return {
+        "path": relative_path,
+        "kind": "image",
+        "dimensions": dimensions,
+        "_pivot_multimodal_blocks": [
+            {
+                "type": "text",
+                "text": (
+                    f'Image loaded: "{original_name}"\n'
+                    f"MIME type: {mime_type}\n"
+                    f"Dimensions: {dimensions}"
+                ),
+            },
+            {
+                "type": "image",
+                "media_type": mime_type,
+                "data": encoded_data,
+            },
+        ],
+    }
+
+
+@tool(tool_type="normal")
+def read_file(
+    path: str,
+    start_line: int = 1,
+    max_lines: int = 400,
+) -> dict[str, object]:
+    """Read a file under ``/workspace``. Automatically selects the appropriate
+    reading strategy based on file extension:
+
+    - **Text/code files** (.py, .js, .json, .yaml, .md, etc.): Returns
+      line-numbered content with pagination hints. Compatible with
+      ``edit_file`` line references.
+    - **Documents** (.pdf, .docx, .pptx, .xlsx): Returns Docling-converted
+      markdown content.
+    - **Images** (.png, .jpg, .jpeg, .webp): Makes the image visible to the
+      model in the next iteration. Returns metadata (path, dimensions).
+
+    Args:
+        path (required, str): Relative or absolute workspace path.
+        start_line (optional, int): 1-based starting line for text files.
+            Ignored for documents and images.
+        max_lines (optional, int): Maximum returned lines for text files.
+            Defaults to ``400``. Ignored for documents and images.
+
+    Returns:
+        Text files: A dict with line-numbered ``content`` and pagination
+        hints (``total_lines``, ``has_more_before``, ``has_more_after``, etc.).
+        Documents: A dict with ``content`` as markdown text and ``kind``.
+        Images: A dict with ``path``, ``dimensions``, and ``kind``.
+    """
+    file_type = _classify_extension(path)
+
+    if file_type == "text":
+        if start_line < 1:
+            raise ValueError("start_line must be greater than or equal to 1.")
+        if max_lines < 1:
+            raise ValueError("max_lines must be greater than or equal to 1.")
+        if max_lines > 800:
+            raise ValueError("max_lines must be less than or equal to 800.")
+        return _read_text_in_sandbox(path, start_line, max_lines)
+
+    if file_type == "document":
+        return _read_document(path)
+
+    if file_type == "image":
+        return _read_image(path)
+
+    raise ValueError(
+        f"Unsupported file type: {path!r}. "
+        f"Supported: text/code, documents (pdf/docx/pptx/xlsx), "
+        f"images (png/jpg/jpeg/webp)."
+    )

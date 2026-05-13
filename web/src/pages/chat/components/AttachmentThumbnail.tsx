@@ -88,7 +88,7 @@ export function AttachmentThumbnail({
   if (!shouldRenderImage) {
     return (
       <div
-        className={`flex h-full w-full items-start justify-center bg-muted pt-1.5 ${className ?? ""}`}
+        className={`flex h-full w-full items-start justify-center bg-background/80 pt-1.5 ${className ?? ""}`}
       >
         <AttachmentFileIcon attachment={attachment} />
       </div>

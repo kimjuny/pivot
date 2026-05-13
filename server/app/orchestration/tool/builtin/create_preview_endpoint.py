@@ -34,10 +34,12 @@ def _serialize_preview_record(
     # If running in background mode, include log file information
     if record.run_in_background and record.start_server:
         log_file = f"/workspace/.tmp/preview-{record.preview_id}.log"
-        result.update({
-            "detached": True,
-            "log_file": log_file,
-        })
+        result.update(
+            {
+                "detached": True,
+                "log_file": log_file,
+            }
+        )
     else:
         result["detached"] = False
 

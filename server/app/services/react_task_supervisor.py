@@ -619,7 +619,7 @@ class ReactTaskSupervisor:
                 llm = create_llm_from_config(llm_config)
 
                 turn_files = []
-                turn_file_blocks = []
+                turn_attachments = []
                 if launch.file_ids:
                     file_service = FileService(db)
                     attached_files = file_service.attach_files_to_task(
@@ -631,10 +631,13 @@ class ReactTaskSupervisor:
                     turn_files = file_service.build_history_items([task.task_id]).get(
                         task.task_id, []
                     )
-                    turn_file_blocks = [
-                        content_block
-                        for item in file_service.preprocess_files(attached_files)
-                        for content_block in item.content_blocks
+                    turn_attachments = [
+                        {
+                            "path": f"/workspace/{f.workspace_relative_path}",
+                            "kind": f.kind,
+                        }
+                        for f in attached_files
+                        if f.workspace_relative_path
                     ]
 
                 request_tool_manager = self._build_request_tool_manager(
@@ -691,6 +694,7 @@ class ReactTaskSupervisor:
                         sandbox_timeout_seconds=runtime_config.sandbox_timeout_seconds,
                         web_search_provider=launch.web_search_provider,
                         allowed_skills=tuple(allowed_skill_mounts),
+                        db_session_factory=managed_session,
                     ),
                     stream_llm_responses=bool(llm_config.streaming),
                     thinking_runtime_config={
@@ -729,7 +733,7 @@ class ReactTaskSupervisor:
                     ),
                     turn_user_message=launch.message,
                     turn_files=turn_files,
-                    turn_file_blocks=turn_file_blocks,
+                    turn_attachments=turn_attachments,
                 ):
                     await self._publish_event(
                         db=db,

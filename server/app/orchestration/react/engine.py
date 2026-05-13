@@ -116,6 +116,7 @@ class ReactEngine:
         self.runtime_service = ReactRuntimeService(db)
         self.state_service = ReactStateService(db)
         self.cancelled = False  # Flag to signal cancellation
+        self._pending_multimodal_blocks: list[dict[str, Any]] = []
 
     def _previous_recursion_failed(self, task: ReactTask) -> bool:
         """Return whether the latest persisted recursion ended in failure.
@@ -1042,6 +1043,7 @@ class ReactEngine:
         context: ReactContext,
         trace_id: str,
         pending_action_result: list[dict[str, Any]] | None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build the per-recursion user payload appended to messages.
 
@@ -1050,6 +1052,7 @@ class ReactEngine:
             context: Current context snapshot.
             trace_id: Server-generated recursion trace ID for this iteration.
             pending_action_result: Result payload from the prior recursion, if any.
+            attachments: File attachment path hints for the first iteration.
 
         Returns:
             Serializable payload for the recursion user message.
@@ -1057,11 +1060,13 @@ class ReactEngine:
         payload: dict[str, Any] = {
             "trace_id": trace_id,
             "iteration": task.iteration + 1,
-            "user_intent": task.user_intent,
+            **({"user_intent": task.user_intent} if task.iteration == 0 else {}),
             "current_plan": self._build_current_plan_payload(context),
         }
         if pending_action_result is not None:
             payload["action_result"] = pending_action_result
+        if attachments:
+            payload["attachments"] = attachments
         return payload
 
     def _build_next_pending_action_result(
@@ -1089,7 +1094,15 @@ class ReactEngine:
                 if isinstance(tool_call_id, str) and tool_call_id:
                     compact_item["id"] = tool_call_id
                 if result_item.get("success") is True:
-                    compact_item["result"] = result_item.get("result")
+                    raw_result = result_item.get("result")
+                    # Extract multimodal blocks for next iteration injection
+                    if isinstance(raw_result, dict):
+                        multimodal_blocks = raw_result.pop(
+                            "_pivot_multimodal_blocks", None
+                        )
+                        if isinstance(multimodal_blocks, list):
+                            self._pending_multimodal_blocks.extend(multimodal_blocks)
+                    compact_item["result"] = raw_result
                 else:
                     compact_item["error"] = result_item.get(
                         "error", "Tool execution failed"
@@ -2122,7 +2135,7 @@ class ReactEngine:
         task_bootstrap_suffix_blocks: list[str] | None = None,
         turn_user_message: str | None = None,
         turn_files: list[FileAssetListItem] | None = None,
-        turn_file_blocks: list[dict[str, Any]] | None = None,
+        turn_attachments: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
@@ -2142,7 +2155,7 @@ class ReactEngine:
                 standard task bootstrap body.
             turn_user_message: User input of the current turn (used for chat history).
             turn_files: Uploaded file summaries for chat history and prompting.
-            turn_file_blocks: Neutral multimodal content blocks for this turn.
+            turn_attachments: Attachment path hints for the first iteration payload.
 
         Yields:
             Stream events for each recursion cycle
@@ -2185,7 +2198,7 @@ class ReactEngine:
             system_prompt,
         )
         logged_message_count = len(runtime_state.messages)
-        pending_turn_file_blocks = turn_file_blocks
+        pending_turn_attachments = turn_attachments
 
         if task.iteration == 0:
             runtime_state, compact_events = await self._maybe_compact_runtime_window(
@@ -2286,15 +2299,20 @@ class ReactEngine:
                     context,
                     trace_id,
                     runtime_state.pending_action_result,
+                    attachments=pending_turn_attachments,
                 )
-                attachments = pending_turn_file_blocks
+                # Inject pending multimodal blocks from prior tool results
+                multimodal_attachments: list[dict[str, Any]] | None = None
+                if self._pending_multimodal_blocks:
+                    multimodal_attachments = list(self._pending_multimodal_blocks)
+                    self._pending_multimodal_blocks.clear()
                 runtime_state = self.runtime_service.append_user_payload(
                     task,
                     user_payload,
-                    attachments=attachments,
+                    attachments=multimodal_attachments,
                 )
                 input_message = dict(runtime_state.messages[-1])
-                pending_turn_file_blocks = None
+                pending_turn_attachments = None
                 self._log_messages_pretty(
                     messages=runtime_state.messages,
                     task_id=task.task_id,

@@ -111,8 +111,8 @@ function SidebarEmptyAction({
 }: SidebarEmptyActionProps) {
   if (kind === "project") {
     return (
-      <SidebarMenuItem>
-        <div className="relative">
+      <SidebarMenuItem className="min-w-0">
+        <div className="relative w-full min-w-0">
           <span className="absolute left-2 top-1/2 z-10 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-sidebar-foreground/55">
             {icon}
           </span>
@@ -132,7 +132,7 @@ function SidebarEmptyAction({
   }
 
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className="min-w-0">
       <SidebarMenuButton
         tooltip={title}
         onClick={() => {
@@ -144,7 +144,7 @@ function SidebarEmptyAction({
         <span className="flex h-4 w-4 shrink-0 items-center justify-center text-sidebar-foreground/60">
           {icon}
         </span>
-        <span>{title}</span>
+        <span className="truncate">{title}</span>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
@@ -379,7 +379,7 @@ export function SessionSidebar({
     const isRunning = isSessionRunning(session);
 
     return (
-      <SidebarMenuItem key={session.session_id} className="group/session-row">
+      <SidebarMenuItem key={session.session_id} className="group/session-row min-w-0">
         {isEditing ? (
           <div className="px-2 py-1">
             <Input
@@ -577,7 +577,7 @@ export function SessionSidebar({
                   </button>
                 ) : null}
               </SidebarGroupLabel>
-              <SidebarGroupContent className="px-1 pt-1">
+              <SidebarGroupContent className="overflow-hidden px-1 pt-1">
                 {projects.length === 0 ? (
                   isSessionListPending ? (
                     <SidebarMenu>
@@ -611,7 +611,7 @@ export function SessionSidebar({
 
                       return (
                         <div key={project.project_id} className="space-y-1">
-                          <SidebarMenuItem>
+                          <SidebarMenuItem className="min-w-0">
                             {isEditing ? (
                               <div className="px-2 py-1">
                                 <Input
@@ -632,7 +632,7 @@ export function SessionSidebar({
                                 />
                               </div>
                             ) : (
-                              <div className="group/project-item relative">
+                              <div className="group/project-item relative w-full min-w-0">
                                 {hasNestedSessions ? (
                                   <button
                                     type="button"
@@ -760,7 +760,7 @@ export function SessionSidebar({
               Sessions
             </SidebarGroupLabel>
             <SidebarGroupContent
-              className={`${footer ? "session-sidebar-group-content " : ""}px-1 pt-1`}
+              className={`${footer ? "session-sidebar-group-content " : ""}overflow-hidden px-1 pt-1`}
             >
               {sessions.length === 0 ? (
                 isSessionListPending ? (

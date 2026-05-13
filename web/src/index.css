@@ -323,6 +323,16 @@
   scrollbar-color: auto;
 }
 
+/*
+ * Radix ScrollArea wraps Viewport children in a `display: table` div, which
+ * allows content to expand the layout beyond the sidebar width. Override to
+ * block layout so long session titles are clipped by the Viewport instead of
+ * pushing the entire sidebar wider.
+ */
+.session-sidebar-scroll-area [data-radix-scroll-area-viewport] > div {
+  display: block !important;
+}
+
 .session-sidebar-scroll-area::-webkit-scrollbar {
   width: 8px;
   height: 8px;

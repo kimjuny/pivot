@@ -70,7 +70,7 @@ function getAttachmentIcon(attachment: AssistantAttachment) {
   if (attachment.renderKind === "download") {
     return <Download className="h-4 w-4 text-muted-foreground" />;
   }
-  return <FileText className="h-4 w-4 text-primary" />;
+  return <FileText className="h-4 w-4 text-muted-foreground" />;
 }
 
 /**

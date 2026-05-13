@@ -2,16 +2,24 @@
 Tool manager for discovering, registering, and managing tools.
 """
 
+from __future__ import annotations
+
 import importlib
 import inspect
 from contextvars import ContextVar
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .metadata import ToolMetadata
 
-_tool_execution_context: ContextVar["ToolExecutionContext | None"] = ContextVar(
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractContextManager
+    from pathlib import Path
+
+    from sqlmodel import Session
+
+_tool_execution_context: ContextVar[ToolExecutionContext | None] = ContextVar(
     "tool_execution_context",
     default=None,
 )
@@ -29,6 +37,7 @@ class ToolExecutionContext:
     sandbox_timeout_seconds: int = 60
     web_search_provider: str | None = None
     allowed_skills: tuple[dict[str, str], ...] = ()
+    db_session_factory: Callable[[], AbstractContextManager[Session]] | None = None
 
 
 def get_current_tool_execution_context() -> ToolExecutionContext | None:
