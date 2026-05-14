@@ -37,7 +37,9 @@ function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
   const { isMobile } = useSidebar();
   const nextTheme = theme === "dark" ? "light" : "dark";
   const accountName = user?.username ?? "Workspace";
-  const accountSubtitle = "Consumer workspace";
+  const accountSubtitle = user?.role
+    ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+    : "";
   const accountInitial = accountName.charAt(0).toUpperCase();
 
   /**

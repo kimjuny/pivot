@@ -149,6 +149,7 @@ def get_recent_activity(
     return [
         {
             "session_id": item.session_id,
+            "title": item.title,
             "agent_name": item.agent_name,
             "model_name": item.model_name,
             "username": item.username,

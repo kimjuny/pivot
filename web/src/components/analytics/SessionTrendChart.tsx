@@ -55,7 +55,37 @@ export function SessionTrendChart({ data }: SessionTrendChartProps) {
                 tickFormatter={(v: string) => v.slice(5)}
               />
               <YAxis tickLine={false} axisLine={false} width={40} allowDecimals={false} />
-              <ChartTooltip content={<ChartTooltipContent />} />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={(value, name, item, index) => (
+                      <>
+                        <div
+                          className="h-2.5 w-2.5 shrink-0 rounded-[2px]"
+                          style={{ backgroundColor: `var(--color-${name})` }}
+                        />
+                        {chartConfig[name as keyof typeof chartConfig]?.label ?? String(name)}
+                        <div className="ml-auto font-mono font-medium tabular-nums text-foreground">
+                          {typeof value === "number" ? value.toLocaleString() : String(value)}
+                        </div>
+                        {index === 1 && (
+                          <div className="mt-1.5 flex basis-full items-center border-t pt-1.5 text-xs font-medium text-foreground">
+                            Total
+                            <div className="ml-auto font-mono font-medium tabular-nums">
+                              {(() => {
+                                const p = item.payload as Record<string, unknown>;
+                                const total =
+                                  Number(p.consumer ?? 0) + Number(p.studio_test ?? 0);
+                                return total.toLocaleString();
+                              })()}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  />
+                }
+              />
               <ChartLegend content={<ChartLegendContent />} />
               <Area
                 type="monotone"

@@ -751,6 +751,13 @@
   }
 }
 
+@keyframes donut-sector-activate {
+  from {
+    transform: scale(0.92);
+    opacity: 0.7;
+  }
+}
+
 @layer components {
   .list-search-group {
     @apply w-full md:ml-auto md:w-[420px] md:flex-none;

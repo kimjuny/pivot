@@ -60,6 +60,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
+import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import type { ReactContextUsageSummary } from "@/utils/api";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
@@ -98,6 +99,8 @@ interface ChatComposerProps {
   imageInputRef: RefObject<HTMLInputElement>;
   documentInputRef: RefObject<HTMLInputElement>;
   resetDraftSignal?: number;
+  /** Bumped when the parent wants the textarea to receive focus. */
+  focusSignal?: number;
   onInputChange?: (value: string) => void;
   onAddMandatorySkill: (skill: MandatorySkillSelection) => void;
   onRemoveMandatorySkill: (skillName: string) => void;
@@ -174,6 +177,7 @@ export function ChatComposer({
   imageInputRef,
   documentInputRef,
   resetDraftSignal = 0,
+  focusSignal = 0,
   onInputChange,
   onAddMandatorySkill,
   onRemoveMandatorySkill,
@@ -359,6 +363,12 @@ export function ChatComposer({
     setComposerSelectionStart(0);
     setDismissedMandatorySkillMentionKey(null);
   }, [resetDraftSignal]);
+
+  useEffect(() => {
+    if (focusSignal > 0) {
+      textareaRef.current?.focus();
+    }
+  }, [focusSignal]);
 
   /**
    * Keep the composer height aligned with the current draft so the reply and
@@ -581,7 +591,7 @@ export function ChatComposer({
             onRemovePendingFile={onRemovePendingFile}
           />
 
-          <InputGroup className="rounded-none !border-0 bg-transparent !shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0">
+          <InputGroup className="h-auto rounded-none !border-0 bg-transparent !shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0">
             {replyTarget && (
               <InputGroupAddon
                 align="block-start"
@@ -662,7 +672,7 @@ export function ChatComposer({
                   onKeyUp={syncComposerSelection}
                   onSelect={syncComposerSelection}
                   onPaste={onPaste}
-                  placeholder={replyTarget ? "Write your answer..." : "Ask anything"}
+                  placeholder={replyTarget ? "Write your answer..." : (selectedMandatorySkills.length > 0 ? "Ask anything" : "")}
                   className="min-h-[60px] max-h-80 overflow-y-auto !border-0 px-4 !shadow-none focus:!border-0 focus-visible:!border-0 [field-sizing:content]"
                   disabled={isStreaming}
                 />
@@ -741,6 +751,17 @@ export function ChatComposer({
                 </Command>
               </PopoverContent>
             </Popover>
+
+            {!draftMessage && !replyTarget && !isStreaming && selectedMandatorySkills.length === 0 && (
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 px-4 py-3"
+                aria-hidden="true"
+              >
+                <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                  Ask anything,<Kbd>Shift</Kbd>+<Kbd>Enter</Kbd>for new line.
+                </p>
+              </div>
+            )}
 
             <InputGroupAddon
               align="block-end"

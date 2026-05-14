@@ -93,6 +93,7 @@ class RecentActivityItem:
     """One recent session event for the activity feed."""
 
     session_id: str
+    title: str
     agent_name: str
     model_name: str
     username: str
@@ -477,14 +478,16 @@ class AnalyticsService:
         stmt = (
             select(  # type: ignore[reportCallIssue]
                 Session.session_id,
+                Session.title,
                 Session.status,
                 Session.type,
                 Session.created_at,
                 Agent.name,
-                Agent.model_name,
+                LLM.model,
                 User.username,
             )
             .join(Agent, Session.agent_id == Agent.id)  # type: ignore[reportArgumentType]
+            .join(LLM, Agent.llm_id == LLM.id, isouter=True)  # type: ignore[reportArgumentType]
             .join(User, Session.user_id == User.id)  # type: ignore[reportArgumentType]
             .order_by(col(Session.created_at).desc())
             .limit(limit)
@@ -493,6 +496,7 @@ class AnalyticsService:
         return [
             RecentActivityItem(
                 session_id=session_id,
+                title=title or "",
                 agent_name=agent_name,
                 model_name=model_name or "",
                 username=username,
@@ -502,6 +506,7 @@ class AnalyticsService:
             )
             for (
                 session_id,
+                title,
                 status,
                 session_type,
                 created_at,

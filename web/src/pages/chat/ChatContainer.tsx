@@ -8,6 +8,7 @@ import {
 } from "react";
 import { Info, Loader2 } from "lucide-react";
 import { resolveIcon } from "@/lib/icon-resolver";
+import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
 
 import {
   ApiError,
@@ -878,6 +879,7 @@ function ChatContainer({
     MandatorySkillSelection[]
   >([]);
   const [composerResetSignal, setComposerResetSignal] = useState(0);
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const messagesRef = useRef<ChatMessage[]>([]);
   const draftMessageRef = useRef("");
   const currentSessionIdRef = useRef<string | null>(null);
@@ -2151,6 +2153,7 @@ function ChatContainer({
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
+    setComposerFocusSignal((s) => s + 1);
   }, [currentSessionId]);
 
   useEffect(() => {
@@ -2576,6 +2579,12 @@ function ChatContainer({
     await enterDraftState(null);
   };
 
+  useNewSessionShortcut(() => {
+    if (!isStreaming) {
+      void enterDraftState(null);
+    }
+  });
+
   /**
    * Opens one project-level draft so the next send creates a session inside
    * the selected shared workspace.
@@ -2936,6 +2945,21 @@ function ChatContainer({
           setSessions((previous) => upsertSessionListItem(previous, sessionItem));
           initialCursor = 0;
           openSessionStream(activeSessionId, initialCursor);
+
+          const firstMessage = pendingMessage.trim();
+          if (firstMessage) {
+            const provisionalTitle =
+              firstMessage.length > 20
+                ? firstMessage.slice(0, 20) + "..."
+                : firstMessage;
+            void updateSession(activeSessionId, {
+              title: provisionalTitle,
+            }).then((updated) => {
+              setSessions((previous) =>
+                upsertSessionListItem(previous, toSessionListItem(updated)),
+              );
+            });
+          }
         }
 
         if (currentReplyTaskId) {
@@ -3761,6 +3785,7 @@ function ChatContainer({
         imageInputRef={imageInputRef}
         documentInputRef={documentInputRef}
         resetDraftSignal={composerResetSignal}
+        focusSignal={composerFocusSignal}
         onInputChange={handleDraftChange}
         onAddMandatorySkill={handleAddMandatorySkill}
         onRemoveMandatorySkill={handleRemoveMandatorySkill}

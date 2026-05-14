@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ChartContainer,
@@ -5,7 +6,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import { Cell, Label, Pie, PieChart } from "recharts";
+import { Cell, Label, Pie, PieChart, Sector } from "recharts";
 
 import type { TaskStats } from "@/utils/api";
 
@@ -39,17 +40,17 @@ const chartConfig: ChartConfig = {
 };
 
 const STATUS_KEYS = ["completed", "failed", "cancelled", "running", "pending"] as const;
-const COLORS = STATUS_KEYS.map((key) => `var(--color-${key})`);
 
 /** Donut chart showing task status breakdown. */
 export function TaskStatusChart({ data }: TaskStatusChartProps) {
+  const [activeIndex, setActiveIndex] = useState(-1);
   const total = data.completed + data.failed + data.cancelled + data.running + data.pending;
   const chartData = STATUS_KEYS
     .filter((key) => data[key as keyof TaskStats] > 0)
     .map((key) => ({
       name: chartConfig[key].label as string,
       value: data[key as keyof TaskStats],
-      key,
+      fill: `var(--color-${key})`,
     }));
 
   return (
@@ -73,9 +74,31 @@ export function TaskStatusChart({ data }: TaskStatusChartProps) {
                 innerRadius={55}
                 outerRadius={85}
                 strokeWidth={2}
+                activeIndex={activeIndex >= 0 ? activeIndex : undefined}
+                activeShape={(props: unknown) => {
+                  const { outerRadius = 0, ...rest } = props as Record<string, unknown>;
+                  return (
+                    <Sector
+                      {...rest}
+                      outerRadius={(outerRadius as number) + 6}
+                      style={{
+                        filter: "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15))",
+                        animation: "donut-sector-activate 200ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+                      }}
+                    />
+                  );
+                }}
+                onMouseEnter={(_: Record<string, unknown>, index: number) => setActiveIndex(index)}
+                onMouseLeave={() => setActiveIndex(-1)}
               >
-                {chartData.map((item) => (
-                  <Cell key={item.key} fill={COLORS[STATUS_KEYS.indexOf(item.key)]} />
+                {chartData.map((_, index) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    style={{
+                      opacity: activeIndex >= 0 && index !== activeIndex ? 0.45 : 1,
+                      transition: "opacity 200ms cubic-bezier(0.22, 1, 0.36, 1)",
+                    }}
+                  />
                 ))}
                 <Label
                   content={({ viewBox }) => {

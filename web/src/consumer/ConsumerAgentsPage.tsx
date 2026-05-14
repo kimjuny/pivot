@@ -23,6 +23,7 @@ import {
 import ConsumerUserMenu from "@/consumer/ConsumerUserMenu";
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import type { Agent } from "@/types";
+import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
 
 /**
  * Keep the recent-session list aligned with backend ordering semantics.
@@ -106,6 +107,8 @@ function ConsumerAgentsPage() {
       navigate(`/app/agents/${firstAgent.id}`);
     }
   };
+
+  useNewSessionShortcut(handleNewSession);
 
   /**
    * Routes back into the exact session the user picked from the recent list.

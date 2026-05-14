@@ -56,7 +56,7 @@ describe("ConsumerUserMenu", () => {
 
     renderConsumerUserMenu();
 
-    expect(screen.getByText("Consumer workspace")).toBeInTheDocument();
+    expect(screen.getByText("User")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "User menu: shadcn" }));
 

@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sidebar,
@@ -49,6 +50,10 @@ const EMPTY_PROJECTS: ChatSidebarProjectItem[] = [];
 const EMPTY_NAVIGATION_ITEMS: ChatSidebarNavigationItem[] = [];
 const SIDEBAR_ITEM_HOVER_CLASS =
   "text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-foreground";
+
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
 interface SessionSidebarProps {
   sessions: SessionListItem[];
@@ -535,7 +540,11 @@ export function SessionSidebar({
                 className={SIDEBAR_ITEM_HOVER_CLASS}
               >
                 <SquarePen className="h-4 w-4" />
-                <span>New Chat</span>
+                <span className="flex-1">New Chat</span>
+                <KbdGroup className="ml-auto gap-0.5">
+                  <Kbd>{IS_MAC ? "⌘" : "Ctrl"}</Kbd>
+                  <Kbd>K</Kbd>
+                </KbdGroup>
               </SidebarMenuButton>
           </SidebarMenuItem>
 

@@ -4112,6 +4112,7 @@ export interface RuntimeHealth {
 /** One recent session event for the activity feed. */
 export interface RecentActivityItem {
   session_id: string;
+  title: string;
   agent_name: string;
   model_name: string;
   username: string;
