@@ -3764,6 +3764,7 @@ function ChatContainer({
       ) : null}
 
       <ChatComposer
+        sessionId={currentSessionId}
         error={error}
         compactStatusMessage={compactStatusMessage}
         replyTarget={replyTarget}

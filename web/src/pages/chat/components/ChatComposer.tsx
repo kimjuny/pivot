@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   Brain,
+  FileIcon,
   ImagePlus,
   Loader2,
   MessageSquare,
@@ -64,6 +65,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import type { ReactContextUsageSummary } from "@/utils/api";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
+import { useFileMention } from "@/hooks/use-file-mention";
 
 import type {
   ChatReplyTarget,
@@ -77,6 +79,7 @@ import { ComposerTaskPlan } from "./ComposerTaskPlan";
 import { ContextUsageRing } from "./ContextUsageRing";
 
 interface ChatComposerProps {
+  sessionId?: string | null;
   inputMessage?: string;
   error: string | null;
   compactStatusMessage: string | null;
@@ -155,6 +158,7 @@ function getActiveMandatorySkillMention(
  * Owns the composer UI while receiving all state from the container to keep behavior explicit.
  */
 export function ChatComposer({
+  sessionId,
   inputMessage,
   error,
   compactStatusMessage,
@@ -265,6 +269,29 @@ export function ChatComposer({
     !isStreaming &&
     activeMandatorySkillMention !== null &&
     activeMandatorySkillMentionKey !== dismissedMandatorySkillMentionKey;
+
+  const fileMention = useFileMention(
+    sessionId ?? null,
+    draftMessage,
+    composerSelectionStart,
+    isStreaming,
+  );
+
+  const fileMentionItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    if (!fileMention.isOpen) {
+      return;
+    }
+    const file = fileMention.files[fileMention.highlightedIndex];
+    if (!file) {
+      return;
+    }
+    const frameId = window.requestAnimationFrame(() => {
+      fileMentionItemRefs.current[file.path]?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [fileMention.isOpen, fileMention.files, fileMention.highlightedIndex]);
 
   /**
    * Keeps local draft ownership inside the composer while still letting the
@@ -513,6 +540,57 @@ export function ChatComposer({
       }
     }
 
+    if (fileMention.isOpen) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (fileMention.files.length > 0) {
+          fileMention.setHighlightedIndex(
+            fileMention.highlightedIndex >= fileMention.files.length - 1
+              ? 0
+              : fileMention.highlightedIndex + 1,
+          );
+        }
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (fileMention.files.length > 0) {
+          fileMention.setHighlightedIndex(
+            fileMention.highlightedIndex <= 0
+              ? fileMention.files.length - 1
+              : fileMention.highlightedIndex - 1,
+          );
+        }
+        return;
+      }
+
+      if (
+        (event.key === "Enter" || event.key === "Tab") &&
+        !event.shiftKey &&
+        fileMention.files.length > 0
+      ) {
+        event.preventDefault();
+        const textarea = textareaRef.current;
+        if (textarea) {
+          fileMention.selectFile(
+            fileMention.files[fileMention.highlightedIndex] ?? fileMention.files[0],
+            textarea,
+          );
+        }
+        return;
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        fileMention.dismiss();
+      }
+
+      if (event.key === "Escape") {
+        fileMention.dismiss();
+        return;
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submitDraftMessage();
@@ -745,6 +823,75 @@ export function ChatComposer({
                             </p>
                           </HoverCardContent>
                         </HoverCard>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+
+            <Popover
+              open={fileMention.isOpen}
+              modal={false}
+              onOpenChange={(open) => {
+                if (!open) {
+                  fileMention.dismiss();
+                }
+              }}
+            >
+              <PopoverAnchor asChild>
+                <div />
+              </PopoverAnchor>
+              <PopoverContent
+                align="start"
+                side="top"
+                sideOffset={10}
+                onOpenAutoFocus={(event) => event.preventDefault()}
+                onCloseAutoFocus={(event) => event.preventDefault()}
+                onInteractOutside={fileMention.dismiss}
+                className="z-[2147483647] w-[min(20rem,calc((100vw-3rem)*0.75))] overflow-hidden rounded-2xl p-0"
+              >
+                <Command
+                  shouldFilter={false}
+                  className="rounded-[inherit]"
+                >
+                  <CommandList className="max-h-64">
+                    <CommandEmpty>
+                      {fileMention.isLoading
+                        ? "Searching..."
+                        : "No files found."}
+                    </CommandEmpty>
+                    <CommandGroup>
+                      {fileMention.files.map((file, index) => (
+                        <CommandItem
+                          key={file.path}
+                          ref={(node) => {
+                            fileMentionItemRefs.current[file.path] = node;
+                          }}
+                          value={file.path}
+                          onSelect={() => {
+                            const textarea = textareaRef.current;
+                            if (textarea) {
+                              fileMention.selectFile(file, textarea);
+                            }
+                          }}
+                          onMouseEnter={() => fileMention.setHighlightedIndex(index)}
+                          className={cn(
+                            "cursor-pointer items-start gap-2",
+                            index === fileMention.highlightedIndex &&
+                              "bg-accent text-accent-foreground",
+                          )}
+                        >
+                          <FileIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <div className="min-w-0">
+                            <div className="truncate text-xs font-medium">
+                              {file.name}
+                            </div>
+                            <div className="truncate text-[11px] text-muted-foreground">
+                              {file.path}
+                            </div>
+                          </div>
+                        </CommandItem>
                       ))}
                     </CommandGroup>
                   </CommandList>

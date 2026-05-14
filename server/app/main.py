@@ -40,6 +40,7 @@ from app.api.storage import router as storage_router  # noqa: E402
 from app.api.task_attachments import router as task_attachments_router  # noqa: E402
 from app.api.tools import router as tools_router  # noqa: E402
 from app.api.web_search import router as web_search_router  # noqa: E402
+from app.api.workspace import router as workspace_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
@@ -126,6 +127,7 @@ app.include_router(operations_router, prefix="/api")
 app.include_router(operations_users_router, prefix="/api")
 app.include_router(operations_roles_router, prefix="/api")
 app.include_router(operations_groups_router, prefix="/api")
+app.include_router(workspace_router, prefix="/api")
 
 # ---------- Production: serve frontend static files ----------
 # In the production fat image the built React SPA is copied to ./static/.

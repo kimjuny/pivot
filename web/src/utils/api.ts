@@ -4268,3 +4268,31 @@ export const getAgentConsumerUsage = async (agentId: number, range: string): Pro
 export const getAgentChannelActivity = async (agentId: number, range: string): Promise<ChannelActivityItem[]> => {
   return apiRequest(`/analytics/agents/${agentId}/channel-activity?range=${encodeURIComponent(range)}`) as Promise<ChannelActivityItem[]>;
 };
+
+// ---------------------------------------------------------------------------
+// Workspace file search
+// ---------------------------------------------------------------------------
+
+/** One file entry returned by workspace search. */
+export interface WorkspaceFileItem {
+  path: string;
+  name: string;
+}
+
+/** Search files in a session's workspace sandbox. */
+export const searchWorkspaceFiles = async (params: {
+  session_id: string;
+  q?: string;
+  limit?: number;
+}): Promise<{ files: WorkspaceFileItem[] }> => {
+  const paramsObj = new URLSearchParams();
+  if (params.q) {
+    paramsObj.set("q", params.q);
+  }
+  if (params.limit) {
+    paramsObj.set("limit", String(params.limit));
+  }
+  const query = paramsObj.toString();
+  const url = `/sessions/${encodeURIComponent(params.session_id)}/workspace/search${query ? `?${query}` : ""}`;
+  return apiRequest(url) as Promise<{ files: WorkspaceFileItem[] }>;
+};
