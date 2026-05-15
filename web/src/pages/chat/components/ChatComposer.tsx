@@ -64,6 +64,7 @@ import { WebSearchProviderBadge } from "@/components/WebSearchProviderBadge";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import type { ReactContextUsageSummary } from "@/utils/api";
+import { getFileIcon } from "@/utils/file-icon";
 import type { ChatThinkingMode } from "@/utils/llmThinking";
 import { useFileMention } from "@/hooks/use-file-mention";
 
@@ -726,11 +727,16 @@ export function ChatComposer({
             )}
 
             <Popover
-              open={isMandatorySkillPickerOpen}
+              open={isMandatorySkillPickerOpen || fileMention.isOpen}
               modal={false}
               onOpenChange={(open) => {
                 if (!open) {
-                  dismissActiveMandatorySkillMention();
+                  if (isMandatorySkillPickerOpen) {
+                    dismissActiveMandatorySkillMention();
+                  }
+                  if (fileMention.isOpen) {
+                    fileMention.dismiss();
+                  }
                 }
               }}
             >
@@ -761,141 +767,135 @@ export function ChatComposer({
                 sideOffset={10}
                 onOpenAutoFocus={(event) => event.preventDefault()}
                 onCloseAutoFocus={(event) => event.preventDefault()}
-                onInteractOutside={dismissActiveMandatorySkillMention}
-                className="z-[2147483647] w-[min(16rem,calc((100vw-3rem)*0.67))] overflow-hidden rounded-2xl p-0"
-              >
-                <Command
-                  shouldFilter={false}
-                  value={
-                    filteredMandatorySkills[highlightedMandatorySkillIndex]?.name ?? ""
+                onInteractOutside={() => {
+                  if (isMandatorySkillPickerOpen) {
+                    dismissActiveMandatorySkillMention();
                   }
-                  className="rounded-[inherit]"
-                >
-                  <CommandList className="max-h-64">
-                    <CommandEmpty>
-                      {availableMandatorySkills.length === 0
-                        ? "No skills available for this agent."
-                        : "No matching skills found."}
-                    </CommandEmpty>
-                    <CommandGroup>
-                      {filteredMandatorySkills.map((skill, index) => (
-                        <HoverCard
-                          key={skill.name}
-                          openDelay={450}
-                          closeDelay={120}
-                        >
-                          <HoverCardTrigger asChild>
-                            <CommandItem
-                              ref={(node) => {
-                                mandatorySkillItemRefs.current[skill.name] =
-                                  node;
-                              }}
-                              value={skill.name}
-                              onSelect={() => selectMandatorySkill(skill)}
-                              onMouseEnter={() =>
-                                setHighlightedMandatorySkillIndex(index)
-                              }
-                              className={cn(
-                                "cursor-pointer items-start",
-                                "aria-selected:bg-accent aria-selected:text-accent-foreground",
-                              )}
-                            >
-                              <div className="min-w-0">
-                                <div className="truncate font-mono text-xs font-medium">
-                                  {skill.name}
-                                </div>
-                                <div className="truncate text-xs text-muted-foreground">
-                                  {skill.description || skill.path}
-                                </div>
-                              </div>
-                            </CommandItem>
-                          </HoverCardTrigger>
-                          <HoverCardContent
-                            side="right"
-                            align="start"
-                            className="w-80 space-y-2 p-3"
-                          >
-                            <div className="font-mono text-xs font-medium text-foreground">
-                              {skill.name}
-                            </div>
-                            <p className="text-xs leading-relaxed text-muted-foreground">
-                              {skill.description || "No description provided."}
-                            </p>
-                          </HoverCardContent>
-                        </HoverCard>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-
-            <Popover
-              open={fileMention.isOpen}
-              modal={false}
-              onOpenChange={(open) => {
-                if (!open) {
-                  fileMention.dismiss();
-                }
-              }}
-            >
-              <PopoverAnchor asChild>
-                <div />
-              </PopoverAnchor>
-              <PopoverContent
-                align="start"
-                side="top"
-                sideOffset={10}
-                onOpenAutoFocus={(event) => event.preventDefault()}
-                onCloseAutoFocus={(event) => event.preventDefault()}
-                onInteractOutside={fileMention.dismiss}
-                className="z-[2147483647] w-[min(20rem,calc((100vw-3rem)*0.75))] overflow-hidden rounded-2xl p-0"
+                  if (fileMention.isOpen) {
+                    fileMention.dismiss();
+                  }
+                }}
+                className={cn(
+                  "z-[2147483647] overflow-hidden rounded-xl p-0",
+                  isMandatorySkillPickerOpen
+                    ? "w-[min(16rem,calc((100vw-3rem)*0.67))]"
+                    : "w-[min(20rem,calc((100vw-3rem)*0.75))]",
+                )}
               >
-                <Command
-                  shouldFilter={false}
-                  className="rounded-[inherit]"
-                >
-                  <CommandList className="max-h-64">
-                    <CommandEmpty>
-                      {fileMention.isLoading
-                        ? "Searching..."
-                        : "No files found."}
-                    </CommandEmpty>
-                    <CommandGroup>
-                      {fileMention.files.map((file, index) => (
-                        <CommandItem
-                          key={file.path}
-                          ref={(node) => {
-                            fileMentionItemRefs.current[file.path] = node;
-                          }}
-                          value={file.path}
-                          onSelect={() => {
-                            const textarea = textareaRef.current;
-                            if (textarea) {
-                              fileMention.selectFile(file, textarea);
-                            }
-                          }}
-                          onMouseEnter={() => fileMention.setHighlightedIndex(index)}
-                          className={cn(
-                            "cursor-pointer items-start gap-2",
-                            index === fileMention.highlightedIndex &&
-                              "bg-accent text-accent-foreground",
-                          )}
-                        >
-                          <FileIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                          <div className="min-w-0">
-                            <div className="truncate text-xs font-medium">
-                              {file.name}
+                {isMandatorySkillPickerOpen ? (
+                  <Command
+                    shouldFilter={false}
+                    value={
+                      filteredMandatorySkills[highlightedMandatorySkillIndex]?.name ?? ""
+                    }
+                    className="rounded-[inherit]"
+                  >
+                    <CommandList className="max-h-64">
+                      <CommandEmpty>
+                        {availableMandatorySkills.length === 0
+                          ? "No skills available for this agent."
+                          : "No matching skills found."}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {filteredMandatorySkills.map((skill, index) => (
+                          <HoverCard
+                            key={skill.name}
+                            openDelay={450}
+                            closeDelay={120}
+                          >
+                            <HoverCardTrigger asChild>
+                              <CommandItem
+                                ref={(node) => {
+                                  mandatorySkillItemRefs.current[skill.name] =
+                                    node;
+                                }}
+                                value={skill.name}
+                                onSelect={() => selectMandatorySkill(skill)}
+                                onMouseEnter={() =>
+                                  setHighlightedMandatorySkillIndex(index)
+                                }
+                                className={cn(
+                                  "cursor-pointer items-start rounded-lg",
+                                  "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                                )}
+                              >
+                                <div className="min-w-0">
+                                  <div className="truncate font-mono text-xs font-medium">
+                                    {skill.name}
+                                  </div>
+                                  <div className="truncate text-xs text-muted-foreground">
+                                    {skill.description || skill.path}
+                                  </div>
+                                </div>
+                              </CommandItem>
+                            </HoverCardTrigger>
+                            <HoverCardContent
+                              side="right"
+                              align="start"
+                              className="w-80 space-y-2 p-3"
+                            >
+                              <div className="font-mono text-xs font-medium text-foreground">
+                                {skill.name}
+                              </div>
+                              <p className="text-xs leading-relaxed text-muted-foreground">
+                                {skill.description || "No description provided."}
+                              </p>
+                            </HoverCardContent>
+                          </HoverCard>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                ) : (
+                  <Command
+                    shouldFilter={false}
+                    value={fileMention.files[fileMention.highlightedIndex]?.path ?? ""}
+                    className="rounded-[inherit]"
+                  >
+                    <CommandList className="max-h-64">
+                      <CommandEmpty>
+                        {fileMention.isLoading
+                          ? "Searching..."
+                          : "No files found."}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {fileMention.files.map((file, index) => (
+                          <CommandItem
+                            key={file.path}
+                            ref={(node) => {
+                              fileMentionItemRefs.current[file.path] = node;
+                            }}
+                            value={file.path}
+                            onSelect={() => {
+                              const textarea = textareaRef.current;
+                              if (textarea) {
+                                fileMention.selectFile(file, textarea);
+                              }
+                            }}
+                            onMouseEnter={() => fileMention.setHighlightedIndex(index)}
+                            className={cn(
+                              "cursor-pointer items-start gap-2 rounded-lg",
+                              "aria-selected:bg-accent aria-selected:text-accent-foreground",
+                            )}
+                          >
+                            {(() => {
+                              const Icon = getFileIcon(file.name);
+                              return <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+                            })()}
+                            <div className="min-w-0">
+                              <div className="truncate text-xs font-medium">
+                                {file.name}
+                              </div>
+                              <div className="truncate text-[11px] text-muted-foreground">
+                                /workspace/{file.path}
+                              </div>
                             </div>
-                            <div className="truncate text-[11px] text-muted-foreground">
-                              {file.path}
-                            </div>
-                          </div>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                )}
               </PopoverContent>
             </Popover>
 

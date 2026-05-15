@@ -40,6 +40,10 @@ export function getActiveFileMention(
   if (query.includes("@")) {
     return null;
   }
+  // Avoid re-triggering on already-inserted workspace paths.
+  if (query.startsWith("/workspace/")) {
+    return null;
+  }
 
   return { start: tokenStart, end: safeStart, query };
 }
@@ -154,9 +158,10 @@ export function useFileMention(
       }
       const before = draftMessage.slice(0, activeMention.start);
       const after = draftMessage.slice(activeMention.end);
-      const newValue = `${before}${file.path} ${after}`;
+      const replacement = `@/workspace/${file.path} `;
+      const newValue = `${before}${replacement}${after}`;
 
-      const newCursorPos = activeMention.start + file.path.length + 1;
+      const newCursorPos = activeMention.start + replacement.length;
 
       // Set the textarea value via the React-compatible native setter.
       const descriptor = Object.getOwnPropertyDescriptor(
