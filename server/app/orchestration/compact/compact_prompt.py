@@ -1,11 +1,12 @@
 # ruff: noqa: RUF001
-"""Prompt template for session context compaction."""
+"""Prompt template helpers for session context compaction."""
 
-COMPACT_PROMPT = """请对当前整个 session 的 messages 做一次完整的 context compact，并只输出一个新的 compact JSON。
+_COMPACT_PROMPT_PREFIX = """请对当前整个 session 的 messages 做一次完整的 context compact，并只输出一个新的 compact JSON。
 
 你的任务不是复述原始对话，而是把整个 session 压缩成一份简洁、稳定、可继续迭代使用的结构化记忆。
+"""
 
-重要要求：
+_COMPACT_PROMPT_REQUIREMENTS = """重要要求：
 
 1. 你要处理的是“整个 session”，不是只处理最近几条消息。
 2. 如果历史消息中已经存在旧的 compact 结果（例如看起来像 compact memory 的结构化 JSON），请把它当作“旧压缩记忆”处理，而不是普通对话内容。
@@ -92,3 +93,30 @@ COMPACT_PROMPT = """请对当前整个 session 的 messages 做一次完整的 c
 }
 ```
 """
+
+
+def build_compact_prompt(user_instruction: str | None = None) -> str:
+    """Build the compaction prompt with optional one-off user guidance."""
+    instruction = (user_instruction or "").strip()
+    if not instruction:
+        return f"{_COMPACT_PROMPT_PREFIX}\n{_COMPACT_PROMPT_REQUIREMENTS}"
+
+    manual_requirements = f"""本次 compact 还有一段【用户额外要求】。这段要求只对本次 compact 生效，优先级很高，请显式遵守：
+
+<user_compact_requirements>
+{instruction}
+</user_compact_requirements>
+
+处理这些额外要求时必须同时满足下面几点：
+- 若这些要求与输出 JSON schema 冲突，以 schema 要求为准。
+- 若这些要求与更高优先级的系统/安全要求冲突，以更高优先级要求为准。
+- 不要把这段“额外要求”的原文直接写入 compact 结果，除非它明确描述的是 session 中真实存在的事实。
+"""
+    return (
+        f"{_COMPACT_PROMPT_PREFIX}\n"
+        f"{manual_requirements}\n"
+        f"{_COMPACT_PROMPT_REQUIREMENTS}"
+    )
+
+
+COMPACT_PROMPT = build_compact_prompt()

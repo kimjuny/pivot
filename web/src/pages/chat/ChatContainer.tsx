@@ -13,6 +13,7 @@ import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
 import {
   ApiError,
   cancelReactTask,
+  compactReactSession,
   createProject,
   createDevSurfaceSession,
   createInstalledSurfaceSession,
@@ -87,6 +88,7 @@ import type {
   ChatWebSearchProviderOption,
   ChatPageProps,
   ChatMessage,
+  CompactTimelineItem,
   MandatorySkillSelection,
   ChatReplyTarget,
   ChatSidebarProjectItem,
@@ -119,10 +121,21 @@ import {
 } from "./utils/chatSelectors";
 
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
+const COMPACT_SKILL_NAME = "compact";
+const COMPACT_SKILL_SELECTION: MandatorySkillSelection = {
+  name: COMPACT_SKILL_NAME,
+  description:
+    "Compact the current session runtime window with optional one-off guidance.",
+  path: "/runtime/compact",
+};
 const DOCK_TRANSITION_MS = 200;
 const SESSION_LOADING_OVERLAY_TRANSITION_MS = 200;
 const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
 const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
+
+function isCompactSkillSelection(skill: MandatorySkillSelection): boolean {
+  return skill.name === COMPACT_SKILL_NAME;
+}
 
 /**
  * Parse the serialized tool allowlist and determine whether ``web_search`` is
@@ -859,6 +872,9 @@ function ChatContainer({
   const [compactStatusMessage, setCompactStatusMessage] = useState<string | null>(
     null,
   );
+  const [compactTimelineItems, setCompactTimelineItems] = useState<
+    CompactTimelineItem[]
+  >([]);
   const [sessionRuntimeDebug, setSessionRuntimeDebug] =
     useState<ReactSessionRuntimeDebug | null>(null);
   const [isRuntimeDebugLoading, setIsRuntimeDebugLoading] =
@@ -878,6 +894,7 @@ function ChatContainer({
   const [selectedMandatorySkills, setSelectedMandatorySkills] = useState<
     MandatorySkillSelection[]
   >([]);
+  const [isManualCompacting, setIsManualCompacting] = useState(false);
   const [composerResetSignal, setComposerResetSignal] = useState(0);
   const [composerFocusSignal, setComposerFocusSignal] = useState(0);
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -894,6 +911,7 @@ function ChatContainer({
   const contextUsageDebounceTimerRef = useRef<number | null>(null);
   const runtimeDebugRequestIdRef = useRef(0);
   const compactStatusStartedAtRef = useRef<number | null>(null);
+  const activeCompactTimelineIdRef = useRef<string | null>(null);
   const compactStatusClearTimerRef = useRef<number | null>(null);
   const dockTransitionTimerRef = useRef<number | null>(null);
   const dockOpenFrameRef = useRef<number | null>(null);
@@ -907,6 +925,26 @@ function ChatContainer({
       activePreviewId: string | null;
     }) => {},
   );
+  const isCompactMode = useMemo(
+    () => selectedMandatorySkills.some(isCompactSkillSelection),
+    [selectedMandatorySkills],
+  );
+  const manualCompactSkillNames = useMemo(
+    () =>
+      selectedMandatorySkills
+        .filter((skill) => !isCompactSkillSelection(skill))
+        .map((skill) => skill.name),
+    [selectedMandatorySkills],
+  );
+  const availableMandatorySkills = useMemo(() => {
+    const visibleSkills = runtimeSkills.filter(
+      (skill) => !isCompactSkillSelection(skill),
+    );
+    if (!currentSessionId) {
+      return visibleSkills;
+    }
+    return [COMPACT_SKILL_SELECTION, ...visibleSkills];
+  }, [currentSessionId, runtimeSkills]);
 
   const {
     pendingFiles,
@@ -1093,6 +1131,50 @@ function ChatContainer({
     );
   }, [clearCompactStatusTimer]);
 
+  const resetCompactTimelineItems = useCallback(() => {
+    activeCompactTimelineIdRef.current = null;
+    setCompactTimelineItems([]);
+  }, []);
+
+  const startCompactTimelineItem = useCallback((timestamp?: string) => {
+    const startedAt = timestamp ?? new Date().toISOString();
+    const itemId = `compact-${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
+    activeCompactTimelineIdRef.current = itemId;
+    setCompactTimelineItems((previous) => [
+      ...previous,
+      {
+        id: itemId,
+        timestamp: startedAt,
+        status: "running",
+        label: "Compacting",
+      },
+    ]);
+  }, []);
+
+  const finalizeCompactTimelineItem = useCallback(
+    (status: "completed" | "failed", timestamp?: string) => {
+      const activeItemId = activeCompactTimelineIdRef.current;
+      if (!activeItemId) {
+        return;
+      }
+      const finishedAt = timestamp ?? new Date().toISOString();
+      setCompactTimelineItems((previous) =>
+        previous.map((item) =>
+          item.id !== activeItemId
+            ? item
+            : {
+                ...item,
+                status,
+                label: status === "completed" ? "Compacted" : "Compaction failed",
+                finishedAt,
+              },
+        ),
+      );
+      activeCompactTimelineIdRef.current = null;
+    },
+    [],
+  );
+
   /**
    * Loads the latest session runtime debug payload for the floating compact inspector.
    */
@@ -1267,9 +1349,10 @@ function ChatContainer({
             message.role === "assistant" && message.status === "running",
         ),
       );
+      resetCompactTimelineItems();
       commitMessages(nextMessages);
     },
-    [commitMessages, syncLiveRefsFromMessages],
+    [commitMessages, resetCompactTimelineItems, syncLiveRefsFromMessages],
   );
 
   /**
@@ -1334,6 +1417,32 @@ function ChatContainer({
       const previewIntent = extractWorkspacePreviewIntent(event);
       if (previewIntent) {
         openWorkspacePreviewIntentRef.current(previewIntent);
+      }
+
+      if (event.type === "compact_start") {
+        showCompactStatus("Compacting context. Please wait before stopping.");
+        startCompactTimelineItem(event.timestamp);
+        return;
+      }
+
+      if (event.type === "compact_complete") {
+        const compactData =
+          typeof event.data === "object" && event.data !== null
+            ? (event.data as { usage_after?: ReactContextUsageSummary })
+            : undefined;
+        if (compactData?.usage_after) {
+          setContextUsage(compactData.usage_after);
+        }
+        void loadSessionRuntimeDebug(currentSessionIdRef.current);
+        finalizeCompactTimelineItem("completed", event.timestamp);
+        clearCompactStatusWithMinimumDelay();
+        return;
+      }
+
+      if (event.type === "compact_failed") {
+        finalizeCompactTimelineItem("failed", event.timestamp);
+        clearCompactStatusWithMinimumDelay();
+        return;
       }
 
       const targetTaskId = event.task_id;
@@ -1417,31 +1526,6 @@ function ChatContainer({
             liveRecursionRef.current.trace_id === event.trace_id))
           ? liveRecursionRef.current
           : null;
-
-      if (event.type === "compact_start") {
-        showCompactStatus(
-          "Compacting context. Please wait before stopping.",
-        );
-        return;
-      }
-
-      if (event.type === "compact_complete") {
-        const compactData =
-          typeof event.data === "object" && event.data !== null
-            ? (event.data as { usage_after?: ReactContextUsageSummary })
-            : undefined;
-        if (compactData?.usage_after) {
-          setContextUsage(compactData.usage_after);
-        }
-        void loadSessionRuntimeDebug(currentSessionIdRef.current);
-        clearCompactStatusWithMinimumDelay();
-        return;
-      }
-
-      if (event.type === "compact_failed") {
-        clearCompactStatusWithMinimumDelay();
-        return;
-      }
 
       const sessionTitle = extractSessionTitle(event);
       const streamedSessionId = currentSessionIdRef.current;
@@ -2101,6 +2185,7 @@ function ChatContainer({
               );
             }
           } else {
+            resetCompactTimelineItems();
             commitMessages([]);
             setIsStreaming(false);
           }
@@ -2112,6 +2197,7 @@ function ChatContainer({
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
           syncLiveRefsFromMessages([]);
+          resetCompactTimelineItems();
           commitMessages([]);
           setIsStreaming(false);
           stopSessionStream();
@@ -2427,11 +2513,11 @@ function ChatContainer({
       agent_id: agentId,
       session_id: currentSessionId,
       task_id: replyTaskId,
-      draft_message: draftMessageRef.current,
+      draft_message: isCompactMode ? "" : draftMessageRef.current,
       file_ids: draftFileIds,
       session_type: sessionType,
       test_snapshot: currentSessionId ? undefined : testSnapshot,
-      mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
+      mandatory_skill_names: manualCompactSkillNames,
     })
       .then((usage) => {
         if (contextUsageRequestIdRef.current === requestId) {
@@ -2456,7 +2542,8 @@ function ChatContainer({
     currentSessionId,
     readyPendingFileIdsKey,
     replyTaskId,
-    selectedMandatorySkills,
+    isCompactMode,
+    manualCompactSkillNames,
     sessionType,
     testSnapshot,
   ]);
@@ -2553,6 +2640,7 @@ function ChatContainer({
       setCurrentProjectId(nextProjectId);
       setCurrentSessionId(null);
       currentSessionIdRef.current = null;
+      resetCompactTimelineItems();
       commitMessages([]);
       setReplyTaskId(null);
       setSelectedMandatorySkills([]);
@@ -2705,6 +2793,7 @@ function ChatContainer({
     } catch (historyError) {
       console.error("Failed to load session history:", historyError);
       syncLiveRefsFromMessages([]);
+      resetCompactTimelineItems();
       commitMessages([]);
       setIsStreaming(false);
     } finally {
@@ -2901,6 +2990,9 @@ function ChatContainer({
       const pendingMessage = options?.messageOverride ?? draftMessageRef.current;
       const currentReplyTaskId = options?.replyTaskIdOverride ?? replyTaskId;
       const isClarifyReply = Boolean(currentReplyTaskId);
+      const isManualCompactRequest = selectedMandatorySkills.some(
+        isCompactSkillSelection,
+      );
       let assistantMessageId: string | null = null;
       const includeReadyAttachments = options?.includeReadyAttachments ?? true;
       const filesToSend = includeReadyAttachments ? readyPendingFiles : [];
@@ -2972,6 +3064,55 @@ function ChatContainer({
           throw new Error("Token expired or invalid. Please log in again.");
         }
 
+        if (isManualCompactRequest) {
+          if (!activeSessionId) {
+            throw new Error("Compact is only available after a session has started.");
+          }
+          setError(null);
+          showCompactStatus("Compacting context. Please wait before stopping.");
+          startCompactTimelineItem();
+          setIsManualCompacting(true);
+          try {
+            let compactResult;
+            try {
+              compactResult = await compactReactSession(
+                activeSessionId,
+                pendingMessage.trim(),
+              );
+            } catch (compactError) {
+              if (
+                compactError instanceof ApiError &&
+                compactError.status === 404 &&
+                compactError.message === "Not Found"
+              ) {
+                throw new Error(
+                  "Manual compact endpoint is unavailable. Please restart the backend and try again.",
+                );
+              }
+              throw compactError;
+            }
+            finalizeCompactTimelineItem("completed");
+            draftMessageRef.current = "";
+            setComposerResetSignal((previous) => previous + 1);
+            setSelectedMandatorySkills([]);
+            setContextUsage(compactResult.usage_after);
+            await loadSessionRuntimeDebug(activeSessionId);
+            clearCompactStatusWithMinimumDelay();
+            void refreshSidebarData().catch((refreshError) => {
+              console.error(
+                "Failed to refresh session list after manual compact:",
+                refreshError,
+              );
+            });
+            return;
+          } catch (compactError) {
+            finalizeCompactTimelineItem("failed");
+            throw compactError;
+          } finally {
+            setIsManualCompacting(false);
+          }
+        }
+
         const messageTimestamp = new Date().toISOString();
         optimisticUserMessageId = isClarifyReply
           ? `user-${currentReplyTaskId}-clarify-reply-${Date.now()}`
@@ -3033,7 +3174,7 @@ function ChatContainer({
           file_ids: filesToSend.map((file) => file.fileId),
           web_search_provider: selectedWebSearchProvider,
           thinking_mode: selectedThinkingMode,
-          mandatory_skill_names: selectedMandatorySkills.map((skill) => skill.name),
+          mandatory_skill_names: manualCompactSkillNames,
         });
 
         if (!sessionStreamAbortControllerRef.current && activeSessionId) {
@@ -3120,10 +3261,13 @@ function ChatContainer({
     [
       agentId,
       clearCompactStatusImmediately,
-      commitMessages,
+      clearCompactStatusWithMinimumDelay,
       currentProjectId,
+      commitMessages,
       currentSessionId,
       discardReadyPendingFiles,
+      loadSessionRuntimeDebug,
+      manualCompactSkillNames,
       openSessionStream,
       prepareForProgrammaticScroll,
       readyPendingFiles,
@@ -3133,6 +3277,7 @@ function ChatContainer({
       selectedThinkingMode,
       selectedWebSearchProvider,
       sessionType,
+      showCompactStatus,
       testSnapshot,
       updateMessages,
     ],
@@ -3285,11 +3430,18 @@ function ChatContainer({
    * Stabilizes mandatory-skill chip mutations so the composer can memoize well.
    */
   const handleAddMandatorySkill = useCallback((skill: MandatorySkillSelection) => {
-    setSelectedMandatorySkills((previous) =>
-      previous.some((item) => item.name === skill.name)
-        ? previous
-        : [...previous, skill],
-    );
+    setSelectedMandatorySkills((previous) => {
+      if (previous.some((item) => item.name === skill.name)) {
+        return previous;
+      }
+      if (isCompactSkillSelection(skill)) {
+        return [skill];
+      }
+      const withoutCompact = previous.filter(
+        (item) => !isCompactSkillSelection(item),
+      );
+      return [...withoutCompact, skill];
+    });
   }, []);
 
   /**
@@ -3743,6 +3895,7 @@ function ChatContainer({
           ) : (
             <ConversationView
               messages={messages}
+              compactTimelineItems={compactTimelineItems}
               agentName={agentName}
               expandedRecursions={expandedRecursions}
               isStreaming={isStreaming}
@@ -3770,18 +3923,24 @@ function ChatContainer({
         replyTarget={replyTarget}
         pendingFiles={pendingFiles}
         isStreaming={isStreaming}
-        canSendMessage={staleSessionId === null && migratedSessionId === null}
+        canSendMessage={
+          staleSessionId === null &&
+          migratedSessionId === null &&
+          !isManualCompacting
+        }
+        isInputDisabled={isManualCompacting}
         isConversationEmpty={isConversationEmpty}
         hasUploadingFiles={hasUploadingFiles}
         taskPlan={composerTaskPlan}
         contextUsage={contextUsage}
         isContextUsageLoading={isContextUsageLoading}
+        isCompacting={compactStatusMessage !== null}
         supportsImageInput={supportsImageInput}
         thinkingModes={thinkingModes}
         selectedThinkingMode={selectedThinkingMode}
         webSearchProviders={webSearchProviders}
         selectedWebSearchProvider={selectedWebSearchProvider}
-        availableMandatorySkills={runtimeSkills}
+        availableMandatorySkills={availableMandatorySkills}
         selectedMandatorySkills={selectedMandatorySkills}
         imageInputRef={imageInputRef}
         documentInputRef={documentInputRef}

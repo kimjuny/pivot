@@ -1,13 +1,19 @@
 import { memo } from "react";
 import { MessageSquare } from "lucide-react";
 
-import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
+import type {
+  ChatMessage,
+  CompactTimelineItem,
+  SkillChangeApprovalRequest,
+} from "../types";
 import { getChatMessageRenderKey } from "../utils/chatData";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";
+import { CompactTimelineSeparator } from "./CompactTimelineSeparator";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 interface ConversationViewProps {
   messages: ChatMessage[];
+  compactTimelineItems?: CompactTimelineItem[];
   agentName?: string;
   expandedRecursions: Record<string, boolean>;
   isStreaming: boolean;
@@ -28,6 +34,7 @@ interface ConversationViewProps {
  */
 export const ConversationView = memo(function ConversationView({
   messages,
+  compactTimelineItems = [],
   agentName,
   expandedRecursions,
   isStreaming,
@@ -36,7 +43,15 @@ export const ConversationView = memo(function ConversationView({
   onApproveSkillChange,
   onRejectSkillChange,
 }: ConversationViewProps) {
-  const isConversationEmpty = messages.length === 0;
+  const timelineItems = [...messages, ...compactTimelineItems].sort((left, right) => {
+    const leftTimestamp = Date.parse(left.timestamp);
+    const rightTimestamp = Date.parse(right.timestamp);
+    if (leftTimestamp !== rightTimestamp) {
+      return leftTimestamp - rightTimestamp;
+    }
+    return "role" in left ? -1 : 1;
+  });
+  const isConversationEmpty = timelineItems.length === 0;
   const normalizedAgentName = agentName?.trim() || "ReAct Agent";
 
   if (isConversationEmpty) {
@@ -59,26 +74,30 @@ export const ConversationView = memo(function ConversationView({
 
   return (
     <>
-      {messages.map((message) => (
-        <div
-          key={getChatMessageRenderKey(message)}
-          className="mb-6 space-y-2 last:mb-0"
-        >
-          {message.role === "user" ? (
-            <UserMessageBubble message={message} />
-          ) : (
-            <AssistantMessageBlock
-              message={message}
-              expandedRecursions={expandedRecursions}
-              isStreaming={isStreaming}
-              onToggleRecursion={onToggleRecursion}
-              onReplyTask={onReplyTask}
-              onApproveSkillChange={onApproveSkillChange}
-              onRejectSkillChange={onRejectSkillChange}
-            />
-          )}
-        </div>
-      ))}
+      {timelineItems.map((item) => {
+        return "role" in item ? (
+          <div
+            key={getChatMessageRenderKey(item)}
+            className="mb-6 space-y-2 last:mb-0"
+          >
+            {item.role === "user" ? (
+              <UserMessageBubble message={item} />
+            ) : (
+              <AssistantMessageBlock
+                message={item}
+                expandedRecursions={expandedRecursions}
+                isStreaming={isStreaming}
+                onToggleRecursion={onToggleRecursion}
+                onReplyTask={onReplyTask}
+                onApproveSkillChange={onApproveSkillChange}
+                onRejectSkillChange={onRejectSkillChange}
+              />
+            )}
+          </div>
+        ) : (
+          <CompactTimelineSeparator key={item.id} item={item} />
+        );
+      })}
     </>
   );
 });

@@ -125,6 +125,37 @@ class ReactRuntimeSkillItem(AppBaseModel):
     )
 
 
+class ReactSessionCompactRequest(AppBaseModel):
+    """Request schema for a user-triggered session compaction."""
+
+    instruction: str = Field(
+        default="",
+        description="Optional one-off user guidance injected into the compact prompt",
+    )
+
+
+class ReactSessionCompactResponse(AppBaseModel):
+    """Response schema for one user-triggered session compaction."""
+
+    session_id: str = Field(..., description="Session UUID being compacted")
+    status: Literal["completed", "noop"] = Field(
+        ..., description="Whether compact ran or was skipped as a noop"
+    )
+    compacted: bool = Field(..., description="Whether the runtime window was rebuilt")
+    reason: str = Field(
+        ...,
+        description="Short machine-readable reason such as manual_request or already_compacted",
+    )
+    usage_before: dict[str, Any] = Field(
+        ...,
+        description="Context-usage snapshot captured before the manual compact attempt",
+    )
+    usage_after: dict[str, Any] = Field(
+        ...,
+        description="Context-usage snapshot after compact or the noop baseline",
+    )
+
+
 class ReactContextUsageResponse(AppBaseModel):
     """Estimated prompt-context usage for the current composer or task."""
 

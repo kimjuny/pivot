@@ -15,6 +15,8 @@ from app.schemas.react import (
     ReactContextUsageRequest,
     ReactContextUsageResponse,
     ReactPendingUserActionRequest,
+    ReactSessionCompactRequest,
+    ReactSessionCompactResponse,
     ReactRuntimeSkillItem,
     ReactRuntimeSkillsRequest,
     ReactSessionRuntimeDebugResponse,
@@ -27,6 +29,7 @@ from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.permission_service import PermissionService
 from app.services.react_context_service import ReactContextUsageService
+from app.services.react_compact_service import ReactCompactService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
@@ -566,6 +569,55 @@ async def get_react_session_runtime_debug(
 
     payload = ReactRuntimeService(db).build_runtime_debug_payload(session_id)
     return ReactSessionRuntimeDebugResponse(**payload)
+
+
+@router.post(
+    "/react/sessions/{session_id}/compact",
+    response_model=ReactSessionCompactResponse,
+)
+async def compact_react_session(
+    session_id: str,
+    request: ReactSessionCompactRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ReactSessionCompactResponse:
+    """Execute one user-triggered compact pass for an idle session runtime."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    session = _get_owned_session(db=db, session_id=session_id, user=current_user)
+    agent = AgentService(db).get_required_agent(session.agent_id)
+    if SessionService.is_session_stale(session, agent.active_release_id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "session_stale",
+                "message": (
+                    "Agent has been republished. Migrate this session or start a new one."
+                ),
+                "latest_release_id": agent.active_release_id,
+            },
+        )
+    _require_runtime_permission(
+        db=db,
+        user=current_user,
+        session_type=session.type,
+    )
+    _require_agent_runtime_access(
+        db=db,
+        user=current_user,
+        agent=agent,
+        session_type=session.type,
+    )
+
+    service = ReactCompactService(db)
+    try:
+        payload = await service.compact_session(
+            session_id=session_id,
+            user_instruction=request.instruction,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ReactSessionCompactResponse(**payload)
 
 
 @router.get("/react/tasks/{task_id}")

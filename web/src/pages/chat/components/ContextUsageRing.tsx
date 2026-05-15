@@ -10,6 +10,7 @@ import type { ReactContextUsageSummary } from "@/utils/api";
 interface ContextUsageRingProps {
   usage: ReactContextUsageSummary | null;
   isLoading: boolean;
+  isCompacting?: boolean;
 }
 
 const RING_RADIUS = 12;
@@ -21,6 +22,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 export function ContextUsageRing({
   usage,
   isLoading,
+  isCompacting = false,
 }: ContextUsageRingProps) {
   const usedPercent = usage?.used_percent ?? 0;
   const progressOffset =
@@ -39,11 +41,32 @@ export function ContextUsageRing({
           <span
             className="inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-accent/70"
             aria-label="Session context usage"
+            data-compacting={isCompacting ? "true" : "false"}
           >
             <span className="relative flex h-7 w-7 items-center justify-center">
+              {isCompacting ? (
+                <svg
+                  viewBox="0 0 32 32"
+                  className="pointer-events-none absolute h-7 w-7 animate-[spin_2.6s_linear_infinite] text-foreground/35"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="16"
+                    cy="16"
+                    r="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeDasharray="18 70"
+                  />
+                </svg>
+              ) : null}
               <svg
                 viewBox="0 0 32 32"
-                className={`h-7 w-7 -rotate-90 ${isLoading ? "animate-pulse" : ""}`}
+                className={`h-7 w-7 -rotate-90 transition-opacity ${
+                  isLoading ? "animate-pulse" : ""
+                } ${isCompacting ? "opacity-95" : ""}`}
                 aria-hidden="true"
               >
                 <circle
@@ -77,6 +100,7 @@ export function ContextUsageRing({
         <TooltipContent side="top" className="text-xs leading-relaxed">
           {usage ? (
             <>
+              {isCompacting && <div>Compacting session context</div>}
               <div>
                 {usage.used_percent} used ({usage.remaining_percent}% left)
               </div>

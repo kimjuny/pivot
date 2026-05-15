@@ -2757,6 +2757,18 @@ export interface ReactSessionRuntimeDebug {
 }
 
 /**
+ * Response returned by one user-triggered session compact request.
+ */
+export interface ReactSessionCompactResponse {
+  session_id: string;
+  status: "completed" | "noop";
+  compacted: boolean;
+  reason: string;
+  usage_before: ReactContextUsageSummary;
+  usage_after: ReactContextUsageSummary;
+}
+
+/**
  * Get full session history with recursion details.
  *
  * @param sessionId - Session UUID
@@ -2871,6 +2883,23 @@ export const getReactSessionRuntimeDebug = async (
   return apiRequest(
     `/react/sessions/${sessionId}/runtime-debug`,
   ) as Promise<ReactSessionRuntimeDebug>;
+};
+
+/**
+ * Trigger one manual compact pass for an existing session.
+ *
+ * @param sessionId - Session UUID to compact
+ * @param instruction - Optional one-off user guidance for this compact pass
+ * @returns Promise resolving to the compact result summary
+ */
+export const compactReactSession = async (
+  sessionId: string,
+  instruction: string,
+): Promise<ReactSessionCompactResponse> => {
+  return apiRequest(`/react/sessions/${sessionId}/compact`, {
+    method: "POST",
+    body: JSON.stringify({ instruction }),
+  }) as Promise<ReactSessionCompactResponse>;
 };
 
 /**

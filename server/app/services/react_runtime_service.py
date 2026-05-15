@@ -322,6 +322,40 @@ class ReactRuntimeService:
         self._persist_state(session, state)
         return state
 
+    def replace_session_runtime_messages(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        compact_result: str | None,
+        preserve_pending_action_result: bool = True,
+        preserve_cache_state: bool = False,
+    ) -> TaskRuntimeState:
+        """Replace persisted runtime messages directly on a session row.
+
+        Args:
+            session_id: Session whose runtime window should be rebuilt.
+            messages: Canonical message list to persist.
+            compact_result: Latest compact JSON inserted into the runtime window.
+            preserve_pending_action_result: Whether to keep any pending action
+                result still stored on the session.
+            preserve_cache_state: Whether previous-response chaining should
+                remain active after the rebuild.
+
+        Returns:
+            The updated runtime state snapshot.
+        """
+        session = self._get_session_by_id_or_raise(session_id)
+        state = self.load_session(session_id)
+        state.messages = [dict(message) for message in messages]
+        state.compact_result = compact_result
+        if not preserve_pending_action_result:
+            state.pending_action_result = None
+        if not preserve_cache_state:
+            state.previous_response_id = None
+        self._persist_state(session, state)
+        return state
+
     def stash_task_messages(
         self,
         task: ReactTask,

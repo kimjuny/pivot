@@ -233,6 +233,64 @@ describe("ChatComposer", () => {
     expect(handleInputChange).toHaveBeenCalledWith("");
   });
 
+  it("switches to compact placeholder mode after selecting the compact mention", async () => {
+    const user = userEvent.setup();
+    const handleInputChange = vi.fn();
+    const handleAddMandatorySkill = vi.fn();
+
+    const { rerender } = render(
+      <ChatComposer
+        {...buildComposerProps({
+          inputMessage: "/com",
+          availableMandatorySkills: [
+            {
+              name: "compact",
+              description: "Compact the current runtime window.",
+              path: "/runtime/compact",
+            },
+          ],
+          onInputChange: handleInputChange,
+          onAddMandatorySkill: handleAddMandatorySkill,
+        })}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Ask anything");
+    await user.click(textarea);
+    expect(textarea).toBeInstanceOf(HTMLTextAreaElement);
+    if (!(textarea instanceof HTMLTextAreaElement)) {
+      throw new Error("Expected the composer to render a textarea element.");
+    }
+    placeComposerCaret(textarea, 4);
+
+    await user.click(await screen.findByText("compact"));
+    expect(handleAddMandatorySkill).toHaveBeenCalledWith({
+      name: "compact",
+      description: "Compact the current runtime window.",
+      path: "/runtime/compact",
+    });
+    expect(handleInputChange).toHaveBeenCalledWith("");
+
+    rerender(
+      <ChatComposer
+        {...buildComposerProps({
+          selectedMandatorySkills: [
+            {
+              name: "compact",
+              description: "Compact the current runtime window.",
+              path: "/runtime/compact",
+            },
+          ],
+          canSendMessage: true,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByPlaceholderText("Describe how you want the session compacted"),
+    ).toBeInTheDocument();
+  });
+
   it("closes the slash picker after clicking outside the composer", async () => {
     const user = userEvent.setup();
 
@@ -637,21 +695,20 @@ describe("ChatComposer", () => {
     );
   });
 
-  it("shows a clear compacting notice while the runtime window is rebuilding", () => {
+  it("marks the context ring as compacting while the runtime window is rebuilding", () => {
     render(
       <ChatComposer
         {...buildComposerProps({
-          compactStatusMessage:
-            "Compacting context. Please wait before stopping.",
           isStreaming: true,
+          isCompacting: true,
         })}
       />,
     );
 
-    expect(
-      screen.getByText("Compacting context. Please wait before stopping."),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Compacting...")).toBeInTheDocument();
+    expect(screen.getByLabelText("Session context usage")).toHaveAttribute(
+      "data-compacting",
+      "true",
+    );
   });
 
   it("renders and updates the web search provider selector when options exist", async () => {

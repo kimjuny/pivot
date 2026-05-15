@@ -360,3 +360,19 @@ export interface ChatMessage {
     | "waiting_input";
   totalTokens?: TokenUsage;
 }
+
+/**
+ * One compact lifecycle marker rendered inline with the chat timeline.
+ */
+export interface CompactTimelineItem {
+  /** Stable key for React rendering and event reconciliation. */
+  id: string;
+  /** Start timestamp used for timeline placement and duration formatting. */
+  timestamp: string;
+  /** Lifecycle state of this compact pass. */
+  status: "running" | "completed" | "failed";
+  /** Human-readable label shown in the separator body. */
+  label: string;
+  /** Optional completed or failed timestamp used to compute elapsed time. */
+  finishedAt?: string;
+}

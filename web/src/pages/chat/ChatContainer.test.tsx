@@ -45,6 +45,7 @@ vi.mock("@/utils/api", async () => {
   return {
     ...actual,
     cancelReactTask: vi.fn(),
+    compactReactSession: vi.fn(),
     createProject: vi.fn(),
     createDevSurfaceSession: vi.fn(),
     createInstalledSurfaceSession: vi.fn(),
@@ -86,6 +87,7 @@ vi.mock("@/contexts/auth-core", () => ({
 
 import {
   cancelReactTask,
+  compactReactSession,
   createProject,
   createDevSurfaceSession,
   createInstalledSurfaceSession,
@@ -238,6 +240,14 @@ describe("ChatContainer session rollover", () => {
     vi.mocked(getAgentWebSearchBindings).mockResolvedValue([]);
     vi.mocked(getReactContextUsage).mockResolvedValue(buildContextUsage());
     vi.mocked(getReactRuntimeSkills).mockResolvedValue([]);
+    vi.mocked(compactReactSession).mockResolvedValue({
+      session_id: "session-1",
+      status: "completed",
+      compacted: true,
+      reason: "manual_request",
+      usage_before: buildContextUsage("session-1"),
+      usage_after: buildContextUsage("session-1"),
+    });
     vi.mocked(getReactSessionRuntimeDebug).mockResolvedValue({
       session_id: "session-1",
       runtime_message_count: 0,
@@ -967,6 +977,58 @@ describe("ChatContainer session rollover", () => {
     const sendButton = screen.getByRole("button", { name: "Send" });
     expect(sendButton).toBeDisabled();
     await user.click(sendButton);
+    expect(startReactTask).not.toHaveBeenCalled();
+  });
+
+  it("routes compact mention sends through the manual compact API", async () => {
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: "session-1",
+          agent_id: 7,
+          status: "active",
+          title: "Compact thread",
+          is_pinned: false,
+          created_at: "2026-03-16T00:00:00.000Z",
+          updated_at: "2026-03-16T00:00:00.000Z",
+        },
+      ],
+      total: 1,
+    });
+    const user = userEvent.setup();
+
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+        initialSessionId="session-1"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getFullSessionHistory).toHaveBeenCalledWith("session-1");
+    });
+
+    const textarea = await screen.findByPlaceholderText("Ask anything");
+    await user.click(textarea);
+    await user.type(textarea, "/com");
+    await user.click(await screen.findByText("compact"));
+
+    const compactTextarea = await screen.findByPlaceholderText(
+      "Describe how you want the session compacted",
+    );
+    await user.type(compactTextarea, "Keep only active decisions");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(compactReactSession).toHaveBeenCalledWith(
+        "session-1",
+        "Keep only active decisions",
+      );
+    });
+    expect(await screen.findByText(/Compacted/i)).toBeInTheDocument();
     expect(startReactTask).not.toHaveBeenCalled();
   });
 

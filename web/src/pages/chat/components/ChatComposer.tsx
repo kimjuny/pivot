@@ -88,11 +88,13 @@ interface ChatComposerProps {
   pendingFiles: PendingUploadItem[];
   canSendMessage?: boolean;
   isStreaming: boolean;
+  isInputDisabled?: boolean;
   isConversationEmpty: boolean;
   hasUploadingFiles: boolean;
   taskPlan: TaskPlanSnapshot | null;
   contextUsage: ReactContextUsageSummary | null;
   isContextUsageLoading: boolean;
+  isCompacting?: boolean;
   supportsImageInput: boolean;
   thinkingModes: ChatThinkingMode[];
   selectedThinkingMode: ChatThinkingMode | null;
@@ -162,16 +164,17 @@ export function ChatComposer({
   sessionId,
   inputMessage,
   error,
-  compactStatusMessage,
   replyTarget,
   pendingFiles,
   canSendMessage,
   isStreaming,
+  isInputDisabled = false,
   isConversationEmpty,
   hasUploadingFiles,
   taskPlan,
   contextUsage,
   isContextUsageLoading,
+  isCompacting = false,
   supportsImageInput,
   thinkingModes,
   selectedThinkingMode,
@@ -198,6 +201,9 @@ export function ChatComposer({
   onDocumentInputChange,
   onRemovePendingFile,
 }: ChatComposerProps) {
+  const isCompactMode = selectedMandatorySkills.some(
+    (skill) => skill.name === "compact",
+  );
   const hasWebSearchSelector =
     webSearchProviders.length > 0 && selectedWebSearchProvider !== null;
   const hasThinkingSelector =
@@ -232,12 +238,18 @@ export function ChatComposer({
   const computedCanSendMessage =
     canSendMessage ??
     (!isStreaming &&
+      !isInputDisabled &&
       !hasUploadingFiles &&
-      (draftMessage.trim().length > 0 || pendingFiles.length > 0));
+      (isCompactMode ||
+        draftMessage.trim().length > 0 ||
+        pendingFiles.length > 0));
   const replyPreview = replyTarget?.question.replace(/\s+/g, " ").trim() ?? "";
   const activeMandatorySkillMention = useMemo(
-    () => getActiveMandatorySkillMention(draftMessage, composerSelectionStart),
-    [composerSelectionStart, draftMessage],
+    () =>
+      isCompactMode
+        ? null
+        : getActiveMandatorySkillMention(draftMessage, composerSelectionStart),
+    [composerSelectionStart, draftMessage, isCompactMode],
   );
   const activeMandatorySkillMentionKey = activeMandatorySkillMention
     ? `${activeMandatorySkillMention.start}:${activeMandatorySkillMention.query}`
@@ -466,12 +478,15 @@ export function ChatComposer({
       return;
     }
 
-    const beforeMention = draftMessage.slice(0, activeMandatorySkillMention.start);
-    const afterMention = draftMessage.slice(activeMandatorySkillMention.end);
-    const nextMessage =
-      beforeMention.endsWith(" ") && afterMention.startsWith(" ")
-        ? `${beforeMention}${afterMention.slice(1)}`
-        : `${beforeMention}${afterMention}`;
+    let nextMessage = "";
+    if (skill.name !== "compact") {
+      const beforeMention = draftMessage.slice(0, activeMandatorySkillMention.start);
+      const afterMention = draftMessage.slice(activeMandatorySkillMention.end);
+      nextMessage =
+        beforeMention.endsWith(" ") && afterMention.startsWith(" ")
+          ? `${beforeMention}${afterMention.slice(1)}`
+          : `${beforeMention}${afterMention}`;
+    }
     setDismissedMandatorySkillMentionKey(null);
     onAddMandatorySkill(skill);
     updateDraftMessage(nextMessage);
@@ -624,16 +639,6 @@ export function ChatComposer({
         </div>
       )}
 
-      {compactStatusMessage && (
-        <div
-          className="mb-2 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/10 px-4 py-2.5 text-sm text-foreground shadow-sm"
-          aria-live="polite"
-        >
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span>{compactStatusMessage}</span>
-        </div>
-      )}
-
       <div
         className={`chat-composer-transition-surface ${
           taskPlan ? "chat-composer-transition-surface-with-plan" : ""
@@ -756,9 +761,15 @@ export function ChatComposer({
                   onKeyUp={syncComposerSelection}
                   onSelect={syncComposerSelection}
                   onPaste={onPaste}
-                  placeholder={replyTarget ? "Write your answer..." : (selectedMandatorySkills.length > 0 ? "Ask anything" : "")}
+                  placeholder={
+                    replyTarget
+                      ? "Write your answer..."
+                      : isCompactMode
+                        ? "Describe how you want the session compacted"
+                        : "Ask anything"
+                  }
                   className="min-h-[60px] max-h-80 overflow-y-auto !border-0 px-4 !shadow-none focus:!border-0 focus-visible:!border-0 [field-sizing:content]"
-                  disabled={isStreaming}
+                  disabled={isStreaming || isInputDisabled}
                 />
               </PopoverAnchor>
               <PopoverContent
@@ -899,7 +910,7 @@ export function ChatComposer({
               </PopoverContent>
             </Popover>
 
-            {!draftMessage && !replyTarget && !isStreaming && selectedMandatorySkills.length === 0 && (
+            {!draftMessage && !replyTarget && !isStreaming && !isCompactMode && selectedMandatorySkills.length === 0 && (
               <div
                 className="pointer-events-none absolute inset-x-0 top-0 px-4 py-3"
                 aria-hidden="true"
@@ -1035,15 +1046,10 @@ export function ChatComposer({
                     <span>Processing attachments...</span>
                   </InputGroupText>
                 )}
-                {compactStatusMessage && (
-                  <InputGroupText className="hidden rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-[11px] font-medium text-foreground/80 sm:flex">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                    <span>Compacting...</span>
-                  </InputGroupText>
-                )}
                 <ContextUsageRing
                   usage={contextUsage}
                   isLoading={isContextUsageLoading}
+                  isCompacting={isCompacting}
                 />
                 {isStreaming ? (
                   <InputGroupButton

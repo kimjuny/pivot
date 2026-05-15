@@ -669,6 +669,15 @@
   }
 }
 
+@keyframes compactSeparatorSweep {
+  0% {
+    background-position: -180% 50%;
+  }
+  100% {
+    background-position: 220% 50%;
+  }
+}
+
 .staggered-fade-in-card {
   animation-name: staggeredFadeInCardEnter;
   animation-duration: var(--list-card-enter-duration, 220ms);
