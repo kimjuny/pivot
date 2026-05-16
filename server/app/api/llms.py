@@ -69,6 +69,8 @@ def _serialize_usable_llm(llm: Any) -> dict[str, Any]:
         "image_input": llm.image_input,
         "image_output": llm.image_output,
         "max_context": llm.max_context,
+        "thinking_policy": llm.thinking_policy,
+        "thinking_effort": llm.thinking_effort,
     }
 
 
@@ -180,6 +182,36 @@ async def get_usable_llms(
         limit=limit,
     )
     return [_serialize_usable_llm(llm) for llm in llms]
+
+
+@router.get("/llms/usable/{llm_id}", response_model=LLMUsableResponse)
+async def get_usable_llm_by_id(
+    llm_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
+) -> dict[str, Any]:
+    """Return a single safe LLM payload by ID (no secrets).
+
+    Args:
+        llm_id: The ID of the LLM to retrieve.
+        db: Database session.
+
+    Returns:
+        The LLM without api_key, endpoint, or other secrets.
+
+    Raises:
+        HTTPException: If the LLM is not found (404).
+    """
+    service = LLMService(db)
+    llm = service.get_llm(llm_id)
+    if not llm:
+        raise HTTPException(status_code=404, detail="LLM not found")
+    service.require_llm_access(
+        user=current_user,
+        llm=llm,
+        access_level=AccessLevel.USE,
+    )
+    return _serialize_usable_llm(llm)
 
 
 @router.post("/llms", response_model=LLMResponse, status_code=201)

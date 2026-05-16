@@ -21,7 +21,8 @@ import {
   deleteProject,
   deleteSession,
   getAgentWebSearchBindings,
-  getAgentExtensionPackages,
+  getAgentChatSurfaces,
+  type ChatSurfaceDescriptorResponse,
   getFullSessionHistory,
   getPreviewEndpoints,
   getReactContextUsage,
@@ -36,7 +37,6 @@ import {
   updateSession,
   type ProjectResponse,
   type DevSurfaceSessionResponse,
-  type AgentExtensionPackage,
   type ReactContextUsageSummary,
   type ReactSessionRuntimeDebug,
   type InstalledSurfaceSessionResponse,
@@ -180,64 +180,6 @@ function toWebSearchProviderOptions(
       name: binding.manifest.name,
       logoUrl: binding.manifest.logo_url ?? null,
     }));
-}
-
-/**
- * Flatten enabled agent extension packages into one header-friendly installed
- * chat surface list.
- */
-function toInstalledChatSurfaces(
-  packages: AgentExtensionPackage[],
-): InstalledChatSurfaceDescriptor[] {
-  const installedSurfaces: InstalledChatSurfaceDescriptor[] = [];
-
-  packages.forEach((pkg) => {
-    const selectedBinding = pkg.selected_binding;
-    const selectedInstallation = selectedBinding?.installation;
-    if (
-      !selectedBinding ||
-      !selectedBinding.enabled ||
-      !selectedInstallation ||
-      selectedInstallation.status !== "active"
-    ) {
-      return;
-    }
-
-    const contributionItemsByKey = new Map(
-      selectedInstallation.contribution_items
-        .filter((item) => item.type === "chat_surface")
-        .map((item) => [item.key ?? item.name, item]),
-    );
-    (selectedInstallation.contribution_summary.chat_surfaces ?? []).forEach(
-      (surfaceKey) => {
-        const contributionItem = contributionItemsByKey.get(surfaceKey);
-        const normalizedMinWidth =
-          typeof contributionItem?.min_width === "number" &&
-          Number.isFinite(contributionItem.min_width) &&
-          contributionItem.min_width > 0
-            ? contributionItem.min_width
-            : null;
-        installedSurfaces.push({
-          installationId: selectedInstallation.id,
-          packageId: pkg.package_id,
-          surfaceKey,
-          displayName:
-            contributionItem?.name && contributionItem.name.trim().length > 0
-              ? contributionItem.name.trim()
-              : surfaceKey,
-          logoUrl: pkg.logo_url,
-          description:
-            contributionItem?.description && contributionItem.description.trim().length > 0
-              ? contributionItem.description.trim()
-              : pkg.description,
-          minWidth: normalizedMinWidth,
-          icon: contributionItem?.icon ?? null,
-        });
-      },
-    );
-  });
-
-  return installedSurfaces;
 }
 
 function extractWorkspacePreviewIntent(
@@ -2428,11 +2370,22 @@ function ChatContainer({
 
     const loadInstalledChatSurfaces = async () => {
       try {
-        const extensionPackages = await getAgentExtensionPackages(agentId);
+        const surfaces = await getAgentChatSurfaces(agentId);
         if (isCancelled) {
           return;
         }
-        setInstalledChatSurfaces(toInstalledChatSurfaces(extensionPackages));
+        setInstalledChatSurfaces(
+          surfaces.map((s: ChatSurfaceDescriptorResponse) => ({
+            installationId: s.installation_id,
+            packageId: s.package_id,
+            surfaceKey: s.surface_key,
+            displayName: s.display_name,
+            logoUrl: s.logo_url,
+            description: s.description ?? "",
+            minWidth: s.min_width,
+            icon: s.icon,
+          })),
+        );
       } catch (loadError) {
         if (isCancelled) {
           return;

@@ -15,10 +15,10 @@ from app.schemas.react import (
     ReactContextUsageRequest,
     ReactContextUsageResponse,
     ReactPendingUserActionRequest,
-    ReactSessionCompactRequest,
-    ReactSessionCompactResponse,
     ReactRuntimeSkillItem,
     ReactRuntimeSkillsRequest,
+    ReactSessionCompactRequest,
+    ReactSessionCompactResponse,
     ReactSessionRuntimeDebugResponse,
     ReactStreamEvent,
     ReactTaskCancelResponse,
@@ -28,8 +28,8 @@ from app.security.permission_catalog import Permission
 from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.permission_service import PermissionService
-from app.services.react_context_service import ReactContextUsageService
 from app.services.react_compact_service import ReactCompactService
+from app.services.react_context_service import ReactContextUsageService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,

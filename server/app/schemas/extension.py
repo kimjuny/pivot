@@ -407,3 +407,16 @@ class AgentExtensionPackageResponse(AppBaseModel):
     has_update_available: bool
     selected_binding: AgentExtensionBindingResponse | None = None
     versions: list[ExtensionInstallationResponse] = Field(default_factory=list)
+
+
+class ChatSurfaceDescriptor(AppBaseModel):
+    """Minimal chat surface descriptor returned to the consumer chat page."""
+
+    installation_id: int
+    package_id: str
+    surface_key: str
+    display_name: str
+    logo_url: str | None = None
+    description: str | None = None
+    min_width: int | None = None
+    icon: str | None = None

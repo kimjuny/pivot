@@ -1931,6 +1931,26 @@ export const getAgentExtensionPackages = async (
   ) as Promise<AgentExtensionPackage[]>;
 };
 
+export interface ChatSurfaceDescriptorResponse {
+  installation_id: number;
+  package_id: string;
+  surface_key: string;
+  display_name: string;
+  logo_url: string | null;
+  description: string | null;
+  min_width: number | null;
+  icon: string | null;
+}
+
+/** Fetch lightweight chat surface descriptors for an agent's enabled extensions. */
+export const getAgentChatSurfaces = async (
+  agentId: number,
+): Promise<ChatSurfaceDescriptorResponse[]> => {
+  return apiRequest(
+    `/agents/${agentId}/chat-surfaces`,
+  ) as Promise<ChatSurfaceDescriptorResponse[]>;
+};
+
 /**
  * Create or update one extension binding for an agent.
  */
@@ -2046,6 +2066,16 @@ export const getLLMs = async (): Promise<LLM[]> => {
  */
 export const getUsableLLMs = async (): Promise<LLMUsable[]> => {
   return apiRequest('/llms/usable') as Promise<LLMUsable[]>;
+};
+
+/**
+ * Fetch a single LLM's safe capabilities (no api_key or endpoint).
+ *
+ * @param llmId - LLM primary key
+ * @returns Promise resolving to safe LLM payload
+ */
+export const getUsableLLMById = async (llmId: number): Promise<LLMUsable> => {
+  return apiRequest(`/llms/usable/${llmId}`) as Promise<LLMUsable>;
 };
 
 /**

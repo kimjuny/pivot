@@ -21,6 +21,7 @@ from app.schemas.extension import (
     AgentExtensionBindingRequest,
     AgentExtensionBindingResponse,
     AgentExtensionPackageResponse,
+    ChatSurfaceDescriptor,
     ExtensionConfigurationFieldResponse,
     ExtensionConfigurationSchemaResponse,
     ExtensionConfigurationSectionResponse,
@@ -58,6 +59,7 @@ from app.services.extension_service import (
     ExtensionBundleImportFile,
     ExtensionInstallPreview,
     ExtensionService,
+    _build_contribution_items,
 )
 from app.services.group_service import GroupService
 from app.services.user_service import UserService
@@ -1456,6 +1458,64 @@ async def list_agent_extension_packages(
         _serialize_agent_package(item, service=service, current_user=current_user)
         for item in service.list_agent_package_choices(agent_id, current_user)
     ]
+
+
+@router.get(
+    "/agents/{agent_id}/chat-surfaces",
+    response_model=list[ChatSurfaceDescriptor],
+)
+async def get_agent_chat_surfaces(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
+) -> list[ChatSurfaceDescriptor]:
+    """Return lightweight chat surface descriptors for an agent's enabled extensions.
+
+    Unlike ``/agents/{id}/extensions/packages`` this skips the full version tree,
+    artifact metadata, and secrets — only active chat surface info is returned.
+    """
+    service = ExtensionService(db)
+    bindings = service.list_agent_bindings(agent_id)
+    if not bindings:
+        return []
+
+    installations = {
+        b.extension_installation_id: service.get_installation(
+            b.extension_installation_id,
+        )
+        for b in bindings
+        if b.enabled
+    }
+
+    results: list[ChatSurfaceDescriptor] = []
+    for binding in bindings:
+        if not binding.enabled:
+            continue
+        installation = installations.get(binding.extension_installation_id)
+        if installation is None or installation.status != "active":
+            continue
+
+        manifest = json.loads(installation.manifest_json)
+        contribution_items = _build_contribution_items(manifest)
+        surface_items = [
+            i for i in contribution_items if i.get("type") == "chat_surface"
+        ]
+
+        for item in surface_items:
+            results.append(
+                ChatSurfaceDescriptor(
+                    installation_id=installation.id or 0,
+                    package_id=installation.package_id,
+                    surface_key=item.get("key") or "",
+                    display_name=item.get("name", ""),
+                    logo_url=service.get_installation_logo_url(installation),
+                    description=item.get("description") or installation.description,
+                    min_width=item.get("min_width"),
+                    icon=item.get("icon"),
+                ),
+            )
+
+    return results
 
 
 @router.put(

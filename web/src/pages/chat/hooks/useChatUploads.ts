@@ -9,7 +9,7 @@ import {
 
 import {
   deleteChatFile,
-  getLLMById,
+  getUsableLLMById,
   type FileUploadSource,
   uploadChatFile,
 } from "@/utils/api";
@@ -59,7 +59,7 @@ export function useChatUploads(primaryLlmId?: number) {
 
     const loadPrimaryLlm = async () => {
       try {
-        const llm = await getLLMById(primaryLlmId);
+        const llm = await getUsableLLMById(primaryLlmId);
         if (!isCancelled) {
           setSupportsThinkingSelector(llmHasThinkingSelector(llm));
           setThinkingModes(getChatThinkingModes(llm));

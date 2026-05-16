@@ -332,6 +332,8 @@ class LLMUsableResponse(AppBaseModel):
     image_input: bool
     image_output: bool
     max_context: int
+    thinking_policy: str
+    thinking_effort: str | None
 
 
 class LLMAccessUpdate(AppBaseModel):

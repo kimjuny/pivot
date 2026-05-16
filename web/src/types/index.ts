@@ -129,4 +129,8 @@ export interface LLMUsable {
   image_output: boolean;
   /** Maximum context token limit */
   max_context: number;
+  /** Thinking policy (e.g. "default", "always", "never") */
+  thinking_policy: string;
+  /** Thinking effort level when policy is active */
+  thinking_effort: string | null;
 }

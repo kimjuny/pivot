@@ -93,7 +93,9 @@ class ReactCompactServiceTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         self.session.close()
 
-    def test_compact_session_injects_user_instruction_and_rebuilds_runtime(self) -> None:
+    def test_compact_session_injects_user_instruction_and_rebuilds_runtime(
+        self,
+    ) -> None:
         """Manual compact should inject user guidance and persist system+compact."""
         self.runtime_service.replace_session_runtime_messages(
             self.session_row.session_id,
@@ -140,9 +142,13 @@ class ReactCompactServiceTestCase(unittest.TestCase):
                 },
             ],
         )
-        self.assertEqual(runtime_state.compact_result, runtime_state.messages[1]["content"])
+        self.assertEqual(
+            runtime_state.compact_result, runtime_state.messages[1]["content"]
+        )
 
-    def test_compact_session_returns_noop_when_runtime_is_already_compacted(self) -> None:
+    def test_compact_session_returns_noop_when_runtime_is_already_compacted(
+        self,
+    ) -> None:
         """A runtime window containing only system+compact should skip the LLM call."""
         compact_result = json.dumps({"history_summary": "ready"}, ensure_ascii=False)
         self.runtime_service.replace_session_runtime_messages(

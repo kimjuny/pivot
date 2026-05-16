@@ -36,9 +36,13 @@ class ReactCompactService:
         if session is None:
             raise ValueError("Session not found.")
         if session.runtime_status != "idle":
-            raise ValueError("Manual compact is only available when the session is idle.")
+            raise ValueError(
+                "Manual compact is only available when the session is idle."
+            )
 
-        runtime_config = AgentReleaseRuntimeService(self.db).resolve_for_session(session_id)
+        runtime_config = AgentReleaseRuntimeService(self.db).resolve_for_session(
+            session_id
+        )
         if runtime_config.llm_id is None:
             raise ValueError("This agent runtime has no LLM configured for compact.")
 
