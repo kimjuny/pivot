@@ -731,20 +731,21 @@ export function ChatComposer({
               </InputGroupAddon>
             )}
 
-            <Popover
-              open={isMandatorySkillPickerOpen || fileMention.isOpen}
-              modal={false}
-              onOpenChange={(open) => {
-                if (!open) {
-                  if (isMandatorySkillPickerOpen) {
-                    dismissActiveMandatorySkillMention();
+            <div className="relative w-full">
+              <Popover
+                open={isMandatorySkillPickerOpen || fileMention.isOpen}
+                modal={false}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    if (isMandatorySkillPickerOpen) {
+                      dismissActiveMandatorySkillMention();
+                    }
+                    if (fileMention.isOpen) {
+                      fileMention.dismiss();
+                    }
                   }
-                  if (fileMention.isOpen) {
-                    fileMention.dismiss();
-                  }
-                }
-              }}
-            >
+                }}
+              >
               <PopoverAnchor asChild>
                 <InputGroupTextarea
                   ref={textareaRef}
@@ -765,7 +766,7 @@ export function ChatComposer({
                     replyTarget
                       ? "Write your answer..."
                       : isCompactMode
-                        ? "Describe how you want the session compacted"
+                        ? ""
                         : "Ask anything"
                   }
                   className="min-h-[60px] max-h-80 overflow-y-auto !border-0 px-4 !shadow-none focus:!border-0 focus-visible:!border-0 [field-sizing:content]"
@@ -920,6 +921,18 @@ export function ChatComposer({
                 </p>
               </div>
             )}
+
+            {!draftMessage && !replyTarget && !isStreaming && isCompactMode && (
+              <div
+                className="pointer-events-none absolute inset-x-0 top-0 px-4 py-3"
+                aria-hidden="true"
+              >
+                <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+                  Describe how you want the session compacted,<Kbd>Enter</Kbd>to start.
+                </p>
+              </div>
+            )}
+            </div>
 
             <InputGroupAddon
               align="block-end"
