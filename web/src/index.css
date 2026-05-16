@@ -193,6 +193,20 @@
 }
 
 /* React Flow dark mode */
+
+/*
+ * Prose blockquote text fix for dark mode.
+ * Tailwind Typography uses a fixed dark --tw-prose-quotes color for blockquotes
+ * which is invisible against dark backgrounds. Override with theme foreground.
+ */
+.dark .prose :where(blockquote):not(:where([class~="not-prose"] *)) {
+  color: oklch(var(--foreground) / 0.85);
+}
+
+.dark .prose :where(blockquote):not(:where([class~="not-prose"] *)) :where(p) {
+  color: oklch(var(--foreground) / 0.85);
+}
+
 .dark .react-flow__node {
   background-color: oklch(0.205 0 0);
   color: oklch(0.985 0 0);
