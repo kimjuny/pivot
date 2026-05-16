@@ -2009,9 +2009,11 @@ function ChatContainer({
       clearCompactStatusWithMinimumDelay,
       applyHistoryMessages,
       currentSessionId,
+      finalizeCompactTimelineItem,
       loadSessionRuntimeDebug,
       refreshSidebarData,
       showCompactStatus,
+      startCompactTimelineItem,
       updateMessages,
     ],
   );
@@ -2218,6 +2220,7 @@ function ChatContainer({
     initialSessionId,
     isLoadingSession,
     refreshSidebarData,
+    resetCompactTimelineItems,
     sessionIdleTimeoutMs,
     openSessionStream,
     stopSessionStream,
@@ -3279,6 +3282,8 @@ function ChatContainer({
       showCompactStatus,
       testSnapshot,
       updateMessages,
+      finalizeCompactTimelineItem,
+      startCompactTimelineItem,
     ],
   );
 
@@ -3388,7 +3393,7 @@ function ChatContainer({
         );
         return;
       }
-      if (message.trim().length === 0 && readyPendingFiles.length === 0) {
+      if (message.trim().length === 0 && readyPendingFiles.length === 0 && !isCompactMode) {
         return;
       }
 
@@ -3397,6 +3402,7 @@ function ChatContainer({
     [
       agentClientState,
       hasUploadingFiles,
+      isCompactMode,
       isStreaming,
       readyPendingFiles.length,
       sendMessage,
