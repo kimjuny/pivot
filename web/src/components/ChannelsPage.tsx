@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Radio, Search, X } from "lucide-react";
 import { toast } from 'sonner';
+
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { Badge } from '@/components/ui/badge';
 import {
   Empty,
@@ -206,7 +208,7 @@ function ChannelsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading channels…</div>
+        <CenteredLoadingIndicator label="Loading channels…" className="min-h-[50vh]" />
       ) : filteredChannels.length === 0 ? (
         <Empty>
           <EmptyHeader>

@@ -12,6 +12,8 @@ import {
   Zap,
 } from "lucide-react";
 import { toast } from 'sonner';
+
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { Badge } from '@/components/ui/badge';
 import {
   Empty,
@@ -529,7 +531,7 @@ function SkillsPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">Loading skills…</div>
+        <CenteredLoadingIndicator label="Loading skills…" className="min-h-[50vh]" />
       ) : filteredRows.length === 0 ? (
         <Empty>
           <EmptyHeader>
@@ -592,7 +594,7 @@ function SkillsPage() {
                     {formatTimestamp(row.skill.updated_at)}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1 flex-wrap">
+                    <div className="flex items-center justify-end gap-1">
                       {row.skill.source === 'extension' ? (
                         <Button
                           variant="ghost"

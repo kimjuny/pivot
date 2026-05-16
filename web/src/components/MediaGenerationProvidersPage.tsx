@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ImagePlus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
+
 import StaggeredFadeInList from "@/components/StaggeredFadeInList";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -199,9 +201,7 @@ function MediaGenerationProvidersPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
-          Loading media providers…
-        </div>
+        <CenteredLoadingIndicator label="Loading media providers…" className="min-h-[50vh]" />
       ) : filteredProviders.length === 0 ? (
         <Empty>
           <EmptyHeader>

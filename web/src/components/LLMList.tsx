@@ -395,10 +395,6 @@ function LLMList() {
   // Render
   // ---------------------------------------------------------------------------
 
-  if (isLoading) {
-    return <CenteredLoadingIndicator className="h-screen" label="Loading models" />;
-  }
-
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background">
@@ -529,7 +525,9 @@ function LLMList() {
       </div>
 
       {/* Table */}
-      {filteredLLMs.length === 0 ? (
+      {isLoading ? (
+        <CenteredLoadingIndicator label="Loading models…" className="min-h-[50vh]" />
+      ) : filteredLLMs.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
           {llms.length === 0 ? (
             <>

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from 'sonner';
 
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import ConfirmationModal from './ConfirmationModal';
 import { ExtensionLogoAvatar } from '@/components/ExtensionLogoAvatar';
 import StaggeredFadeInList from '@/components/StaggeredFadeInList';
@@ -839,9 +840,7 @@ function ExtensionsPage() {
         </div>
 
         {isLoading ? (
-          <div className="flex items-center justify-center min-h-[50vh]">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
+          <CenteredLoadingIndicator label="Loading extensions…" className="min-h-[50vh]" />
         ) : filteredPackages.length === 0 ? (
           <Empty>
             <EmptyHeader>

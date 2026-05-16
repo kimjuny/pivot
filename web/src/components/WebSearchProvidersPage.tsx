@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Globe, Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import StaggeredFadeInList from "@/components/StaggeredFadeInList";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -145,9 +146,7 @@ function WebSearchProvidersPage() {
       </div>
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
-          Loading web search providers…
-        </div>
+        <CenteredLoadingIndicator label="Loading web search providers…" className="min-h-[50vh]" />
       ) : filteredProviders.length === 0 ? (
         <Empty>
           <EmptyHeader>

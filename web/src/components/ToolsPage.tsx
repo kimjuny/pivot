@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import ResourceAuthTab from '@/components/ResourceAuthTab';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -565,9 +566,7 @@ function ToolsPage() {
         </div>
 
         {isLoading ? (
-          <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-            Loading tools…
-          </div>
+          <CenteredLoadingIndicator label="Loading tools…" className="min-h-[50vh]" />
         ) : filteredRows.length === 0 ? (
           <Empty>
             <EmptyHeader>
