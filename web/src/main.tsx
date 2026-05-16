@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import LoginPage from './components/LoginPage'
 import AgentList from './components/AgentList'
 import AgentDetailPage from './components/AgentDetailPage'
@@ -79,12 +79,14 @@ function firstAllowedTarget(
 
 /**
  * Protected route wrapper.
- * Redirects to login page if user is not authenticated.
+ * Redirects to login page if user is not authenticated, preserving the
+ * intended destination so login can return the user to where they came from.
  */
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const persistedUser = getStoredUser();
   const activeUser = user ?? persistedUser;
+  const location = useLocation();
 
   // Show loading while checking auth state
   if (isLoading) {
@@ -93,7 +95,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   // Redirect to login if not authenticated
   if (!activeUser || !isTokenValid()) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
   }
 
   return <>{children}</>;
@@ -110,13 +112,14 @@ export function PermissionRoute({
 }) {
   const { user, isLoading } = useAuth();
   const activeUser = user ?? getStoredUser();
+  const location = useLocation();
 
   if (isLoading) {
     return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
   }
 
   if (!activeUser || !isTokenValid()) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
   }
 
   if (!hasPermission(activeUser, permission)) {
@@ -130,13 +133,14 @@ export function PermissionRoute({
 function AccessManagementGate({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const activeUser = user ?? getStoredUser();
+  const location = useLocation();
 
   if (isLoading) {
     return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
   }
 
   if (!activeUser || !isTokenValid()) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
   }
 
   const hasAnyPermission =
@@ -160,13 +164,14 @@ export function PermissionRedirect({
 }) {
   const { user, isLoading } = useAuth();
   const activeUser = user ?? getStoredUser();
+  const location = useLocation();
 
   if (isLoading) {
     return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
   }
 
   if (!activeUser || !isTokenValid()) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
   }
 
   return <Navigate to={firstAllowedTarget(activeUser, targets) ?? fallback} replace />;
