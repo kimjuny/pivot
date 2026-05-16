@@ -111,18 +111,6 @@ function CompactDebugButton({
 
   return (
     <>
-      {debugState.compactStatusMessage && (
-        <div className="pointer-events-none fixed bottom-4 left-1/2 z-30 -translate-x-1/2 px-4">
-          <div
-            className="flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-2 text-sm text-foreground shadow-lg backdrop-blur"
-            aria-live="polite"
-          >
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="truncate">{debugState.compactStatusMessage}</span>
-          </div>
-        </div>
-      )}
-
       <div className="pointer-events-none fixed bottom-4 right-4 z-40">
         <div className="pointer-events-auto relative" ref={containerRef}>
           {isOpen && (

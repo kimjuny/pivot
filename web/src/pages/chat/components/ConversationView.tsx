@@ -44,12 +44,39 @@ export const ConversationView = memo(function ConversationView({
   onRejectSkillChange,
 }: ConversationViewProps) {
   const timelineItems = [...messages, ...compactTimelineItems].sort((left, right) => {
+    const leftIsMessage = "role" in left;
+    const rightIsMessage = "role" in right;
+
+    // ChatMessages always come before CompactTimelineItems
+    if (leftIsMessage !== rightIsMessage) {
+      return leftIsMessage ? -1 : 1;
+    }
+
     const leftTimestamp = Date.parse(left.timestamp);
     const rightTimestamp = Date.parse(right.timestamp);
+
+    // Same task: user before assistant, regardless of timestamp drift
+    if (leftIsMessage && rightIsMessage) {
+      if (
+        left.task_id &&
+        right.task_id &&
+        left.task_id === right.task_id &&
+        left.role !== right.role
+      ) {
+        return left.role === "user" ? -1 : 1;
+      }
+    }
+
     if (leftTimestamp !== rightTimestamp) {
       return leftTimestamp - rightTimestamp;
     }
-    return "role" in left ? -1 : 1;
+
+    // Same timestamp, different tasks (or no task_id): user before assistant
+    if (leftIsMessage && rightIsMessage && left.role !== right.role) {
+      return left.role === "user" ? -1 : 1;
+    }
+
+    return 0;
   });
   const isConversationEmpty = timelineItems.length === 0;
   const normalizedAgentName = agentName?.trim() || "ReAct Agent";

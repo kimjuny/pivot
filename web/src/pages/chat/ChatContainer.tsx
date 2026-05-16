@@ -75,6 +75,7 @@ import {
 } from "@/contexts/auth-core";
 
 import { ChatComposer } from "./components/ChatComposer";
+import { CompactStatusPill } from "./components/CompactStatusPill";
 import { ConversationView } from "./components/ConversationView";
 import { ExtensionDock } from "./components/ExtensionDock";
 import type { InstalledChatSurfaceDescriptor } from "./components/ExtensionDock";
@@ -1146,7 +1147,7 @@ function ChatContainer({
         id: itemId,
         timestamp: startedAt,
         status: "running",
-        label: "Compacting",
+        label: "Compacting context. Please wait before stopping.",
       },
     ]);
   }, []);
@@ -1834,7 +1835,6 @@ function ChatContainer({
                 recursions: updatedRecursions,
                 pendingUserAction: undefined,
                 status: "stopped" as const,
-                timestamp: event.timestamp,
                 errorMessage: undefined,
               };
             }
@@ -1845,7 +1845,6 @@ function ChatContainer({
               pendingUserAction: undefined,
               status: "completed" as const,
               errorMessage: undefined,
-              timestamp: event.timestamp,
               totalTokens: event.total_tokens ?? message.totalTokens,
             };
           }),
@@ -3113,7 +3112,7 @@ function ChatContainer({
           }
         }
 
-        const messageTimestamp = new Date().toISOString();
+        const userTimestamp = new Date().toISOString();
         optimisticUserMessageId = isClarifyReply
           ? `user-${currentReplyTaskId}-clarify-reply-${Date.now()}`
           : `user-${Date.now()}`;
@@ -3123,7 +3122,7 @@ function ChatContainer({
           content: pendingMessage,
           attachments: sentAttachments,
           mandatorySkills: selectedMandatorySkills,
-          timestamp: messageTimestamp,
+          timestamp: userTimestamp,
         };
         assistantMessageId = isClarifyReply
           ? `assistant-${currentReplyTaskId}-resume-${Date.now()}`
@@ -3132,7 +3131,7 @@ function ChatContainer({
           id: assistantMessageId,
           role: "assistant",
           content: "",
-          timestamp: messageTimestamp,
+          timestamp: new Date(Date.now() + 1).toISOString(),
           recursions: [],
           status: "running" as const,
         };
@@ -3908,6 +3907,8 @@ function ChatContainer({
           <div className="h-1" />
         </div>
       </ScrollArea>
+
+      <CompactStatusPill message={compactStatusMessage} />
 
       {sessionType === "studio_test" && agentClientState === "draining_for_upgrade" ? (
         <div className="mx-3 mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
