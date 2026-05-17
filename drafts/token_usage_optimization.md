@@ -1,145 +1,75 @@
 # Agent Token Usage Optimization
 
 > Date: 2026-05-17
-> Status: Draft - Analysis Complete, Implementation Pending
-
-## 1. Current Token Consumption Breakdown
-
-### Message Structure Per Task
-
-```
-[System Prompt]           ← sent every recursion, ~3500-4500 tokens
-[User Bootstrap Prompt]   ← injected once per task, ~3000-6000 tokens
-  ├─ tools_description    ← JSON catalog, ~2000-4000 tokens (largest variable)
-  ├─ skills               ← JSON metadata
-  ├─ mandatory_skills     ← JSON content
-  └─ workspace_guidance   ← markdown
-[Recursion 1 User]        ← user_intent + current_plan + attachments
-[Recursion 1 Assistant]   ← JSON + payload blocks, ~500-5000+ tokens
-[Recursion 2 User]        ← current_plan + action_result (tool results!)
-[Recursion 2 Assistant]   ← ...
-...loops until ANSWER or max_iteration
-```
-
-**Key insight**: Each additional recursion resends **all** historical messages to the LLM. Every token saved in the prompt is multiplied by N (recursion count).
-
-### Source Files
-
-| Component | File |
-|---|---|
-| System prompt template | `server/app/orchestration/react/system_prompt.md` |
-| User prompt template | `server/app/orchestration/react/user_prompt.md` |
-| Prompt builder | `server/app/orchestration/react/prompt_template.py` |
-| Tool catalog generator | `server/app/orchestration/tool/manager.py` → `to_text_catalog()` |
-| Tool metadata | `server/app/orchestration/tool/metadata.py` |
-| Tool implementations | `server/app/orchestration/tool/builtin/*.py` |
-| Per-recursion payload | `server/app/orchestration/react/engine.py` → `_build_recursion_user_payload()` |
-| Plan payload builder | `server/app/orchestration/react/engine.py` → `_build_current_plan_payload()` |
-| Compact prompt | `server/app/orchestration/compact/compact_prompt.py` |
-| Response parser | `server/app/orchestration/react/parser.py` |
+> Status: Phase 1 + Phase 2 partially complete
 
 ---
 
-## 2. Optimization Directions (Sorted by Impact)
+## Completed Work
 
-### 2.1 System Prompt: Chinese → English + Redundancy Elimination
+### 2.1 System Prompt: Chinese → English + Redundancy Elimination ✅ DONE
 
-**Priority**: P0 | **Estimated Savings**: ~50% (~1800 tokens/round) | **Effort**: Medium
+**Result**: Rewrote `system_prompt.md` from Chinese to English. Removed "Agent 权限运行边界" section, consolidated repeated format rules, merged JSON examples. ~55-60% token reduction.
 
-#### Current Issues
+### 2.1b Prompt Split: Session-level vs Task-level ✅ DONE
 
-1. **CJK characters are extremely token-expensive**: Each Chinese character consumes 2-3 tokens in mainstream tokenizers (GPT, Claude, etc.), while an English word typically costs ~1 token. The same semantic content in Chinese costs ~1.8-2.5x more tokens than English.
-2. **"Agent 权限运行边界" section (lines 10-14)** is runtime permission logic irrelevant to LLM decision-making. The LLM doesn't need to know about Agent use/edit permission rules — those are Studio-side configuration constraints.
-3. **JSON Schema and Examples heavily overlap**: Section 3.1 defines the full outer structure, then sections 3.2-3.6 each repeat a complete JSON example. Low information density.
-4. **`thinking_next_turn` rules (lines 53-58)**: 5 detailed conditions are overly verbose; can be condensed to 1-2 sentences.
-5. **Repetitive emphasis**: "禁止输出Markdown代码围栏" appears at least 3 times across the document.
-6. **`observe` and `reason` descriptions**: Marked as "选填" (optional) but given verbose template descriptions that encourage the LLM to write long paragraphs.
+**Key architectural change**: Moved `tools_description` and `skills_index` from per-task user prompt → session-level system prompt. These are stable within a session and survive context compaction (engine.py restores system prompt after compaction).
 
-#### Proposed Changes
+- **System prompt** (`system_prompt.md`): protocol rules + `{{tools_description}}` + `{{skills}}`
+- **User prompt** (`user_prompt.md`): only task-level content — `{{system_time}}` + `{{mandatory_skills}}` + `{{workspace_guidance}}`
+- **Savings**: ~3000-4000 tokens per task after the first one in a session (tools/skills no longer re-injected)
 
-- Convert entire system prompt from Chinese to English
-- Remove "Agent 权限运行边界" section entirely
-- Consolidate repeated format rules (no markdown fences, no extra text) into a single rules block
-- Merge JSON examples: show the full structure once in 3.1, then each action type only shows the `action.output` diff
-- Condense `thinking_next_turn` conditions to 2 sentences
-- Reduce `observe`/`reason` descriptions to discourage verbose output
+**Files modified**:
+- `server/app/orchestration/react/system_prompt.md`
+- `server/app/orchestration/react/user_prompt.md`
+- `server/app/orchestration/react/prompt_template.py`
+- `server/app/orchestration/react/engine.py`
+- `server/app/services/react_context_service.py`
+- `server/tests/services/test_workspace_guidance_service.py`
 
-#### Estimated Result
+### 2.2 Tool Catalog: Schema-based Approach (Option 2) ✅ DONE
 
+**Decision**: Chose Option 2 (structured JSON Schema from decorator) over Option 1 (docstring-based) for forward-compatibility with native LLM tool calling (OpenAI/Anthropic/Gemini all share the same schema: `name + description + parameters JSON Schema`).
+
+**Implementation**:
+1. **`Param` descriptor class** — used inside `Annotated[type, Param("description")]` to attach per-parameter descriptions. Supports `hidden=True` to exclude params from LLM schema while keeping them in the Python function signature.
+2. **`@tool` decorator enhanced** — accepts explicit `description` parameter (LLM-facing tool overview). Docstring no longer feeds LLM at all.
+3. **Auto-extraction from function signature**:
+   - `tool_name` ← `func.__name__`
+   - `parameter_name` / `parameter_type` ← type hints → JSON Schema type
+   - `parameter_required` ← no default value → `required` array
+   - `parameter_default` ← default value → `default` field
+   - `parameter_description` ← `Param("...")` in `Annotated` → `description` field
+4. **All 9 builtin tools migrated** to new format.
+5. **Output format** now matches OpenAI/Anthropic/Gemini native tool calling schema exactly.
+
+**Example output** (what the LLM sees):
+```json
+{
+  "name": "run_bash",
+  "description": "Run one bash command from /workspace and return stdout.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "command": {"type": "string", "description": "Shell command string executed with bash -lc."},
+      "fail_on_nonzero": {"type": "boolean", "description": "Raise RuntimeError on non-zero exit code.", "default": false}
+    },
+    "required": ["command"]
+  }
+}
 ```
-Before: ~197 lines, ~3500-4500 tokens
-After:  ~80-100 lines, ~1500-1800 tokens
-Savings: ~50%
-```
+
+**`web_search` special handling**: `provider` param marked `Param(hidden=True)` — excluded from LLM schema (design decision: LLM should not hard-code provider keys).
+
+**Files modified**:
+- `server/app/orchestration/tool/decorator.py` — `Param` class, enriched schema builder
+- `server/app/orchestration/tool/metadata.py` — clean `to_dict()` / `to_openai_format()`
+- `server/app/orchestration/tool/__init__.py` — export `Param`
+- All 9 files in `server/app/orchestration/tool/builtin/`
 
 ---
 
-### 2.2 Tool Catalog: Compress Tool Descriptions
-
-**Priority**: P0 | **Estimated Savings**: ~60% (~1800 tokens/task) | **Effort**: Low
-
-#### Current State
-
-`to_text_catalog()` outputs pretty-printed JSON (indent=2) with full docstrings and complete JSON Schemas.
-
-| Tool | Param Count | Description Length |
-|---|---|---|
-| `web_search` | **21** | ~3,100 chars |
-| `edit_file` | 2 | ~1,450 chars |
-| `read_file` | 3 | ~1,180 chars |
-| `search` | 6 | ~1,150 chars |
-| `write_file` | 2 | ~780 chars |
-| `list_directories` | 2 | ~480 chars |
-| `run_bash` | 2 | ~460 chars |
-
-#### Current Issues
-
-1. **`web_search` dominates**: 21 parameters, ~3100 chars. Most params (`include_favicon`, `safe_search`, `auto_parameters`, `include_usage`, etc.) are almost never used by the Agent.
-2. **Full docstrings in prompt**: Each tool includes its complete docstring (with Args, Returns, Raises sections). The LLM only needs to know what the tool does and what parameters it accepts.
-3. **Duplicate descriptions**: JSON Schema `description` fields duplicate the tool-level `description`.
-4. **`tool_type` field**: Not useful for LLM decision-making.
-5. **Pretty-printed JSON**: `indent=2` adds significant whitespace overhead.
-
-#### Proposed Changes
-
-1. Add a `short_description` field to `ToolMetadata` (1-2 sentence summary). Use it in `to_text_catalog()` instead of the full docstring.
-2. For `web_search`: expose only high-frequency parameters in the schema (`query`, `max_results`, `time_range`, `search_depth`, `include_domains`, `exclude_domains`). Hide the rest as internal.
-3. Remove parameter-level `description` from JSON Schema (the short tool description covers it).
-4. Use `indent=None` (compact JSON) or a custom compact serializer.
-5. Remove `tool_type` from catalog output.
-6. Alternatively: implement a `to_compact_catalog()` method that produces a minimal representation.
-
-#### Implementation Sketch
-
-```python
-# In ToolMetadata
-def to_compact_dict(self) -> dict[str, Any]:
-    """Minimal representation for LLM consumption."""
-    compact_params = {
-        "type": self.parameters.get("type", "object"),
-        "required": self.parameters.get("required", []),
-        "properties": {
-            name: {"type": schema.get("type", "string")}
-            for name, schema in self.parameters.get("properties", {}).items()
-            if not schema.get("internal", False)  # hide internal params
-        }
-    }
-    return {
-        "name": self.name,
-        "description": self.short_description,
-        "parameters": compact_params,
-    }
-```
-
-#### Estimated Result
-
-```
-Before: ~8000-10000 chars, ~2000-4000 tokens
-After:  ~3000-4000 chars, ~800-1200 tokens
-Savings: ~60%
-```
-
----
+## Remaining Optimization Directions
 
 ### 2.3 Per-Recursion Payload: Plan History Compression
 
@@ -256,43 +186,26 @@ Already implements provider-level cache policies (Qwen block cache, Kimi prompt 
 
 ---
 
-## 3. Priority Matrix
+## Priority Matrix (Updated)
 
-| Priority | Direction | Token Savings | Effort | Risk |
+| Priority | Direction | Token Savings | Effort | Status |
 |---|---|---|---|---|
-| **P0** | Tool Catalog Compression | ~60% (~1800 tokens/task) | Low | Very Low |
-| **P0** | System Prompt EN + Simplify | ~50% (~1800 tokens/round) | Medium | Low (test format compliance) |
-| **P1** | Per-Recursion Plan Compression | 30-50%/round (compounding) | Medium | Low |
-| **P1** | Assistant Output Format | 20-30%/round output | Low | Low |
-| **P2** | Compact Prompt Optimization | 30-40% | Low | Low |
-| **P2** | Caching Strategy Hardening | Indirect | Medium-High | Medium |
+| **P0** | System Prompt EN + Simplify | ~50% (~1800 tokens/round) | Medium | ✅ Done |
+| **P0** | Prompt Split (session vs task) | ~3000-4000 tokens/task | Medium | ✅ Done |
+| **P0** | Tool Catalog Schema (Option 2) | ~60% (~1800 tokens/task) | Medium | ✅ Done |
+| **P1** | Per-Recursion Plan Compression | 30-50%/round (compounding) | Medium | Pending |
+| **P1** | Assistant Output Format | 20-30%/round output | Low | Pending |
+| **P2** | Compact Prompt Optimization | 30-40% | Low | Pending |
+| **P2** | Caching Strategy Hardening | Indirect | Medium-High | Pending |
 
 ---
 
-## 4. Aggregate Impact Estimate
+## Remaining Implementation Sequence
 
-For a typical 5-recursion task:
-
-| Component | Before (est.) | After (est.) | Savings |
-|---|---|---|---|
-| System Prompt | ~4000 × 5 = 20,000 | ~1800 × 5 = 9,000 | **-55%** |
-| Tool Catalog (bootstrap) | ~3000 × 1 = 3,000 | ~1200 × 1 = 1,200 | **-60%** |
-| Per-Recursion Payload | ~2000 × 5 = 10,000 | ~1000 × 5 = 5,000 | **-50%** |
-| Assistant Output | ~2000 × 5 = 10,000 | ~1400 × 5 = 7,000 | **-30%** |
-| **Total (no cache)** | **~43,000** | **~22,200** | **~48%** |
-
-With prompt caching, actual cost savings depend on cache hit rate, but output tokens (not cached) still save ~30%. Compaction triggers will also fire less frequently since context grows more slowly.
-
----
-
-## 5. Implementation Sequence (Recommended)
-
-1. **Phase 1** (Quick wins, 1-2 days): Tool catalog compression (2.2)
-2. **Phase 2** (Core prompt, 2-3 days): System prompt rewrite to English (2.1) + assistant output format tuning (2.4)
-3. **Phase 3** (Payload optimization, 2-3 days): Per-recursion plan compression (2.3) + tool result truncation
-4. **Phase 4** (Polish, 1-2 days): Compact prompt optimization (2.5) + caching verification (2.6)
+1. **Phase 3** (Payload optimization, 2-3 days): Per-recursion plan compression (2.3) + tool result truncation
+2. **Phase 4** (Output tuning, 1-2 days): Assistant output format optimization (2.4)
+3. **Phase 5** (Polish, 1-2 days): Compact prompt optimization (2.5) + caching verification (2.6)
 
 Each phase should include:
-- A/B testing against existing prompts to verify format compliance
 - Token count measurement before/after using `estimate_messages_tokens()`
 - Agent behavior regression testing (ensure task completion rate is maintained)

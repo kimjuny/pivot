@@ -1,26 +1,37 @@
 """Built-in sandbox tool: write file content in agent workspace."""
 
-from app.orchestration.tool import tool
+from typing import Annotated
+
+from app.orchestration.tool import Param, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
 
-@tool(tool_type="sandbox")
-def write_file(path: str, content: str) -> str:
+@tool(
+    description="Write UTF-8 text to a file under /workspace. Creates parent directories automatically.",
+    tool_type="sandbox",
+)
+def write_file(
+    path: Annotated[
+        str,
+        Param(
+            "Absolute /workspace/... path to the target file. "
+            "Workspace-relative paths are accepted but absolute sandbox paths are clearer."
+        ),
+    ],
+    content: Annotated[
+        str,
+        Param("UTF-8 text content to write. Expects a string, not a JSON object."),
+    ],
+) -> str:
     """Write UTF-8 text to a file under ``/workspace``.
 
-    Parent directories are created automatically.
     IMPORTANT: Prefer an absolute sandbox path that starts with ``/workspace/``,
-    for example ``/workspace/app/index.html``. Never pass host-machine paths
-    such as ``/Users/...`` or ``/tmp/...``; paths outside ``/workspace`` are
-    rejected.
+    for example ``/workspace/app/index.html``. Never pass host-machine paths.
 
     Args:
-        path (required, str): Absolute ``/workspace/...`` path to the target
-            file. Workspace-relative paths are accepted, but absolute sandbox
-            paths are clearer and less error-prone.
-        content (required, str): UTF-8 text content to write. This tool expects
-            a string, not a JSON object or other structured value.
+        path: Target file path.
+        content: Text content to write.
 
     Returns:
         Human-readable write confirmation.

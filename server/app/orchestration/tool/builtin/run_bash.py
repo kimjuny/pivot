@@ -1,25 +1,31 @@
 """Built-in sandbox tool: run one shell command in workspace."""
 
-from typing import Any
+from typing import Annotated, Any
 
-from app.orchestration.tool import tool
+from app.orchestration.tool import Param, tool
 from app.services.sandbox_service import get_sandbox_service
 
 from ._sandbox_common import require_context
 
 
-@tool(tool_type="sandbox")
-def run_bash(command: str, fail_on_nonzero: bool = False) -> dict[str, Any]:
+@tool(
+    description="Run one bash command from /workspace and return stdout.",
+    tool_type="sandbox",
+)
+def run_bash(
+    command: Annotated[str, Param("Shell command string executed with bash -lc.")],
+    fail_on_nonzero: Annotated[
+        bool, Param("Raise RuntimeError on non-zero exit code.")
+    ] = False,
+) -> dict[str, Any]:
     """Run one bash command from ``/workspace`` and return stdout.
 
     Args:
-        command (required, str): Shell command string executed with
-            ``bash -lc``.
-        fail_on_nonzero (optional, bool): When true, raise ``RuntimeError`` on
-            non-zero exit code. Defaults to ``False``.
+        command: Shell command string.
+        fail_on_nonzero: When true, raise on non-zero exit.
 
     Returns:
-        Structured result dict with ``ok``, ``exit_code``, ``stdout``, ``stderr``.
+        Structured result dict with ok, exit_code, stdout, stderr.
 
     Raises:
         RuntimeError: If ``fail_on_nonzero`` is true and command fails.

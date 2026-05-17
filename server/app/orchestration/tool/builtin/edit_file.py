@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-from app.orchestration.tool import tool
+from app.orchestration.tool import Param, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
@@ -360,13 +361,19 @@ print(json.dumps(payload, ensure_ascii=False))
 """.strip()
 
 
-@tool(tool_type="sandbox")
-def edit_file(path: str, diff: str) -> dict[str, object]:
+@tool(
+    description=(
+        "Apply simplified unified diff hunks to one file under /workspace. "
+        "Use after read_file. One edit_file call per file per recursion; "
+        "send multiple @@ hunks if the file needs several changes."
+    ),
+    tool_type="sandbox",
+)
+def edit_file(
+    path: Annotated[str, Param("Target file path under /workspace.")],
+    diff: Annotated[str, Param("Simplified unified diff hunks for that file.")],
+) -> dict[str, object]:
     """Apply simplified unified diff hunks to one file under ``/workspace``.
-
-    Use this after ``read_file``. The ``read_file`` line numbers are snapshot
-    data, so after any successful write to the same file you must re-run
-    ``read_file`` before editing that file again.
 
     IMPORTANT:
     - In one recursion, call ``edit_file`` at most once per file.
@@ -374,26 +381,10 @@ def edit_file(path: str, diff: str) -> dict[str, object]:
       multiple ``@@`` hunks instead of multiple calls.
     - Use the ``read_file`` numbers in hunk headers, but never include the
       ``N | `` prefixes in diff body lines.
-    - ``old_start`` should point to the first old/context line. The tool tries
-      that exact anchor first, then may auto-correct within a small nearby
-      window when the old/context block has one unique match.
-    - Keep ``old_count`` and ``new_count`` accurate; mismatches only warn today,
-      but they make future edits less reliable.
-
-    Example with multiple hunks:
-
-    @@ -10,3 +10,3 @@
-     unchanged context
-    -old line
-    +new line
-    @@ -40,2 +40,3 @@
-     another context line
-    +inserted line
-     final context line
 
     Args:
-        path (required, str): Target file path under ``/workspace``.
-        diff (required, str): Simplified unified diff hunks for that file.
+        path: Target file path under /workspace.
+        diff: Simplified unified diff hunks.
 
     Returns:
         A dict with message, path, hunk_count, line counts, and warnings.

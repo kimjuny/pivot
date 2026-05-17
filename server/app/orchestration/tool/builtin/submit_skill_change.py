@@ -2,37 +2,31 @@
 
 from __future__ import annotations
 
-from app.orchestration.tool import get_current_tool_execution_context, tool
+from typing import Annotated
+
+from app.orchestration.tool import Param, get_current_tool_execution_context, tool
 from app.services.skill_change_service import submit_skill_change_for_agent
 
 
-@tool
+@tool(
+    description="Stage one skill change authored inside the sandbox for user approval.",
+)
 def submit_skill_change(
-    skill_path: str = "",
-    message: str = "",
+    skill_path: Annotated[
+        str, Param("Sandbox-local skill directory under /workspace/skills.")
+    ] = "",
+    message: Annotated[
+        str, Param("Reviewer-facing explanation of what changed and why.")
+    ] = "",
 ) -> dict[str, object]:
-    """Stage one skill change authored inside the sandbox.
+    """Stage one skill change authored inside ``/workspace/skills``.
 
-    Use this tool for any skill work written under ``/workspace/skills``.
-
-    **Important:** This tool is to submit skill files change only, other files are not allowed to submit.
-
-    Workflow:
-    1. Create or edit one skill directory inside ``/workspace/skills/<name>``.
-    2. When the draft is ready for review, call this tool with ``skill_path`` set to
-       that top-level directory.
-    3. The system will freeze a snapshot, ask the user to approve or reject it, and
-       resume the task automatically after the user decides.
-
-    Notes:
-        - V1 syncs to creator-owned Skills only.
-        - Built-in and foreign-owned Skill targets are rejected.
+    Workflow: create/edit skill directory → call this tool → system freezes
+    snapshot → user approves/rejects → task resumes automatically.
 
     Args:
-        skill_path (optional, str): Sandbox-local skill directory under
-            ``/workspace/skills``. Defaults to the empty string.
-        message (optional, str): Reviewer-facing explanation of what changed
-            and why. Defaults to the empty string.
+        skill_path: Sandbox-local skill directory under /workspace/skills.
+        message: Reviewer-facing explanation of what changed and why.
 
     Returns:
         Structured submission result including a system-owned pending approval action.

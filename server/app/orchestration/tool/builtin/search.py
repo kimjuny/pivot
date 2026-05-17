@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-from app.orchestration.tool import tool
+from app.orchestration.tool import Param, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
@@ -147,36 +148,39 @@ print(json.dumps(payload, ensure_ascii=False))
 """.strip()
 
 
-@tool(tool_type="sandbox")
+@tool(
+    description=(
+        "Search workspace files and return a compact list of read candidates. "
+        "Designed to help decide where to read next, not dump full source text."
+    ),
+    tool_type="sandbox",
+)
 def search(
-    query: str,
-    path: str = ".",
-    regex: bool = False,
-    case_sensitive: bool = False,
-    max_candidates: int = 8,
-    max_hits_per_file: int = 3,
+    query: Annotated[str, Param("Text or regex pattern to search for.")],
+    path: Annotated[
+        str, Param("Relative or absolute workspace path to search under.")
+    ] = ".",
+    regex: Annotated[
+        bool, Param("Treat query as a ripgrep regex instead of literal text.")
+    ] = False,
+    case_sensitive: Annotated[bool, Param("Preserve case when matching.")] = False,
+    max_candidates: Annotated[
+        int, Param("Maximum number of files returned as read candidates.")
+    ] = 8,
+    max_hits_per_file: Annotated[int, Param("Maximum anchor hits kept per file.")] = 3,
 ) -> dict[str, object]:
     """Search workspace files and return a compact list of read candidates.
 
-    This tool is intentionally terse: it should help the agent decide *where to
-    read next*, not dump enough source text to replace ``read_file``.
-
     Args:
-        query (required, str): Text or regex pattern to search for. Must not be
-            blank.
-        path (optional, str): Relative or absolute workspace path to search
-            under. Defaults to ``.``.
-        regex (optional, bool): Whether ``query`` should be treated as a
-            ripgrep regex. Defaults to ``False``.
-        case_sensitive (optional, bool): Whether matching should preserve case.
-            Defaults to ``False``.
-        max_candidates (optional, int): Maximum number of files returned as
-            read candidates. Defaults to ``8``.
-        max_hits_per_file (optional, int): Maximum number of anchor hits kept
-            per file. Defaults to ``3``.
+        query: Search text or regex.
+        path: Workspace path to search under.
+        regex: Whether query is a regex.
+        case_sensitive: Whether matching preserves case.
+        max_candidates: Max files to return.
+        max_hits_per_file: Max anchor hits per file.
 
     Returns:
-        Structured payload with ranked file candidates, match counts, and a few
+        Structured payload with ranked file candidates, match counts, and
         short anchor previews per file.
 
     Raises:

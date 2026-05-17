@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from app.db.session import managed_session
-from app.orchestration.tool import get_current_tool_execution_context, tool
+from app.orchestration.tool import Param, get_current_tool_execution_context, tool
 from app.services.preview_endpoint_service import (
     PreviewEndpointRecord,
     PreviewEndpointService,
@@ -46,35 +48,46 @@ def _serialize_preview_record(
     return result
 
 
-@tool
+@tool(
+    description=(
+        "Create or reconnect a web preview for this chat session. "
+        "The preview server must bind 0.0.0.0 inside the sandbox; "
+        "localhost and 127.0.0.1 are not reachable through the proxy."
+    ),
+)
 def create_preview_endpoint(
-    preview_name: str,
-    start_server: str,
-    port: int,
-    path: str = "/",
-    cwd: str = ".",
-    run_in_background: bool = True,
+    preview_name: Annotated[str, Param("Label shown in the preview picker.")],
+    start_server: Annotated[
+        str,
+        Param(
+            "Shell command to start the preview server. "
+            "e.g. 'npm run dev -- --host 0.0.0.0' or 'python -m http.server 8000 --bind 0.0.0.0'."
+        ),
+    ],
+    port: Annotated[int, Param("Sandbox-local HTTP port to expose.")],
+    path: Annotated[str, Param("Initial HTTP path.")] = "/",
+    cwd: Annotated[
+        str,
+        Param("Workspace-relative or absolute /workspace directory for start_server."),
+    ] = ".",
+    run_in_background: Annotated[
+        bool,
+        Param(
+            "If true, automatically detach the server process so it runs "
+            "in the background and the command returns immediately. "
+            "Set to false only if start_server is a quick setup script that exits on its own."
+        ),
+    ] = True,
 ) -> dict[str, object]:
     """Create/reconnect a web preview for this chat session.
 
-    The preview server must bind ``0.0.0.0`` inside the sandbox; ``localhost``
-    and ``127.0.0.1`` are not reachable through the proxy.
-
     Args:
-        preview_name (required, str): Label shown in the preview picker.
-        start_server (required, str): Shell command to start the preview server.
-            Write a simple foreground command like ``npm run dev -- --host 0.0.0.0``
-            or ``python -m http.server 8000 --bind 0.0.0.0``. The tool will
-            automatically detach it if ``run_in_background`` is True.
-        port (required, int): Sandbox-local HTTP port to expose.
-        path (optional, str): Initial HTTP path. Defaults to ``/``.
-        cwd (optional, str): Workspace-relative or absolute ``/workspace`` directory for
-            ``start_server``. Defaults to ``.``.
-        run_in_background (optional, bool): If True (default), automatically detach
-            the server process so it runs in the background and the command returns
-            immediately. Server output will be logged to
-            ``/workspace/.tmp/preview-{preview_id}.log``. Set to False only if
-            ``start_server`` is a quick setup script that exits on its own.
+        preview_name: Label for the preview.
+        start_server: Shell command to start the server.
+        port: HTTP port.
+        path: Initial path.
+        cwd: Working directory for start_server.
+        run_in_background: Whether to detach the server process.
 
     Returns:
         Preview metadata, proxy URL, log file path, and UI intent.

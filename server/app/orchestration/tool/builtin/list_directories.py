@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-from app.orchestration.tool import tool
+from app.orchestration.tool import Param, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
@@ -38,18 +39,23 @@ print("\\n".join(f"{path.name}/" if path.is_dir() else path.name for path in ite
 """.strip()
 
 
-@tool(tool_type="sandbox")
+@tool(
+    description="List direct files and subdirectories under one workspace directory.",
+    tool_type="sandbox",
+)
 def list_directories(
-    dir_path: str = ".",
-    ignore: list[str] | None = None,
+    dir_path: Annotated[
+        str, Param("Relative or absolute directory path under /workspace.")
+    ] = ".",
+    ignore: Annotated[
+        list[str] | None, Param("Glob patterns used to exclude direct children.")
+    ] = None,
 ) -> str:
-    """List direct files and subdirectories under one workspace directory.
+    """List direct children under one workspace directory.
 
     Args:
-        dir_path (optional, str): Relative or absolute directory path under
-            ``/workspace``. Defaults to ``.``.
-        ignore (optional, list[str]): Glob patterns used to exclude direct
-            children. Defaults to ``None``.
+        dir_path: Directory path under /workspace.
+        ignore: Glob patterns to exclude children.
 
     Returns:
         Newline-separated child names. Directory names end with ``/``.

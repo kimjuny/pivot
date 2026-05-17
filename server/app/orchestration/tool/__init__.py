@@ -4,7 +4,7 @@ Tool module for function calling capabilities.
 Provides decorator-based tool registration and management for agent function calling.
 """
 
-from .decorator import tool
+from .decorator import Param, tool
 from .manager import (
     ToolExecutionContext,
     ToolManager,
@@ -14,6 +14,7 @@ from .manager import (
 from .metadata import ToolMetadata
 
 __all__ = [
+    "Param",
     "ToolExecutionContext",
     "ToolManager",
     "ToolMetadata",

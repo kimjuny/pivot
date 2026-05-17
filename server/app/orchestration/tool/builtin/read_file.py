@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import posixpath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from app.orchestration.tool import get_current_tool_execution_context, tool
+from app.orchestration.tool import Param, get_current_tool_execution_context, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
@@ -347,35 +347,51 @@ def _read_image(path: str) -> dict[str, object]:
     }
 
 
-@tool(tool_type="normal")
+@tool(
+    description=(
+        "Read a file under /workspace. Auto-selects reading strategy by extension: "
+        "text/code files get line-numbered output, documents (pdf/docx/pptx/xlsx) "
+        "get Docling-converted markdown, images (png/jpg/jpeg/webp) are made visible "
+        "to the model."
+    ),
+)
 def read_file(
-    path: str,
-    start_line: int = 1,
-    max_lines: int = 400,
+    path: Annotated[str, Param("Relative or absolute workspace path.")],
+    start_line: Annotated[
+        int,
+        Param(
+            "1-based starting line for text files. " "Ignored for documents and images."
+        ),
+    ] = 1,
+    max_lines: Annotated[
+        int,
+        Param(
+            "Maximum returned lines for text files. "
+            "Ignored for documents and images."
+        ),
+    ] = 400,
 ) -> dict[str, object]:
     """Read a file under ``/workspace``. Automatically selects the appropriate
     reading strategy based on file extension:
 
     - **Text/code files** (.py, .js, .json, .yaml, .md, etc.): Returns
-      line-numbered content with pagination hints. Compatible with
-      ``edit_file`` line references.
+      line-numbered content with pagination hints.
     - **Documents** (.pdf, .docx, .pptx, .xlsx): Returns Docling-converted
       markdown content.
     - **Images** (.png, .jpg, .jpeg, .webp): Makes the image visible to the
-      model in the next iteration. Returns metadata (path, dimensions).
+      model in the next iteration.
 
     Args:
-        path (required, str): Relative or absolute workspace path.
-        start_line (optional, int): 1-based starting line for text files.
-            Ignored for documents and images.
-        max_lines (optional, int): Maximum returned lines for text files.
-            Defaults to ``400``. Ignored for documents and images.
+        path: Workspace file path.
+        start_line: 1-based starting line for text files.
+        max_lines: Maximum lines for text files.
 
     Returns:
-        Text files: A dict with line-numbered ``content`` and pagination
-        hints (``total_lines``, ``has_more_before``, ``has_more_after``, etc.).
-        Documents: A dict with ``content`` as markdown text and ``kind``.
-        Images: A dict with ``path``, ``dimensions``, and ``kind``.
+        Structured dict with file content and metadata.
+
+    Raises:
+        ValueError: If arguments are invalid or file type is unsupported.
+        FileNotFoundError: If the file does not exist.
     """
     file_type = _classify_extension(path)
 
