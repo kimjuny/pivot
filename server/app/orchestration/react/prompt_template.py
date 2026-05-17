@@ -36,13 +36,32 @@ _REACT_SYSTEM_PROMPT = _read_template(_SYSTEM_TEMPLATE_PATH)
 _REACT_USER_PROMPT = _read_template(_USER_TEMPLATE_PATH)
 
 
-def build_runtime_system_prompt() -> str:
+def build_runtime_system_prompt(
+    tool_manager: ToolManager | None = None,
+    skills: str = "[]",
+) -> str:
     """Build the stable system prompt used once for an entire session.
 
+    The system prompt includes session-level context (tool catalog and skills
+    index) that remains constant across all tasks within the same session.
+    Because the system prompt is always restored after context compaction,
+    this content never needs to be re-injected per-task.
+
+    Args:
+        tool_manager: Optional tool manager to describe available tools.
+        skills: Runtime-visible skill metadata JSON for prompt injection.
+
     Returns:
-        System prompt text containing only stable role/schema guidance.
+        Rendered system prompt text with tool catalog and skills embedded.
     """
-    return _REACT_SYSTEM_PROMPT
+    tools_description = ""
+    if tool_manager:
+        tools_description = tool_manager.to_text_catalog()
+
+    return (
+        _REACT_SYSTEM_PROMPT.replace("{{tools_description}}", tools_description)
+        .replace("{{skills}}", skills)
+    )
 
 
 def _format_task_start_time(
@@ -68,8 +87,6 @@ def _format_task_start_time(
 
 
 def build_runtime_user_prompt(
-    tool_manager: ToolManager | None = None,
-    skills: str = "",
     mandatory_skills: str = "[]",
     workspace_guidance: str = "",
     prefix_blocks: list[str] | None = None,
@@ -77,9 +94,11 @@ def build_runtime_user_prompt(
 ) -> str:
     """Build the task bootstrap user prompt injected once per task.
 
+    Task-level context (mandatory skills, workspace guidance, timestamps) that
+    may change between tasks within the same session. Session-stable content
+    (tools, skills index) lives in the system prompt instead.
+
     Args:
-        tool_manager: Optional tool manager to describe available tools.
-        skills: Runtime-visible skill metadata JSON for prompt injection.
         mandatory_skills: User-selected mandatory skill payload JSON injected
             into the task bootstrap prompt.
         workspace_guidance: Project-local repository guidance injected into the
@@ -92,14 +111,8 @@ def build_runtime_user_prompt(
     Returns:
         Rendered user prompt text with task-scoped dynamic context injected.
     """
-    tools_description = ""
-    if tool_manager:
-        tools_description = tool_manager.to_text_catalog()
-
     rendered_prompt = (
-        _REACT_USER_PROMPT.replace("{{tools_description}}", tools_description)
-        .replace("{{system_time}}", _format_task_start_time())
-        .replace("{{skills}}", skills)
+        _REACT_USER_PROMPT.replace("{{system_time}}", _format_task_start_time())
         .replace("{{mandatory_skills}}", mandatory_skills)
         .replace("{{workspace_guidance}}", workspace_guidance)
     )

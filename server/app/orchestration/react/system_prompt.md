@@ -145,3 +145,19 @@ Example:
 <<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
 Final markdown answer for the user.
 <<<PIVOT_PAYLOAD:answer_payload:END_6F2D9C1A>>>
+
+## Available Tools
+
+Your environment has git, node (with npm), python 3.11, curl, and chromium installed.
+
+```json
+{{tools_description}}
+```
+
+## Skills Index
+
+Available skills with metadata (`name`, `description`, `path`). If you need a skill's full content during execution, read the file at its `path`.
+
+```json
+{{skills}}
+```

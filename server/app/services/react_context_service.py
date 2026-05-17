@@ -281,9 +281,28 @@ class ReactContextUsageService:
             Ordered list of preview messages for token estimation.
         """
         messages: list[dict[str, Any]] = []
+        tool_manager = self._build_request_tool_manager(
+            user_id=user_id,
+            runtime_config=runtime_config,
+        )
+        extension_skills = ExtensionService(self.db).build_bundle_skill_payloads(
+            runtime_config.extension_bundle
+        )
+        skills_json = build_skills_metadata_prompt_json(
+            self.db,
+            user_id,
+            raw_skill_ids=runtime_config.raw_skill_ids,
+            extra_skills=extension_skills,
+        )
         if include_system_prompt:
             messages.append(
-                {"role": "system", "content": build_runtime_system_prompt()}
+                {
+                    "role": "system",
+                    "content": build_runtime_system_prompt(
+                        tool_manager=tool_manager,
+                        skills=skills_json,
+                    ),
+                }
             )
 
         user_prompt = self._build_user_prompt(
@@ -291,6 +310,7 @@ class ReactContextUsageService:
             user_id=user_id,
             session_id=session_id,
             mandatory_skill_names=mandatory_skill_names,
+            skills_json=skills_json,
         )
         messages.append(build_runtime_task_bootstrap_message(user_prompt))
         payload = {
@@ -314,6 +334,7 @@ class ReactContextUsageService:
         user_id: int,
         session_id: str | None,
         mandatory_skill_names: list[str] | None = None,
+        skills_json: str = "[]",
     ) -> str:
         """Build the task bootstrap user prompt used for next-turn previews.
 
@@ -324,25 +345,16 @@ class ReactContextUsageService:
                 migrated to user_id.
             session_id: Optional session whose workspace guidance should be injected.
             mandatory_skill_names: Ordered mandatory skill names to include.
+            skills_json: Pre-built skills metadata JSON (unused here, kept for
+                interface compatibility).
 
         Returns:
             Rendered user prompt string for the task bootstrap message.
         """
-        tool_manager = self._build_request_tool_manager(
-            user_id=user_id,
-            runtime_config=runtime_config,
-        )
         extension_skills = ExtensionService(self.db).build_bundle_skill_payloads(
             runtime_config.extension_bundle
         )
         return build_runtime_user_prompt(
-            tool_manager=tool_manager,
-            skills=build_skills_metadata_prompt_json(
-                self.db,
-                user_id,
-                raw_skill_ids=runtime_config.raw_skill_ids,
-                extra_skills=extension_skills,
-            ),
             mandatory_skills=build_mandatory_skills_prompt_json(
                 self.db,
                 user_id,

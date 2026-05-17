@@ -82,7 +82,7 @@ class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
             workspace_guidance="# /workspace/AGENTS.md\n\nUse uv run.",
         )
 
-        self.assertIn("## 8. Workspace Guidance", rendered)
+        self.assertIn("## Workspace Guidance", rendered)
         self.assertIn("# /workspace/AGENTS.md", rendered)
         self.assertIn("Use uv run.", rendered)
         self.assertNotIn("{{workspace_guidance}}", rendered)

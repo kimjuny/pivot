@@ -2175,7 +2175,10 @@ class ReactEngine:
             if llm_config is not None:
                 max_context_tokens = max(int(llm_config.max_context or 0), 0)
         compact_threshold_percent = max(int(agent.compact_threshold_percent or 0), 0)
-        system_prompt = build_runtime_system_prompt()
+        system_prompt = build_runtime_system_prompt(
+            tool_manager=self.tool_manager,
+            skills=skills_metadata_json,
+        )
 
         should_append_user_history = (
             task.iteration == 0 or turn_user_message is not None
@@ -2215,8 +2218,6 @@ class ReactEngine:
             runtime_state = self.runtime_service.append_task_bootstrap_prompt(
                 task,
                 build_runtime_user_prompt(
-                    tool_manager=self.tool_manager,
-                    skills=skills_metadata_json,
                     mandatory_skills=mandatory_skills_json,
                     workspace_guidance=workspace_guidance,
                     prefix_blocks=task_bootstrap_prefix_blocks,
@@ -2237,8 +2238,6 @@ class ReactEngine:
             runtime_state = self.runtime_service.append_task_bootstrap_prompt(
                 task,
                 build_runtime_user_prompt(
-                    tool_manager=self.tool_manager,
-                    skills=skills_metadata_json,
                     mandatory_skills=mandatory_skills_json,
                     workspace_guidance=workspace_guidance,
                 ),
