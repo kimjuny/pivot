@@ -2,28 +2,42 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from app.api.permissions import permissions
 from app.crud.llm import llm as llm_crud
 from app.models.access import AccessLevel
-from app.schemas.schemas import AgentResponse
+from app.schemas.extension import (
+    ChatSurfaceDescriptor,
+    WebSearchProviderOption,
+)
+from app.schemas.project import ProjectResponse
+from app.schemas.schemas import AgentResponse, LLMUsableResponse
 from app.schemas.session import (
     ConsumerSessionListItem,
     ConsumerSessionListResponse,
+    SessionListItem,
 )
 from app.security.permission_catalog import Permission
 from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
+from app.services.extension_service import (
+    ExtensionService,
+    _build_contribution_items,
+)
+from app.services.project_service import ProjectService
 from app.services.session_service import SessionService
+from app.services.web_search_service import WebSearchService
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from .dependencies import get_db
 
 if TYPE_CHECKING:
     from app.models.user import User
-    from sqlmodel import Session
+    from sqlmodel import Session as DbSession
 
 router = APIRouter()
 
@@ -56,7 +70,7 @@ def _serialize_consumer_agent_response(
 
 
 def _resolve_model_display(
-    db: Session, llm_id: int | None, fallback: str | None
+    db: DbSession, llm_id: int | None, fallback: str | None
 ) -> str:
     """Resolve the visible model label shown in Consumer agent cards."""
     model_display = fallback or "N/A"
@@ -71,7 +85,7 @@ def _resolve_model_display(
 
 @router.get("/consumer/agents", response_model=list[AgentResponse])
 async def list_consumer_agents(
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> list[dict[str, Any]]:
     """List all agents currently visible in the Consumer product."""
@@ -93,7 +107,7 @@ async def list_consumer_agents(
 @router.get("/consumer/agents/{agent_id}", response_model=AgentResponse)
 async def get_consumer_agent(
     agent_id: int,
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> dict[str, Any]:
     """Return one Consumer-visible agent by identifier."""
@@ -116,7 +130,7 @@ async def get_consumer_agent(
 @router.get("/consumer/sessions", response_model=ConsumerSessionListResponse)
 async def list_consumer_sessions(
     limit: int = 20,
-    db: Session = Depends(get_db),
+    db: DbSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> ConsumerSessionListResponse:
     """List the current user's recent sessions for Consumer-visible agents."""
@@ -166,4 +180,158 @@ async def list_consumer_sessions(
             if (visible_agent := visible_agents.get(session.agent_id)) is not None
         ],
         total=len(sessions),
+    )
+
+
+class ChatBootstrapResponse(BaseModel):
+    """Aggregated payload for bootstrapping the Chat page in one request."""
+
+    agent: AgentResponse
+    llm: LLMUsableResponse | None
+    sessions: list[SessionListItem]
+    projects: list[ProjectResponse]
+    chat_surfaces: list[ChatSurfaceDescriptor]
+    web_search_providers: list[WebSearchProviderOption]
+
+
+@router.get(
+    "/consumer/agents/{agent_id}/chat-bootstrap",
+    response_model=ChatBootstrapResponse,
+)
+async def get_chat_bootstrap(
+    agent_id: int,
+    db: DbSession = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
+) -> ChatBootstrapResponse:
+    """Bootstrap the Chat page with a single aggregated response.
+
+    Merges agent detail, LLM config, sessions, projects, chat surfaces,
+    and web search providers into one payload to eliminate 6 separate
+    HTTP round-trips on page load.
+    """
+    try:
+        agent = AgentService(db).require_consumer_visible_agent(agent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    AccessService(db).require_agent_access(
+        user=current_user,
+        agent=agent,
+        access_level=AccessLevel.USE,
+    )
+
+    agent_data = _serialize_consumer_agent_response(
+        agent,
+        model_display=_resolve_model_display(db, agent.llm_id, agent.model_name),
+    )
+
+    llm_data: LLMUsableResponse | None = None
+    if agent.llm_id is not None:
+        llm_row = llm_crud.get(agent.llm_id, db)
+        if llm_row is not None:
+            llm_data = LLMUsableResponse.model_validate(llm_row)
+
+    sessions_data: list[SessionListItem] = []
+    if current_user.id is not None:
+        session_svc = SessionService(db)
+        raw_sessions = session_svc.get_sessions_by_user(
+            user_id=current_user.id,
+            agent_id=agent_id,
+            session_type="consumer",
+            limit=50,
+        )
+        for s in raw_sessions:
+            sessions_data.append(
+                SessionListItem(
+                    session_id=s.session_id,
+                    agent_id=s.agent_id,
+                    type=cast(Literal["consumer", "studio_test"], s.type),
+                    release_id=s.release_id,
+                    latest_release_id=agent.active_release_id,
+                    is_stale=session_svc.is_session_stale(s, agent.active_release_id),
+                    migrated_to_session_id=s.migrated_to_session_id,
+                    project_id=s.project_id,
+                    workspace_id=s.workspace_id,
+                    workspace_scope=SessionService.get_workspace_scope(s),
+                    test_workspace_hash=None,
+                    status=s.status,
+                    runtime_status=s.runtime_status,
+                    title=s.title,
+                    is_pinned=s.is_pinned,
+                    created_at=s.created_at.replace(tzinfo=UTC).isoformat(),
+                    updated_at=s.updated_at.replace(tzinfo=UTC).isoformat(),
+                )
+            )
+
+    project_svc = ProjectService(db)
+    projects_data: list[ProjectResponse] = []
+    for project in project_svc.list_projects(user=current_user, agent_id=agent_id):
+        projects_data.append(
+            ProjectResponse(
+                id=project.id or 0,
+                project_id=project.project_id,
+                agent_id=project.agent_id,
+                name=project.name,
+                description=project.description,
+                workspace_id=project.workspace_id,
+                can_edit=project_svc.has_project_access(
+                    user=current_user,
+                    project=project,
+                    access_level=AccessLevel.EDIT,
+                ),
+                created_at=project.created_at.replace(tzinfo=UTC).isoformat(),
+                updated_at=project.updated_at.replace(tzinfo=UTC).isoformat(),
+            )
+        )
+
+    ext_svc = ExtensionService(db)
+    bindings = ext_svc.list_agent_bindings(agent_id)
+    chat_surfaces: list[ChatSurfaceDescriptor] = []
+
+    installations_cache: dict[int, Any] = {}
+    for b in bindings:
+        if not b.enabled:
+            continue
+        iid = b.extension_installation_id
+        if iid not in installations_cache:
+            installations_cache[iid] = ext_svc.get_installation(iid)
+        installation = installations_cache[iid]
+        if installation is None or installation.status != "active":
+            continue
+
+        manifest = json.loads(installation.manifest_json)
+        for item in _build_contribution_items(manifest):
+            if item.get("type") == "chat_surface":
+                chat_surfaces.append(
+                    ChatSurfaceDescriptor(
+                        installation_id=installation.id or 0,
+                        package_id=installation.package_id,
+                        surface_key=item.get("key") or "",
+                        display_name=item.get("name", ""),
+                        logo_url=ext_svc.get_installation_logo_url(installation),
+                        description=item.get("description") or installation.description,
+                        min_width=item.get("min_width"),
+                        icon=item.get("icon"),
+                    )
+                )
+
+    web_search_providers: list[WebSearchProviderOption] = []
+    for wb in WebSearchService(db).list_agent_bindings(agent_id):
+        if not wb.effective_enabled:
+            continue
+        manifest_info = wb.manifest or {}
+        web_search_providers.append(
+            WebSearchProviderOption(
+                provider_key=wb.provider_key,
+                name=manifest_info.get("name", wb.provider_key),
+                logo_url=manifest_info.get("logo_url"),
+            )
+        )
+
+    return ChatBootstrapResponse(
+        agent=AgentResponse.model_validate(agent_data),
+        llm=llm_data,
+        sessions=sessions_data,
+        projects=projects_data,
+        chat_surfaces=chat_surfaces,
+        web_search_providers=web_search_providers,
     )

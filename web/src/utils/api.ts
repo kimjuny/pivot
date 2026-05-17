@@ -1951,6 +1951,37 @@ export const getAgentChatSurfaces = async (
   ) as Promise<ChatSurfaceDescriptorResponse[]>;
 };
 
+/** Lightweight web-search provider option returned by the bootstrap endpoint. */
+export interface WebSearchProviderOptionResponse {
+  provider_key: string;
+  name: string;
+  logo_url: string | null;
+}
+
+/** Aggregated bootstrap payload returned by the chat-bootstrap endpoint. */
+export interface ChatBootstrapResponse {
+  agent: Agent;
+  llm: LLMUsable | null;
+  sessions: SessionListItem[];
+  projects: ProjectResponse[];
+  chat_surfaces: ChatSurfaceDescriptorResponse[];
+  web_search_providers: WebSearchProviderOptionResponse[];
+}
+
+/**
+ * Bootstrap the Chat page with a single aggregated request.
+ *
+ * Returns agent detail, LLM config, sessions, projects, chat surfaces,
+ * and web search providers in one payload.
+ */
+export const getChatBootstrap = async (
+  agentId: number,
+): Promise<ChatBootstrapResponse> => {
+  return apiRequest(
+    `/consumer/agents/${agentId}/chat-bootstrap`,
+  ) as Promise<ChatBootstrapResponse>;
+};
+
 /**
  * Create or update one extension binding for an agent.
  */

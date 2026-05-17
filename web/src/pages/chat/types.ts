@@ -4,7 +4,10 @@ import type {
   ReactSessionRuntimeDebug,
   SessionListItem,
   TaskAttachmentAsset,
+  ChatSurfaceDescriptorResponse,
+  WebSearchProviderOptionResponse,
 } from "@/utils/api";
+import type { LLMUsable } from "@/types";
 import type {
   ChatSessionType,
   StudioTestSnapshotPayload,
@@ -77,6 +80,16 @@ export interface ReactChatInterfaceProps {
    * upgraded extension cannot run inside the test sandbox.
    */
   agentClientState?: string;
+  /** Pre-fetched LLM capabilities from the bootstrap endpoint. */
+  initialLlm?: LLMUsable | null;
+  /** Pre-fetched session list from the bootstrap endpoint. */
+  initialSessions?: SessionListItem[];
+  /** Pre-fetched project list from the bootstrap endpoint. */
+  initialProjects?: ProjectResponse[];
+  /** Pre-fetched chat surfaces from the bootstrap endpoint. */
+  initialChatSurfaces?: ChatSurfaceDescriptorResponse[];
+  /** Pre-fetched web-search providers from the bootstrap endpoint. */
+  initialWebSearchProviders?: WebSearchProviderOptionResponse[];
 }
 
 /**

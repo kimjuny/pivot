@@ -6,9 +6,9 @@ import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator"
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import ReactChatInterface from "@/components/ReactChatInterface";
 import { Card, CardContent } from "@/components/ui/card";
-import { getConsumerAgentById } from "@/consumer/api";
+import { getChatBootstrap } from "@/utils/api";
+import type { ChatBootstrapResponse } from "@/utils/api";
 import ConsumerUserMenu from "@/consumer/ConsumerUserMenu";
-import type { Agent } from "@/types";
 
 /**
  * Full-page Consumer chat workspace for one published agent.
@@ -17,7 +17,9 @@ function ConsumerAgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [agent, setAgent] = useState<Agent | null>(null);
+  const [bootstrap, setBootstrap] = useState<ChatBootstrapResponse | null>(
+    null,
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialSessionId = searchParams.get("session");
@@ -34,7 +36,7 @@ function ConsumerAgentPage() {
       try {
         setIsLoading(true);
         setError(null);
-        setAgent(await getConsumerAgentById(parsedAgentId));
+        setBootstrap(await getChatBootstrap(parsedAgentId));
       } catch (loadError) {
         setError(
           loadError instanceof Error
@@ -56,7 +58,7 @@ function ConsumerAgentPage() {
     );
   }
 
-  if (error || !agent) {
+  if (error || !bootstrap) {
     return (
       <Card className="m-6">
         <CardContent className="space-y-4 pt-6">
@@ -75,6 +77,8 @@ function ConsumerAgentPage() {
     );
   }
 
+  const { agent, llm } = bootstrap;
+
   return (
     <div className="h-screen bg-background">
       <ReactChatInterface
@@ -86,6 +90,11 @@ function ConsumerAgentPage() {
         primaryLlmId={agent.llm_id}
         sessionIdleTimeoutMinutes={agent.session_idle_timeout_minutes}
         showCompactDebug={false}
+        initialLlm={llm}
+        initialSessions={bootstrap.sessions}
+        initialProjects={bootstrap.projects}
+        initialChatSurfaces={bootstrap.chat_surfaces}
+        initialWebSearchProviders={bootstrap.web_search_providers}
         sidebarTitleIcon={
           <LLMBrandAvatar
             model={agent.model_name}

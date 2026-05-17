@@ -19,14 +19,22 @@ import {
   llmHasThinkingSelector,
   type ChatThinkingMode,
 } from "@/utils/llmThinking";
+import type { LLMUsable } from "@/types";
 
 import type { PendingUploadItem } from "../types";
 import { getUniqueClipboardFiles, toChatAttachment } from "../utils/chatData";
 
 /**
  * Owns attachment queue state so the chat container can stay focused on conversation flow.
+ *
+ * @param primaryLlmId - LLM primary key used to gate upload affordances.
+ * @param prefetchedLlm - Optional pre-fetched LLM data from the bootstrap endpoint.
+ *   When provided, the hook skips the network request and uses this data directly.
  */
-export function useChatUploads(primaryLlmId?: number) {
+export function useChatUploads(
+  primaryLlmId?: number,
+  prefetchedLlm?: LLMUsable | null,
+) {
   const [pendingFiles, setPendingFiles] = useState<PendingUploadItem[]>([]);
   const [supportsThinkingSelector, setSupportsThinkingSelector] =
     useState<boolean>(false);
@@ -48,6 +56,15 @@ export function useChatUploads(primaryLlmId?: number) {
       setSupportsThinkingSelector(false);
       setThinkingModes([]);
       setDefaultThinkingMode("fast");
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    if (prefetchedLlm) {
+      setSupportsThinkingSelector(llmHasThinkingSelector(prefetchedLlm));
+      setThinkingModes(getChatThinkingModes(prefetchedLlm));
+      setDefaultThinkingMode(getDefaultChatThinkingMode(prefetchedLlm));
       return () => {
         isCancelled = true;
       };
@@ -80,7 +97,7 @@ export function useChatUploads(primaryLlmId?: number) {
     return () => {
       isCancelled = true;
     };
-  }, [primaryLlmId]);
+  }, [primaryLlmId, prefetchedLlm]);
 
   useEffect(() => {
     pendingFilesRef.current = pendingFiles;

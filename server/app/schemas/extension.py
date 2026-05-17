@@ -420,3 +420,11 @@ class ChatSurfaceDescriptor(AppBaseModel):
     description: str | None = None
     min_width: int | None = None
     icon: str | None = None
+
+
+class WebSearchProviderOption(AppBaseModel):
+    """Minimal web-search provider option for the chat composer selector."""
+
+    provider_key: str
+    name: str
+    logo_url: str | None = None

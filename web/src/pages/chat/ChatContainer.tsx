@@ -757,6 +757,12 @@ function ChatContainer({
   agentClientState,
   onRuntimeDebugChange,
   onSurfaceDevAttached,
+  showCompactDebug,
+  initialLlm,
+  initialSessions,
+  initialProjects,
+  initialChatSurfaces,
+  initialWebSearchProviders,
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
@@ -765,8 +771,12 @@ function ChatContainer({
     Record<string, boolean>
   >({});
   const [replyTaskId, setReplyTaskId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<SessionListItem[]>([]);
-  const [projects, setProjects] = useState<ProjectResponse[]>([]);
+  const [sessions, setSessions] = useState<SessionListItem[]>(
+    initialSessions ?? [],
+  );
+  const [projects, setProjects] = useState<ProjectResponse[]>(
+    initialProjects ?? [],
+  );
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [accessProjectId, setAccessProjectId] = useState<string | null>(null);
@@ -788,7 +798,18 @@ function ChatContainer({
   >(null);
   const [installedChatSurfaces, setInstalledChatSurfaces] = useState<
     InstalledChatSurfaceDescriptor[]
-  >([]);
+  >(
+    initialChatSurfaces?.map((s) => ({
+      installationId: s.installation_id,
+      packageId: s.package_id,
+      surfaceKey: s.surface_key,
+      displayName: s.display_name,
+      logoUrl: s.logo_url,
+      description: s.description ?? "",
+      minWidth: s.min_width,
+      icon: s.icon,
+    })) ?? [],
+  );
   const [activeInstalledSurface, setActiveInstalledSurface] =
     useState<InstalledChatSurfaceDescriptor | null>(null);
   const [activeInstalledSurfaceSession, setActiveInstalledSurfaceSession] =
@@ -825,7 +846,13 @@ function ChatContainer({
   const [runtimeDebugError, setRuntimeDebugError] = useState<string | null>(null);
   const [webSearchProviders, setWebSearchProviders] = useState<
     ChatWebSearchProviderOption[]
-  >([]);
+  >(
+    initialWebSearchProviders?.map((p) => ({
+      key: p.provider_key,
+      name: p.name,
+      logoUrl: p.logo_url,
+    })) ?? [],
+  );
   const [selectedWebSearchProvider, setSelectedWebSearchProvider] = useState<
     string | null
   >(null);
@@ -905,7 +932,7 @@ function ChatContainer({
     handleFileInputChange,
     handleDocumentInputChange,
     handlePaste,
-  } = useChatUploads(primaryLlmId);
+  } = useChatUploads(primaryLlmId, initialLlm);
   const { scrollContainerRef, handleScroll, prepareForProgrammaticScroll } =
     useChatAutoScroll(messages);
   const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
@@ -2066,7 +2093,13 @@ function ChatContainer({
 
       setIsLoadingSession(true);
       try {
-        const { sessions: existingSessions } = await refreshSidebarData();
+        let existingSessions: SessionListItem[];
+        if (initialSessions && initialProjects) {
+          existingSessions = sessions;
+        } else {
+          const sidebarData = await refreshSidebarData();
+          existingSessions = sidebarData.sessions;
+        }
 
         if (existingSessions.length > 0) {
           const requestedSessionId =
@@ -2160,6 +2193,8 @@ function ChatContainer({
     agentId,
     isInitialized,
     initialSessionId,
+    initialSessions,
+    initialProjects,
     isLoadingSession,
     refreshSidebarData,
     resetCompactTimelineItems,
@@ -2169,6 +2204,7 @@ function ChatContainer({
     applyHistoryMessages,
     commitMessages,
     sessionType,
+    sessions,
     syncLiveRefsFromMessages,
     testSnapshot,
     testSnapshotHash,
@@ -2260,8 +2296,11 @@ function ChatContainer({
   }, [currentSessionId, sessionType, sessions, testSnapshotHash]);
 
   useEffect(() => {
+    if (!showCompactDebug) {
+      return;
+    }
     void loadSessionRuntimeDebug(currentSessionId);
-  }, [currentSessionId, loadSessionRuntimeDebug]);
+  }, [currentSessionId, loadSessionRuntimeDebug, showCompactDebug]);
 
   // Why: consumer sessions pinned to an older Agent release must prompt the
   // user to migrate. Already-migrated sessions show a different dialog.
@@ -2320,6 +2359,10 @@ function ChatContainer({
   const readyPendingFileIdsKey = readyPendingFileIds.join(",");
 
   useEffect(() => {
+    if (!currentSessionId && sessionType === "consumer") {
+      return;
+    }
+
     let isCancelled = false;
 
     const loadRuntimeSkills = async () => {
@@ -2366,6 +2409,10 @@ function ChatContainer({
   }, [runtimeSkills]);
 
   useEffect(() => {
+    if (initialChatSurfaces) {
+      return;
+    }
+
     let isCancelled = false;
 
     const loadInstalledChatSurfaces = async () => {
@@ -2404,12 +2451,16 @@ function ChatContainer({
     return () => {
       isCancelled = true;
     };
-  }, [agentId]);
+  }, [agentId, initialChatSurfaces]);
 
   useEffect(() => {
     if (!canUseWebSearch) {
       setWebSearchProviders([]);
       setSelectedWebSearchProvider(null);
+      return;
+    }
+
+    if (initialWebSearchProviders) {
       return;
     }
 
@@ -2438,7 +2489,7 @@ function ChatContainer({
     return () => {
       isCancelled = true;
     };
-  }, [agentId, canUseWebSearch]);
+  }, [agentId, canUseWebSearch, initialWebSearchProviders]);
 
   useEffect(() => {
     if (webSearchProviders.length === 0) {
