@@ -620,6 +620,7 @@ describe("AgentDetailSidebar", () => {
             extension_version: null,
             setup_steps: [],
             supported_parameters: [],
+          default_runtime_config: {},
             auth_schema: [],
             config_schema: [],
           },

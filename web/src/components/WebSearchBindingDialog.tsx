@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ExternalLink, Inbox, Loader2, Plus, RefreshCcw } from "lucide-react";
 import { toast } from 'sonner';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Empty,
   EmptyContent,
@@ -30,18 +31,25 @@ import {
   type WebSearchProviderManifest,
 } from '@/utils/api';
 
-/**
- * Convert runtime config values into stable form input strings.
- * Why: object stringification would otherwise produce useless "[object Object]" output.
- */
-function toFieldValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return '';
+/** Serialize a config object to a pretty-printed JSON string for the textarea. */
+function toConfigText(config: Record<string, unknown>): string {
+  if (!config || Object.keys(config).length === 0) {
+    return '{\n}';
   }
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
+  return JSON.stringify(config, null, 2);
+}
+
+/** Parse the textarea JSON into a config object. Throws on invalid JSON. */
+function parseConfigText(text: string): Record<string, unknown> {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return {};
   }
-  return JSON.stringify(value);
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('Config must be a JSON object.');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 interface WebSearchBindingDialogProps {
@@ -70,7 +78,8 @@ function WebSearchBindingDialog({
   const [providerKey, setProviderKey] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [authConfig, setAuthConfig] = useState<Record<string, string>>({});
-  const [runtimeConfig, setRuntimeConfig] = useState<Record<string, string>>({});
+  const [configText, setConfigText] = useState('{\n}');
+  const configTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testMessage, setTestMessage] = useState<string | null>(null);
@@ -111,11 +120,7 @@ function WebSearchBindingDialog({
       setProviderKey(initialBinding.provider_key);
       setEnabled(initialBinding.enabled);
       setAuthConfig(initialBinding.auth_config);
-      setRuntimeConfig(
-        Object.fromEntries(
-          Object.entries(initialBinding.runtime_config).map(([key, value]) => [key, toFieldValue(value)])
-        )
-      );
+      setConfigText(toConfigText(initialBinding.runtime_config));
       setTestMessage(initialBinding.last_health_message);
       return;
     }
@@ -124,25 +129,33 @@ function WebSearchBindingDialog({
     setProviderKey(firstManifest?.key ?? '');
     setEnabled(true);
     setAuthConfig({});
-    setRuntimeConfig({});
+    setConfigText(
+      firstManifest ? toConfigText(firstManifest.default_runtime_config ?? {}) : '{\n}',
+    );
     setTestMessage(null);
   }, [initialBinding, open, selectableCatalog]);
 
-  const handleFieldChange = (
-    scope: 'auth' | 'runtime',
-    fieldKey: string,
-    value: string
-  ) => {
-    if (scope === 'auth') {
-      setAuthConfig((prev) => ({ ...prev, [fieldKey]: value }));
+  // Auto-resize config textarea to fit content
+  useEffect(() => {
+    const textarea = configTextareaRef.current;
+    if (!textarea) {
       return;
     }
-    setRuntimeConfig((prev) => ({ ...prev, [fieldKey]: value }));
-  };
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 60), 240)}px`;
+  }, [configText]);
 
   const handleSave = async () => {
     if (!manifest) {
       toast.error('Please select a web search provider');
+      return;
+    }
+
+    let parsedConfig: Record<string, unknown>;
+    try {
+      parsedConfig = parseConfigText(configText);
+    } catch {
+      toast.error('Invalid Config JSON. Please fix syntax errors.');
       return;
     }
 
@@ -151,7 +164,7 @@ function WebSearchBindingDialog({
       const payload = {
         enabled,
         auth_config: authConfig,
-        runtime_config: runtimeConfig,
+        runtime_config: parsedConfig,
       };
 
       if (initialBinding) {
@@ -179,13 +192,21 @@ function WebSearchBindingDialog({
       return;
     }
 
+    let parsedConfig: Record<string, unknown>;
+    try {
+      parsedConfig = parseConfigText(configText);
+    } catch {
+      toast.error('Invalid Config JSON. Please fix syntax errors.');
+      return;
+    }
+
     setIsTesting(true);
     try {
       const result = initialBinding
         ? await testAgentWebSearchBinding(initialBinding.id)
         : await testWebSearchProviderDraft(manifest.key, {
             auth_config: authConfig,
-            runtime_config: runtimeConfig,
+            runtime_config: parsedConfig,
           });
       setTestMessage(result.result.message);
       toast.success(result.result.message);
@@ -317,18 +338,23 @@ function WebSearchBindingDialog({
                 description="These fields are defined by the provider manifest and stored only on this agent."
                 fields={manifest.auth_schema}
                 values={authConfig}
-                onChange={(fieldKey, value) => handleFieldChange('auth', fieldKey, value)}
+                onChange={(fieldKey, value) => setAuthConfig((prev) => ({ ...prev, [fieldKey]: value }))}
               />
 
-              {manifest.config_schema.length > 0 && (
-                <ConfigFieldGroup
-                  title="Runtime Config"
-                  description="Optional provider-specific behavior settings."
-                  fields={manifest.config_schema}
-                  values={runtimeConfig}
-                  onChange={(fieldKey, value) => handleFieldChange('runtime', fieldKey, value)}
+              <div className="space-y-2">
+                <Label htmlFor="web-search-config">Config (JSON)</Label>
+                <Textarea
+                  ref={configTextareaRef}
+                  id="web-search-config"
+                  value={configText}
+                  onChange={(event) => setConfigText(event.target.value)}
+                  className="min-h-[60px] max-h-60 resize-none overflow-y-auto font-mono text-xs [field-sizing:content]"
+                  placeholder='{"search_depth": "basic"}'
                 />
-              )}
+                <div className="text-xs text-muted-foreground">
+                  Provider-native search parameters in JSON. Pre-filled from provider defaults. Refer to provider docs for available keys.
+                </div>
+              </div>
 
               <div className="space-y-2">
                 <div className="text-sm font-medium text-foreground">Setup Notes</div>

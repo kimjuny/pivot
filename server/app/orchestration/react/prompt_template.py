@@ -58,10 +58,9 @@ def build_runtime_system_prompt(
     if tool_manager:
         tools_description = tool_manager.to_text_catalog()
 
-    return (
-        _REACT_SYSTEM_PROMPT.replace("{{tools_description}}", tools_description)
-        .replace("{{skills}}", skills)
-    )
+    return _REACT_SYSTEM_PROMPT.replace(
+        "{{tools_description}}", tools_description
+    ).replace("{{skills}}", skills)
 
 
 def _format_task_start_time(

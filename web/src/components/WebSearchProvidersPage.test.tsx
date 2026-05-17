@@ -31,6 +31,7 @@ describe("WebSearchProvidersPage", () => {
           config_schema: [],
           setup_steps: [],
           supported_parameters: ["query", "max_results"],
+          default_runtime_config: {},
         },
       },
       {
@@ -49,6 +50,7 @@ describe("WebSearchProvidersPage", () => {
           config_schema: [],
           setup_steps: [],
           supported_parameters: ["query"],
+          default_runtime_config: {},
         },
       },
     ]);

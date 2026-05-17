@@ -1,7 +1,7 @@
 # Agent Token Usage Optimization
 
 > Date: 2026-05-17
-> Status: Phase 1 + Phase 2 partially complete
+> Status: Phase 1 + Phase 2 + Phase 3 + Phase 3b complete
 
 ---
 
@@ -67,58 +67,55 @@
 - `server/app/orchestration/tool/__init__.py` — export `Param`
 - All 9 files in `server/app/orchestration/tool/builtin/`
 
+### 2.2b Web Search Tool: Two-Layer Parameter Architecture ✅ DONE
+
+**Problem**: `web_search` exposed 19 LLM-visible parameters (20 total). Most were provider-specific knobs (`search_depth`, `include_favicon`, `auto_parameters`, etc.) that an Agent never needs to reason about. The 20-field `WebSearchQueryRequest` tried to abstract across all providers, creating a leaky abstraction — most params were ignored by Baidu, and providers couldn't expose their own native parameters.
+
+**Decision**: Refactored into a clean two-layer architecture:
+- **Layer 1 (Agent)**: 6 universal abstract params the LLM controls
+- **Layer 2 (Config JSON)**: Provider-native params, pre-populated from manifest defaults, editable per-binding in the "Edit Web Search" dialog
+
+**Implementation**:
+1. **`WebSearchQueryRequest` trimmed from 20 → 7 fields**: `query`, `provider`, `max_results`, `topic`, `time_range`, `include_domains`, `exclude_domains`. Removed 13 provider-specific fields and their validators.
+2. **`WebSearchProviderManifest` gained `default_runtime_config`**: Each provider declares its native parameter defaults in the manifest. These flow to the frontend via `manifest.model_dump()` and pre-populate the Config JSON textarea when creating a new binding.
+3. **Providers read native params from `binding.runtime_config`**: Tavily reads 15 native params (search_depth, include_answer, etc.). Baidu reads 5 (edition, safe_search, include_images, start_date, end_date).
+4. **Merge priority**: Agent's abstract params override Config JSON on overlap (e.g., Agent sends `max_results=10`, Config JSON has `max_results=5` → 10 wins).
+5. **Frontend**: Replaced `ConfigFieldGroup` for runtime config with a JSON textarea (matching `ExtensionBindingDialog` pattern). Pre-fills from `manifest.default_runtime_config`.
+6. **`search` tool**: `max_candidates` and `max_hits_per_file` hidden via `Param(hidden=True)`.
+
+**Result**: LLM-visible params reduced from 19 → 6 per `web_search` call (all 6 are Agent-facing, zero hidden params). Provider-native parameters are correctly separated and configurable per-binding. The `provider` key is resolved from the execution context at runtime rather than passed as a tool parameter.
+
+**Files modified**:
+- `server/app/orchestration/web_search/types.py` — trimmed request model, added `default_runtime_config`
+- `server/app/orchestration/web_search/normalization.py` — removed 13 field normalizations
+- `server/app/orchestration/tool/builtin/web_search.py` — 6 LLM-visible params
+- `server/app/orchestration/tool/builtin/search.py` — 2 params hidden
+- `extensions/extensions/tavily/providers/tavily.py` — reads from `runtime_config`, merge logic
+- `extensions/extensions/baidu/providers/baidu.py` — reads from `runtime_config`, merge logic
+- `web/src/utils/api.ts` — `default_runtime_config` on manifest type
+- `web/src/components/WebSearchBindingDialog.tsx` — Config JSON textarea
+- 4 test files updated for new manifest field
+
+### 2.3 Per-Recursion Payload: Plan Compression ✅ DONE
+
+**Decision**: Adopted a two-tier `current_plan` injection strategy based on whether context compaction has occurred.
+
+**Implementation**:
+1. **Before compaction**: Inject a one-line plan status summary via `_build_plan_status_line()`, e.g. `"Steps 1,2 done, Step 3 in_progress, Steps 4,5 pending"` (~13 tokens vs ~400 tokens for full plan). Rationale: the LLM already has full plan context in its message history — re-injecting the entire structured plan is redundant.
+2. **After compaction**: Inject the full structured plan via `_build_current_plan_payload()`. Rationale: compaction loses plan details, so the full context must be rebuilt.
+3. **Detection**: `after_compaction` flag = `runtime_state.compact_result is not None`.
+
+**Result**: ~97% token reduction for `current_plan` field per recursion before compaction (13 tokens vs ~400 tokens). Compounds across all recursions until compaction triggers.
+
+**Files modified**:
+- `server/app/orchestration/react/engine.py` — added `_build_plan_status_line()`, updated `_build_recursion_user_payload()` with `after_compaction` parameter
+- `server/app/services/react_context_service.py` — mirrored same logic for token estimation accuracy
+
+**Note**: UI event streaming (SSE) continues to use full `_build_current_plan_payload()` for frontend display — only the LLM-facing payload is compressed.
+
 ---
 
 ## Remaining Optimization Directions
-
-### 2.3 Per-Recursion Payload: Plan History Compression
-
-**Priority**: P1 | **Estimated Savings**: 30-50%/round (compounds over recursions) | **Effort**: Medium
-
-#### Current State
-
-Each recursion's user payload includes the full `current_plan` with every step containing 5+ fields:
-
-```json
-{
-  "step_id": "1",
-  "general_goal": "Overall goal of this step",
-  "specific_description": "Detailed instructions...",
-  "completion_criteria": "Acceptance criteria...",
-  "status": "pending",
-  "recursion_history": [
-    {"iteration": 2, "summary": "..."},
-    {"iteration": 3, "summary": "..."}
-  ]
-}
-```
-
-#### Current Issues
-
-1. **Completed steps still carry full fields**: When `status=done`, the `general_goal`, `specific_description`, and `completion_criteria` are no longer needed — the LLM only needs to know it's completed.
-2. **`recursion_history` grows linearly**: Even with `REACT_CURRENT_PLAN_HISTORY_LIMIT`, this accumulates over multi-recursion tasks.
-3. **`action_result` tool results can be enormous**: `read_file` may return an entire file, `search` may return many matches — all injected directly into the payload.
-4. **Plan is fully re-sent every recursion**: No diff/incremental mechanism.
-
-#### Proposed Changes
-
-1. **Compress completed steps**: When `status=done`, only keep `step_id` + `status` in the payload.
-2. **Truncate `recursion_history` for completed steps**: Remove history entries for steps already done.
-3. **Truncate large tool results**: When a tool result exceeds a threshold (e.g., 2000 chars), truncate with a hint: `"... (truncated, use read_file to see full content)"`.
-4. **Long-term**: Consider sending plan diffs instead of full plan (higher complexity).
-
-#### Implementation Location
-
-`engine.py` → `_build_current_plan_payload()` and `_build_next_pending_action_result()`
-
-#### Estimated Result
-
-```
-For a 5+ recursion task: 30-50% reduction in per-recursion payload tokens
-Compounding effect: savings grow with each additional recursion
-```
-
----
 
 ### 2.4 Assistant Output Format Optimization
 
@@ -193,7 +190,7 @@ Already implements provider-level cache policies (Qwen block cache, Kimi prompt 
 | **P0** | System Prompt EN + Simplify | ~50% (~1800 tokens/round) | Medium | ✅ Done |
 | **P0** | Prompt Split (session vs task) | ~3000-4000 tokens/task | Medium | ✅ Done |
 | **P0** | Tool Catalog Schema (Option 2) | ~60% (~1800 tokens/task) | Medium | ✅ Done |
-| **P1** | Per-Recursion Plan Compression | 30-50%/round (compounding) | Medium | Pending |
+| **P1** | Per-Recursion Plan Compression | ~97% before compaction (~387 tokens/round) | Medium | ✅ Done |
 | **P1** | Assistant Output Format | 20-30%/round output | Low | Pending |
 | **P2** | Compact Prompt Optimization | 30-40% | Low | Pending |
 | **P2** | Caching Strategy Hardening | Indirect | Medium-High | Pending |
@@ -202,7 +199,7 @@ Already implements provider-level cache policies (Qwen block cache, Kimi prompt 
 
 ## Remaining Implementation Sequence
 
-1. **Phase 3** (Payload optimization, 2-3 days): Per-recursion plan compression (2.3) + tool result truncation
+1. ~~**Phase 3** (Payload optimization): Per-recursion plan compression (2.3) ✅~~
 2. **Phase 4** (Output tuning, 1-2 days): Assistant output format optimization (2.4)
 3. **Phase 5** (Polish, 1-2 days): Compact prompt optimization (2.5) + caching verification (2.6)
 

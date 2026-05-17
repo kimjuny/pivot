@@ -145,6 +145,7 @@ class ReactContextUsageService:
                     task=task,
                     draft_message=draft_message,
                     pending_action_result=runtime_state.pending_action_result,
+                    after_compaction=runtime_state.compact_result is not None,
                 )
                 draft_message_object = build_runtime_payload_message(
                     draft_message_payload,
@@ -550,6 +551,7 @@ class ReactContextUsageService:
         task: ReactTask,
         draft_message: str,
         pending_action_result: list[dict[str, Any]] | None,
+        after_compaction: bool = False,
     ) -> dict[str, Any]:
         """Build the next user payload using the task's current plan context."""
         context = ReactContext.from_task(task, self.db)
@@ -558,15 +560,56 @@ class ReactContextUsageService:
             reply=draft_message,
             task=task,
         )
+        if after_compaction:
+            plan_value: str | list[dict[str, Any]] = self._build_current_plan_payload(
+                context
+            )
+        else:
+            plan_value = self._build_plan_status_line(context)
+
         payload: dict[str, Any] = {
             "trace_id": "preview",
             "iteration": task.iteration + 1,
             "user_intent": task.user_intent,
-            "current_plan": self._build_current_plan_payload(context),
+            "current_plan": plan_value,
         }
         if effective_action_result is not None:
             payload["action_result"] = effective_action_result
         return payload
+
+    @staticmethod
+    def _build_plan_status_line(context: ReactContext) -> str:
+        """Build a one-line plan status summary for pre-compaction recursions."""
+        steps: list[dict[str, Any]] = [
+            s
+            for s in context.context.get("plan", [])
+            if isinstance(s, dict) and isinstance(s.get("step_id"), str)
+        ]
+        if not steps:
+            return ""
+
+        done_ids: list[str] = []
+        in_progress_ids: list[str] = []
+        pending_ids: list[str] = []
+        for step in steps:
+            step_id = str(step.get("step_id", ""))
+            status = step.get("status", "pending")
+            if status == "done":
+                done_ids.append(step_id)
+            elif status == "in_progress":
+                in_progress_ids.append(step_id)
+            else:
+                pending_ids.append(step_id)
+
+        parts: list[str] = []
+        if done_ids:
+            parts.append(f"Steps {','.join(done_ids)} done")
+        if in_progress_ids:
+            parts.append(f"Step {','.join(in_progress_ids)} in_progress")
+        if pending_ids:
+            parts.append(f"Steps {','.join(pending_ids)} pending")
+
+        return ", ".join(parts) if parts else ""
 
     def _build_current_plan_payload(
         self,

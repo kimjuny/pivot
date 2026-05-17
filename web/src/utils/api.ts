@@ -817,6 +817,7 @@ export interface WebSearchProviderManifest {
   config_schema: WebSearchConfigField[];
   setup_steps: string[];
   supported_parameters: string[];
+  default_runtime_config: Record<string, unknown>;
 }
 
 /**

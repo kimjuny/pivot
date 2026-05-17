@@ -52,6 +52,7 @@ describe("WebSearchBindingDialog", () => {
                 config_schema: [],
                 setup_steps: ["Paste the key", "Test it", "Save it"],
                 supported_parameters: ["query", "max_results"],
+          default_runtime_config: {},
               },
             },
           ]}

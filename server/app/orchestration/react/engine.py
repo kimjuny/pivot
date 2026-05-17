@@ -1011,6 +1011,48 @@ class ReactEngine:
             )
         return current_plan
 
+    @staticmethod
+    def _build_plan_status_line(context: ReactContext) -> str:
+        """Build a one-line plan status summary for pre-compaction recursions.
+
+        Args:
+            context: Current ReAct context snapshot.
+
+        Returns:
+            Compact status string like "Steps 1-3 done, Step 4 in_progress, Step 5 pending"
+            or an empty string when no plan exists.
+        """
+        steps: list[dict[str, Any]] = [
+            s
+            for s in context.context.get("plan", [])
+            if isinstance(s, dict) and isinstance(s.get("step_id"), str)
+        ]
+        if not steps:
+            return ""
+
+        done_ids: list[str] = []
+        in_progress_ids: list[str] = []
+        pending_ids: list[str] = []
+        for step in steps:
+            step_id = str(step.get("step_id", ""))
+            status = step.get("status", "pending")
+            if status == "done":
+                done_ids.append(step_id)
+            elif status == "in_progress":
+                in_progress_ids.append(step_id)
+            else:
+                pending_ids.append(step_id)
+
+        parts: list[str] = []
+        if done_ids:
+            parts.append(f"Steps {','.join(done_ids)} done")
+        if in_progress_ids:
+            parts.append(f"Step {','.join(in_progress_ids)} in_progress")
+        if pending_ids:
+            parts.append(f"Steps {','.join(pending_ids)} pending")
+
+        return ", ".join(parts) if parts else ""
+
     def _persist_session_title(
         self,
         task: ReactTask,
@@ -1044,6 +1086,8 @@ class ReactEngine:
         trace_id: str,
         pending_action_result: list[dict[str, Any]] | None,
         attachments: list[dict[str, Any]] | None = None,
+        *,
+        after_compaction: bool = False,
     ) -> dict[str, Any]:
         """Build the per-recursion user payload appended to messages.
 
@@ -1053,15 +1097,25 @@ class ReactEngine:
             trace_id: Server-generated recursion trace ID for this iteration.
             pending_action_result: Result payload from the prior recursion, if any.
             attachments: File attachment path hints for the first iteration.
+            after_compaction: When true, inject the full plan (plan details were
+                lost during compaction). When false, inject only a one-line status
+                summary to save tokens.
 
         Returns:
             Serializable payload for the recursion user message.
         """
+        if after_compaction:
+            plan_value: str | list[dict[str, Any]] = self._build_current_plan_payload(
+                context
+            )
+        else:
+            plan_value = self._build_plan_status_line(context)
+
         payload: dict[str, Any] = {
             "trace_id": trace_id,
             "iteration": task.iteration + 1,
             **({"user_intent": task.user_intent} if task.iteration == 0 else {}),
-            "current_plan": self._build_current_plan_payload(context),
+            "current_plan": plan_value,
         }
         if pending_action_result is not None:
             payload["action_result"] = pending_action_result
@@ -2299,6 +2353,7 @@ class ReactEngine:
                     trace_id,
                     runtime_state.pending_action_result,
                     attachments=pending_turn_attachments,
+                    after_compaction=runtime_state.compact_result is not None,
                 )
                 # Inject pending multimodal blocks from prior tool results
                 multimodal_attachments: list[dict[str, Any]] | None = None

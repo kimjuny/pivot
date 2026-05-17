@@ -165,9 +165,11 @@ def search(
     ] = False,
     case_sensitive: Annotated[bool, Param("Preserve case when matching.")] = False,
     max_candidates: Annotated[
-        int, Param("Maximum number of files returned as read candidates.")
+        int, Param("Maximum number of files returned as read candidates.", hidden=True)
     ] = 8,
-    max_hits_per_file: Annotated[int, Param("Maximum anchor hits kept per file.")] = 3,
+    max_hits_per_file: Annotated[
+        int, Param("Maximum anchor hits kept per file.", hidden=True)
+    ] = 3,
 ) -> dict[str, object]:
     """Search workspace files and return a compact list of read candidates.
 

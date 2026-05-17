@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from app.orchestration.web_search.normalization import (
-    normalize_date_text,
     normalize_domain_list,
     normalize_enum_text,
     normalize_optional_text,
@@ -19,7 +18,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 FieldType = Literal["text", "number", "secret", "textarea", "boolean"]
-SearchDepth = Literal["basic", "advanced", "fast", "ultra-fast"]
 SearchTopic = Literal["general", "news", "finance"]
 SearchTimeRange = Literal["day", "week", "month", "year"]
 
@@ -52,6 +50,7 @@ class WebSearchProviderManifest(AppBaseModel):
     config_schema: list[WebSearchConfigField]
     setup_steps: list[str]
     supported_parameters: list[str]
+    default_runtime_config: dict[str, Any] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -65,28 +64,19 @@ class WebSearchProviderBinding:
 
 
 class WebSearchQueryRequest(AppBaseModel):
-    """Provider-neutral request shape accepted by the abstract web_search tool."""
+    """Provider-neutral request shape accepted by the abstract web_search tool.
+
+    Only universal parameters controlled by the Agent are here.
+    Provider-native parameters live in each binding's ``runtime_config``.
+    """
 
     query: str
     provider: str | None = None
     max_results: int = Field(default=5, ge=1, le=20)
-    search_depth: SearchDepth | None = None
     topic: SearchTopic | None = None
     time_range: SearchTimeRange | None = None
-    start_date: str | None = None
-    end_date: str | None = None
-    include_answer: bool = False
-    include_raw_content: bool = False
-    include_images: bool = False
-    include_image_descriptions: bool = False
-    include_favicon: bool = False
     include_domains: list[str] = Field(default_factory=list)
     exclude_domains: list[str] = Field(default_factory=list)
-    country: str | None = None
-    auto_parameters: bool = False
-    exact_match: bool = False
-    include_usage: bool = False
-    safe_search: bool = False
 
     @field_validator("query", mode="before")
     @classmethod
@@ -100,24 +90,6 @@ class WebSearchQueryRequest(AppBaseModel):
         """Normalize optional provider text before validation."""
         normalized = normalize_optional_text(value, field_name="provider")
         return normalized.lower() if normalized is not None else None
-
-    @field_validator("search_depth", mode="before")
-    @classmethod
-    def _normalize_search_depth(cls, value: Any) -> str | None:
-        """Normalize search-depth aliases before validation."""
-        return normalize_enum_text(
-            value,
-            field_name="search_depth",
-            aliases={
-                "basic": "basic",
-                "advanced": "advanced",
-                "fast": "fast",
-                "ultra-fast": "ultra-fast",
-                "ultrafast": "ultra-fast",
-                "ultra_fast": "ultra-fast",
-                "ultra fast": "ultra-fast",
-            },
-        )
 
     @field_validator("topic", mode="before")
     @classmethod
@@ -151,19 +123,6 @@ class WebSearchQueryRequest(AppBaseModel):
                 "y": "year",
             },
         )
-
-    @field_validator("start_date", "end_date", mode="before")
-    @classmethod
-    def _normalize_dates(cls, value: Any, info: Any) -> str | None:
-        """Normalize date-like fields before provider execution."""
-        return normalize_date_text(value, field_name=str(info.field_name))
-
-    @field_validator("country", mode="before")
-    @classmethod
-    def _normalize_country(cls, value: Any) -> str | None:
-        """Normalize optional country text before validation."""
-        normalized = normalize_optional_text(value, field_name="country")
-        return normalized.lower() if normalized is not None else None
 
     @field_validator("include_domains", "exclude_domains", mode="before")
     @classmethod

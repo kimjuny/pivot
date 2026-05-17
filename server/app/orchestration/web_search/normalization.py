@@ -9,16 +9,6 @@ from urllib.parse import urlparse
 
 _DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
-_SEARCH_DEPTH_ALIASES = {
-    "basic": "basic",
-    "advanced": "advanced",
-    "fast": "fast",
-    "ultra-fast": "ultra-fast",
-    "ultrafast": "ultra-fast",
-    "ultra_fast": "ultra-fast",
-    "ultra fast": "ultra-fast",
-}
-
 _TOPIC_ALIASES = {
     "general": "general",
     "news": "news",
@@ -141,11 +131,6 @@ def normalize_web_search_request_payload(raw_payload: dict[str, Any]) -> dict[st
         field_name="provider",
     )
     normalized["provider"] = provider_value.lower() if provider_value else None
-    normalized["search_depth"] = normalize_enum_text(
-        raw_payload.get("search_depth"),
-        field_name="search_depth",
-        aliases=_SEARCH_DEPTH_ALIASES,
-    )
     normalized["topic"] = normalize_enum_text(
         raw_payload.get("topic"),
         field_name="topic",
@@ -156,38 +141,12 @@ def normalize_web_search_request_payload(raw_payload: dict[str, Any]) -> dict[st
         field_name="time_range",
         aliases=_TIME_RANGE_ALIASES,
     )
-    normalized["start_date"] = normalize_date_text(
-        raw_payload.get("start_date"),
-        field_name="start_date",
-    )
-    normalized["end_date"] = normalize_date_text(
-        raw_payload.get("end_date"),
-        field_name="end_date",
-    )
-    normalized["country"] = normalize_optional_text(
-        raw_payload.get("country"),
-        field_name="country",
-    )
-    if normalized["country"] is not None:
-        normalized["country"] = normalized["country"].lower()
     normalized["include_domains"] = normalize_domain_list(
         raw_payload.get("include_domains")
     )
     normalized["exclude_domains"] = normalize_domain_list(
         raw_payload.get("exclude_domains")
     )
-    for key in (
-        "include_answer",
-        "include_raw_content",
-        "include_images",
-        "include_image_descriptions",
-        "include_favicon",
-        "auto_parameters",
-        "exact_match",
-        "include_usage",
-        "safe_search",
-    ):
-        normalized[key] = normalize_bool(raw_payload.get(key), field_name=key)
     return normalized
 
 
