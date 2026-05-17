@@ -87,13 +87,11 @@ class ReactStateService:
         self,
         task: ReactTask,
         recursion: ReactRecursion,
-        observe: str,
         thinking: str | None,
-        reason: str,
         action_type: str,
         action_output: dict[str, Any],
         action_step_id: str | None,
-        summary: str,
+        message: str,
         token_counter: dict[str, int],
     ) -> dict[str, int] | None:
         """Persist the parsed LLM decision before side effects run.
@@ -101,13 +99,11 @@ class ReactStateService:
         Args:
             task: Owning task.
             recursion: Recursion row created for this cycle.
-            observe: Assistant observe content.
             thinking: Raw provider reasoning content, if available.
-            reason: Assistant reason content.
             action_type: Final normalized action type.
             action_output: Parsed action output payload before tool results.
             action_step_id: Optional plan step associated with this recursion.
-            summary: Optional user-facing progress summary text.
+            message: User-facing progress note.
             token_counter: Aggregated token usage for the recursion.
 
         Returns:
@@ -115,9 +111,7 @@ class ReactStateService:
         """
         raw_action_output = copy.deepcopy(action_output)
 
-        recursion.observe = observe
         recursion.thinking = thinking
-        recursion.reason = reason
         recursion.action_type = action_type
         recursion.action_output = json.dumps(raw_action_output, ensure_ascii=False)
         recursion.plan_step_id = self._resolve_plan_step_id(
@@ -127,8 +121,8 @@ class ReactStateService:
             trace_id=recursion.trace_id,
         )
 
-        if summary:
-            recursion.summary = summary
+        if message:
+            recursion.message = message
 
         tokens_data = self._apply_token_usage(task, recursion, token_counter)
         recursion.updated_at = datetime.now(UTC)
@@ -145,7 +139,7 @@ class ReactStateService:
         action_type: str,
         action_output: dict[str, Any],
         step_status_updates: list[dict[str, str]],
-        summary: str,
+        message: str,
         tool_results: list[dict[str, Any]],
         pending_user_action: dict[str, Any] | None = None,
     ) -> None:
@@ -159,7 +153,7 @@ class ReactStateService:
             action_output: Mutable action output payload. Tool results may be
                 merged into it for snapshot/event consistency.
             step_status_updates: Validated step status updates.
-            summary: Optional user-facing progress summary text.
+            message: User-facing progress note.
             tool_results: Executed tool results for this recursion.
             pending_user_action: Optional system-owned waiting action created by
                 a tool result and persisted on the task row.
@@ -180,7 +174,7 @@ class ReactStateService:
             action_type=action_type,
             action_output=action_output,
             step_status_updates=step_status_updates,
-            summary=summary,
+            message=message,
         )
         self._save_snapshot(task, recursion, context)
 
@@ -230,13 +224,11 @@ class ReactStateService:
         task: ReactTask,
         recursion: ReactRecursion,
         context: ReactContext,
-        observe: str,
         thinking: str | None,
-        reason: str,
         action_output: dict[str, Any],
         action_step_id: str | None,
         step_status_updates: list[dict[str, str]],
-        summary: str,
+        message: str,
         tool_results: list[dict[str, Any]],
         error_log: str,
         pending_user_action: dict[str, Any] | None = None,
@@ -250,9 +242,7 @@ class ReactStateService:
         """
         raw_action_output = copy.deepcopy(action_output)
 
-        recursion.observe = observe
         recursion.thinking = thinking
-        recursion.reason = reason
         recursion.action_type = "CALL_TOOL"
         recursion.action_output = json.dumps(raw_action_output, ensure_ascii=False)
         recursion.plan_step_id = self._resolve_plan_step_id(
@@ -261,8 +251,8 @@ class ReactStateService:
             action_step_id=action_step_id,
             trace_id=recursion.trace_id,
         )
-        if summary:
-            recursion.summary = summary
+        if message:
+            recursion.message = message
         if tool_results:
             recursion.tool_call_results = json.dumps(tool_results, ensure_ascii=False)
 
@@ -280,7 +270,7 @@ class ReactStateService:
             action_type="CALL_TOOL",
             action_output=action_output,
             step_status_updates=step_status_updates,
-            summary=summary,
+            message=message,
         )
         self._save_snapshot(task, recursion, context)
         if pending_user_action is not None:
@@ -485,7 +475,7 @@ class ReactStateService:
         action_type: str,
         action_output: dict[str, Any],
         step_status_updates: list[dict[str, str]],
-        summary: str,
+        message: str,
     ) -> None:
         """Apply recursion side effects to the in-memory context before snapshot.
 
@@ -496,7 +486,7 @@ class ReactStateService:
             action_type: Final action type.
             action_output: Enriched action output payload.
             step_status_updates: Validated step status updates.
-            summary: Optional user-facing progress summary text.
+            message: User-facing progress note.
         """
 
         if action_type == "RE_PLAN":
@@ -512,7 +502,7 @@ class ReactStateService:
             action_type=action_type,
             action_output=action_output,
             step_status_updates=step_status_updates,
-            summary=summary,
+            message=message,
         )
 
     def _replace_plan(
@@ -628,7 +618,7 @@ class ReactStateService:
         action_type: str,
         action_output: dict[str, Any],
         step_status_updates: list[dict[str, str]],
-        summary: str,
+        message: str,
     ) -> None:
         """Attach the current recursion to the correct branch in the context.
 
@@ -639,14 +629,12 @@ class ReactStateService:
             action_type: Final action type.
             action_output: Enriched action output payload.
             step_status_updates: Validated step status updates.
-            summary: Optional user-facing progress summary text.
+            message: User-facing progress note.
         """
         current_rec_dict = {
             "iteration": task.iteration,
             "trace_id": recursion.trace_id,
-            "observe": recursion.observe or "",
-            "reason": recursion.reason or "",
-            "summary": summary,
+            "message": message,
             "action": {
                 "action_type": action_type,
                 "output": action_output,

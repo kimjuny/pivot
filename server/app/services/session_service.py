@@ -928,10 +928,8 @@ class SessionService:
                         "iteration": recursion.iteration_index,
                         "trace_id": recursion.trace_id,
                         "input_message_json": recursion.input_message_json,
-                        "observe": recursion.observe,
                         "thinking": recursion.thinking,
-                        "reason": recursion.reason,
-                        "summary": recursion.summary,
+                        "message": recursion.message,
                         "action_type": recursion.action_type,
                         "action_output": recursion.action_output,
                         "tool_call_results": recursion.tool_call_results,
@@ -999,7 +997,7 @@ class SessionService:
         """Return the reconnect cursor that safely replays active task events.
 
         Why: full-history cannot include in-flight recursion fields such as
-        ``summary`` until that recursion is finalized, so a
+        ``message`` until that recursion is finalized, so a
         reconnecting observer must replay active-task events from the event log.
 
         Args:
@@ -1151,13 +1149,13 @@ class SessionService:
                         continue
 
                     iteration = history_item.get("iteration")
-                    summary = history_item.get("summary", "")
+                    message = history_item.get("message", "")
                     recursion_history.append(
                         {
                             "iteration": iteration
                             if isinstance(iteration, int)
                             else None,
-                            "summary": summary if isinstance(summary, str) else "",
+                            "message": message if isinstance(message, str) else "",
                         }
                     )
 

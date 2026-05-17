@@ -935,8 +935,6 @@ function hasExecutionDetails(recursion: RecursionRecord) {
   );
 
   return (
-    Boolean(recursion.observe) ||
-    Boolean(recursion.reason) ||
     Boolean(recursion.action) ||
     nonToolEvents.length > 0 ||
     Boolean(recursion.errorLog)
@@ -960,18 +958,6 @@ function ExecutionDetails({
 
   return (
     <div className="space-y-1">
-      {recursion.observe && (
-        <DetailBlock icon={<DetailBarIcon />} label="Observe">
-          {recursion.observe}
-        </DetailBlock>
-      )}
-
-      {recursion.reason && (
-        <DetailBlock icon={<DetailBarIcon />} label="Reason">
-          {recursion.reason}
-        </DetailBlock>
-      )}
-
       {recursion.action && (
         <DetailBlock icon={<DetailBarIcon />} label="Action">
           <div className="flex items-center justify-between gap-2">
@@ -1187,20 +1173,16 @@ export function RecursionCard({
   const key = `${messageId}-${recursion.uid}`;
   const effectiveStatus = getRecursionStatus(recursion);
   const hasStableRunningLabel = Boolean(
-    recursion.summary || recursion.reason || recursion.observe || recursion.action,
+    recursion.message || recursion.action,
   );
   const shouldShowPendingTicker =
     effectiveStatus === "running" && !hasStableRunningLabel;
   const stableRunningLabel =
-    recursion.summary ||
-    recursion.reason ||
-    recursion.observe ||
+    recursion.message ||
     recursion.action ||
     "Working...";
   const completedLabel =
-    recursion.summary ||
-    recursion.reason ||
-    recursion.observe ||
+    recursion.message ||
     recursion.action ||
     "Completed step";
   const canExpandDetails = hasExecutionDetails(recursion);

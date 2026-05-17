@@ -150,7 +150,7 @@ class SessionServiceTestCase(unittest.TestCase):
                                 "recursion_history": [
                                     {
                                         "iteration": 2,
-                                        "summary": "Repository inspection is complete",
+                                        "message": "Repository inspection is complete",
                                     }
                                 ],
                             },
@@ -178,7 +178,7 @@ class SessionServiceTestCase(unittest.TestCase):
         self.assertEqual(history[0]["current_plan"][0]["status"], "done")
         self.assertEqual(history[0]["current_plan"][1]["status"], "running")
         self.assertEqual(
-            history[0]["current_plan"][0]["recursion_history"][0]["summary"],
+            history[0]["current_plan"][0]["recursion_history"][0]["message"],
             "Repository inspection is complete",
         )
 

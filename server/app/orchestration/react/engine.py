@@ -683,9 +683,7 @@ class ReactEngine:
                                     await token_meter_queue.put(
                                         {
                                             "type": "react_control",
-                                            "observe": preview_decision.observe,
-                                            "reason": preview_decision.reason,
-                                            "summary": preview_decision.summary,
+                                            "message": preview_decision.message,
                                             "action_type": (
                                                 preview_decision.action.action_type
                                             ),
@@ -996,7 +994,7 @@ class ReactEngine:
                     recursion_history.append(
                         {
                             "iteration": history_entry.get("iteration"),
-                            "summary": history_entry.get("summary", ""),
+                            "message": history_entry.get("message", ""),
                         }
                     )
             current_plan.append(
@@ -1112,7 +1110,6 @@ class ReactEngine:
             plan_value = self._build_plan_status_line(context)
 
         payload: dict[str, Any] = {
-            "trace_id": trace_id,
             "iteration": task.iteration + 1,
             **({"user_intent": task.user_intent} if task.iteration == 0 else {}),
             "current_plan": plan_value,
@@ -1768,7 +1765,7 @@ class ReactEngine:
                 choice = response.first()
                 message = choice.message
 
-                # Parse JSON from content to get observe, reason, summary, action_type
+                # Parse JSON from content to extract decision fields
                 content = message.content or "{}"
                 assistant_message_raw = content
 
@@ -1876,15 +1873,13 @@ class ReactEngine:
                             task=task,
                             recursion=recursion,
                             context=context,
-                            observe=preview_decision.observe,
                             thinking=message.reasoning_content
                             if message is not None
                             else None,
-                            reason=preview_decision.reason,
                             action_output=action_output,
                             action_step_id=preview_decision.action.step_id,
                             step_status_updates=step_status_updates_validated,
-                            summary=preview_decision.summary,
+                            message=preview_decision.message,
                             tool_results=tool_results,
                             error_log=parse_error_message,
                             pending_user_action=pending_user_action,
@@ -1901,19 +1896,16 @@ class ReactEngine:
                             "llm_response_id": response.id
                             if response is not None
                             else None,
-                            "observe": preview_decision.observe,
+                            "message": preview_decision.message,
                             "thinking": message.reasoning_content
                             if message is not None
                             else None,
-                            "reason": preview_decision.reason,
-                            "summary": preview_decision.summary,
                             "session_title": "",
                             "output": action_output,
                             "answer_attachments": [],
                             "tool_calls": recovered_tool_calls,
                             "tool_results": tool_results,
                             "pending_user_action": pending_user_action,
-                            "task_summary": preview_decision.task_summary,
                             "step_status_update": step_status_updates_validated,
                             "current_plan": self._build_current_plan_payload(context),
                         }
@@ -1934,11 +1926,8 @@ class ReactEngine:
                     "llm_response_id": response.id if response is not None else None,
                 }
 
-            observe = decision.observe
             thinking = message.reasoning_content
-            reason = decision.reason
-            summary = decision.summary
-            session_title = decision.session_title
+            message_text = decision.message
             action = decision.action
             action_type = action.action_type
             action_output = dict(action.output)
@@ -1956,17 +1945,18 @@ class ReactEngine:
             # missing step_id should only surface as a warning so the task can continue.
             action_step_id = action.step_id
 
-            task_summary = decision.task_summary
+            session_title = ""
+            if action_type == "ANSWER":
+                session_title = action_output.get("session_title", "")
+
             tokens_data = self.state_service.record_llm_decision(
                 task=task,
                 recursion=recursion,
-                observe=observe,
                 thinking=thinking,
-                reason=reason,
                 action_type=action_type,
                 action_output=action_output,
                 action_step_id=action_step_id,
-                summary=summary,
+                message=message_text,
                 token_counter=token_counter,
             )
 
@@ -2111,7 +2101,7 @@ class ReactEngine:
                 action_type=action_type,
                 action_output=action_output,
                 step_status_updates=step_status_updates_validated,
-                summary=summary,
+                message=message_text,
                 tool_results=tool_results,
                 pending_user_action=pending_user_action,
             )
@@ -2122,10 +2112,8 @@ class ReactEngine:
                 "trace_id": trace_id,
                 "action_type": action_type,
                 "llm_response_id": response.id,
-                "observe": observe,
+                "message": message_text,
                 "thinking": thinking,
-                "reason": reason,
-                "summary": summary,
                 "session_title": persisted_session_title,
                 "output": action_output,
                 "answer_attachments": answer_attachments,
@@ -2133,7 +2121,6 @@ class ReactEngine:
                 "tool_calls": reconstructed_tool_calls,  # Native tool_calls
                 "tool_results": tool_results,  # Tool execution results
                 "pending_user_action": pending_user_action,
-                "task_summary": task_summary,
                 "step_status_update": step_status_updates_validated,
                 "current_plan": self._build_current_plan_payload(context),
             }
@@ -2483,36 +2470,14 @@ class ReactEngine:
                         preview_timestamp = datetime.now(UTC).isoformat()
                         preview_trace_id = trace_id
 
-                        preview_observe = meter_data.get("observe")
-                        if isinstance(preview_observe, str) and preview_observe:
+                        preview_message = meter_data.get("message")
+                        if isinstance(preview_message, str) and preview_message:
                             yield {
-                                "type": "observe",
+                                "type": "message",
                                 "task_id": task.task_id,
                                 "trace_id": preview_trace_id,
                                 "iteration": task.iteration,
-                                "delta": preview_observe,
-                                "timestamp": preview_timestamp,
-                            }
-
-                        preview_reason = meter_data.get("reason")
-                        if isinstance(preview_reason, str) and preview_reason:
-                            yield {
-                                "type": "reason",
-                                "task_id": task.task_id,
-                                "trace_id": preview_trace_id,
-                                "iteration": task.iteration,
-                                "delta": preview_reason,
-                                "timestamp": preview_timestamp,
-                            }
-
-                        preview_summary = meter_data.get("summary")
-                        if isinstance(preview_summary, str) and preview_summary:
-                            yield {
-                                "type": "summary",
-                                "task_id": task.task_id,
-                                "trace_id": preview_trace_id,
-                                "iteration": task.iteration,
-                                "delta": preview_summary,
+                                "delta": preview_message,
                                 "timestamp": preview_timestamp,
                                 "data": {
                                     "current_plan": self._build_current_plan_payload(
@@ -2779,39 +2744,13 @@ class ReactEngine:
                         "tokens": event_data.get("tokens"),
                     }
 
-                if recursion.observe:
+                if recursion.message:
                     yield {
-                        "type": "observe",
+                        "type": "message",
                         "task_id": task.task_id,
                         "trace_id": event_data.get("trace_id"),
                         "iteration": task.iteration,
-                        "delta": recursion.observe,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "created_at": recursion.created_at.isoformat(),
-                        "updated_at": recursion.updated_at.isoformat(),
-                        "tokens": event_data.get("tokens"),
-                    }
-
-                if recursion.reason:
-                    yield {
-                        "type": "reason",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "delta": recursion.reason,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                        "created_at": recursion.created_at.isoformat(),
-                        "updated_at": recursion.updated_at.isoformat(),
-                        "tokens": event_data.get("tokens"),
-                    }
-
-                if recursion.summary:
-                    yield {
-                        "type": "summary",
-                        "task_id": task.task_id,
-                        "trace_id": event_data.get("trace_id"),
-                        "iteration": task.iteration,
-                        "delta": recursion.summary,
+                        "delta": recursion.message,
                         "timestamp": datetime.now(UTC).isoformat(),
                         "created_at": recursion.created_at.isoformat(),
                         "updated_at": recursion.updated_at.isoformat(),

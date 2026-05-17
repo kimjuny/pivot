@@ -368,7 +368,7 @@ class ChannelServiceTestCase(unittest.TestCase):
         task_events = [
             {
                 "event_id": 1,
-                "type": "summary",
+                "type": "message",
                 "task_id": "task-1",
                 "iteration": 1,
                 "timestamp": datetime.now(UTC).isoformat(),
@@ -384,7 +384,7 @@ class ChannelServiceTestCase(unittest.TestCase):
                             "recursion_history": [
                                 {
                                     "iteration": 1,
-                                    "summary": "Reading the linked files",
+                                    "message": "Reading the linked files",
                                 }
                             ],
                         }
@@ -506,7 +506,7 @@ class ChannelServiceTestCase(unittest.TestCase):
         task_events = [
             {
                 "event_id": 1,
-                "type": "summary",
+                "type": "message",
                 "task_id": "task-1",
                 "iteration": 1,
                 "timestamp": datetime.now(UTC).isoformat(),

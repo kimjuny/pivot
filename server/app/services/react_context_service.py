@@ -315,7 +315,6 @@ class ReactContextUsageService:
         )
         messages.append(build_runtime_task_bootstrap_message(user_prompt))
         payload = {
-            "trace_id": "preview",
             "iteration": 1,
             "user_intent": draft_message,
             "current_plan": [],
@@ -568,7 +567,6 @@ class ReactContextUsageService:
             plan_value = self._build_plan_status_line(context)
 
         payload: dict[str, Any] = {
-            "trace_id": "preview",
             "iteration": task.iteration + 1,
             "user_intent": task.user_intent,
             "current_plan": plan_value,
@@ -636,7 +634,7 @@ class ReactContextUsageService:
                     recursion_history.append(
                         {
                             "iteration": history_entry.get("iteration"),
-                            "summary": history_entry.get("summary", ""),
+                            "message": history_entry.get("message", ""),
                         }
                     )
             current_plan.append(

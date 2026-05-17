@@ -58,7 +58,7 @@ class _CompactionHarnessEngine(ReactEngine):
         if self.fail_compaction:
             raise RuntimeError("compaction failed")
         return (
-            json.dumps({"summary": "compacted"}, ensure_ascii=False),
+            json.dumps({"message": "compacted"}, ensure_ascii=False),
             {
                 "prompt_tokens": 11,
                 "completion_tokens": 7,
@@ -138,7 +138,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
         )
         self.runtime_service.append_assistant_message(
             self.task,
-            '{"action":{"action_type":"REFLECT","output":{"summary":"working"}}}',
+            '{"action":{"action_type":"REFLECT","output":{"message":"working"}}}',
         )
         self.task.iteration = 2
         self.session.add(self.task)
@@ -189,7 +189,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
         self.assertEqual(updated_state.messages[1]["role"], "assistant")
         self.assertEqual(
             updated_state.messages[1]["content"],
-            json.dumps({"summary": "compacted"}, ensure_ascii=False),
+            json.dumps({"message": "compacted"}, ensure_ascii=False),
         )
         self.assertEqual(
             updated_state.messages[2:],
@@ -211,7 +211,7 @@ class ReactEngineCompactionTestCase(unittest.TestCase):
                     "role": "assistant",
                     "content": (
                         '{"action":{"action_type":"REFLECT","output":'
-                        '{"summary":"working"}}}'
+                        '{"message":"working"}}}'
                     ),
                 },
             ],

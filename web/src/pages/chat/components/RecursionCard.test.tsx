@@ -98,10 +98,10 @@ describe("RecursionCard", () => {
         messageId="message-2"
         recursion={buildRecursion({
           thinking: "Need to inspect the repo state.",
-          observe: "Repository structure loaded.",
+          message: "Repository structure loaded.",
           events: [
             {
-              type: "observe",
+              type: "message",
               task_id: "task-2",
               trace_id: "trace-2",
               iteration: 0,
@@ -126,7 +126,7 @@ describe("RecursionCard", () => {
         messageId="message-thinking-complete"
         recursion={buildRecursion({
           thinking: "I compared the available implementation paths.",
-          summary: "Picked the smaller frontend-only change.",
+          message: "Picked the smaller frontend-only change.",
           status: "completed",
           endTime: "2026-03-24T00:00:03.000Z",
         })}
@@ -143,7 +143,7 @@ describe("RecursionCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("calls the summary toggle and shows execution details when expanded", async () => {
+  it("calls the message toggle and shows execution details when expanded", async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
 
@@ -151,9 +151,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-details"
         recursion={buildRecursion({
-          summary: "Inspected the chat rendering flow.",
-          observe: "RecursionCard owns the visible iteration row.",
-          reason: "The shell component is not the right edit surface.",
+          message: "Inspected the chat rendering flow.",
           action: "CALL_TOOL",
           status: "completed",
           endTime: "2026-03-24T00:00:04.000Z",
@@ -174,9 +172,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-details"
         recursion={buildRecursion({
-          summary: "Inspected the chat rendering flow.",
-          observe: "RecursionCard owns the visible iteration row.",
-          reason: "The shell component is not the right edit surface.",
+          message: "Inspected the chat rendering flow.",
           action: "CALL_TOOL",
           status: "completed",
           endTime: "2026-03-24T00:00:04.000Z",
@@ -186,17 +182,15 @@ describe("RecursionCard", () => {
       />,
     );
 
-    expect(screen.getByText("Observe")).toBeInTheDocument();
-    expect(screen.getByText("Reason")).toBeInTheDocument();
     expect(screen.getByText("Action")).toBeInTheDocument();
   });
 
-  it("keeps the summary visible while tool execution is waiting on results", () => {
+  it("keeps the message visible while tool execution is waiting on results", () => {
     render(
       <RecursionCard
         messageId="message-3"
         recursion={buildRecursion({
-          summary: "Loaded project files",
+          message: "Loaded project files",
           events: [
             {
               type: "tool_call",
@@ -238,7 +232,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-live-tools"
         recursion={buildRecursion({
-          summary: "Updating files",
+          message: "Updating files",
           events: [
             {
               type: "tool_call",
@@ -369,7 +363,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-long-write"
         recursion={buildRecursion({
-          summary: "Writing a large file",
+          message: "Writing a large file",
           events: [
             {
               type: "tool_call",
@@ -424,7 +418,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-edit-lines"
         recursion={buildRecursion({
-          summary: "Editing a file",
+          message: "Editing a file",
           events: [
             {
               type: "tool_call",
@@ -478,7 +472,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-tools"
         recursion={buildRecursion({
-          summary: "Ran file checks",
+          message: "Ran file checks",
           status: "completed",
           endTime: "2026-03-24T00:00:05.000Z",
           events: [
@@ -638,7 +632,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-tools-running"
         recursion={buildRecursion({
-          summary: "Running checks",
+          message: "Running checks",
           status: "running",
           events: baseEvents,
         })}
@@ -659,7 +653,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-tools-running"
         recursion={buildRecursion({
-          summary: "Running checks",
+          message: "Running checks",
           status: "running",
           events: [
             {
@@ -697,7 +691,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-failed-reversed"
         recursion={buildRecursion({
-          summary: "Lint failed",
+          message: "Lint failed",
           status: "completed",
           endTime: "2026-03-24T00:00:04.000Z",
           events: [
@@ -762,7 +756,7 @@ describe("RecursionCard", () => {
       <RecursionCard
         messageId="message-copy-tool"
         recursion={buildRecursion({
-          summary: "Read file",
+          message: "Read file",
           status: "completed",
           endTime: "2026-03-24T00:00:05.000Z",
           events: [

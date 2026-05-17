@@ -266,9 +266,7 @@ class ReactStreamEventType(str, Enum):
 
     RECURSION_START = "recursion_start"
     REASONING = "reasoning"
-    OBSERVE = "observe"
-    REASON = "reason"
-    SUMMARY = "summary"
+    MESSAGE = "message"
     ACTION = "action"
     TOOL_CALL = "tool_call"
     TOOL_PAYLOAD_DELTA = "tool_payload_delta"
@@ -376,10 +374,8 @@ class ReactRecursionResponse(AppBaseModel):
     task_id: str
     iteration_index: int
     input_message_json: str | None
-    observe: str | None
     thinking: str | None
-    reason: str | None
-    summary: str | None
+    message: str | None
     action_type: str | None
     action_output: str | None
     tool_call_results: str | None

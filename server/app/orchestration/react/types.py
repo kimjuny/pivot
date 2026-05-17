@@ -101,26 +101,16 @@ class ParsedReactDecision:
     """Fully parsed assistant decision for one recursion.
 
     Attributes:
-        observe: Optional assistant observation text, normalized to ``""`` when
-            omitted by the model.
-        reason: Optional assistant reasoning text, normalized to ``""`` when
-            omitted by the model.
-        summary: Optional user-facing progress summary.
-        thinking_next_turn: Optional hint controlling whether the next recursion
-            should use provider thinking mode when the runtime is in Auto mode.
-        session_title: Optional session title proposed by the assistant.
+        message: User-facing progress note emitted every recursion.
+        thinking_next_turn: Hint controlling whether the next recursion should
+            use provider thinking mode when the runtime is in Auto mode.
         action: Parsed action definition.
-        task_summary: Optional summary payload for the completed task.
         raw_payload: Canonical dictionary representation of the parsed response.
     """
 
-    observe: str
-    reason: str
-    summary: str
+    message: str
     thinking_next_turn: bool | None
-    session_title: str
     action: ParsedAction
-    task_summary: dict[str, Any]
     raw_payload: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:

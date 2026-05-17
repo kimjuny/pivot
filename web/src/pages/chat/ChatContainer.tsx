@@ -603,10 +603,10 @@ function extractLiveCurrentPlan(event: ReactStreamEvent): PlanStepData[] | undef
     return undefined;
   }
 
-  if (event.type === "summary") {
-    const summaryPayload = event.data as { current_plan?: PlanStepData[] };
-    return Array.isArray(summaryPayload.current_plan)
-      ? summaryPayload.current_plan
+  if (event.type === "message") {
+    const messagePayload = event.data as { current_plan?: PlanStepData[] };
+    return Array.isArray(messagePayload.current_plan)
+      ? messagePayload.current_plan
       : undefined;
   }
 
@@ -1827,9 +1827,7 @@ function ChatContainer({
             event.type === "tool_result" ||
             event.type === "tool_payload_delta" ||
             event.type === "answer_delta" ||
-            ((event.type === "observe" ||
-              event.type === "reason" ||
-              event.type === "summary" ||
+            ((event.type === "message" ||
               event.type === "action") &&
               event.tokens)),
       );
@@ -1892,28 +1890,16 @@ function ChatContainer({
             zeroRateStreak: nextZeroRateStreak,
           };
         }
-      } else if (event.type === "observe") {
-        nextRecursion = {
-          ...nextRecursion,
-          observe: event.delta ?? "",
-          tokens: event.tokens ?? currentRecursion.tokens,
-        };
       } else if (event.type === "reasoning") {
         nextRecursion = {
           ...nextRecursion,
           thinking: `${currentRecursion.thinking ?? ""}${event.delta ?? ""}`,
           tokens: event.tokens ?? currentRecursion.tokens,
         };
-      } else if (event.type === "reason") {
+      } else if (event.type === "message") {
         nextRecursion = {
           ...nextRecursion,
-          reason: event.delta ?? "",
-          tokens: event.tokens ?? currentRecursion.tokens,
-        };
-      } else if (event.type === "summary") {
-        nextRecursion = {
-          ...nextRecursion,
-          summary: event.delta ?? "",
+          message: event.delta ?? "",
           tokens: event.tokens ?? currentRecursion.tokens,
         };
       } else if (event.type === "action") {

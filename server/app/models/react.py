@@ -127,9 +127,6 @@ class ReactTask(SQLModel, table=True):
 class ReactRecursion(SQLModel, table=True):
     """Recursion model representing a single ReAct recursion cycle.
 
-    Each recursion corresponds to one observe-reason-act cycle in the ReAct state
-    machine.
-
     Attributes:
         id: Primary key of the recursion.
         trace_id: UUID string for unique recursion identification.
@@ -138,13 +135,11 @@ class ReactRecursion(SQLModel, table=True):
         iteration_index: Index of this recursion in the task (0-based).
         input_message_json: JSON string of the per-recursion user message sent to
             the LLM.
-        observe: LLM's observation of current state.
         thinking: Raw protocol-level reasoning text returned by the provider.
-        reason: LLM's reasoning/analysis.
         action_type: Type of action (CALL_TOOL, RE_PLAN, ANSWER, REFLECT).
         action_output: JSON string of action output.
         tool_call_results: JSON string of tool execution results.
-        summary: User-facing progress summary emitted in this recursion.
+        message: User-facing progress note emitted in this recursion.
         status: Current status (running, done, error).
         error_log: Error message if any.
         created_at: UTC timestamp when recursion was created.
@@ -161,12 +156,10 @@ class ReactRecursion(SQLModel, table=True):
         default=None,
         description="JSON string of the per-recursion user message sent to the LLM",
     )
-    observe: str | None = Field(default=None, description="LLM observation")
     thinking: str | None = Field(
         default=None,
         description="Provider reasoning/thinking text for this recursion",
     )
-    reason: str | None = Field(default=None, description="LLM reasoning")
     action_type: str | None = Field(
         default=None,
         description="Action type: CALL_TOOL, RE_PLAN, ANSWER, REFLECT",
@@ -179,9 +172,9 @@ class ReactRecursion(SQLModel, table=True):
         default=None,
         description="JSON string of tool results",
     )
-    summary: str | None = Field(
+    message: str | None = Field(
         default=None,
-        description="User-facing progress summary for this recursion",
+        description="User-facing progress note for this recursion",
     )
     plan_step_id: str | None = Field(
         default=None,

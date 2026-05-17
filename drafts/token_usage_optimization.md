@@ -1,7 +1,7 @@
 # Agent Token Usage Optimization
 
 > Date: 2026-05-17
-> Status: Phase 1 + Phase 2 + Phase 3 + Phase 3b complete
+> Status: Phase 1 + Phase 2 + Phase 3 + Phase 3b + Phase 4 complete
 
 ---
 
@@ -113,33 +113,108 @@
 
 **Note**: UI event streaming (SSE) continues to use full `_build_current_plan_payload()` for frontend display — only the LLM-facing payload is compressed.
 
+### 2.4 Assistant Output Format Cleanup ✅ DONE
+
+**Result**: Removed 4 dead fields, renamed 1 field, moved 1 field to action-specific output, removed `trace_id` from LLM prompt. The LLM's JSON envelope shrank from 8 top-level fields to 4.
+
+#### Changes
+
+1. **Removed `observe` + `reason` entirely**: These classic ReAct artifacts were listed as "optional" but the LLM wrote paragraphs for them every recursion. Removed from system prompt, parser, types, DB model (`ReactRecursion`), engine streaming, schemas, API serialization, and all frontend rendering/SSE handling.
+
+2. **Moved `session_title` to ANSWER-only**: Previously the LLM generated a session title every recursion, but only the first write was ever persisted. Now `session_title` is an optional field inside `action.output` when `action_type == "ANSWER"`. The engine extracts it only on ANSWER actions and passes it to `_persist_session_title()`.
+
+3. **Renamed `summary` → `message`**: Field semantics expanded from "brief status update" to "a note to the user about what you are doing, what you found, or what happens next. Every recursion must include this." Renamed across: system prompt, parser, types, DB column (`ReactRecursion.message`), state service, engine, schemas, SSE event type (`"message"`), API serialization, frontend types, SSE handling, and RecursionCard rendering.
+
+4. **Removed `task_summary`**: Dead code — parsed from LLM output but never persisted, streamed, or displayed. The engine placed it in `event_data` as a top-level key, but the supervisor only reads `event_data["data"]`, so it was silently discarded every recursion.
+
+5. **Removed `trace_id` from LLM-facing prompt**: The engine generates a UUID `trace_id` and injected it into the user message, asking the LLM to echo it back. The parser never extracted it — the engine used its own copy for all logging, DB records, and SSE events. Removed from `_build_recursion_user_payload()` and context service preview payloads.
+
+6. **Deleted `current_state_schema.md`**: Dead file with no references, contained outdated Chinese descriptions.
+
+#### New JSON Envelope
+
+```json
+{
+  "iteration": 3,
+  "message": "note to the user about current progress",
+  "thinking_next_turn": false,
+  "action": {
+    "action_type": "CALL_TOOL | RE_PLAN | REFLECT | CLARIFY | ANSWER",
+    "output": {},
+    "step_id": "current step being executed",
+    "step_status_update": []
+  }
+}
+```
+
+#### Token Savings
+
+- Removed `observe` (~2-4 sentences) + `reason` (~2-4 sentences) per recursion: **~100-200 output tokens/recursion**
+- Removed `trace_id` echo: **~5-10 output tokens/recursion**
+- Removed `task_summary` on ANSWER: **~50-100 output tokens** on final recursion
+- `session_title` only on ANSWER: **~20-30 output tokens** on non-ANSWER recursions
+- **Estimated total: ~175-340 output tokens saved per recursion** (~30-40% of output tokens)
+
+#### Files Modified
+
+**System prompt**:
+- `server/app/orchestration/react/system_prompt.md`
+
+**Parser + Types**:
+- `server/app/orchestration/react/parser.py`
+- `server/app/orchestration/react/types.py`
+
+**DB Model + State Service**:
+- `server/app/models/react.py`
+- `server/app/services/react_state_service.py`
+
+**Engine + Orchestration**:
+- `server/app/orchestration/react/engine.py`
+- `server/app/orchestration/base/stream.py`
+- `server/app/services/react_context_service.py`
+- `server/app/services/channel_service.py`
+
+**Schemas + API**:
+- `server/app/schemas/react.py`
+- `server/app/schemas/session.py`
+- `server/app/services/session_service.py`
+- `server/app/api/session.py`
+- `server/app/api/operations.py`
+
+**Frontend**:
+- `web/src/pages/chat/types.ts`
+- `web/src/pages/chat/ChatContainer.tsx`
+- `web/src/pages/chat/utils/chatData.ts`
+- `web/src/pages/chat/utils/chatPlan.ts`
+- `web/src/pages/chat/components/RecursionCard.tsx`
+- `web/src/utils/api.ts`
+- `web/src/studio/operations/api.ts`
+
+**Deleted**:
+- `server/app/orchestration/react/current_state_schema.md`
+
+**Tests**:
+- `server/tests/orchestration/react/test_parser.py`
+- `server/tests/orchestration/react/test_engine_stream_usage.py`
+- `server/tests/orchestration/react/test_engine_thinking_mode.py`
+- `server/tests/orchestration/react/test_engine_tool_batches.py`
+- `server/tests/orchestration/react/test_context.py`
+- `server/tests/orchestration/react/test_engine_compaction.py`
+- `server/tests/services/test_react_state_service.py`
+- `server/tests/services/test_session_service.py`
+- `server/tests/services/test_channel_service.py`
+- `web/src/pages/chat/components/RecursionCard.test.tsx`
+- `web/src/pages/chat/utils/chatData.test.ts`
+- `web/src/pages/chat/utils/chatPlan.test.ts`
+- `web/src/studio/operations/SessionDetailPage.test.tsx`
+- `web/src/studio/operations/diagnostics.test.ts`
+- `web/src/studio/operations/OperationsHookReplayPanel.test.tsx`
+
+**Note**: DB schema changed (removed `observe`/`reason` columns, renamed `summary` → `message`). Requires deleting `pivot.db` and restarting.
+
 ---
 
 ## Remaining Optimization Directions
-
-### 2.4 Assistant Output Format Optimization
-
-**Priority**: P1 | **Estimated Savings**: 20-30%/round output tokens | **Effort**: Low
-
-#### Current Issues
-
-1. **`observe` and `reason` are "optional" but LLM writes them anyway**: The system prompt gives them descriptive templates, so the LLM tends to write a paragraph each time. These are "internal thinking" fields that shouldn't consume many output tokens.
-2. **`session_title` generated every recursion**: But it's only used once (persisted on first write). The LLM wastes tokens generating it on recursions 2, 3, 4...
-3. **`summary` required every recursion**: Many intermediate recursion summaries have low user value.
-
-#### Proposed Changes
-
-1. In the system prompt, explicitly instruct: `observe` and `reason` should only be populated at **critical decision points**; omit them during routine tool-calling recursions.
-2. Only request `session_title` on `iteration=1`. Add instruction: "Omit `session_title` after the first recursion."
-3. Add length guidance for `summary` (e.g., "≤50 chars") or only require it on `CALL_TOOL` and `ANSWER` actions.
-
-#### Estimated Result
-
-```
-Per-recursion output tokens: -20-30%
-```
-
----
 
 ### 2.5 Compact Prompt Optimization
 
@@ -191,7 +266,7 @@ Already implements provider-level cache policies (Qwen block cache, Kimi prompt 
 | **P0** | Prompt Split (session vs task) | ~3000-4000 tokens/task | Medium | ✅ Done |
 | **P0** | Tool Catalog Schema (Option 2) | ~60% (~1800 tokens/task) | Medium | ✅ Done |
 | **P1** | Per-Recursion Plan Compression | ~97% before compaction (~387 tokens/round) | Medium | ✅ Done |
-| **P1** | Assistant Output Format | 20-30%/round output | Low | Pending |
+| **P1** | Assistant Output Format | ~30-40%/round output (~175-340 tokens) | Low | ✅ Done |
 | **P2** | Compact Prompt Optimization | 30-40% | Low | Pending |
 | **P2** | Caching Strategy Hardening | Indirect | Medium-High | Pending |
 
@@ -200,7 +275,7 @@ Already implements provider-level cache policies (Qwen block cache, Kimi prompt 
 ## Remaining Implementation Sequence
 
 1. ~~**Phase 3** (Payload optimization): Per-recursion plan compression (2.3) ✅~~
-2. **Phase 4** (Output tuning, 1-2 days): Assistant output format optimization (2.4)
+2. ~~**Phase 4** (Output tuning): Assistant output format cleanup (2.4) ✅~~
 3. **Phase 5** (Polish, 1-2 days): Compact prompt optimization (2.5) + caching verification (2.6)
 
 Each phase should include:

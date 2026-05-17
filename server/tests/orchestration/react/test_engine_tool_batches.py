@@ -80,9 +80,7 @@ class _BatchToolManager:
 def _build_batch_response_content() -> str:
     return """
 {
-  "observe": "Need parallel reads before verification.",
-  "reason": "The first two calls are independent; the third should wait.",
-  "summary": "Running batched tools.",
+  "message": "Running batched tools.",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {

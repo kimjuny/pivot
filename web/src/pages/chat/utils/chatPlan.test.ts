@@ -112,7 +112,7 @@ describe("deriveComposerTaskPlan", () => {
     expect(taskPlan?.steps.map((step) => step.status)).toEqual(["done", "done"]);
   });
 
-  it("prefers the latest summary current_plan during live execution", () => {
+  it("prefers the latest message current_plan during live execution", () => {
     const taskPlan = deriveComposerTaskPlan([
       createAssistantMessage({
         recursions: [
@@ -149,7 +149,7 @@ describe("deriveComposerTaskPlan", () => {
             trace_id: "trace-2",
             events: [
               {
-                type: "summary",
+                type: "message",
                 task_id: "task-1",
                 iteration: 1,
                 timestamp: "2026-03-15T00:00:02.000Z",
@@ -240,7 +240,7 @@ describe("deriveComposerTaskPlan", () => {
             trace_id: "trace-2",
             events: [
               {
-                type: "summary",
+                type: "message",
                 task_id: "task-1",
                 iteration: 1,
                 timestamp: "2026-03-15T00:00:02.000Z",

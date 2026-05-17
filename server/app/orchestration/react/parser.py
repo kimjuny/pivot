@@ -293,35 +293,17 @@ def parse_react_output(
     resolved_payload = _normalize_step_status_update_location(resolved_payload)
     action = _parse_action(resolved_payload)
 
-    observe = _expect_optional_string(resolved_payload.get("observe"), "observe")
-    reason = _expect_optional_string(resolved_payload.get("reason"), "reason")
-    summary = _expect_optional_string(
-        resolved_payload.get("summary"),
-        "summary",
-    )
+    message = _expect_optional_string(resolved_payload.get("message"), "message")
     thinking_next_turn = _expect_optional_bool(
         resolved_payload.get("thinking_next_turn"),
         "thinking_next_turn",
     )
-    session_title = _expect_optional_string(
-        resolved_payload.get("session_title"),
-        "session_title",
-    )
-
-    task_summary = _expect_optional_dict(
-        resolved_payload.get("task_summary"),
-        "task_summary",
-    )
 
     resolved_payload["action"] = action.to_dict()
     return ParsedReactDecision(
-        observe=observe,
-        reason=reason,
-        summary=summary,
+        message=message,
         thinking_next_turn=thinking_next_turn,
-        session_title=session_title,
         action=action,
-        task_summary=task_summary,
         raw_payload=resolved_payload,
     )
 
@@ -340,32 +322,18 @@ def parse_react_control_section(content: str) -> ParsedReactDecision:
     raw_payload = _normalize_step_status_update_location(raw_payload)
     action = _parse_action(raw_payload)
 
-    observe = _expect_optional_string(raw_payload.get("observe"), "observe")
-    reason = _expect_optional_string(raw_payload.get("reason"), "reason")
-    summary = _expect_optional_string(raw_payload.get("summary"), "summary")
+    message = _expect_optional_string(raw_payload.get("message"), "message")
     thinking_next_turn = _expect_optional_bool(
         raw_payload.get("thinking_next_turn"),
         "thinking_next_turn",
-    )
-    session_title = _expect_optional_string(
-        raw_payload.get("session_title"),
-        "session_title",
-    )
-    task_summary = _expect_optional_dict(
-        raw_payload.get("task_summary"),
-        "task_summary",
     )
 
     preview_payload = dict(raw_payload)
     preview_payload["action"] = action.to_dict()
     return ParsedReactDecision(
-        observe=observe,
-        reason=reason,
-        summary=summary,
+        message=message,
         thinking_next_turn=thinking_next_turn,
-        session_title=session_title,
         action=action,
-        task_summary=task_summary,
         raw_payload=preview_payload,
     )
 
@@ -630,26 +598,6 @@ def _expect_optional_string(raw_value: Any, path: str) -> str:
         return ""
     if not isinstance(raw_value, str):
         raise ValueError(f"{path} must be a string when provided.")
-    return raw_value
-
-
-def _expect_optional_dict(raw_value: Any, path: str) -> dict[str, Any]:
-    """Validate an optional dictionary field.
-
-    Args:
-        raw_value: Raw field value.
-        path: Human-readable field path for errors.
-
-    Returns:
-        A dictionary value or an empty dictionary when absent.
-
-    Raises:
-        ValueError: If the value is not ``None`` or ``dict``.
-    """
-    if raw_value is None:
-        return {}
-    if not isinstance(raw_value, dict):
-        raise ValueError(f"{path} must be an object when provided.")
     return raw_value
 
 

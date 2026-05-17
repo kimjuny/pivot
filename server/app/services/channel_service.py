@@ -908,7 +908,7 @@ class ChannelService:
 
         async for event_data in iter_task_events():
             event_type = event_data.get("type")
-            if event_type == "summary":
+            if event_type == "message":
                 summary_data = event_data.get("data")
                 current_plan = (
                     summary_data.get("current_plan", [])
@@ -917,7 +917,7 @@ class ChannelService:
                 )
                 progress_view = self._build_channel_progress_view(
                     current_plan=current_plan,
-                    fallback_summary=str(event_data.get("delta") or "").strip(),
+                    fallback_message=str(event_data.get("delta") or "").strip(),
                 )
                 progress_text = (
                     self._render_channel_progress_view(progress_view=progress_view)
@@ -1134,7 +1134,7 @@ class ChannelService:
         self,
         *,
         current_plan: Any,
-        fallback_summary: str | None,
+        fallback_message: str | None,
     ) -> ChannelProgressView | None:
         """Convert the current plan payload into a transport-neutral view."""
         from app.channels.types import (
@@ -1142,11 +1142,11 @@ class ChannelService:
             ChannelProgressView,
         )
 
-        summary = (fallback_summary or "").strip() or None
+        message = (fallback_message or "").strip() or None
         if not isinstance(current_plan, list) or not current_plan:
-            if summary is None:
+            if message is None:
                 return None
-            return ChannelProgressView(mode="text", summary=summary)
+            return ChannelProgressView(mode="text", summary=message)
 
         steps: list[ChannelPlanStepProgressView] = []
         for step in current_plan:
@@ -1166,9 +1166,9 @@ class ChannelService:
                 for history_entry in raw_history:
                     if not isinstance(history_entry, dict):
                         continue
-                    entry_summary = history_entry.get("summary")
-                    if isinstance(entry_summary, str) and entry_summary.strip():
-                        summaries.append(entry_summary.strip())
+                    entry_message = history_entry.get("message")
+                    if isinstance(entry_message, str) and entry_message.strip():
+                        summaries.append(entry_message.strip())
 
             steps.append(
                 ChannelPlanStepProgressView(
@@ -1180,13 +1180,13 @@ class ChannelService:
             )
 
         if not steps:
-            if summary is None:
+            if message is None:
                 return None
-            return ChannelProgressView(mode="text", summary=summary)
+            return ChannelProgressView(mode="text", summary=message)
 
         return ChannelProgressView(
             mode="plan",
-            summary=summary,
+            summary=message,
             steps=steps,
         )
 

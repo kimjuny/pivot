@@ -10,7 +10,7 @@ interface PlanEventPayload {
   plan?: PlanStepData[];
 }
 
-interface SummaryEventPayload {
+interface MessageEventPayload {
   current_plan?: PlanStepData[];
 }
 
@@ -93,18 +93,18 @@ function asPlanEventPayload(value: unknown): PlanEventPayload | undefined {
 }
 
 /**
- * Narrows summary payloads to the current-plan shape emitted by the live stream.
+ * Narrows message payloads to the current-plan shape emitted by the live stream.
  */
-function asSummaryEventPayload(value: unknown): SummaryEventPayload | undefined {
+function asMessageEventPayload(value: unknown): MessageEventPayload | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
 
-  return value as SummaryEventPayload;
+  return value as MessageEventPayload;
 }
 
 /**
- * Extracts plan-step data from either an explicit plan update or a summary snapshot.
+ * Extracts plan-step data from either an explicit plan update or a message snapshot.
  */
 function extractPlanStepsFromEvent(
   event: { type: string; data?: unknown },
@@ -113,8 +113,8 @@ function extractPlanStepsFromEvent(
     return normalizePlanSteps(asPlanEventPayload(event.data)?.plan);
   }
 
-  if (event.type === "summary") {
-    return normalizePlanSteps(asSummaryEventPayload(event.data)?.current_plan);
+  if (event.type === "message") {
+    return normalizePlanSteps(asMessageEventPayload(event.data)?.current_plan);
   }
 
   return [];

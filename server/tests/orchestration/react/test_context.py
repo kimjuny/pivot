@@ -75,13 +75,11 @@ class ReactContextTestCase(unittest.TestCase):
         self.state_service.record_llm_decision(
             task=self.task,
             recursion=recursion,
-            observe="observe",
             thinking=None,
-            reason="reason",
             action_type="RE_PLAN",
             action_output=action_output,
             action_step_id=None,
-            summary="",
+            message="",
             token_counter={},
         )
         self.state_service.finalize_success(
@@ -91,7 +89,7 @@ class ReactContextTestCase(unittest.TestCase):
             action_type="RE_PLAN",
             action_output=action_output,
             step_status_updates=[],
-            summary="",
+            message="",
             tool_results=[],
         )
 

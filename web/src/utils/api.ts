@@ -2661,10 +2661,8 @@ export interface RecursionDetail {
   iteration: number;
   trace_id: string;
   input_message_json: string | null;
-  observe: string | null;
   thinking: string | null;
-  reason: string | null;
-  summary: string | null;
+  message: string | null;
   action_type: string | null;
   action_output: string | null;
   tool_call_results: string | null;
@@ -2679,11 +2677,11 @@ export interface RecursionDetail {
 }
 
 /**
- * Compact recursion summary nested under one current-plan step.
+ * Compact recursion note nested under one current-plan step.
  */
 export interface CurrentPlanRecursionSummary {
   iteration?: number | null;
-  summary: string;
+  message: string;
 }
 
 /**

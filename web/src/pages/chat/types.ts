@@ -142,9 +142,7 @@ export type ReactStreamEventType =
   | "compact_failed"
   | "recursion_start"
   | "reasoning"
-  | "observe"
-  | "reason"
-  | "summary"
+  | "message"
   | "action"
   | "tool_call"
   | "tool_payload_delta"
@@ -197,7 +195,7 @@ export interface PlanStepData {
   status: string;
   recursion_history?: Array<{
     iteration?: number | null;
-    summary: string;
+    message: string;
   }>;
 }
 
@@ -275,9 +273,7 @@ export interface RecursionRecord {
   iteration: number;
   trace_id: string | null;
   thinking?: string;
-  observe?: string;
-  reason?: string;
-  summary?: string;
+  message?: string;
   action?: string;
   events: ReactStreamEvent[];
   status: "running" | "completed" | "error" | "stopped";

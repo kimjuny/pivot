@@ -41,11 +41,8 @@ class ReactParserTestCase(unittest.TestCase):
         """CALL_TOOL payload blocks should resolve into typed tool arguments."""
         content = """
 {
-  "observe": "Need file content",
-  "reason": "Call the file tool",
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "thinking_next_turn": true,
-  "session_title": "Read demo file",
   "action": {
     "action_type": "CALL_TOOL",
     "step_id": "1",
@@ -78,9 +75,8 @@ class ReactParserTestCase(unittest.TestCase):
         decision = parse_react_output(content)
 
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
-        self.assertEqual(decision.summary, "Reading the requested file")
+        self.assertEqual(decision.message, "Reading the requested file")
         self.assertIs(decision.thinking_next_turn, True)
-        self.assertEqual(decision.session_title, "Read demo file")
         self.assertEqual(decision.action.step_id, "1")
         self.assertEqual(len(decision.action.tool_calls), 1)
         self.assertEqual(decision.action.tool_calls[0].batch, 2)
@@ -100,7 +96,7 @@ class ReactParserTestCase(unittest.TestCase):
         """A mistaken ```text wrapper around payload blocks should be stripped."""
         content = """
 {
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {
@@ -136,9 +132,7 @@ class ReactParserTestCase(unittest.TestCase):
         """Early control parsing should not require completed payload bodies."""
         content = """
 {
-  "observe": "Need file content",
-  "reason": "Call the file tool",
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {
@@ -160,7 +154,7 @@ class ReactParserTestCase(unittest.TestCase):
 
         decision = parse_react_control_section(content)
 
-        self.assertEqual(decision.summary, "Reading the requested file")
+        self.assertEqual(decision.message, "Reading the requested file")
         self.assertEqual(decision.action.action_type, "CALL_TOOL")
         self.assertEqual(
             decision.action.tool_calls[0].arguments,
@@ -172,18 +166,13 @@ class ReactParserTestCase(unittest.TestCase):
         """ANSWER payload blocks should resolve into the final markdown body."""
         content = """
 {
-  "summary": "Task complete",
+  "message": "Task complete",
   "action": {
     "action_type": "ANSWER",
     "output": {
       "answer": {"$payload_ref": "answer_payload"},
       "attachments": []
     }
-  },
-  "task_summary": {
-    "narrative": "Completed successfully.",
-    "key_findings": [],
-    "final_decisions": []
   }
 }
 <<<PIVOT_PAYLOAD:answer_payload:BEGIN_6F2D9C1A>>>
@@ -200,7 +189,6 @@ Everything is ready.
             decision.action.output["answer"],
             "# Final Answer\n\nEverything is ready.",
         )
-        self.assertEqual(decision.task_summary["narrative"], "Completed successfully.")
 
     def test_parse_answer_control_section_keeps_payload_ref_for_stream_preview(
         self,
@@ -208,7 +196,7 @@ Everything is ready.
         """ANSWER previews should remain parseable before the payload is complete."""
         content = """
 {
-  "summary": "Task complete",
+  "message": "Task complete",
   "action": {
     "action_type": "ANSWER",
     "output": {
@@ -494,25 +482,6 @@ Everything is ready.
             "thinking_next_turn must be a boolean",
         ):
             parse_react_output(content)
-
-    def test_parse_missing_observe_and_reason_as_empty_strings(self) -> None:
-        """Missing observe/reason should stay parseable and normalize to empty strings."""
-        content = """
-{
-  "summary": "Proceeding without extra trace text",
-  "action": {
-    "action_type": "REFLECT",
-    "output": {}
-  }
-}
-""".strip()
-
-        decision = parse_react_output(content)
-
-        self.assertEqual(decision.observe, "")
-        self.assertEqual(decision.reason, "")
-        self.assertEqual(decision.summary, "Proceeding without extra trace text")
-        self.assertEqual(decision.action.action_type, "REFLECT")
 
     def test_raw_string_payload_strips_block_terminator_newline(self) -> None:
         """Raw string payloads should not inherit the formatting newline before END."""

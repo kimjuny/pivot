@@ -31,12 +31,8 @@ def _build_assistant_decision(thinking_next_turn: bool) -> str:
     """Return a minimal valid assistant decision JSON string."""
     return json.dumps(
         {
-            "trace_id": "trace-1",
-            "observe": "Observed current state.",
-            "reason": "Choose the next best action.",
-            "summary": "Progress update.",
+            "message": "Progress update.",
             "thinking_next_turn": thinking_next_turn,
-            "session_title": "",
             "action": {
                 "action_type": "REFLECT",
                 "output": {},

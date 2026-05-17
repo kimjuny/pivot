@@ -8,7 +8,6 @@ class AgentResponseChunkType(str, Enum):
     """Enum for agent response chunk types."""
 
     REASONING = "reasoning"
-    REASON = "reason"
     RESPONSE = "response"
     ERROR = "error"
     PARSING = "parsing"  # Internal state, not usually yielded but good to have

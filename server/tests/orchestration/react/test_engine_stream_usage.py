@@ -330,9 +330,7 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         """The first payload marker should unlock early summary/tool UI events."""
         control_json = """
 {
-  "observe": "Need file content",
-  "reason": "Call the file tool",
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {
@@ -414,7 +412,7 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
 
         self.assertEqual(response.first().message.content, expected_content)
         self.assertEqual(len(control_items), 1)
-        self.assertEqual(control_items[0]["summary"], "Reading the requested file")
+        self.assertEqual(control_items[0]["message"], "Reading the requested file")
         self.assertEqual(control_items[0]["action_type"], "CALL_TOOL")
         self.assertEqual(
             control_items[0]["tool_calls"],
@@ -432,18 +430,13 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         """ANSWER payload bodies should stream as answer_delta events."""
         control_json = """
 {
-  "summary": "Task complete",
+  "message": "Task complete",
   "action": {
     "action_type": "ANSWER",
     "output": {
       "answer": {"$payload_ref": "answer_payload"},
       "attachments": []
     }
-  },
-  "task_summary": {
-    "narrative": "Completed.",
-    "key_findings": [],
-    "final_decisions": []
   }
 }
 """.strip()
@@ -526,7 +519,7 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         """A closed payload block should start its tool before later chunks arrive."""
         content = """
 {
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {
@@ -636,7 +629,7 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         """Eager results should not wait for the next provider chunk."""
         content = """
 {
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {
@@ -713,7 +706,7 @@ class ReactEngineStreamUsageTestCase(unittest.TestCase):
         """After a tool starts, parse failure becomes next-turn recovery context."""
         content = """
 {
-  "summary": "Reading the requested file",
+  "message": "Reading the requested file",
   "action": {
     "action_type": "CALL_TOOL",
     "output": {

@@ -153,10 +153,8 @@ class RecursionDetail(AppBaseModel):
     iteration: int
     trace_id: str
     input_message_json: str | None = None
-    observe: str | None = None
     thinking: str | None = None
-    reason: str | None = None
-    summary: str | None = None
+    message: str | None = None
     action_type: str | None = None
     action_output: str | None = None
     tool_call_results: str | None = None
@@ -174,7 +172,7 @@ class CurrentPlanRecursionSummary(AppBaseModel):
     """Compact recursion summary attached to one current-plan step."""
 
     iteration: int | None = None
-    summary: str = ""
+    message: str = ""
 
 
 class CurrentPlanStep(AppBaseModel):

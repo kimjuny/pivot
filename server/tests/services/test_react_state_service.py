@@ -81,9 +81,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
         tokens = self.service.record_llm_decision(
             task=self.task,
             recursion=recursion,
-            observe="observe",
             thinking="provider thinking",
-            reason="reason",
             action_type="RE_PLAN",
             action_output={
                 "plan": [
@@ -97,7 +95,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
                 ]
             },
             action_step_id=None,
-            summary="",
+            message="",
             token_counter={
                 "prompt_tokens": 10,
                 "completion_tokens": 5,
@@ -107,7 +105,6 @@ class ReactStateServiceTestCase(unittest.TestCase):
         )
         self.session.refresh(recursion)
         self.assertEqual(recursion.status, "running")
-        self.assertEqual(recursion.observe, "observe")
         self.assertIsNotNone(recursion.input_message_json)
 
         self.service.finalize_success(
@@ -127,7 +124,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
                 ]
             },
             step_status_updates=[],
-            summary="",
+            message="",
             tool_results=[],
         )
 
@@ -185,13 +182,11 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.service.record_llm_decision(
             task=self.task,
             recursion=recursion,
-            observe="observe",
             thinking=None,
-            reason="reason",
             action_type="CALL_TOOL",
             action_output=action_output,
             action_step_id="1",
-            summary="Working through the file analysis",
+            message="Working through the file analysis",
             token_counter={},
         )
         self.session.refresh(recursion)
@@ -206,7 +201,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             action_type="CALL_TOOL",
             action_output=action_output,
             step_status_updates=[{"step_id": "1", "status": "done"}],
-            summary="Working through the file analysis",
+            message="Working through the file analysis",
             tool_results=[
                 {
                     "tool_call_id": "call-1",
@@ -234,9 +229,9 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.assertEqual(updated_step.status, "done")
         self.assertEqual(recursion.plan_step_id, "1")
         self.assertIsNotNone(recursion.tool_call_results)
-        self.assertEqual(recursion.summary, "Working through the file analysis")
+        self.assertEqual(recursion.message, "Working through the file analysis")
         self.assertEqual(
-            rec_entry["summary"],
+            rec_entry["message"],
             "Working through the file analysis",
         )
         self.assertEqual(

@@ -461,10 +461,8 @@ async def get_full_session_history(
                 iteration=r["iteration"],
                 trace_id=r["trace_id"],
                 input_message_json=r["input_message_json"],
-                observe=r["observe"],
                 thinking=r["thinking"],
-                reason=r["reason"],
-                summary=r["summary"],
+                message=r["message"],
                 action_type=r["action_type"],
                 action_output=r["action_output"],
                 tool_call_results=r["tool_call_results"],
@@ -506,7 +504,7 @@ async def get_full_session_history(
                         recursion_history=[
                             CurrentPlanRecursionSummary(
                                 iteration=entry.get("iteration"),
-                                summary=entry.get("summary", ""),
+                                message=entry.get("message", ""),
                             )
                             for entry in step.get("recursion_history", [])
                             if isinstance(entry, dict)
