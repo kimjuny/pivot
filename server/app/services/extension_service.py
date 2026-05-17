@@ -1073,7 +1073,7 @@ def _normalize_manifest(
                         provider_key=provider.manifest.key,
                         scope=normalized_scope,
                         field_name=(
-                            "contributions.media_providers" f"[{index}].manifest.key"
+                            f"contributions.media_providers[{index}].manifest.key"
                         ),
                     )
                     if provider_key in seen_names:
@@ -1129,8 +1129,7 @@ def _normalize_manifest(
                         provider_key=provider.manifest.key,
                         scope=normalized_scope,
                         field_name=(
-                            "contributions.web_search_providers"
-                            f"[{index}].manifest.key"
+                            f"contributions.web_search_providers[{index}].manifest.key"
                         ),
                     )
                     if provider_key in seen_names:
@@ -1192,7 +1191,7 @@ def _normalize_manifest(
                         normalized_event_name = event_name.strip()
                         if normalized_event_name not in _SUPPORTED_HOOK_EVENTS:
                             raise ValueError(
-                                "Unsupported hook event " f"'{normalized_event_name}'."
+                                f"Unsupported hook event '{normalized_event_name}'."
                             )
 
                         callable_name = raw_item.get("callable")

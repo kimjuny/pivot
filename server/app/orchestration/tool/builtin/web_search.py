@@ -176,7 +176,7 @@ def web_search(
     return result.model_dump()
 
 
-cast(Any, web_search).__tool_metadata__.parameters = {
+cast("Any", web_search).__tool_metadata__.parameters = {
     "type": "object",
     "properties": {
         "query": {"type": "string"},

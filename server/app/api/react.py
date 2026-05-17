@@ -183,13 +183,13 @@ def _resolve_runtime_agent_for_request(
     _require_runtime_permission(
         db=db,
         user=user,
-        session_type=session_row.type if session_row is not None else "consumer",
+        session_type=session_row.type if session_row is not None else "client",
     )
     _require_agent_runtime_access(
         db=db,
         user=user,
         agent=agent,
-        session_type=session_row.type if session_row is not None else "consumer",
+        session_type=session_row.type if session_row is not None else "client",
     )
     return agent, session_row
 
@@ -299,7 +299,7 @@ async def submit_react_user_action(
         raise HTTPException(status_code=401, detail="User not authenticated")
     task = _get_owned_task(db=db, task_id=task_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
-    session_type = "consumer"
+    session_type = "client"
     if task.session_id is not None:
         session = _get_owned_session(
             db=db, session_id=task.session_id, user=current_user
@@ -638,7 +638,7 @@ async def get_react_task(
     """
     task = _get_owned_task(db=db, task_id=task_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
-    session_type = "consumer"
+    session_type = "client"
     if task.session_id is not None:
         session = _get_owned_session(
             db=db, session_id=task.session_id, user=current_user
@@ -678,7 +678,7 @@ async def get_task_recursions(
     """
     task = _get_owned_task(db=db, task_id=task_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
-    session_type = "consumer"
+    session_type = "client"
     if task.session_id is not None:
         session = _get_owned_session(
             db=db, session_id=task.session_id, user=current_user
@@ -729,7 +729,7 @@ async def get_task_states(
 
     task = _get_owned_task(db=db, task_id=task_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
-    session_type = "consumer"
+    session_type = "client"
     if task.session_id is not None:
         session = _get_owned_session(
             db=db, session_id=task.session_id, user=current_user
@@ -782,7 +782,7 @@ async def get_task_state_at_iteration(
 
     task = _get_owned_task(db=db, task_id=task_id, user=current_user)
     agent = AgentService(db).get_required_agent(task.agent_id)
-    session_type = "consumer"
+    session_type = "client"
     if task.session_id is not None:
         session = _get_owned_session(
             db=db, session_id=task.session_id, user=current_user

@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 /**
- * Dialog shown for stale or migrated consumer sessions.
+ * Dialog shown for stale or migrated client sessions.
  *
  * - Stale: the agent was republished; user can migrate to a new session.
  * - Migrated: this session was already migrated; user can navigate to the

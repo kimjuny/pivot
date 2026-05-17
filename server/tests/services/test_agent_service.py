@@ -1,4 +1,4 @@
-"""Unit tests for consumer-visible agent filtering."""
+"""Unit tests for client-visible agent filtering."""
 
 import sys
 import unittest
@@ -16,7 +16,7 @@ AgentService = import_module("app.services.agent_service").AgentService
 
 
 class AgentServiceTestCase(unittest.TestCase):
-    """Validate Consumer visibility rules for agents."""
+    """Validate Client visibility rules for agents."""
 
     def setUp(self) -> None:
         """Create an isolated in-memory database per test."""
@@ -54,18 +54,18 @@ class AgentServiceTestCase(unittest.TestCase):
         """Close the session after each test."""
         self.session.close()
 
-    def test_list_consumer_visible_agents_returns_only_serving_published_agents(
+    def test_list_client_visible_agents_returns_only_serving_published_agents(
         self,
     ) -> None:
-        """Consumer agent lists should expose only published serving agents."""
-        agents = self.service.list_consumer_visible_agents()
+        """Client agent lists should expose only published serving agents."""
+        agents = self.service.list_client_visible_agents()
 
         self.assertEqual([agent.name for agent in agents], ["visible-agent"])
 
-    def test_require_consumer_visible_agent_rejects_hidden_agent(self) -> None:
-        """Consumer should not load unpublished or disabled agents."""
+    def test_require_client_visible_agent_rejects_hidden_agent(self) -> None:
+        """Client should not load unpublished or disabled agents."""
         with self.assertRaisesRegex(ValueError, "not available to end users"):
-            self.service.require_consumer_visible_agent(999)
+            self.service.require_client_visible_agent(999)
 
 
 if __name__ == "__main__":

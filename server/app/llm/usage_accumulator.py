@@ -21,7 +21,7 @@ def _empty_token_counter() -> dict[str, int]:
     Returns:
         A token counter with all known usage fields initialized to zero.
     """
-    return {field: 0 for field in TOKEN_USAGE_FIELDS}
+    return dict.fromkeys(TOKEN_USAGE_FIELDS, 0)
 
 
 def _coerce_usage_value(usage: Any, field_name: str) -> int:

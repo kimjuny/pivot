@@ -24,7 +24,7 @@ class ListDirectoriesToolTestCase(unittest.TestCase):
 
     def test_script_lists_direct_children_without_syntax_error(self) -> None:
         """The embedded Python script should execute and list children cleanly."""
-        module = cast(Any, list_directories_module)
+        module = cast("Any", list_directories_module)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

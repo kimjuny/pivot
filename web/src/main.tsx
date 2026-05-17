@@ -20,9 +20,9 @@ import { AuthProvider } from './contexts/AuthContext'
 import { getStoredUser, hasPermission, isTokenValid, useAuth } from './contexts/auth-core'
 import { ThemeProvider } from '@/components/ui/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
-import ConsumerEntryPage from '@/consumer/ConsumerEntryPage'
-import ConsumerAgentsPage from '@/consumer/ConsumerAgentsPage'
-import ConsumerAgentPage from '@/consumer/ConsumerAgentPage'
+import ClientEntryPage from '@/client/ClientEntryPage'
+import ClientAgentsPage from '@/client/ClientAgentsPage'
+import ClientAgentPage from '@/client/ClientAgentPage'
 import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator'
 import SessionHistoryPage from '@/studio/operations/SessionHistoryPage'
 import SessionDetailPage from '@/studio/operations/SessionDetailPage'
@@ -321,9 +321,9 @@ export function StudioDashboardRoute() {
 }
 
 /**
- * Consumer layout wrapper for end-user-facing routes.
+ * Client layout wrapper for end-user-facing routes.
  */
-export function ConsumerRouteLayout() {
+export function ClientRouteLayout() {
   return (
     <PermissionRoute permission="client.access" fallback="/studio">
       <Outlet />
@@ -342,10 +342,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/access-denied" element={<AccessDeniedPage />} />
 
             {/* Protected routes */}
-            <Route path="/app" element={<ConsumerRouteLayout />}>
-              <Route index element={<ConsumerEntryPage />} />
-              <Route path="agents" element={<ConsumerAgentsPage />} />
-              <Route path="agents/:agentId" element={<ConsumerAgentPage />} />
+            <Route path="/app" element={<ClientRouteLayout />}>
+              <Route index element={<ClientEntryPage />} />
+              <Route path="agents" element={<ClientAgentsPage />} />
+              <Route path="agents/:agentId" element={<ClientAgentPage />} />
             </Route>
 
             <Route path="/studio" element={<PermissionRedirect targets={studioTargets} />} />

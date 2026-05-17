@@ -39,7 +39,7 @@ router = APIRouter()
 
 
 def _session_access_level(
-    session_type: Literal["consumer", "studio_test"],
+    session_type: Literal["client", "studio_test"],
 ) -> AccessLevel:
     """Return the agent access level required for one session type."""
     return AccessLevel.EDIT if session_type == "studio_test" else AccessLevel.USE
@@ -48,7 +48,7 @@ def _session_access_level(
 def _require_session_permission(
     db: DBSession,
     user: User,
-    session_type: Literal["consumer", "studio_test"],
+    session_type: Literal["client", "studio_test"],
 ) -> None:
     required_permission = (
         Permission.AGENTS_MANAGE
@@ -64,7 +64,7 @@ def _require_session_access(
     session: Session,
 ) -> None:
     """Require both entry permission and agent access for one session row."""
-    session_type = cast(Literal["consumer", "studio_test"], session.type)
+    session_type = cast("Literal['client', 'studio_test']", session.type)
     _require_session_permission(db, user, session_type)
     agent = AgentService(db).get_required_agent(session.agent_id)
     AccessService(db).require_agent_access(
@@ -86,7 +86,7 @@ def _build_session_response(
         id=session.id or 0,
         session_id=session.session_id,
         agent_id=session.agent_id,
-        type=cast(Literal["consumer", "studio_test"], session.type),
+        type=cast("Literal['client', 'studio_test']", session.type),
         release_id=session.release_id,
         latest_release_id=latest_release_id,
         is_stale=is_stale,
@@ -183,7 +183,7 @@ async def create_session(
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     agent_id: int | None = None,
-    session_type: Literal["consumer", "studio_test"] | None = None,
+    session_type: Literal["client", "studio_test"] | None = None,
     limit: int = 50,
     db: DBSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -241,7 +241,7 @@ async def list_sessions(
             SessionListItem(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
-                type=cast(Literal["consumer", "studio_test"], session.type),
+                type=cast("Literal['client', 'studio_test']", session.type),
                 release_id=session.release_id,
                 latest_release_id=latest_release_id,
                 is_stale=service.is_session_stale(session, latest_release_id),
@@ -610,7 +610,7 @@ async def migrate_session(
     db: DBSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SessionMigrateResponse:
-    """Migrate a stale consumer session onto the agent's latest release.
+    """Migrate a stale client session onto the agent's latest release.
 
     Creates a new session pinned to ``agent.active_release_id``, copies
     workspace contents for session-private workspaces, and marks the old

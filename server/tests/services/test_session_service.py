@@ -432,7 +432,7 @@ class SessionServiceTestCase(unittest.TestCase):
         self.session.commit()
 
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=profile,
         ):
@@ -459,7 +459,7 @@ class SessionServiceTestCase(unittest.TestCase):
         source_file.write_text("# Report", encoding="utf-8")
 
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=profile,
         ):
@@ -583,7 +583,7 @@ class SessionServiceTestCase(unittest.TestCase):
         self.addCleanup(temp_dir.cleanup)
 
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=profile,
         ):
@@ -611,7 +611,7 @@ class SessionServiceTestCase(unittest.TestCase):
         self.assertTrue(expected_host_path.exists())
 
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=profile,
         ):
@@ -637,7 +637,7 @@ class SessionServiceTestCase(unittest.TestCase):
         sandbox_service = Mock()
 
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=profile,
         ):
@@ -663,7 +663,7 @@ class SessionServiceTestCase(unittest.TestCase):
         )
 
     def test_get_sessions_by_user_filters_by_session_type(self) -> None:
-        """Studio and Consumer session listings should stay isolated."""
+        """Studio and Client session listings should stay isolated."""
         snapshot = AgentSnapshotService(self.session).create_test_snapshot(
             self.agent.id or 0,
             working_copy_snapshot={
@@ -706,7 +706,7 @@ class SessionServiceTestCase(unittest.TestCase):
         self.assertEqual([session.session_id for session in sessions], ["session-3"])
 
     def test_get_sessions_by_user_supports_multiple_agent_ids(self) -> None:
-        """Multi-agent filters keep Consumer listings inside the requested scope."""
+        """Multi-agent filters keep Client listings inside the requested scope."""
         sessions = self.service.get_sessions_by_user(
             user="alice",
             agent_ids=[self.second_agent.id or 0],

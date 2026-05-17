@@ -21,7 +21,7 @@ class StorageStatusServiceTestCase(unittest.TestCase):
 
     def test_reports_resolved_storage_profile(self) -> None:
         """Status should expose active backends and the backend workspace root."""
-        module = cast(Any, storage_status_service)
+        module = cast("Any", storage_status_service)
         service = module.StorageStatusService()
         fake_profile = type(
             "ResolvedProfile",

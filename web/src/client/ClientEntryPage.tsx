@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
-import { getConsumerSessions } from "@/consumer/api";
+import { getClientSessions } from "@/client/api";
 import { Button } from "@/components/ui/button";
 
 /**
- * Restores the user's most recent Consumer workspace as quickly as possible.
+ * Restores the user's most recent Client workspace as quickly as possible.
  */
-function ConsumerEntryPage() {
+function ClientEntryPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
@@ -18,7 +18,7 @@ function ConsumerEntryPage() {
     void (async () => {
       try {
         setError(null);
-        const response = await getConsumerSessions(1);
+        const response = await getClientSessions(1);
         if (isCancelled) {
           return;
         }
@@ -76,4 +76,4 @@ function ConsumerEntryPage() {
   );
 }
 
-export default ConsumerEntryPage;
+export default ClientEntryPage;

@@ -410,7 +410,7 @@ class AgentExtensionPackageResponse(AppBaseModel):
 
 
 class ChatSurfaceDescriptor(AppBaseModel):
-    """Minimal chat surface descriptor returned to the consumer chat page."""
+    """Minimal chat surface descriptor returned to the client chat page."""
 
     installation_id: int
     package_id: str

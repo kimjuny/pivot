@@ -1978,7 +1978,7 @@ export const getChatBootstrap = async (
   agentId: number,
 ): Promise<ChatBootstrapResponse> => {
   return apiRequest(
-    `/consumer/agents/${agentId}/chat-bootstrap`,
+    `/client/agents/${agentId}/chat-bootstrap`,
   ) as Promise<ChatBootstrapResponse>;
 };
 
@@ -2392,7 +2392,7 @@ export const createSession = async (
     body: JSON.stringify({
       agent_id: agentId,
       project_id: options?.projectId ?? null,
-      type: options?.type ?? 'consumer',
+      type: options?.type ?? 'client',
       test_snapshot: options?.testSnapshot ?? null,
     }),
   }) as Promise<SessionResponse>;
@@ -2632,7 +2632,7 @@ export const closeSession = async (
 };
 
 /**
- * Migrate a stale consumer session onto the agent's latest release.
+ * Migrate a stale client session onto the agent's latest release.
  * Creates a new session, copies private workspace contents, closes the old one.
  */
 export const migrateSession = async (
@@ -4153,7 +4153,7 @@ export interface StudioOverview {
 /** One day's session counts broken down by type. */
 export interface DailySessionCount {
   date: string;
-  consumer: number;
+  client: number;
   studio_test: number;
 }
 
@@ -4184,7 +4184,7 @@ export interface DailyTokenUsage {
   output: number;
 }
 
-/** One agent's popularity rank by consumer session count. */
+/** One agent's popularity rank by client session count. */
 export interface AgentPopularity {
   agent_id: number;
   agent_name: string;
@@ -4221,7 +4221,7 @@ export const getStudioTokenUsage = async (range: string): Promise<DailyTokenUsag
   return apiRequest(`/analytics/studio/token-usage?range=${encodeURIComponent(range)}`) as Promise<DailyTokenUsage[]>;
 };
 
-/** Fetch top agents ranked by consumer session count. */
+/** Fetch top agents ranked by client session count. */
 export const getStudioAgentPopularity = async (range: string, limit: number = 10): Promise<AgentPopularity[]> => {
   return apiRequest(`/analytics/studio/agent-popularity?range=${encodeURIComponent(range)}&limit=${limit}`) as Promise<AgentPopularity[]>;
 };
@@ -4250,7 +4250,7 @@ export interface DailyUserGrowth {
   new_users: number;
 }
 
-/** Fetch daily DAU/WAU/MAU for consumer sessions. */
+/** Fetch daily DAU/WAU/MAU for client sessions. */
 export const getStudioUserActivity = async (range: string): Promise<DailyUserActivity[]> => {
   return apiRequest(`/analytics/studio/user-activity?range=${encodeURIComponent(range)}`) as Promise<DailyUserActivity[]>;
 };
@@ -4333,8 +4333,8 @@ export const getAgentReleases = async (agentId: number): Promise<AgentReleaseIte
   return apiRequest(`/analytics/agents/${agentId}/releases`) as Promise<AgentReleaseItem[]>;
 };
 
-/** One day's consumer usage for a specific agent. */
-export interface DailyConsumerUsage {
+/** One day's client usage for a specific agent. */
+export interface DailyClientUsage {
   date: string;
   sessions: number;
   dau: number;
@@ -4349,9 +4349,9 @@ export interface ChannelActivityItem {
   last_event_at: string;
 }
 
-/** Fetch agent-scoped consumer usage over time. */
-export const getAgentConsumerUsage = async (agentId: number, range: string): Promise<DailyConsumerUsage[]> => {
-  return apiRequest(`/analytics/agents/${agentId}/consumer-usage?range=${encodeURIComponent(range)}`) as Promise<DailyConsumerUsage[]>;
+/** Fetch agent-scoped client usage over time. */
+export const getAgentClientUsage = async (agentId: number, range: string): Promise<DailyClientUsage[]> => {
+  return apiRequest(`/analytics/agents/${agentId}/client-usage?range=${encodeURIComponent(range)}`) as Promise<DailyClientUsage[]>;
 };
 
 /** Fetch per-channel activity stats for a specific agent. */

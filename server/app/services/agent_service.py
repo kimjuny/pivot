@@ -151,7 +151,7 @@ class AgentService:
             raise ValueError("Agent is currently unavailable for end users")
         return agent
 
-    def list_consumer_visible_agents(self) -> list[Agent]:
+    def list_client_visible_agents(self) -> list[Agent]:
         """List agents currently visible in the end-user product.
 
         Returns:
@@ -166,8 +166,8 @@ class AgentService:
         )
         return list(self.db.exec(statement).all())
 
-    def get_consumer_visible_agent(self, agent_id: int) -> Agent | None:
-        """Return one agent only when it is visible in Consumer.
+    def get_client_visible_agent(self, agent_id: int) -> Agent | None:
+        """Return one agent only when it is visible in Client.
 
         Args:
             agent_id: Stable agent identifier.
@@ -183,8 +183,8 @@ class AgentService:
         )
         return self.db.exec(statement).first()
 
-    def require_consumer_visible_agent(self, agent_id: int) -> Agent:
-        """Return one Consumer-visible agent or raise.
+    def require_client_visible_agent(self, agent_id: int) -> Agent:
+        """Return one Client-visible agent or raise.
 
         Args:
             agent_id: Stable agent identifier.
@@ -195,7 +195,7 @@ class AgentService:
         Raises:
             ValueError: If the agent is not available to end users.
         """
-        agent = self.get_consumer_visible_agent(agent_id)
+        agent = self.get_client_visible_agent(agent_id)
         if agent is None:
             raise ValueError("Agent is not available to end users")
         return agent

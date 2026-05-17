@@ -43,7 +43,7 @@ class WorkspaceServiceBackendPathTestCase(unittest.TestCase):
 
     def test_workspace_backend_path_uses_active_provider_root(self) -> None:
         """Backend path generation should follow the active provider root."""
-        module = cast(Any, workspace_service)
+        module = cast("Any", workspace_service)
         service = module.WorkspaceService(db=None)
         workspace = Workspace(
             workspace_id="workspace-1",
@@ -77,7 +77,7 @@ class WorkspaceServiceBackendPathTestCase(unittest.TestCase):
 
     def test_workspace_backend_path_supports_external_posix_root(self) -> None:
         """External POSIX providers should drive backend-visible workspace roots."""
-        module = cast(Any, workspace_service)
+        module = cast("Any", workspace_service)
         service = module.WorkspaceService(db=None)
         workspace = Workspace(
             workspace_id="workspace-2",
@@ -111,7 +111,7 @@ class WorkspaceServiceBackendPathTestCase(unittest.TestCase):
 
     def test_workspace_uploads_dir_stays_inside_external_workspace_root(self) -> None:
         """Runtime uploads should live under the active workspace root."""
-        module = cast(Any, workspace_service)
+        module = cast("Any", workspace_service)
         service = module.WorkspaceService(db=None)
         workspace = Workspace(
             workspace_id="workspace-3",
@@ -154,7 +154,7 @@ class WorkspaceServiceBackendPathTestCase(unittest.TestCase):
 
     def test_user_tools_dir_uses_unified_users_namespace(self) -> None:
         """Private tools should live under ``users/{username}/tools``."""
-        module = cast(Any, workspace_service)
+        module = cast("Any", workspace_service)
 
         with tempfile.TemporaryDirectory() as temp_root:
             resolved_profile = type(
@@ -181,7 +181,7 @@ class WorkspaceServiceBackendPathTestCase(unittest.TestCase):
 
     def test_agent_workspace_uses_unified_users_namespace(self) -> None:
         """Request-scoped agent runtime files should stay under ``users/...``."""
-        module = cast(Any, workspace_service)
+        module = cast("Any", workspace_service)
 
         with tempfile.TemporaryDirectory() as temp_root:
             resolved_profile = type(

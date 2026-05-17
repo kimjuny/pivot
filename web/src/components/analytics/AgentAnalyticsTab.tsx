@@ -11,7 +11,7 @@ import {
   getAgentIterationDistribution,
   getAgentTopUsers,
   getAgentReleases,
-  getAgentConsumerUsage,
+  getAgentClientUsage,
   getAgentChannelActivity,
   type AgentOverview,
   type TaskStats,
@@ -19,7 +19,7 @@ import {
   type IterationBucket,
   type AgentUserStats,
   type AgentReleaseItem,
-  type DailyConsumerUsage,
+  type DailyClientUsage,
   type ChannelActivityItem,
 } from "@/utils/api";
 
@@ -30,7 +30,7 @@ import { TaskStatusChart } from "./TaskStatusChart";
 import { IterationDistributionChart } from "./IterationDistributionChart";
 import { TopUsersTable } from "./TopUsersTable";
 import { ReleaseTimeline } from "./ReleaseTimeline";
-import { ConsumerUsageChart } from "./ConsumerUsageChart";
+import { ClientUsageChart } from "./ClientUsageChart";
 import { ChannelActivityCard } from "./ChannelActivityCard";
 
 /** Compose the `--reveal-index` CSS variable for a staged reveal slot. */
@@ -53,7 +53,7 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
   const [iterations, setIterations] = useState<IterationBucket[]>([]);
   const [topUsers, setTopUsers] = useState<AgentUserStats[]>([]);
   const [releases, setReleases] = useState<AgentReleaseItem[]>([]);
-  const [consumerUsage, setConsumerUsage] = useState<DailyConsumerUsage[]>([]);
+  const [clientUsage, setClientUsage] = useState<DailyClientUsage[]>([]);
   const [channelActivity, setChannelActivity] = useState<ChannelActivityItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +83,7 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
         iterData,
         usersData,
         releasesData,
-        consumerData,
+        clientData,
         channelData,
       ] = await Promise.all([
         getAgentAnalyticsOverview(agentId, range),
@@ -92,7 +92,7 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
         getAgentIterationDistribution(agentId, range),
         getAgentTopUsers(agentId, range),
         getAgentReleases(agentId),
-        getAgentConsumerUsage(agentId, range),
+        getAgentClientUsage(agentId, range),
         getAgentChannelActivity(agentId, range),
       ]);
       setOverview(overviewData);
@@ -101,7 +101,7 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
       setIterations(iterData);
       setTopUsers(usersData);
       setReleases(releasesData);
-      setConsumerUsage(consumerData);
+      setClientUsage(clientData);
       setChannelActivity(channelData);
       setRevealToken((t) => t + 1);
     } catch (err) {
@@ -204,13 +204,13 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
               <IterationDistributionChart data={iterations} />
             </div>
 
-            {/* Row 3: Consumer Usage + Channel Activity */}
+            {/* Row 3: Client Usage + Channel Activity */}
             <div
               key={`r3-${revealToken}`}
               className={`dashboard-reveal grid grid-cols-1 gap-4 lg:grid-cols-2 ${sectionClass}`}
               style={revealStyle(4)}
             >
-              <ConsumerUsageChart data={consumerUsage} />
+              <ClientUsageChart data={clientUsage} />
               <ChannelActivityCard data={channelActivity} />
             </div>
 

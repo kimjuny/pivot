@@ -192,7 +192,7 @@ function StudioDashboardPage() {
                 overview.sessions_total,
                 overview.sessions_delta,
               )}
-              tooltip="Total consumer conversation sessions in the selected period. The delta compares against the equal-length period immediately before it."
+              tooltip="Total client conversation sessions in the selected period. The delta compares against the equal-length period immediately before it."
             />
             <KpiCard
               title="Users"

@@ -344,8 +344,7 @@ def _ensure_workspace_dir(path_in_backend: str) -> None:
         raise HTTPException(
             status_code=500,
             detail=(
-                "Backend workspace directory creation failed "
-                f"(exit_code={exit_code})"
+                f"Backend workspace directory creation failed (exit_code={exit_code})"
             ),
         )
 

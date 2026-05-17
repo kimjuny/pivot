@@ -96,8 +96,8 @@ class ReactEngineThinkingModeTestCase(unittest.TestCase):
     def _build_engine(self):
         """Create a ReactEngine configured for Auto thinking-mode resolution."""
         return ReactEngine(
-            llm=cast(Any, SimpleNamespace()),
-            tool_manager=cast(Any, SimpleNamespace()),
+            llm=cast("Any", SimpleNamespace()),
+            tool_manager=cast("Any", SimpleNamespace()),
             db=self.session,
             stream_llm_responses=False,
             thinking_runtime_config={

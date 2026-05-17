@@ -476,7 +476,7 @@ function toSessionListItem(session: SessionResponse): SessionListItem {
   return {
     session_id: session.session_id,
     agent_id: session.agent_id,
-    type: session.type ?? "consumer",
+    type: session.type ?? "client",
     release_id: session.release_id,
     project_id: session.project_id ?? null,
     workspace_id: session.workspace_id ?? null,
@@ -742,7 +742,7 @@ function SessionLoadingOverlay({ isActive }: { isActive: boolean }) {
  */
 function ChatContainer({
   agentId,
-  sessionType = "consumer",
+  sessionType = "client",
   initialSessionId,
   testSnapshot,
   testSnapshotHash,
@@ -2302,7 +2302,7 @@ function ChatContainer({
     void loadSessionRuntimeDebug(currentSessionId);
   }, [currentSessionId, loadSessionRuntimeDebug, showCompactDebug]);
 
-  // Why: consumer sessions pinned to an older Agent release must prompt the
+  // Why: client sessions pinned to an older Agent release must prompt the
   // user to migrate. Already-migrated sessions show a different dialog.
   // The banner reappears each time the user navigates to a stale/migrated session.
   useEffect(() => {
@@ -2314,11 +2314,11 @@ function ChatContainer({
     const current = sessions.find(
       (session) => session.session_id === currentSessionId,
     );
-    if (current?.type === "consumer" && current.migrated_to_session_id) {
+    if (current?.type === "client" && current.migrated_to_session_id) {
       setMigratedSessionId(current.migrated_to_session_id);
       setStaleSessionId(null);
       setIsStaleBannerDismissed(false);
-    } else if (current?.type === "consumer" && current.is_stale) {
+    } else if (current?.type === "client" && current.is_stale) {
       setStaleSessionId(currentSessionId);
       setMigratedSessionId(null);
       setIsStaleBannerDismissed(false);
@@ -2359,7 +2359,7 @@ function ChatContainer({
   const readyPendingFileIdsKey = readyPendingFileIds.join(",");
 
   useEffect(() => {
-    if (!currentSessionId && sessionType === "consumer") {
+    if (!currentSessionId && sessionType === "client") {
       return;
     }
 
@@ -2853,7 +2853,7 @@ function ChatContainer({
   };
 
   /**
-   * Migrate a stale consumer session onto the agent's latest release.
+   * Migrate a stale client session onto the agent's latest release.
    * Creates a new session, copies private workspace files server-side, and
    * marks the old session closed. Switches the UI to the new session.
    */

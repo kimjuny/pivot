@@ -4,9 +4,9 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 import LoginPage from "@/components/LoginPage";
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { ThemeProvider } from "@/components/ui/theme-provider";
-import ConsumerAgentPage from "@/consumer/ConsumerAgentPage";
-import ConsumerAgentsPage from "@/consumer/ConsumerAgentsPage";
-import ConsumerEntryPage from "@/consumer/ConsumerEntryPage";
+import ClientAgentPage from "@/client/ClientAgentPage";
+import ClientAgentsPage from "@/client/ClientAgentsPage";
+import ClientEntryPage from "@/client/ClientEntryPage";
 import { DesktopSetup } from "@/desktop/DesktopSetup";
 import {
   isDesktop,
@@ -40,9 +40,9 @@ function DesktopProtectedRoute({
 }
 
 /**
- * Wraps consumer routes with the desktop authentication gate.
+ * Wraps client routes with the desktop authentication gate.
  */
-function DesktopConsumerLayout() {
+function DesktopClientLayout() {
   return (
     <DesktopProtectedRoute>
       <Outlet />
@@ -82,10 +82,10 @@ function DesktopAppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<LoginPage />} />
-      <Route path="/app" element={<DesktopConsumerLayout />}>
-        <Route index element={<ConsumerEntryPage />} />
-        <Route path="agents" element={<ConsumerAgentsPage />} />
-        <Route path="agents/:agentId" element={<ConsumerAgentPage />} />
+      <Route path="/app" element={<DesktopClientLayout />}>
+        <Route index element={<ClientEntryPage />} />
+        <Route path="agents" element={<ClientAgentsPage />} />
+        <Route path="agents/:agentId" element={<ClientAgentPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>

@@ -167,8 +167,7 @@ def ensure_agent_schema_compatibility() -> None:
         if "session_idle_timeout_minutes" not in columns:
             conn.execute(
                 text(
-                    "ALTER TABLE agent "
-                    "ADD COLUMN session_idle_timeout_minutes INTEGER"
+                    "ALTER TABLE agent ADD COLUMN session_idle_timeout_minutes INTEGER"
                 )
             )
         if "sandbox_timeout_seconds" not in columns:
@@ -177,9 +176,7 @@ def ensure_agent_schema_compatibility() -> None:
             )
         if "compact_threshold_percent" not in columns:
             conn.execute(
-                text(
-                    "ALTER TABLE agent " "ADD COLUMN compact_threshold_percent INTEGER"
-                )
+                text("ALTER TABLE agent ADD COLUMN compact_threshold_percent INTEGER")
             )
         if "active_release_id" not in columns:
             conn.execute(text("ALTER TABLE agent ADD COLUMN active_release_id INTEGER"))
@@ -218,11 +215,7 @@ def ensure_agent_schema_compatibility() -> None:
                 )
             )
         conn.execute(
-            text(
-                "UPDATE agent "
-                "SET client_state = 'open' "
-                "WHERE client_state IS NULL"
-            )
+            text("UPDATE agent SET client_state = 'open' WHERE client_state IS NULL")
         )
         # Migrate legacy is_active=false to client_state=paused
         if "is_active" in columns:
@@ -260,7 +253,7 @@ def ensure_session_schema_compatibility() -> None:
             conn.execute(text("ALTER TABLE session ADD COLUMN release_id INTEGER"))
         if "type" not in columns:
             conn.execute(
-                text("ALTER TABLE session ADD COLUMN type VARCHAR DEFAULT 'consumer'")
+                text("ALTER TABLE session ADD COLUMN type VARCHAR DEFAULT 'client'")
             )
         if "test_snapshot_id" not in columns:
             conn.execute(
@@ -273,7 +266,7 @@ def ensure_session_schema_compatibility() -> None:
                 text("ALTER TABLE session ADD COLUMN migrated_to_session_id VARCHAR")
             )
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
-        conn.execute(text("UPDATE session SET type = 'consumer' WHERE type IS NULL"))
+        conn.execute(text("UPDATE session SET type = 'client' WHERE type IS NULL"))
         conn.execute(
             text(
                 "UPDATE session "
@@ -332,8 +325,7 @@ def ensure_react_schema_compatibility() -> None:
             if "cancel_requested_at" not in task_columns:
                 conn.execute(
                     text(
-                        "ALTER TABLE reacttask "
-                        "ADD COLUMN cancel_requested_at DATETIME"
+                        "ALTER TABLE reacttask ADD COLUMN cancel_requested_at DATETIME"
                     )
                 )
             if "runtime_message_start_index" not in task_columns:
@@ -345,7 +337,7 @@ def ensure_react_schema_compatibility() -> None:
                 )
             if "stashed_messages" not in task_columns:
                 conn.execute(
-                    text("ALTER TABLE reacttask " "ADD COLUMN stashed_messages VARCHAR")
+                    text("ALTER TABLE reacttask ADD COLUMN stashed_messages VARCHAR")
                 )
             if "pending_user_action_json" not in task_columns:
                 conn.execute(

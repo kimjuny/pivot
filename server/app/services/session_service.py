@@ -78,7 +78,7 @@ class SessionService:
         user_id: int,
         *,
         project_id: str | None = None,
-        session_type: Literal["consumer", "studio_test"] = "consumer",
+        session_type: Literal["client", "studio_test"] = "client",
         test_snapshot_id: int | None = None,
     ) -> Session:
         """Create a new session row.
@@ -87,7 +87,7 @@ class SessionService:
             agent_id: ID of the agent for this session.
             user_id: Foreign key of the session owner.
             project_id: Optional shared project UUID for project-backed sessions.
-            session_type: Whether the session belongs to Consumer or Studio Test.
+            session_type: Whether the session belongs to Client or Studio Test.
             test_snapshot_id: Frozen Studio working-copy snapshot pinned to the
                 session when ``session_type`` is ``studio_test``.
 
@@ -105,7 +105,7 @@ class SessionService:
         resolved_test_snapshot_id: int | None = None
         workspace_id: str | None = None
 
-        if session_type == "consumer":
+        if session_type == "client":
             agent = AgentService(self.db).require_session_creation_ready(agent_id)
             release_id = agent.active_release_id
         elif session_type == "studio_test":
@@ -198,15 +198,15 @@ class SessionService:
 
     @staticmethod
     def is_session_stale(session: Session, active_release_id: int | None) -> bool:
-        """Return True when a consumer session is pinned to an outdated release.
+        """Return True when a client session is pinned to an outdated release.
 
         Why: once the Agent is republished, existing sessions still run against
-        the old release snapshot. Consumers must be redirected to a fresh
+        the old release snapshot. Client users must be redirected to a fresh
         session rather than continuing silently on the stale runtime. Closed
         sessions are never stale because they are either finished or already
         migrated.
         """
-        if session.type != "consumer":
+        if session.type != "client":
             return False
         if session.status == "closed":
             return False
@@ -448,7 +448,7 @@ class SessionService:
         user_id: int,
         agent_id: int | None = None,
         agent_ids: list[int] | None = None,
-        session_type: Literal["consumer", "studio_test"] | None = None,
+        session_type: Literal["client", "studio_test"] | None = None,
         limit: int = 50,
     ) -> list[Session]:
         """Get all sessions for a user, optionally filtered by agent.
@@ -508,7 +508,7 @@ class SessionService:
             Mapping from session UUID to ``idle``, ``running``, or
             ``waiting_input``.
         """
-        runtime_statuses = {session_id: "idle" for session_id in session_ids}
+        runtime_statuses = dict.fromkeys(session_ids, "idle")
         if len(session_ids) == 0:
             return runtime_statuses
 
@@ -758,7 +758,7 @@ class SessionService:
 
         Why: when an Agent is republished, existing sessions pin to the old
         release and cannot safely accept new tasks. Migration creates a new
-        consumer session on the latest release, copies workspace contents for
+        client session on the latest release, copies workspace contents for
         session-private workspaces, and marks the old session closed while
         preserving its history.
 
@@ -772,8 +772,8 @@ class SessionService:
         old_session = self.get_session(session_id)
         if old_session is None:
             raise ValueError(f"Session {session_id} not found.")
-        if old_session.type != "consumer":
-            raise ValueError("Only consumer sessions can be migrated.")
+        if old_session.type != "client":
+            raise ValueError("Only client sessions can be migrated.")
 
         agent = AgentService(self.db).require_session_creation_ready(
             old_session.agent_id
@@ -788,7 +788,7 @@ class SessionService:
             agent_id=old_session.agent_id,
             user_id=old_session.user_id,
             project_id=old_session.project_id,
-            session_type="consumer",
+            session_type="client",
         )
 
         new_session.title = (
@@ -905,8 +905,7 @@ class SessionService:
                                     {
                                         "name": item.strip(),
                                         "path": (
-                                            "/workspace/skills/"
-                                            f"{item.strip()}/SKILL.md"
+                                            f"/workspace/skills/{item.strip()}/SKILL.md"
                                         ),
                                     }
                                 )

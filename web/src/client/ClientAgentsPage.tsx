@@ -16,11 +16,11 @@ import {
 import { SessionSidebar } from "@/pages/chat/components/SessionSidebar";
 import { Input } from "@/components/ui/input";
 import {
-  getConsumerAgents,
-  getConsumerSessions,
-  type ConsumerSessionListItem,
-} from "@/consumer/api";
-import ConsumerUserMenu from "@/consumer/ConsumerUserMenu";
+  getClientAgents,
+  getClientSessions,
+  type ClientSessionListItem,
+} from "@/client/api";
+import ClientUserMenu from "@/client/ClientUserMenu";
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import type { Agent } from "@/types";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
@@ -28,9 +28,9 @@ import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
 /**
  * Keep the recent-session list aligned with backend ordering semantics.
  */
-function sortConsumerSessions(
-  sessions: ConsumerSessionListItem[],
-): ConsumerSessionListItem[] {
+function sortClientSessions(
+  sessions: ClientSessionListItem[],
+): ClientSessionListItem[] {
   return [...sessions].sort((left, right) => {
     if (left.is_pinned !== right.is_pinned) {
       return Number(right.is_pinned) - Number(left.is_pinned);
@@ -41,12 +41,12 @@ function sortConsumerSessions(
 }
 
 /**
- * Browse all Consumer-visible agents and open one chat workspace.
+ * Browse all Client-visible agents and open one chat workspace.
  */
-function ConsumerAgentsPage() {
+function ClientAgentsPage() {
   const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [sessions, setSessions] = useState<ConsumerSessionListItem[]>([]);
+  const [sessions, setSessions] = useState<ClientSessionListItem[]>([]);
   const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,8 +57,8 @@ function ConsumerAgentsPage() {
         setIsLoading(true);
         setError(null);
         const [nextAgents, sessionResponse] = await Promise.all([
-          getConsumerAgents(),
-          getConsumerSessions(30),
+          getClientAgents(),
+          getClientSessions(30),
         ]);
         setAgents(nextAgents);
         setSessions(sessionResponse.sessions);
@@ -66,7 +66,7 @@ function ConsumerAgentsPage() {
         setError(
           loadError instanceof Error
             ? loadError.message
-            : "Failed to load consumer agents.",
+            : "Failed to load client agents.",
         );
       } finally {
         setIsLoading(false);
@@ -127,10 +127,10 @@ function ConsumerAgentsPage() {
    */
   const replaceSidebarSession = (
     sessionId: string,
-    updater: (session: ConsumerSessionListItem) => ConsumerSessionListItem,
+    updater: (session: ClientSessionListItem) => ClientSessionListItem,
   ) => {
     setSessions((previous) =>
-      sortConsumerSessions(
+      sortClientSessions(
         previous.map((session) =>
           session.session_id === sessionId ? updater(session) : session,
         ),
@@ -193,7 +193,7 @@ function ConsumerAgentsPage() {
           },
         ]}
         footer={(isCollapsed) => (
-          <ConsumerUserMenu isCollapsed={isCollapsed} />
+          <ClientUserMenu isCollapsed={isCollapsed} />
         )}
       />
 
@@ -217,7 +217,7 @@ function ConsumerAgentsPage() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search agents…"
-                aria-label="Search consumer agents"
+                aria-label="Search client agents"
               />
             </div>
           </div>
@@ -284,4 +284,4 @@ function ConsumerAgentsPage() {
   );
 }
 
-export default ConsumerAgentsPage;
+export default ClientAgentsPage;

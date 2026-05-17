@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider } from "@/components/ui/sidebar";
 
-import ConsumerUserMenu from "./ConsumerUserMenu";
+import ClientUserMenu from "./ClientUserMenu";
 
 const logoutMock = vi.fn();
 const navigateMock = vi.fn();
@@ -36,15 +36,15 @@ vi.mock("@/lib/use-theme", () => ({
 /**
  * Renders the footer menu inside the sidebar provider it depends on.
  */
-function renderConsumerUserMenu(isCollapsed: boolean = false) {
+function renderClientUserMenu(isCollapsed: boolean = false) {
   return render(
     <SidebarProvider defaultOpen={!isCollapsed}>
-      <ConsumerUserMenu isCollapsed={isCollapsed} />
+      <ClientUserMenu isCollapsed={isCollapsed} />
     </SidebarProvider>,
   );
 }
 
-describe("ConsumerUserMenu", () => {
+describe("ClientUserMenu", () => {
   beforeEach(() => {
     logoutMock.mockReset();
     navigateMock.mockReset();
@@ -54,7 +54,7 @@ describe("ConsumerUserMenu", () => {
   it("opens the footer menu and runs the available account actions", async () => {
     const user = userEvent.setup();
 
-    renderConsumerUserMenu();
+    renderClientUserMenu();
 
     expect(screen.getByText("User")).toBeInTheDocument();
 
@@ -76,13 +76,13 @@ describe("ConsumerUserMenu", () => {
   it("keeps the collapsed footer trigger icon-only until the menu is opened", async () => {
     const user = userEvent.setup();
 
-    renderConsumerUserMenu(true);
+    renderClientUserMenu(true);
 
-    expect(screen.queryByText("Consumer workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("Client workspace")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "User menu: shadcn" }));
 
-    expect(await screen.findByText("Consumer workspace")).toBeInTheDocument();
+    expect(await screen.findByText("Client workspace")).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
   });
 });

@@ -48,7 +48,7 @@ class TaskAttachmentServiceTestCase(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.host_root = Path(self.temp_dir.name) / "external-posix"
         self.profile_patch = patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=type(
                 "ResolvedProfile",

@@ -69,7 +69,7 @@ export function ActivityFeed({ data }: ActivityFeedProps) {
                   </p>
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="font-medium">{item.agent_name}</span>
-                    {item.session_type === "consumer" ? (
+                    {item.session_type === "client" ? (
                       <User className="h-3 w-3 shrink-0 text-muted-foreground/60" />
                     ) : (
                       <Wrench className="h-3 w-3 shrink-0 text-muted-foreground/60" />

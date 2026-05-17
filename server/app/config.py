@@ -87,11 +87,11 @@ def get_settings() -> Settings:
 
     # If specific env file exists, use it
     if env_file.exists():
-        return cast(Any, Settings)(_env_file=str(env_file), ENV=env)
+        return cast("Any", Settings)(_env_file=str(env_file), ENV=env)
 
     # Fallback to .env in server dir
     base_env = server_dir / ".env"
     if base_env.exists():
-        return cast(Any, Settings)(_env_file=str(base_env), ENV=env)
+        return cast("Any", Settings)(_env_file=str(base_env), ENV=env)
 
     return Settings(ENV=env)

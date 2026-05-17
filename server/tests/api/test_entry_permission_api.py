@@ -25,7 +25,7 @@ react_models = import_module("app.models.react")
 session_models = import_module("app.models.session")
 user_models = import_module("app.models.user")
 auth_module = import_module("app.api.auth")
-consumer_api_module = import_module("app.api.consumer")
+client_api_module = import_module("app.api.client")
 projects_api_module = import_module("app.api.projects")
 react_api_module = import_module("app.api.react")
 session_api_module = import_module("app.api.session")
@@ -86,7 +86,7 @@ class EntryPermissionApiTestCase(unittest.TestCase):
         self.current_user = self.no_entry_user
 
         self.app = FastAPI()
-        self.app.include_router(consumer_api_module.router)
+        self.app.include_router(client_api_module.router)
         self.app.include_router(projects_api_module.router)
         self.app.include_router(react_api_module.router)
         self.app.include_router(session_api_module.router)
@@ -110,17 +110,17 @@ class EntryPermissionApiTestCase(unittest.TestCase):
         """Return the active user configured by each test."""
         return self.current_user
 
-    def test_consumer_agents_require_client_access(self) -> None:
-        """Consumer agent listing should require the client entry permission."""
-        response = self.client.get("/consumer/agents")
+    def test_client_agents_require_client_access(self) -> None:
+        """Client agent listing should require the client entry permission."""
+        response = self.client.get("/client/agents")
 
         self.assertEqual(response.status_code, 403)
 
-    def test_consumer_session_create_requires_client_access(self) -> None:
-        """Consumer session creation should require the client entry permission."""
+    def test_client_session_create_requires_client_access(self) -> None:
+        """Client session creation should require the client entry permission."""
         response = self.client.post(
             "/sessions",
-            json={"agent_id": 1, "type": "consumer"},
+            json={"agent_id": 1, "type": "client"},
         )
 
         self.assertEqual(response.status_code, 403)
@@ -150,13 +150,13 @@ class EntryPermissionApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_consumer_session_get_requires_agent_use_access(self) -> None:
-        """Consumer session reads should be blocked after agent use is unavailable."""
+    def test_client_session_get_requires_agent_use_access(self) -> None:
+        """Client session reads should be blocked after agent use is unavailable."""
         self.current_user = self.client_user
         session = SessionModel(
             session_id=str(uuid.uuid4()),
             agent_id=self.locked_agent.id or 0,
-            type="consumer",
+            type="client",
             user=self.client_user.username,
         )
         self.session.add(session)
@@ -166,7 +166,7 @@ class EntryPermissionApiTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_consumer_session_list_hides_sessions_without_agent_use_access(
+    def test_client_session_list_hides_sessions_without_agent_use_access(
         self,
     ) -> None:
         """Session list should omit sessions whose agent is no longer usable."""
@@ -174,19 +174,19 @@ class EntryPermissionApiTestCase(unittest.TestCase):
         session = SessionModel(
             session_id=str(uuid.uuid4()),
             agent_id=self.locked_agent.id or 0,
-            type="consumer",
+            type="client",
             user=self.client_user.username,
         )
         self.session.add(session)
         self.session.commit()
 
-        response = self.client.get("/sessions?session_type=consumer")
+        response = self.client.get("/sessions?session_type=client")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["sessions"], [])
 
     def test_react_task_start_requires_agent_use_access(self) -> None:
-        """Consumer runtime launch should stay inside the agent use boundary."""
+        """Client runtime launch should stay inside the agent use boundary."""
         self.current_user = self.client_user
 
         response = self.client.post(
@@ -205,7 +205,7 @@ class EntryPermissionApiTestCase(unittest.TestCase):
         session = SessionModel(
             session_id=str(uuid.uuid4()),
             agent_id=self.locked_agent.id or 0,
-            type="consumer",
+            type="client",
             user=self.client_user.username,
         )
         self.session.add(session)

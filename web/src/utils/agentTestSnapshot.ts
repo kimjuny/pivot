@@ -3,7 +3,7 @@ import type { Agent } from "@/types";
 /**
  * Session namespaces supported by the shared chat surface.
  */
-export type ChatSessionType = "consumer" | "studio_test";
+export type ChatSessionType = "client" | "studio_test";
 
 /**
  * Runtime-facing agent payload frozen into a Studio test snapshot.

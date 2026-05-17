@@ -88,7 +88,7 @@ class ProjectServiceTestCase(unittest.TestCase):
     def test_create_project_creates_shared_workspace(self) -> None:
         """Creating a project should persist both the row and the workspace path."""
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=self.resolved_profile,
         ):
@@ -115,7 +115,7 @@ class ProjectServiceTestCase(unittest.TestCase):
     def test_delete_project_removes_child_sessions(self) -> None:
         """Deleting a project should remove every session that points at it."""
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=self.resolved_profile,
         ):
@@ -153,7 +153,7 @@ class ProjectServiceTestCase(unittest.TestCase):
         """Project deletion should tear down sandboxes using external workspace paths."""
         sandbox_service = Mock()
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=self.resolved_profile,
         ):
@@ -189,7 +189,7 @@ class ProjectServiceTestCase(unittest.TestCase):
     def test_project_use_grant_allows_listing_without_edit(self) -> None:
         """A use grant should make a project visible without allowing metadata edits."""
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=self.resolved_profile,
         ):
@@ -235,7 +235,7 @@ class ProjectServiceTestCase(unittest.TestCase):
     def test_project_edit_grant_syncs_workspace_write_access(self) -> None:
         """Project edit access should mirror to the backing workspace."""
         with patch.object(
-            cast(Any, workspace_service),
+            cast("Any", workspace_service),
             "get_resolved_storage_profile",
             return_value=self.resolved_profile,
         ):

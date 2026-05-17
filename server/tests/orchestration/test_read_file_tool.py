@@ -23,7 +23,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
     def test_script_returns_numbered_chunk(self) -> None:
         """The returned content should include line numbers for diff hunks."""
-        module = cast(Any, read_file_module)
+        module = cast("Any", read_file_module)
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
             file_path.write_text("alpha\n  beta\ngamma\n", encoding="utf-8")
@@ -50,7 +50,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
     def test_script_truncates_requested_range_by_max_lines(self) -> None:
         """Chunk metadata should tell the caller when more lines remain."""
-        module = cast(Any, read_file_module)
+        module = cast("Any", read_file_module)
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
             file_path.write_text("a\nb\nc\nd\n", encoding="utf-8")
@@ -77,7 +77,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
     def test_script_reports_missing_file_without_traceback(self) -> None:
         """Missing files should produce a short tool-facing error."""
-        module = cast(Any, read_file_module)
+        module = cast("Any", read_file_module)
         with tempfile.TemporaryDirectory() as temp_dir:
             missing_path = Path(temp_dir) / "missing.py"
 
@@ -101,7 +101,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
     def test_read_file_shortens_missing_file_sandbox_errors(self) -> None:
         """Sandbox missing-file failures should not expose Python tracebacks."""
-        module = cast(Any, read_file_module)
+        module = cast("Any", read_file_module)
         original_exec_in_sandbox = module.exec_in_sandbox
 
         def fail_missing_file(_cmd: list[str]) -> str:
@@ -118,7 +118,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
     def test_read_file_rejects_large_max_lines(self) -> None:
         """Huge chunks should fail fast to keep reads focused."""
-        module = cast(Any, read_file_module)
+        module = cast("Any", read_file_module)
 
         with self.assertRaisesRegex(ValueError, "less than or equal to 800"):
             module.read_file(path="src/app.py", max_lines=801)

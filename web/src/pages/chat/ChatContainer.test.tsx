@@ -171,7 +171,7 @@ function applyPointerCapturePolyfill() {
 }
 
 describe("ChatContainer session rollover", () => {
-  const expectedSessionListArgs = [7, 50, { type: "consumer" }] as const;
+  const expectedSessionListArgs = [7, 50, { type: "client" }] as const;
 
   beforeEach(() => {
     vi.resetAllMocks();

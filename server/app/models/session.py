@@ -23,7 +23,7 @@ class Session(SQLModel, table=True):
         id: Primary key of the session.
         session_id: UUID string for global unique session identification.
         agent_id: Foreign key to the agent handling this session.
-        type: Whether this session belongs to Consumer or Studio Test.
+        type: Whether this session belongs to Client or Studio Test.
         release_id: Published release fixed to this session at creation time.
         test_snapshot_id: Frozen Studio working-copy snapshot pinned to this
             session when ``type`` is ``studio_test``.
@@ -51,9 +51,9 @@ class Session(SQLModel, table=True):
     session_id: str = Field(index=True, unique=True, description="UUID for session")
     agent_id: int = Field(foreign_key="agent.id", index=True)
     type: str = Field(
-        default="consumer",
+        default="client",
         index=True,
-        description="Session type: consumer or studio_test",
+        description="Session type: client or studio_test",
     )
     release_id: int | None = Field(
         default=None,
@@ -68,7 +68,7 @@ class Session(SQLModel, table=True):
         index=True,
         description=(
             "Frozen Studio working-copy snapshot pinned to this session. "
-            "Consumer sessions keep this field null."
+            "Client sessions keep this field null."
         ),
     )
     user_id: int = Field(foreign_key="user.id", index=True)

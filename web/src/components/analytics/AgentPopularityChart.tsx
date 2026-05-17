@@ -15,7 +15,7 @@ export type { AgentPopularity } from "@/utils/api";
 
 /** Props for the agent popularity horizontal bar chart. */
 export interface AgentPopularityChartProps {
-  /** Top agents ranked by consumer session count. */
+  /** Top agents ranked by client session count. */
   data: AgentPopularity[];
 }
 
@@ -73,7 +73,7 @@ function createAgentTick(agents: AgentPopularity[]) {
   return AgentTick;
 }
 
-/** Horizontal bar chart showing top agents by consumer session count. */
+/** Horizontal bar chart showing top agents by client session count. */
 export function AgentPopularityChart({ data }: AgentPopularityChartProps) {
   const displayData = padToSlots(data, 5);
 
@@ -85,7 +85,7 @@ export function AgentPopularityChart({ data }: AgentPopularityChartProps) {
       <CardContent>
         {data.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            No consumer sessions in this period.
+            No client sessions in this period.
           </p>
         ) : (
           <ChartContainer config={chartConfig} className="h-[250px] w-full">

@@ -8,12 +8,12 @@ import ReactChatInterface from "@/components/ReactChatInterface";
 import { Card, CardContent } from "@/components/ui/card";
 import { getChatBootstrap } from "@/utils/api";
 import type { ChatBootstrapResponse } from "@/utils/api";
-import ConsumerUserMenu from "@/consumer/ConsumerUserMenu";
+import ClientUserMenu from "@/client/ClientUserMenu";
 
 /**
- * Full-page Consumer chat workspace for one published agent.
+ * Full-page Client chat workspace for one published agent.
  */
-function ConsumerAgentPage() {
+function ClientAgentPage() {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -41,7 +41,7 @@ function ConsumerAgentPage() {
         setError(
           loadError instanceof Error
             ? loadError.message
-            : "Failed to load the consumer agent.",
+            : "Failed to load the client agent.",
         );
       } finally {
         setIsLoading(false);
@@ -114,11 +114,11 @@ function ConsumerAgentPage() {
           },
         ]}
         sidebarFooter={(isCollapsed) => (
-          <ConsumerUserMenu isCollapsed={isCollapsed} />
+          <ClientUserMenu isCollapsed={isCollapsed} />
         )}
       />
     </div>
   );
 }
 
-export default ConsumerAgentPage;
+export default ClientAgentPage;

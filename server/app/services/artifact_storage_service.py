@@ -168,9 +168,7 @@ class ExtensionArtifactStorageService:
         manifest_hash: str,
     ) -> str:
         """Return the canonical artifact key for one extension version."""
-        return (
-            f"extensions/{scope}/{name}/{version}/artifact/" f"{manifest_hash}.tar.gz"
-        )
+        return f"extensions/{scope}/{name}/{version}/artifact/{manifest_hash}.tar.gz"
 
     def store_directory(
         self,

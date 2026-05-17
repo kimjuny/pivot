@@ -12,7 +12,7 @@ import { Area, AreaChart, XAxis, YAxis } from "recharts";
 /** One day's session counts by type. */
 export interface DailySessionCount {
   date: string;
-  consumer: number;
+  client: number;
   studio_test: number;
 }
 
@@ -23,7 +23,7 @@ export interface SessionTrendChartProps {
 }
 
 const chartConfig: ChartConfig = {
-  consumer: {
+  client: {
     label: "Client",
     color: "oklch(var(--chart-4))",
   },
@@ -75,7 +75,7 @@ export function SessionTrendChart({ data }: SessionTrendChartProps) {
                               {(() => {
                                 const p = item.payload as Record<string, unknown>;
                                 const total =
-                                  Number(p.consumer ?? 0) + Number(p.studio_test ?? 0);
+                                  Number(p.client ?? 0) + Number(p.studio_test ?? 0);
                                 return total.toLocaleString();
                               })()}
                             </div>
@@ -89,10 +89,10 @@ export function SessionTrendChart({ data }: SessionTrendChartProps) {
               <ChartLegend content={<ChartLegendContent />} />
               <Area
                 type="monotone"
-                dataKey="consumer"
+                dataKey="client"
                 stackId="sessions"
-                stroke="var(--color-consumer)"
-                fill="var(--color-consumer)"
+                stroke="var(--color-client)"
+                fill="var(--color-client)"
                 fillOpacity={0.4}
               />
               <Area

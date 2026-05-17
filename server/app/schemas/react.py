@@ -76,8 +76,8 @@ class ReactContextUsageRequest(AppBaseModel):
         default_factory=list,
         description="Uploaded file IDs whose prompt blocks should be included",
     )
-    session_type: Literal["consumer", "studio_test"] = Field(
-        default="consumer",
+    session_type: Literal["client", "studio_test"] = Field(
+        default="client",
         description="Session type used when estimating a draft before session creation",
     )
     test_snapshot: StudioTestSnapshotPayload | None = Field(
@@ -101,8 +101,8 @@ class ReactRuntimeSkillsRequest(AppBaseModel):
         default=None,
         description="Optional session ID used for runtime release resolution",
     )
-    session_type: Literal["consumer", "studio_test"] = Field(
-        default="consumer",
+    session_type: Literal["client", "studio_test"] = Field(
+        default="client",
         description="Session type used when no session has been created yet",
     )
     test_snapshot: StudioTestSnapshotPayload | None = Field(

@@ -89,7 +89,7 @@ class WorkspaceFileServiceTestCase(unittest.TestCase):
         )()
 
         self.workspace_profile_patch = patch.object(
-            cast(Any, workspace_service_module),
+            cast("Any", workspace_service_module),
             "get_resolved_storage_profile",
             return_value=resolved_profile,
         )

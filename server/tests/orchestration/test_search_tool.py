@@ -55,7 +55,7 @@ class SearchToolTestCase(unittest.TestCase):
                 }
             )
 
-        module = cast(Any, search_module)
+        module = cast("Any", search_module)
         with (
             patch.object(module, "workspace_path", return_value="/workspace/src"),
             patch.object(module, "exec_in_sandbox", side_effect=fake_exec),
@@ -80,21 +80,21 @@ class SearchToolTestCase(unittest.TestCase):
 
     def test_search_rejects_invalid_candidate_limit(self) -> None:
         """Large candidate lists should be rejected to keep the tool concise."""
-        module = cast(Any, search_module)
+        module = cast("Any", search_module)
 
         with self.assertRaisesRegex(ValueError, "less than or equal to 20"):
             module.search(query="needle", max_candidates=21)
 
     def test_search_rejects_invalid_hits_per_file_limit(self) -> None:
         """Too many anchors per file should fail fast before sandbox execution."""
-        module = cast(Any, search_module)
+        module = cast("Any", search_module)
 
         with self.assertRaisesRegex(ValueError, "less than or equal to 5"):
             module.search(query="needle", max_hits_per_file=6)
 
     def test_search_rejects_blank_query(self) -> None:
         """Blank queries should fail fast to avoid meaningless scans."""
-        module = cast(Any, search_module)
+        module = cast("Any", search_module)
 
         with self.assertRaisesRegex(ValueError, "must not be blank"):
             module.search(query="   ")

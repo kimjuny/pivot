@@ -73,7 +73,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         )()
 
         self.workspace_profile_patch = patch.object(
-            cast(Any, workspace_service_module),
+            cast("Any", workspace_service_module),
             "get_resolved_storage_profile",
             return_value=resolved_profile,
         )
@@ -1182,7 +1182,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         """Proxying the local dev server should inject the bootstrap payload into HTML."""
 
         class _SurfaceDevHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 if self.path == "/":
                     body = (
                         b"<!doctype html><html><head><title>Surface</title></head>"
@@ -1238,7 +1238,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         """Proxying should preserve concrete entry-page URLs for sibling assets."""
 
         class _EntryHtmlHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 if self.path == "/sample/index.html":
                     body = (
                         b"<!doctype html><html><head><title>Sample</title></head>"
@@ -1309,7 +1309,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         """Proxying should keep Vite root-relative assets under the proxy prefix."""
 
         class _ViteHtmlHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 if self.path == "/":
                     body = (
                         b"<!doctype html><html><head>"
@@ -1365,7 +1365,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         """Proxying should retarget Vite's websocket client through Pivot."""
 
         class _ViteClientHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 if self.path == "/@vite/client":
                     body = (
                         b"const importMetaUrl = new URL(import.meta.url);\n"
@@ -1426,7 +1426,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         """Proxying should keep JS module imports under the surface proxy prefix."""
 
         class _ViteModuleHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 if self.path == "/src/main.js":
                     body = (
                         b'import "/src/styles.css?t=123";\n'
@@ -1556,7 +1556,7 @@ class ChatSurfacesApiTestCase(unittest.TestCase):
         (workspace_path / "notes.txt").write_text("hello surface\n", encoding="utf-8")
 
         class _SurfaceDevHandler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 body = b"<!doctype html><html><body>ok</body></html>"
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")

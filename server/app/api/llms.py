@@ -96,7 +96,7 @@ def _serialize_llm_access(
     edit_grants = [grant for grant in grants if grant.access_level == AccessLevel.EDIT]
     return LLMAccessResponse(
         llm_id=llm_id,
-        use_scope=cast(Literal["all", "selected"], use_scope),
+        use_scope=cast("Literal['all', 'selected']", use_scope),
         use_user_ids=_grant_principal_ids(use_grants, PrincipalType.USER),
         use_group_ids=_grant_principal_ids(use_grants, PrincipalType.GROUP),
         edit_user_ids=_grant_principal_ids(edit_grants, PrincipalType.USER),

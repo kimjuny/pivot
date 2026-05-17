@@ -38,9 +38,9 @@ class SessionCreate(AppBaseModel):
         default=None,
         description="Optional project UUID for shared-workspace sessions",
     )
-    type: Literal["consumer", "studio_test"] = Field(
-        default="consumer",
-        description="Whether the session belongs to Consumer or Studio Test",
+    type: Literal["client", "studio_test"] = Field(
+        default="client",
+        description="Whether the session belongs to Client or Studio Test",
     )
     test_snapshot: StudioTestSnapshotPayload | None = Field(
         default=None,
@@ -54,7 +54,7 @@ class SessionResponse(AppBaseModel):
     id: int
     session_id: str
     agent_id: int
-    type: Literal["consumer", "studio_test"]
+    type: Literal["client", "studio_test"]
     release_id: int | None
     latest_release_id: int | None = None
     is_stale: bool = False
@@ -84,7 +84,7 @@ class SessionListItem(AppBaseModel):
 
     session_id: str
     agent_id: int
-    type: Literal["consumer", "studio_test"]
+    type: Literal["client", "studio_test"]
     release_id: int | None
     latest_release_id: int | None = None
     is_stale: bool = False
@@ -116,17 +116,17 @@ class SessionListResponse(AppBaseModel):
     total: int
 
 
-class ConsumerSessionListItem(SessionListItem):
-    """Session list item enriched with Consumer-facing agent metadata."""
+class ClientSessionListItem(SessionListItem):
+    """Session list item enriched with Client-facing agent metadata."""
 
     agent_name: str
     agent_description: str | None = None
 
 
-class ConsumerSessionListResponse(AppBaseModel):
-    """Response schema for Consumer recent session listings."""
+class ClientSessionListResponse(AppBaseModel):
+    """Response schema for Client recent session listings."""
 
-    sessions: list[ConsumerSessionListItem]
+    sessions: list[ClientSessionListItem]
     total: int
 
 

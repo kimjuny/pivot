@@ -23,7 +23,7 @@ class WebSearchToolTestCase(unittest.TestCase):
 
     def test_web_search_metadata_hides_provider_selection_from_llm(self) -> None:
         """The model should not be told to choose concrete provider keys."""
-        parameters = cast(Any, tool_module.web_search).__tool_metadata__.parameters
+        parameters = cast("Any", tool_module.web_search).__tool_metadata__.parameters
 
         self.assertNotIn("provider", parameters["properties"])
 
@@ -64,7 +64,7 @@ class WebSearchToolTestCase(unittest.TestCase):
 
         self.assertEqual(result["provider"]["key"], "pivot@test")
         self.assertIsNotNone(captured_request)
-        request = cast(Any, captured_request)
+        request = cast("Any", captured_request)
         self.assertEqual(
             request.query, "2026 deep learning breakthrough research papers"
         )
@@ -108,7 +108,7 @@ class WebSearchToolTestCase(unittest.TestCase):
 
         self.assertEqual(result["provider"]["key"], "pivot@test-a")
         self.assertIsNotNone(captured_request)
-        request = cast(Any, captured_request)
+        request = cast("Any", captured_request)
         self.assertEqual(request.provider, "pivot@test-a")
 
     def test_web_search_surfaces_invalid_turn_scoped_provider_errors(self) -> None:
@@ -119,7 +119,7 @@ class WebSearchToolTestCase(unittest.TestCase):
 
         def fake_execute_search(*, agent_id: int, request: object):
             self.assertEqual(agent_id, 7)
-            request_payload = cast(Any, request)
+            request_payload = cast("Any", request)
             self.assertEqual(request_payload.provider, "missing")
             raise ValueError(expected_error)
 

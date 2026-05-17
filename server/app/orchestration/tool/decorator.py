@@ -162,7 +162,7 @@ def tool(
             tool_type=tool_type,
         )
         object.__setattr__(target, "__tool_metadata__", metadata)
-        return cast(ToolFunction, target)
+        return cast("ToolFunction", target)
 
     if func is None:
         return _decorate

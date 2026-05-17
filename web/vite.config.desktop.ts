@@ -57,7 +57,7 @@ function llmIconManifestPlugin(): Plugin {
 /**
  * Desktop Vite configuration.
  *
- * Builds the Consumer-only frontend for the Tauri desktop shell.
+ * Builds the Client-only frontend for the Tauri desktop shell.
  * Outputs to dist-desktop/ and uses desktop.html as the entry point.
  *
  * Dev mode  — Vite dev server proxies `/api` to the backend (no CORS).

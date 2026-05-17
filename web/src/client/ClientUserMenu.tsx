@@ -19,7 +19,7 @@ import { useAuth } from "@/contexts/auth-core";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useTheme } from "@/lib/use-theme";
 
-interface ConsumerUserMenuProps {
+interface ClientUserMenuProps {
   isCollapsed: boolean;
 }
 
@@ -30,7 +30,7 @@ interface ConsumerUserMenuProps {
  * matching the sidebar's own menu button treatment keeps the affordance clear
  * without introducing a second interaction language just for the footer.
  */
-function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
+function ClientUserMenu({ isCollapsed }: ClientUserMenuProps) {
   const navigate = useNavigate();
   const { logout, user } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -127,4 +127,4 @@ function ConsumerUserMenu({ isCollapsed }: ConsumerUserMenuProps) {
   );
 }
 
-export default ConsumerUserMenu;
+export default ClientUserMenu;

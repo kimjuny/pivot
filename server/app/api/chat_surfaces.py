@@ -2422,7 +2422,7 @@ def _rewrite_vite_client_hmr_target(*, source: str, hmr_proxy_path: str) -> str:
     """Rewrite Vite's websocket host resolution to use Pivot's HMR tunnel."""
     rewritten = re.sub(
         r"const socketHost = .*?;",
-        ("const socketHost = " f"`${{importMetaUrl.host}}{hmr_proxy_path}`;"),
+        (f"const socketHost = `${{importMetaUrl.host}}{hmr_proxy_path}`;"),
         source,
         count=1,
     )

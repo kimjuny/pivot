@@ -1,4 +1,4 @@
-"""Consumer-facing API endpoints for visible published agents."""
+"""Client-facing API endpoints for visible published agents."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from app.schemas.extension import (
 from app.schemas.project import ProjectResponse
 from app.schemas.schemas import AgentResponse, LLMUsableResponse
 from app.schemas.session import (
-    ConsumerSessionListItem,
-    ConsumerSessionListResponse,
+    ClientSessionListItem,
+    ClientSessionListResponse,
     SessionListItem,
 )
 from app.security.permission_catalog import Permission
@@ -42,12 +42,12 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
-def _serialize_consumer_agent_response(
+def _serialize_client_agent_response(
     agent: Any,
     *,
     model_display: str,
 ) -> dict[str, Any]:
-    """Serialize one Consumer-visible agent into the existing response shape."""
+    """Serialize one Client-visible agent into the existing response shape."""
     return {
         "id": agent.id,
         "name": agent.name,
@@ -72,7 +72,7 @@ def _serialize_consumer_agent_response(
 def _resolve_model_display(
     db: DbSession, llm_id: int | None, fallback: str | None
 ) -> str:
-    """Resolve the visible model label shown in Consumer agent cards."""
+    """Resolve the visible model label shown in Client agent cards."""
     model_display = fallback or "N/A"
     if llm_id is None:
         return model_display
@@ -83,12 +83,12 @@ def _resolve_model_display(
     return f"{llm.name} ({llm.model})"
 
 
-@router.get("/consumer/agents", response_model=list[AgentResponse])
-async def list_consumer_agents(
+@router.get("/client/agents", response_model=list[AgentResponse])
+async def list_client_agents(
     db: DbSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> list[dict[str, Any]]:
-    """List all agents currently visible in the Consumer product."""
+    """List all agents currently visible in the Client product."""
     agents = AccessService(db).list_accessible_agents(
         user=current_user,
         access_level=AccessLevel.USE,
@@ -96,7 +96,7 @@ async def list_consumer_agents(
         require_serving=True,
     )
     return [
-        _serialize_consumer_agent_response(
+        _serialize_client_agent_response(
             agent,
             model_display=_resolve_model_display(db, agent.llm_id, agent.model_name),
         )
@@ -104,15 +104,15 @@ async def list_consumer_agents(
     ]
 
 
-@router.get("/consumer/agents/{agent_id}", response_model=AgentResponse)
-async def get_consumer_agent(
+@router.get("/client/agents/{agent_id}", response_model=AgentResponse)
+async def get_client_agent(
     agent_id: int,
     db: DbSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
 ) -> dict[str, Any]:
-    """Return one Consumer-visible agent by identifier."""
+    """Return one Client-visible agent by identifier."""
     try:
-        agent = AgentService(db).require_consumer_visible_agent(agent_id)
+        agent = AgentService(db).require_client_visible_agent(agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     AccessService(db).require_agent_access(
@@ -121,19 +121,19 @@ async def get_consumer_agent(
         access_level=AccessLevel.USE,
     )
 
-    return _serialize_consumer_agent_response(
+    return _serialize_client_agent_response(
         agent,
         model_display=_resolve_model_display(db, agent.llm_id, agent.model_name),
     )
 
 
-@router.get("/consumer/sessions", response_model=ConsumerSessionListResponse)
-async def list_consumer_sessions(
+@router.get("/client/sessions", response_model=ClientSessionListResponse)
+async def list_client_sessions(
     limit: int = 20,
     db: DbSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
-) -> ConsumerSessionListResponse:
-    """List the current user's recent sessions for Consumer-visible agents."""
+) -> ClientSessionListResponse:
+    """List the current user's recent sessions for Client-visible agents."""
     visible_agents = {
         agent.id: agent
         for agent in AccessService(db).list_accessible_agents(
@@ -150,17 +150,17 @@ async def list_consumer_sessions(
     sessions = SessionService(db).get_sessions_by_user(
         user_id=current_user.id,
         agent_ids=list(visible_agents),
-        session_type="consumer",
+        session_type="client",
         limit=limit,
     )
 
     session_service = SessionService(db)
-    return ConsumerSessionListResponse(
+    return ClientSessionListResponse(
         sessions=[
-            ConsumerSessionListItem(
+            ClientSessionListItem(
                 session_id=session.session_id,
                 agent_id=session.agent_id,
-                type=cast(Literal["consumer", "studio_test"], session.type),
+                type=cast("Literal['client', 'studio_test']", session.type),
                 agent_name=visible_agent.name,
                 agent_description=visible_agent.description,
                 release_id=session.release_id,
@@ -195,7 +195,7 @@ class ChatBootstrapResponse(BaseModel):
 
 
 @router.get(
-    "/consumer/agents/{agent_id}/chat-bootstrap",
+    "/client/agents/{agent_id}/chat-bootstrap",
     response_model=ChatBootstrapResponse,
 )
 async def get_chat_bootstrap(
@@ -210,7 +210,7 @@ async def get_chat_bootstrap(
     HTTP round-trips on page load.
     """
     try:
-        agent = AgentService(db).require_consumer_visible_agent(agent_id)
+        agent = AgentService(db).require_client_visible_agent(agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     AccessService(db).require_agent_access(
@@ -219,7 +219,7 @@ async def get_chat_bootstrap(
         access_level=AccessLevel.USE,
     )
 
-    agent_data = _serialize_consumer_agent_response(
+    agent_data = _serialize_client_agent_response(
         agent,
         model_display=_resolve_model_display(db, agent.llm_id, agent.model_name),
     )
@@ -236,7 +236,7 @@ async def get_chat_bootstrap(
         raw_sessions = session_svc.get_sessions_by_user(
             user_id=current_user.id,
             agent_id=agent_id,
-            session_type="consumer",
+            session_type="client",
             limit=50,
         )
         for s in raw_sessions:
@@ -244,7 +244,7 @@ async def get_chat_bootstrap(
                 SessionListItem(
                     session_id=s.session_id,
                     agent_id=s.agent_id,
-                    type=cast(Literal["consumer", "studio_test"], s.type),
+                    type=cast("Literal['client', 'studio_test']", s.type),
                     release_id=s.release_id,
                     latest_release_id=agent.active_release_id,
                     is_stale=session_svc.is_session_stale(s, agent.active_release_id),

@@ -56,7 +56,7 @@ def get_session_trends(
     return [
         {
             "date": item.date,
-            "consumer": item.consumer,
+            "client": item.client,
             "studio_test": item.studio_test,
         }
         for item in service.get_session_trends(days)
@@ -109,7 +109,7 @@ def get_agent_popularity(
     db: DBSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.STUDIO_ACCESS)),
 ) -> list[dict[str, Any]]:
-    """Return top agents ranked by consumer session count."""
+    """Return top agents ranked by client session count."""
     days = _parse_range(range)
     service = AnalyticsService(db)
     return [
@@ -167,7 +167,7 @@ def get_user_activity(
     db: DBSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.STUDIO_ACCESS)),
 ) -> list[dict[str, Any]]:
-    """Return daily DAU/WAU/MAU for consumer sessions."""
+    """Return daily DAU/WAU/MAU for client sessions."""
     days = _parse_range(range)
     service = AnalyticsService(db)
     return [
@@ -237,7 +237,7 @@ def get_agent_session_trends(
     return [
         {
             "date": item.date,
-            "consumer": item.consumer,
+            "client": item.client,
             "studio_test": item.studio_test,
         }
         for item in service.get_agent_session_trends(agent_id, days)
@@ -345,14 +345,14 @@ def get_agent_releases(
     ]
 
 
-@router.get("/analytics/agents/{agent_id}/consumer-usage")
-def get_agent_consumer_usage(
+@router.get("/analytics/agents/{agent_id}/client-usage")
+def get_agent_client_usage(
     agent_id: int,
     range: str = "30d",
     db: DBSession = Depends(get_db),
     current_user: User = Depends(permissions(Permission.AGENTS_MANAGE)),
 ) -> list[dict[str, Any]]:
-    """Return daily consumer sessions and distinct users for this agent."""
+    """Return daily client sessions and distinct users for this agent."""
     days = _parse_range(range)
     service = AnalyticsService(db)
     return [
@@ -361,7 +361,7 @@ def get_agent_consumer_usage(
             "sessions": item.sessions,
             "dau": item.dau,
         }
-        for item in service.get_agent_consumer_usage(agent_id, days)
+        for item in service.get_agent_client_usage(agent_id, days)
     ]
 
 

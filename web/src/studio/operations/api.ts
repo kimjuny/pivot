@@ -55,7 +55,7 @@ export interface OperationsSession {
   /** Agent-scoped version number, if pinned. */
   release_version: number | null;
   /** Session type discriminator. */
-  type: "consumer" | "studio_test";
+  type: "client" | "studio_test";
   /** User ID that owns the session. */
   user_id: number;
   /** Session lifecycle status. */
@@ -90,7 +90,7 @@ export interface OperationsSessionDetail {
   agent_id: number;
   agent_name: string;
   release_version: number | null;
-  type: "consumer" | "studio_test";
+  type: "client" | "studio_test";
   user_id: number;
   status: string;
   title: string | null;

@@ -9,14 +9,14 @@ import {
 } from "@/components/ui/chart";
 import { Line, LineChart, XAxis, YAxis } from "recharts";
 
-import type { DailyConsumerUsage } from "@/utils/api";
+import type { DailyClientUsage } from "@/utils/api";
 
-export type { DailyConsumerUsage } from "@/utils/api";
+export type { DailyClientUsage } from "@/utils/api";
 
-/** Props for the consumer usage line chart. */
-export interface ConsumerUsageChartProps {
-  /** Daily consumer sessions and distinct users for an agent. */
-  data: DailyConsumerUsage[];
+/** Props for the client usage line chart. */
+export interface ClientUsageChartProps {
+  /** Daily client sessions and distinct users for an agent. */
+  data: DailyClientUsage[];
 }
 
 const chartConfig: ChartConfig = {
@@ -30,19 +30,19 @@ const chartConfig: ChartConfig = {
   },
 };
 
-/** Line chart showing daily consumer sessions and distinct users for one agent. */
-export function ConsumerUsageChart({ data }: ConsumerUsageChartProps) {
+/** Line chart showing daily client sessions and distinct users for one agent. */
+export function ClientUsageChart({ data }: ClientUsageChartProps) {
   const totalSessions = data.reduce((sum, d) => sum + d.sessions, 0);
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">Consumer Usage</CardTitle>
+        <CardTitle className="text-sm font-medium">Client Usage</CardTitle>
       </CardHeader>
       <CardContent>
         {totalSessions === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            No consumer sessions in this period.
+            No client sessions in this period.
           </p>
         ) : (
           <ChartContainer config={chartConfig} className="h-[250px] w-full">

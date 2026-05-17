@@ -257,7 +257,7 @@ export default function SessionHistoryPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="consumer">Consumer</SelectItem>
+            <SelectItem value="client">Client</SelectItem>
             <SelectItem value="studio_test">Studio Test</SelectItem>
           </SelectContent>
         </Select>

@@ -22,7 +22,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
 
     def test_recreates_container_when_base_image_id_changes(self) -> None:
         """A rebuilt local sandbox image should invalidate reused containers."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         container = object()
 
         with (
@@ -73,7 +73,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
 
     def test_keeps_container_when_mounts_and_image_match(self) -> None:
         """Healthy sandboxes should stay warm instead of being recreated."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         container = object()
 
         with (
@@ -124,7 +124,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
 
     def test_recreates_container_when_network_mode_changes(self) -> None:
         """Changing sandbox network policy should refresh warm containers."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         container = object()
 
         with (
@@ -175,7 +175,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
 
     def test_recreates_container_when_skills_volume_mount_is_missing(self) -> None:
         """Legacy sandboxes without the private skills volume must be replaced."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         container = object()
 
         with (
@@ -225,7 +225,7 @@ class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
 
     def test_ensure_workspace_dir_rejects_paths_outside_configured_root(self) -> None:
         """Sandbox creation should reject backend paths that escape the root."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
 
         with (
             patch.object(
@@ -250,7 +250,7 @@ class SandboxManagerBackendContainerSelectionTestCase(unittest.TestCase):
 
     def test_backend_container_prefers_exact_running_name(self) -> None:
         """Sandbox-manager should not pick exited pivot-backend-run containers."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         exited_run_container = type(
             "Container",
             (),
@@ -306,7 +306,7 @@ class SandboxManagerBackendContainerSelectionTestCase(unittest.TestCase):
 
     def test_container_status_falls_back_when_property_accessor_breaks(self) -> None:
         """Status lookup should survive Podman objects whose status property raises."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
 
         class _BrokenStatusContainer:
             def __init__(self) -> None:
@@ -327,7 +327,7 @@ class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
 
     def test_preview_unreachable_detail_mentions_bind_address(self) -> None:
         """Preview connection errors should explain the required bind host."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
 
         detail = module._build_preview_unreachable_detail(
             port=8080,
@@ -339,7 +339,7 @@ class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
 
     def test_preview_disconnected_detail_mentions_http_response(self) -> None:
         """Early upstream disconnects should explain that HTTP never arrived."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
 
         detail = module._build_preview_disconnected_detail(
             port=8080,
@@ -351,7 +351,7 @@ class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
 
     def test_ensure_workspace_dir_accepts_external_posix_root(self) -> None:
         """External POSIX roots should be treated as valid workspace parents."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         backend = type(
             "Backend",
             (),
@@ -381,7 +381,7 @@ class SandboxManagerPreviewErrorMessageTestCase(unittest.TestCase):
 
     def test_resolve_host_path_prefers_external_posix_mount(self) -> None:
         """Workspace resolution should prefer the most specific external mount."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         backend_mounts = [
             {
                 "Destination": "/app/server",
@@ -417,7 +417,7 @@ class SandboxManagerHttpProxyTestCase(unittest.TestCase):
 
     def test_http_proxy_translates_remote_disconnect_into_502(self) -> None:
         """Upstream preview disconnects should become user-facing 502 errors."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
         payload = module.SandboxHttpProxyRequest(
             username="default",
             workspace_id="workspace-1",
@@ -459,7 +459,7 @@ class SandboxManagerStartFailureDetailTestCase(unittest.TestCase):
 
     def test_formats_missing_workspace_mount_as_bridge_remount_hint(self) -> None:
         """Statfs mount misses should explain the bridge remount recovery path."""
-        module = cast(Any, sandbox_manager)
+        module = cast("Any", sandbox_manager)
 
         detail = module._format_sandbox_start_failure_detail(
             name="pivot-sandbox-default-demo",

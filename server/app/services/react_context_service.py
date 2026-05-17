@@ -60,7 +60,7 @@ class ReactContextUsageService:
         task_id: str | None = None,
         draft_message: str = "",
         file_ids: list[str] | None = None,
-        session_type: str = "consumer",
+        session_type: str = "client",
         test_snapshot: dict[str, Any] | None = None,
         mandatory_skill_names: list[str] | None = None,
     ) -> ReactContextUsageResponse:
@@ -386,7 +386,7 @@ class ReactContextUsageService:
         agent_id: int,
         user_id: int,
         session_id: str | None = None,
-        session_type: str = "consumer",
+        session_type: str = "client",
         test_snapshot: dict[str, Any] | None = None,
     ) -> list[dict[str, str]]:
         """List runtime-visible skill metadata for the current chat surface.

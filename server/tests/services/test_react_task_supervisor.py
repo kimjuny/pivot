@@ -265,7 +265,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         if not isinstance(tool_execution_context, ToolExecutionContext):
             self.fail("Expected a ToolExecutionContext instance")
         self.assertEqual(
-            cast(Any, tool_execution_context).sandbox_timeout_seconds,
+            cast("Any", tool_execution_context).sandbox_timeout_seconds,
             90,
         )
 

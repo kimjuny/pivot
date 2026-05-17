@@ -44,7 +44,7 @@ class DailySessionCount:
     """One day's session counts broken down by type."""
 
     date: str
-    consumer: int
+    client: int
     studio_test: int
 
 
@@ -71,7 +71,7 @@ class DailyTokenUsage:
 
 @dataclass(frozen=True)
 class AgentPopularity:
-    """One agent's popularity rank by consumer session count."""
+    """One agent's popularity rank by client session count."""
 
     agent_id: int
     agent_name: str
@@ -163,8 +163,8 @@ class AgentReleaseItem:
 
 
 @dataclass(frozen=True)
-class DailyConsumerUsage:
-    """One day's consumer usage for a specific agent."""
+class DailyClientUsage:
+    """One day's client usage for a specific agent."""
 
     date: str
     sessions: int
@@ -245,13 +245,13 @@ class AnalyticsService:
 
         sessions_in_range = self.db.exec(
             select(func.count(Session.id)).where(  # type: ignore[reportArgumentType, reportCallIssue]
-                col(Session.type) == "consumer",
+                col(Session.type) == "client",
                 col(Session.created_at) >= range_start,
             )
         ).one()
         sessions_prev = self.db.exec(
             select(func.count(Session.id)).where(  # type: ignore[reportArgumentType, reportCallIssue]
-                col(Session.type) == "consumer",
+                col(Session.type) == "client",
                 col(Session.created_at) >= prev_start,
                 col(Session.created_at) < range_start,
             )
@@ -326,19 +326,19 @@ class AnalyticsService:
         for row in self.db.exec(stmt):
             date_str, session_type, count = row
             if date_str not in raw:
-                raw[date_str] = {"consumer": 0, "studio_test": 0}
-            key = "consumer" if session_type == "consumer" else "studio_test"
+                raw[date_str] = {"client": 0, "studio_test": 0}
+            key = "client" if session_type == "client" else "studio_test"
             raw[date_str][key] = count
 
         filled = _fill_date_range(
             raw,
             days,
-            lambda d: {"consumer": 0, "studio_test": 0},
+            lambda d: {"client": 0, "studio_test": 0},
         )
         return [
             DailySessionCount(
                 date=date_str,
-                consumer=counts["consumer"],
+                client=counts["client"],
                 studio_test=counts["studio_test"],
             )
             for date_str, counts in filled.items()
@@ -410,7 +410,7 @@ class AnalyticsService:
         ]
 
     def get_agent_popularity(self, days: int, limit: int) -> list[AgentPopularity]:
-        """Return top agents ranked by consumer session count."""
+        """Return top agents ranked by client session count."""
         now = datetime.now(UTC)
         range_start = now - timedelta(days=days)
 
@@ -424,7 +424,7 @@ class AnalyticsService:
             .join(Agent, Session.agent_id == Agent.id)  # type: ignore[reportArgumentType]
             .join(LLM, Agent.llm_id == LLM.id, isouter=True)  # type: ignore[reportArgumentType]
             .where(
-                col(Session.type) == "consumer",
+                col(Session.type) == "client",
                 col(Session.created_at) >= range_start,
             )
             .group_by(Session.agent_id, Agent.name, LLM.model)
@@ -517,7 +517,7 @@ class AnalyticsService:
         ]
 
     def get_user_activity(self, days: int) -> list[DailyUserActivity]:
-        """Return daily DAU/WAU/MAU for consumer sessions.
+        """Return daily DAU/WAU/MAU for client sessions.
 
         WAU and MAU are rolling windows computed from an extended DAU query.
         """
@@ -532,7 +532,7 @@ class AnalyticsService:
                 func.count(func.distinct(Session.user_id)),  # type: ignore[reportArgumentType, reportCallIssue]
             )
             .where(
-                col(Session.type) == "consumer",
+                col(Session.type) == "client",
                 col(Session.created_at) >= extended_start,
             )
             .group_by("date")  # type: ignore[reportArgumentType]
@@ -669,19 +669,19 @@ class AnalyticsService:
         for row in self.db.exec(stmt):
             date_str, session_type, count = row
             if date_str not in raw:
-                raw[date_str] = {"consumer": 0, "studio_test": 0}
-            key = "consumer" if session_type == "consumer" else "studio_test"
+                raw[date_str] = {"client": 0, "studio_test": 0}
+            key = "client" if session_type == "client" else "studio_test"
             raw[date_str][key] = count
 
         filled = _fill_date_range(
             raw,
             days,
-            lambda d: {"consumer": 0, "studio_test": 0},
+            lambda d: {"client": 0, "studio_test": 0},
         )
         return [
             DailySessionCount(
                 date=date_str,
-                consumer=counts["consumer"],
+                client=counts["client"],
                 studio_test=counts["studio_test"],
             )
             for date_str, counts in filled.items()
@@ -914,10 +914,10 @@ class AnalyticsService:
             )
         return results
 
-    def get_agent_consumer_usage(
+    def get_agent_client_usage(
         self, agent_id: int, days: int
-    ) -> list[DailyConsumerUsage]:
-        """Return daily consumer sessions and distinct users for this agent."""
+    ) -> list[DailyClientUsage]:
+        """Return daily client sessions and distinct users for this agent."""
         now = datetime.now(UTC)
         range_start = now - timedelta(days=days)
         date_col = _date_bucket(Session.created_at).label("date")
@@ -926,7 +926,7 @@ class AnalyticsService:
             select(date_col, func.count(Session.id))  # type: ignore[reportArgumentType, reportCallIssue]
             .where(
                 col(Session.agent_id) == agent_id,
-                col(Session.type) == "consumer",
+                col(Session.type) == "client",
                 col(Session.created_at) >= range_start,
             )
             .group_by("date")  # type: ignore[reportArgumentType]
@@ -943,7 +943,7 @@ class AnalyticsService:
             )
             .where(
                 col(Session.agent_id) == agent_id,
-                col(Session.type) == "consumer",
+                col(Session.type) == "client",
                 col(Session.created_at) >= range_start,
             )
             .group_by("date")  # type: ignore[reportArgumentType]
@@ -965,7 +965,7 @@ class AnalyticsService:
             lambda d: {"sessions": 0, "dau": 0},
         )
         return [
-            DailyConsumerUsage(
+            DailyClientUsage(
                 date=date_str,
                 sessions=vals["sessions"],
                 dau=vals["dau"],
