@@ -1414,13 +1414,11 @@ def build_mandatory_skills_prompt_json(
                 f"Mandatory skill '{skill_name}' is not visible to this agent runtime."
             )
 
-        content_path = Path(skill["location"]) / skill["filename"]
         prompt_payload.append(
             {
                 "name": skill_name,
                 "description": skill["description"],
                 "path": _sandbox_skill_entry_path(skill_name),
-                "content": _read_markdown(content_path),
             }
         )
 

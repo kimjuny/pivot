@@ -360,8 +360,8 @@ class SkillServiceTestCase(unittest.TestCase):
             ],
         )
 
-    def test_build_mandatory_skills_prompt_json_reads_full_skill_content(self) -> None:
-        """Mandatory skill prompt payloads should inline the full markdown body."""
+    def test_build_mandatory_skills_prompt_json_returns_reference_only(self) -> None:
+        """Mandatory skill prompt payloads should contain reference, not full content."""
         self._write_skill(
             self.workspace_root / "alice" / "skills",
             "sample-skill",
@@ -383,14 +383,6 @@ class SkillServiceTestCase(unittest.TestCase):
                     "name": "sample-skill",
                     "description": "Sample mandatory skill",
                     "path": "/workspace/skills/sample-skill/SKILL.md",
-                    "content": (
-                        "---\n"
-                        "name: sample-skill\n"
-                        "description: Sample mandatory skill\n"
-                        "---\n\n"
-                        "# sample-skill\n\n"
-                        "Follow the sample workflow carefully.\n"
-                    ),
                 }
             ],
         )

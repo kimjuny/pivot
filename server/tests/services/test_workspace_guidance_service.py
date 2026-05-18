@@ -77,7 +77,7 @@ class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
         )
 
     def test_runtime_user_prompt_injects_workspace_guidance(self) -> None:
-        """The task bootstrap prompt should replace the guidance placeholder."""
+        """The task bootstrap prompt should include guidance when provided."""
         rendered = prompt_template.build_runtime_user_prompt(
             workspace_guidance="# /workspace/AGENTS.md\n\nUse uv run.",
         )
@@ -85,7 +85,28 @@ class WorkspaceGuidanceServiceTestCase(unittest.TestCase):
         self.assertIn("## Workspace Guidance", rendered)
         self.assertIn("# /workspace/AGENTS.md", rendered)
         self.assertIn("Use uv run.", rendered)
-        self.assertNotIn("{{workspace_guidance}}", rendered)
+
+    def test_runtime_user_prompt_omits_workspace_guidance_when_empty(self) -> None:
+        """The task bootstrap prompt should omit guidance when not provided."""
+        rendered = prompt_template.build_runtime_user_prompt()
+
+        self.assertNotIn("## Workspace Guidance", rendered)
+
+    def test_runtime_user_prompt_omits_mandatory_skills_when_empty(self) -> None:
+        """The task bootstrap prompt should omit skills when none selected."""
+        rendered = prompt_template.build_runtime_user_prompt()
+
+        self.assertNotIn("## Mandatory Skills", rendered)
+
+    def test_runtime_user_prompt_injects_mandatory_skills_when_provided(self) -> None:
+        """The task bootstrap prompt should include skills when selected."""
+        rendered = prompt_template.build_runtime_user_prompt(
+            mandatory_skills='[{"name":"x","description":"d","path":"/workspace/skills/x/SKILL.md"}]',
+        )
+
+        self.assertIn("## Mandatory Skills", rendered)
+        self.assertIn("Read each skill's SKILL.md", rendered)
+        self.assertIn("/workspace/skills/x/SKILL.md", rendered)
 
     def test_task_start_time_uses_configured_timezone_format(self) -> None:
         """Task-start time should render in local IANA timezone format."""

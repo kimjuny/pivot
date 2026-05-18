@@ -11,7 +11,7 @@ from app.orchestration.tool.manager import ToolManager
 
 _TEMPLATE_DIR = Path(__file__).parent
 _SYSTEM_TEMPLATE_PATH = _TEMPLATE_DIR / "system_prompt.md"
-_USER_TEMPLATE_PATH = _TEMPLATE_DIR / "user_prompt.md"
+_TASK_TEMPLATE_PATH = _TEMPLATE_DIR / "task_prompt.md"
 
 
 def _read_template(path: Path) -> str:
@@ -33,7 +33,7 @@ def _read_template(path: Path) -> str:
 
 
 _REACT_SYSTEM_PROMPT = _read_template(_SYSTEM_TEMPLATE_PATH)
-_REACT_USER_PROMPT = _read_template(_USER_TEMPLATE_PATH)
+_REACT_TASK_PROMPT = _read_template(_TASK_TEMPLATE_PATH)
 
 
 def build_runtime_system_prompt(
@@ -97,30 +97,53 @@ def build_runtime_user_prompt(
     may change between tasks within the same session. Session-stable content
     (tools, skills index) lives in the system prompt instead.
 
+    Sections are included only when they have content — empty mandatory skills
+    or missing workspace guidance are omitted entirely to save tokens.
+
     Args:
-        mandatory_skills: User-selected mandatory skill payload JSON injected
-            into the task bootstrap prompt.
-        workspace_guidance: Project-local repository guidance injected into the
-            task bootstrap prompt.
+        mandatory_skills: User-selected mandatory skill payload JSON. When
+            non-empty, a section is added instructing the agent to read each
+            skill's SKILL.md on demand.
+        workspace_guidance: Project-local repository guidance (from AGENTS.md
+            or CLAUDE.md). When non-empty, a section is added telling the agent
+            to follow these rules.
         prefix_blocks: Additional prompt blocks inserted before the standard
             bootstrap template body.
         suffix_blocks: Additional prompt blocks inserted after the standard
             bootstrap template body.
 
     Returns:
-        Rendered user prompt text with task-scoped dynamic context injected.
+        Rendered task prompt text with conditional sections injected.
     """
-    rendered_prompt = (
-        _REACT_USER_PROMPT.replace("{{system_time}}", _format_task_start_time())
-        .replace("{{mandatory_skills}}", mandatory_skills)
-        .replace("{{workspace_guidance}}", workspace_guidance)
-    )
-    ordered_sections = [
+    sections: list[str] = []
+
+    base = _REACT_TASK_PROMPT.replace(
+        "{{system_time}}", _format_task_start_time()
+    ).strip()
+    sections.append(base)
+
+    if mandatory_skills and mandatory_skills != "[]":
+        sections.append(
+            "## Mandatory Skills\n\n"
+            "User-selected skills for this task. Read each skill's SKILL.md "
+            "at the given path before applying it. If you already know a skill "
+            "from prior context, you may skip re-reading.\n\n"
+            f"```json\n{mandatory_skills}\n```"
+        )
+
+    if workspace_guidance:
+        sections.append(
+            "## Workspace Guidance\n\n"
+            "You MUST follow the rules in this file:\n\n"
+            f"````markdown\n{workspace_guidance}\n````"
+        )
+
+    all_blocks: list[str] = [
         *[block.strip() for block in (prefix_blocks or []) if block.strip()],
-        rendered_prompt.strip(),
+        *sections,
         *[block.strip() for block in (suffix_blocks or []) if block.strip()],
     ]
-    return "\n\n".join(ordered_sections)
+    return "\n\n".join(all_blocks)
 
 
 def build_runtime_task_bootstrap_message(user_prompt: str) -> dict[str, Any]:
