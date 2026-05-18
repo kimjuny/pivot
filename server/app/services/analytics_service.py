@@ -71,12 +71,13 @@ class DailyTokenUsage:
 
 @dataclass(frozen=True)
 class AgentPopularity:
-    """One agent's popularity rank by client session count."""
+    """One agent's popularity rank by sessions and tasks."""
 
     agent_id: int
     agent_name: str
     model_name: str
     session_count: int
+    task_count: int
 
 
 @dataclass(frozen=True)
@@ -410,25 +411,49 @@ class AnalyticsService:
         ]
 
     def get_agent_popularity(self, days: int, limit: int) -> list[AgentPopularity]:
-        """Return top agents ranked by client session count."""
+        """Return top agents with both session and task counts.
+
+        Results are ordered by session count descending so the default
+        view (Sessions tab) shows the most relevant agents first.
+        """
         now = datetime.now(UTC)
         range_start = now - timedelta(days=days)
 
-        stmt = (
-            select(  # pyright: ignore[reportArgumentType]
-                Session.agent_id,
-                Agent.name,
-                LLM.model,
-                func.count(Session.id),  # type: ignore[reportArgumentType, reportCallIssue]
+        session_cte = (
+            select(  # type: ignore[reportArgumentType]
+                col(Session.agent_id),
+                func.count(col(Session.id)).label("session_count"),
             )
-            .join(Agent, Session.agent_id == Agent.id)  # type: ignore[reportArgumentType]
-            .join(LLM, Agent.llm_id == LLM.id, isouter=True)  # type: ignore[reportArgumentType]
             .where(
                 col(Session.type) == "client",
                 col(Session.created_at) >= range_start,
             )
-            .group_by(Session.agent_id, Agent.name, LLM.model)
-            .order_by(func.count(Session.id).desc())  # type: ignore[reportArgumentType, reportCallIssue]
+            .group_by(col(Session.agent_id))
+            .subquery()
+        )
+
+        task_cte = (
+            select(  # type: ignore[reportArgumentType]
+                col(ReactTask.agent_id),
+                func.count(col(ReactTask.id)).label("task_count"),
+            )
+            .where(col(ReactTask.created_at) >= range_start)
+            .group_by(col(ReactTask.agent_id))
+            .subquery()
+        )
+
+        stmt = (
+            select(  # type: ignore[reportArgumentType]
+                col(Agent.id),
+                col(Agent.name),
+                col(LLM.model),
+                func.coalesce(session_cte.c.session_count, 0),
+                func.coalesce(task_cte.c.task_count, 0),
+            )
+            .join(session_cte, col(Agent.id) == session_cte.c.agent_id, isouter=True)
+            .join(task_cte, col(Agent.id) == task_cte.c.agent_id, isouter=True)
+            .join(LLM, Agent.llm_id == LLM.id, isouter=True)
+            .order_by(func.coalesce(session_cte.c.session_count, 0).desc())
             .limit(limit)
         )
 
@@ -437,9 +462,10 @@ class AnalyticsService:
                 agent_id=agent_id,
                 agent_name=agent_name,
                 model_name=model or "",
-                session_count=count,
+                session_count=session_count,
+                task_count=task_count,
             )
-            for agent_id, agent_name, model, count in self.db.exec(stmt)
+            for agent_id, agent_name, model, session_count, task_count in self.db.exec(stmt)
         ]
 
     async def get_runtime_health(self) -> RuntimeHealth:

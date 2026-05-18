@@ -4189,6 +4189,7 @@ export interface AgentPopularity {
   agent_name: string;
   model_name: string;
   session_count: number;
+  task_count: number;
 }
 
 /** Runtime infrastructure health summary. */

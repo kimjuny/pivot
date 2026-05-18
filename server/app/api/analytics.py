@@ -118,6 +118,7 @@ def get_agent_popularity(
             "agent_name": item.agent_name,
             "model_name": item.model_name,
             "session_count": item.session_count,
+            "task_count": item.task_count,
         }
         for item in service.get_agent_popularity(days, limit)
     ]

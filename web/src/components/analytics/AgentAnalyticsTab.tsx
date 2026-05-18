@@ -178,11 +178,31 @@ export function AgentAnalyticsTab({ agentId }: AgentAnalyticsTabProps) {
               className={`dashboard-reveal grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 ${sectionClass}`}
               style={revealStyle(1)}
             >
-              <KpiCard title="Sessions" value={overview.sessions.toLocaleString()} />
-              <KpiCard title="Tasks" value={overview.tasks.toLocaleString()} />
-              <KpiCard title="Success Rate" value={`${overview.success_rate}%`} />
-              <KpiCard title="Avg Tokens" value={overview.avg_tokens.toLocaleString()} />
-              <KpiCard title="Avg Iterations" value={overview.avg_iterations.toString()} />
+              <KpiCard
+                title="Sessions"
+                value={overview.sessions.toLocaleString()}
+                tooltip="Total conversation sessions with this agent during the selected period."
+              />
+              <KpiCard
+                title="Tasks"
+                value={overview.tasks.toLocaleString()}
+                tooltip="Total tasks executed by this agent. Each user message that triggers agent processing counts as one task."
+              />
+              <KpiCard
+                title="Success Rate"
+                value={`${overview.success_rate}%`}
+                tooltip="Percentage of tasks that completed without errors."
+              />
+              <KpiCard
+                title="Avg Tokens"
+                value={overview.avg_tokens.toLocaleString()}
+                tooltip="Average total tokens (input + output) consumed per task."
+              />
+              <KpiCard
+                title="Avg Iterations"
+                value={overview.avg_iterations.toString()}
+                tooltip="Average number of agent reasoning-action cycles per task."
+              />
             </div>
 
             {/* Row 1: Session Timeline + Task Status */}

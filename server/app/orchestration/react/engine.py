@@ -1153,7 +1153,9 @@ class ReactEngine:
                         )
                         if isinstance(multimodal_blocks, list):
                             self._pending_multimodal_blocks.extend(multimodal_blocks)
-                    compact_item["result"] = raw_result
+                    compact_item["result"] = self._compact_result_for_llm(
+                        result_item.get("name", ""), raw_result
+                    )
                 else:
                     compact_item["error"] = result_item.get(
                         "error", "Tool execution failed"
@@ -1172,6 +1174,88 @@ class ReactEngine:
             output = event_data.get("output", {})
             return [{"result": output if isinstance(output, dict) else {}}]
         return None
+
+    @staticmethod
+    def _compact_result_for_llm(tool_name: str, raw_result: Any) -> Any:
+        """Strip tool-result fields that the LLM does not need.
+
+        SSE events and DB persistence receive the full result; this method
+        only affects what is injected into the next recursion's user message.
+
+        Args:
+            tool_name: Name of the tool that produced the result.
+            raw_result: Raw tool return value (dict, str, etc.).
+
+        Returns:
+            A compacted copy suitable for LLM consumption.
+        """
+        if not isinstance(raw_result, dict):
+            return raw_result
+
+        if tool_name == "create_preview_endpoint":
+            keep = {"preview_id", "title", "port", "path", "proxy_url"}
+            return {k: v for k, v in raw_result.items() if k in keep}
+
+        if tool_name == "web_search":
+            strip_top = {
+                "provider_request",
+                "provider_response_metadata",
+                "applied_parameters",
+                "ignored_parameters",
+                "provider",
+            }
+            strip_per_result = {
+                "favicon_url",
+                "resource_type",
+                "score",
+                "metadata",
+                "source",
+            }
+            compact = {k: v for k, v in raw_result.items() if k not in strip_top}
+            results = compact.get("results")
+            if isinstance(results, list):
+                compact["results"] = [
+                    {k: v for k, v in r.items() if k not in strip_per_result}
+                    for r in results
+                    if isinstance(r, dict)
+                ]
+            return compact
+
+        if tool_name == "search":
+            strip_top = {
+                "query",
+                "path",
+                "regex",
+                "case_sensitive",
+                "max_candidates",
+                "max_hits_per_file",
+            }
+            strip_per_candidate = {
+                "first_match_line",
+                "last_match_line",
+                "anchors_truncated",
+            }
+            compact = {k: v for k, v in raw_result.items() if k not in strip_top}
+            candidates = compact.get("candidates")
+            if isinstance(candidates, list):
+                compact["candidates"] = [
+                    {k: v for k, v in c.items() if k not in strip_per_candidate}
+                    for c in candidates
+                    if isinstance(c, dict)
+                ]
+            return compact
+
+        if tool_name == "submit_skill_change":
+            strip = {"pending_user_action", "target_kind"}
+            return {k: v for k, v in raw_result.items() if k not in strip}
+
+        if tool_name == "run_bash":
+            return {k: v for k, v in raw_result.items() if k != "ok"}
+
+        if tool_name == "edit_file":
+            return {k: v for k, v in raw_result.items() if k != "message"}
+
+        return raw_result
 
     def _extract_pending_user_action_from_tool_results(
         self,
