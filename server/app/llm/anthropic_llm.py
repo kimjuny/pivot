@@ -1,15 +1,18 @@
 """Anthropic-compatible LLM implementation.
 
-This implementation works with Anthropic's Messages API (Claude models).
+This implementation works with Anthropic's Messages API (Claude models)
+using raw HTTP requests instead of the Anthropic SDK.
 """
 
 import contextlib
+import json
+import logging
 import time
 import uuid
 from collections.abc import Iterator
 from typing import Any
 
-from anthropic import Anthropic
+import requests
 
 from .abstract_llm import (
     AbstractLLM,
@@ -23,16 +26,17 @@ from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_anthropic_content
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
+logger = logging.getLogger(__name__)
+
 
 class AnthropicLLM(AbstractLLM):
     """Generic implementation for Anthropic Messages API.
 
     This implementation works with Anthropic's Claude models and any
-    compatible APIs that follow the same protocol.
+    compatible APIs that follow the same protocol, using raw HTTP requests.
     """
 
     DEFAULT_TIMEOUT = 60  # Request timeout in seconds
-    MAX_RETRIES = 3  # Maximum number of retry attempts
     DEFAULT_MAX_TOKENS = 4096  # Default max tokens for response
 
     def __init__(
@@ -53,9 +57,12 @@ class AnthropicLLM(AbstractLLM):
             endpoint: The base URL for the API (e.g., "https://api.anthropic.com")
             model: The model identifier to use (e.g., "claude-3-5-sonnet-20241022")
             api_key: API key for authentication
+            cache_policy: Cache policy for prompt caching.
+            thinking_policy: Thinking/reasoning policy for extended thinking.
+            thinking_effort: Thinking effort level (e.g. "low", "medium", "high").
+            thinking_budget_tokens: Token budget for thinking.
             timeout: Request timeout in seconds. Defaults to 60 seconds.
             extra_config: Additional kwargs to pass to API calls.
-                         Example: {"extra_body": {"reasoning_split": True}}
 
         Raises:
             ValueError: If any required parameter is missing
@@ -84,14 +91,6 @@ class AnthropicLLM(AbstractLLM):
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
 
-        # Initialize Anthropic client
-        self.client = Anthropic(
-            api_key=self.api_key,
-            base_url=self.endpoint,
-            timeout=self.timeout,
-            max_retries=self.MAX_RETRIES,
-        )
-
     def _convert_messages(
         self, messages: list[dict[str, Any]]
     ) -> tuple[str, list[dict[str, Any]]]:
@@ -113,16 +112,12 @@ class AnthropicLLM(AbstractLLM):
             content = msg.get("content", "")
 
             if role == "system":
-                # Extract system message separately
                 if isinstance(content, str):
                     system_message = content
             elif role in ["user", "assistant"]:
-                # Keep user and assistant messages
                 formatted_messages.append(
                     {"role": role, "content": to_anthropic_content(content)}
                 )
-            # Note: Anthropic doesn't use "tool" role the same way as OpenAI
-            # Tool results are formatted differently in Anthropic's API
 
         return system_message, formatted_messages
 
@@ -130,8 +125,6 @@ class AnthropicLLM(AbstractLLM):
         self, openai_tools: list[dict[str, Any]] | None
     ) -> list[dict[str, Any]] | None:
         """Convert OpenAI-format tools to Anthropic format.
-
-        Anthropic tools format is slightly different from OpenAI's.
 
         Args:
             openai_tools: Tools in OpenAI format
@@ -146,7 +139,6 @@ class AnthropicLLM(AbstractLLM):
         for tool in openai_tools:
             if tool.get("type") == "function":
                 func = tool.get("function", {})
-                # Anthropic format
                 anthropic_tool = {
                     "name": func.get("name", ""),
                     "description": func.get("description", ""),
@@ -215,134 +207,183 @@ class AnthropicLLM(AbstractLLM):
 
         return system_message, formatted_messages
 
-    def _convert_anthropic_response(
-        self, raw_response: Any, is_stream_chunk: bool = False
-    ) -> Response:
-        """Convert Anthropic API response to our structured Response format.
+    @staticmethod
+    def _http_error_detail(response: requests.Response | None) -> str:
+        """Build a concise provider-facing diagnostic string for failed responses."""
+        if response is None:
+            return "<no response>"
+
+        request_id = ""
+        for header_name in (
+            "x-request-id",
+            "request-id",
+            "x-amzn-requestid",
+            "trace-id",
+        ):
+            header_value = response.headers.get(header_name)
+            if isinstance(header_value, str) and header_value.strip():
+                request_id = header_value.strip()
+                break
+
+        content_type = response.headers.get("content-type", "").strip()
+
+        parsed_body: Any = None
+        with contextlib.suppress(Exception):
+            parsed_body = response.json()
+
+        detail = ""
+        if isinstance(parsed_body, dict):
+            summary_keys = (
+                "error",
+                "message",
+                "type",
+            )
+            summary = {
+                key: parsed_body[key]
+                for key in summary_keys
+                if key in parsed_body and parsed_body[key] not in (None, "")
+            }
+            detail = json.dumps(
+                summary or parsed_body,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        else:
+            with contextlib.suppress(Exception):
+                detail = (response.text or "").strip()
+
+        if not detail:
+            detail = "<empty response body>"
+        if len(detail) > 1200:
+            detail = f"{detail[:1200]}...(truncated)"
+
+        suffix_parts: list[str] = []
+        if content_type:
+            suffix_parts.append(f"content_type={content_type}")
+        if request_id:
+            suffix_parts.append(f"request_id={request_id}")
+        if suffix_parts:
+            return f"{detail} ({', '.join(suffix_parts)})"
+        return detail
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build HTTP headers for Anthropic API requests."""
+        return {
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+    def _build_api_url(self) -> str:
+        """Build the full API URL for the Messages endpoint."""
+        return f"{self.endpoint.rstrip('/')}/v1/messages"
+
+    def _build_api_params(
+        self,
+        messages: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Build the full API request payload.
 
         Args:
-            raw_response: Response from the Anthropic client
-            is_stream_chunk: Whether this is a streaming chunk
+            messages: Raw message list from caller.
+            **kwargs: Additional API parameters.
 
         Returns:
-            Response: Structured response in our standard format
+            Complete JSON payload dict for the Anthropic Messages API.
         """
-        # Extract basic information
-        response_id = getattr(raw_response, "id", str(uuid.uuid4()))
-        response_model = getattr(raw_response, "model", self.model)
+        kwargs.pop("_pivot_task_id", None)
+        kwargs.pop("_pivot_previous_response_id", None)
 
-        # For streaming chunks
-        if is_stream_chunk:
-            # Handle different chunk types
-            chunk_type = getattr(raw_response, "type", "")
+        system_message, formatted_messages = self._convert_messages(messages)
+        merged_kwargs = {**self.extra_config, **kwargs}
 
-            if chunk_type == "content_block_start":
-                # Starting a new content block
-                content_block = getattr(raw_response, "content_block", None)
-                if content_block:
-                    block_type = getattr(content_block, "type", "")
-                    if block_type == "tool_use":
-                        # Tool use started - we'll get the details in subsequent deltas
-                        # Return empty response for now
-                        pass
-            elif chunk_type == "content_block_delta":
-                delta = getattr(raw_response, "delta", None)
-                if delta:
-                    delta_type = getattr(delta, "type", "")
-                    if delta_type == "text_delta":
-                        # Text content delta
-                        text = getattr(delta, "text", "")
-                        message = ChatMessage(role="assistant", content=text)
-                        choice = Choice(index=0, message=message)
-                        return Response(
-                            id=response_id,
-                            choices=[choice],
-                            created=int(time.time()),
-                            model=response_model,
-                        )
-                    elif delta_type == "thinking_delta":
-                        thinking = getattr(delta, "thinking", "")
-                        if isinstance(thinking, str) and thinking:
-                            message = ChatMessage(
-                                role="assistant",
-                                content="",
-                                reasoning_content=thinking,
-                            )
-                            choice = Choice(index=0, message=message)
-                            return Response(
-                                id=response_id,
-                                choices=[choice],
-                                created=int(time.time()),
-                                model=response_model,
-                            )
-                    elif delta_type == "input_json_delta":
-                        # Tool use input delta - could accumulate and return later if needed
-                        # For now, we'll handle complete tool use in message_stop
-                        pass
+        tools = merged_kwargs.pop("tools", None)
+        anthropic_tools = self._convert_tools_to_anthropic(tools)
 
-            # Return empty response for other chunk types
-            return Response(
-                id=response_id,
-                choices=[],
-                created=int(time.time()),
-                model=response_model,
+        if "max_tokens" not in merged_kwargs:
+            merged_kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
+
+        api_params: dict[str, Any] = {
+            "model": self.model,
+            "messages": formatted_messages,
+            **merged_kwargs,
+        }
+
+        if system_message:
+            api_params["system"] = system_message
+
+        if anthropic_tools:
+            api_params["tools"] = anthropic_tools
+
+        if self.cache_policy == "anthropic-auto-cache":
+            api_params["cache_control"] = {"type": "ephemeral"}
+        elif self.cache_policy == "anthropic-block-cache":
+            cached_system, cached_messages = self._apply_block_cache_to_prompt(
+                system_message,
+                formatted_messages,
             )
+            if cached_system:
+                api_params["system"] = cached_system
+            api_params["messages"] = cached_messages
 
-        # For non-streaming responses
-        # Extract content blocks (Anthropic returns array of content blocks)
-        content_blocks = getattr(raw_response, "content", [])
+        return api_params
+
+    def _parse_response(self, raw_dict: dict[str, Any]) -> Response:
+        """Parse a non-streaming Anthropic Messages API response dict.
+
+        Args:
+            raw_dict: Parsed JSON response from the Anthropic API.
+
+        Returns:
+            Structured Response in our standard format.
+        """
+        response_id = raw_dict.get("id", str(uuid.uuid4()))
+        response_model = raw_dict.get("model", self.model)
+
+        content_blocks = raw_dict.get("content", [])
         content_text = ""
         reasoning_text = ""
-        tool_calls = []
+        tool_calls: list[dict[str, Any]] = []
 
         for block in content_blocks:
-            block_type = getattr(block, "type", "")
+            block_type = block.get("type", "")
 
             if block_type == "text":
-                # Text content
-                if hasattr(block, "text"):
-                    content_text += block.text
+                content_text += block.get("text", "")
             elif block_type == "thinking":
-                block_thinking = getattr(block, "thinking", None)
-                if not isinstance(block_thinking, str) or not block_thinking:
-                    block_thinking = getattr(block, "text", "")
-                if isinstance(block_thinking, str):
-                    reasoning_text += block_thinking
+                thinking = block.get("thinking", "")
+                if not isinstance(thinking, str) or not thinking:
+                    thinking = block.get("text", "")
+                if isinstance(thinking, str):
+                    reasoning_text += thinking
             elif block_type == "tool_use":
-                # Tool use block - convert to OpenAI format
-                tool_id = getattr(block, "id", "")
-                tool_name = getattr(block, "name", "")
-                tool_input = getattr(block, "input", {})
+                tool_calls.append(
+                    {
+                        "id": block.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": block.get("name", ""),
+                            "arguments": json.dumps(
+                                block.get("input", {}), ensure_ascii=False
+                            ),
+                        },
+                    }
+                )
 
-                # Convert to OpenAI tool call format
-                import json
-
-                tool_call = {
-                    "id": tool_id,
-                    "type": "function",
-                    "function": {
-                        "name": tool_name,
-                        "arguments": json.dumps(tool_input, ensure_ascii=False),
-                    },
-                }
-                tool_calls.append(tool_call)
-
-        # Extract finish reason
         finish_reason = None
-        raw_stop_reason = getattr(raw_response, "stop_reason", None)
+        raw_stop_reason = raw_dict.get("stop_reason")
         if raw_stop_reason:
-            # Map Anthropic stop reasons to our FinishReason enum
-            if raw_stop_reason == "end_turn":
-                finish_reason = FinishReason.STOP
-            elif raw_stop_reason == "max_tokens":
-                finish_reason = FinishReason.LENGTH
-            elif raw_stop_reason == "tool_use":
-                finish_reason = FinishReason.TOOL_CALLS
-            else:
+            stop_reason_map = {
+                "end_turn": FinishReason.STOP,
+                "max_tokens": FinishReason.LENGTH,
+                "tool_use": FinishReason.TOOL_CALLS,
+            }
+            finish_reason = stop_reason_map.get(raw_stop_reason)
+            if finish_reason is None:
                 with contextlib.suppress(ValueError):
                     finish_reason = FinishReason(raw_stop_reason)
 
-        # Create message with tool calls if present
         message = ChatMessage(
             role="assistant",
             content=content_text if content_text else None,
@@ -350,24 +391,21 @@ class AnthropicLLM(AbstractLLM):
             tool_calls=tool_calls if tool_calls else None,
         )
 
-        # Create choice
         choice = Choice(index=0, message=message, finish_reason=finish_reason)
 
-        # Extract usage information.
-        # Anthropic's `input_tokens` counts only uncached input; cache
-        # creation and cache read tokens must be added back to get the true
-        # total prompt size.
         usage = None
-        raw_usage = getattr(raw_response, "usage", None)
-        if raw_usage:
-            cache_creation = getattr(raw_usage, "cache_creation_input_tokens", 0) or 0
-            cache_read = getattr(raw_usage, "cache_read_input_tokens", 0) or 0
-            prompt_tokens = getattr(raw_usage, "input_tokens", 0) + cache_creation + cache_read
-            completion_tokens = getattr(raw_usage, "output_tokens", 0)
+        raw_usage = raw_dict.get("usage")
+        if isinstance(raw_usage, dict):
+            cache_creation = raw_usage.get("cache_creation_input_tokens", 0) or 0
+            cache_read = raw_usage.get("cache_read_input_tokens", 0) or 0
+            input_tokens = (
+                raw_usage.get("input_tokens", 0) + cache_creation + cache_read
+            )
+            completion_tokens = raw_usage.get("output_tokens", 0)
             usage = UsageInfo(
-                prompt_tokens=prompt_tokens,
+                prompt_tokens=input_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=prompt_tokens + completion_tokens,
+                total_tokens=input_tokens + completion_tokens,
                 cached_input_tokens=cache_read,
             )
 
@@ -379,42 +417,102 @@ class AnthropicLLM(AbstractLLM):
             usage=usage,
         )
 
-    def _extract_stream_usage(self, raw_event: Any) -> UsageInfo | None:
-        """Extract usage tokens from Anthropic streaming events."""
+    def _parse_stream_event(self, event_data: dict[str, Any]) -> Response | None:
+        """Parse a single Anthropic SSE event into a Response, or None if ignorable.
 
-        def _read(source: Any, key: str) -> Any:
-            if source is None:
-                return None
-            if isinstance(source, dict):
-                return source.get(key)
-            return getattr(source, key, None)
+        Args:
+            event_data: Parsed JSON dict of one SSE event.
 
-        event_type = getattr(raw_event, "type", "")
+        Returns:
+            Response with text/reasoning/tool content, usage-only Response,
+            or None for events that don't carry user-visible content.
+        """
+        event_type = event_data.get("type", "")
+
         if event_type == "message_start":
-            message_obj = getattr(raw_event, "message", None)
-            raw_usage = _read(message_obj, "usage")
+            return None
+
+        if event_type == "message_delta":
+            # message_delta carries stop_reason and sometimes usage.
+            return None
+
+        if event_type == "content_block_start":
+            return None
+
+        if event_type == "content_block_stop":
+            return None
+
+        if event_type == "content_block_delta":
+            delta = event_data.get("delta", {})
+            delta_type = delta.get("type", "")
+
+            if delta_type == "text_delta":
+                text = delta.get("text", "")
+                message = ChatMessage(role="assistant", content=text)
+                choice = Choice(index=0, message=message)
+                return Response(
+                    id=str(uuid.uuid4()),
+                    choices=[choice],
+                    created=int(time.time()),
+                    model=self.model,
+                )
+
+            if delta_type == "thinking_delta":
+                thinking = delta.get("thinking", "")
+                if isinstance(thinking, str) and thinking:
+                    message = ChatMessage(
+                        role="assistant",
+                        content="",
+                        reasoning_content=thinking,
+                    )
+                    choice = Choice(index=0, message=message)
+                    return Response(
+                        id=str(uuid.uuid4()),
+                        choices=[choice],
+                        created=int(time.time()),
+                        model=self.model,
+                    )
+
+            if delta_type == "input_json_delta":
+                # Tool input is accumulated by the caller; nothing to yield.
+                return None
+
+            return None
+
+        return None
+
+    def _extract_stream_usage(self, event_data: dict[str, Any]) -> UsageInfo | None:
+        """Extract usage tokens from Anthropic streaming events.
+
+        Anthropic emits usage in ``message_start`` (with initial input tokens)
+        and ``message_delta`` (with final output tokens). We extract whichever
+        is present.
+        """
+        event_type = event_data.get("type", "")
+
+        raw_usage: dict[str, Any] | None = None
+        if event_type == "message_start":
+            message_obj = event_data.get("message", {})
+            raw_usage = (
+                message_obj.get("usage") if isinstance(message_obj, dict) else None
+            )
         elif event_type == "message_delta":
-            raw_usage = _read(raw_event, "usage")
+            raw_usage = event_data.get("usage")
         else:
             return None
 
-        if raw_usage is None:
+        if not isinstance(raw_usage, dict):
             return None
 
-        input_tokens = _read(raw_usage, "input_tokens")
-        completion_tokens = _read(raw_usage, "output_tokens")
+        input_tokens = raw_usage.get("input_tokens", 0)
         if not isinstance(input_tokens, int):
             input_tokens = 0
+        completion_tokens = raw_usage.get("output_tokens", 0)
         if not isinstance(completion_tokens, int):
             completion_tokens = 0
 
-        def _safe_int(val: Any) -> int:
-            if not isinstance(val, int):
-                return 0
-            return max(val, 0)
-
-        cache_creation = _safe_int(_read(raw_usage, "cache_creation_input_tokens"))
-        cache_read = _safe_int(_read(raw_usage, "cache_read_input_tokens"))
+        cache_creation = raw_usage.get("cache_creation_input_tokens", 0) or 0
+        cache_read = raw_usage.get("cache_read_input_tokens", 0) or 0
         prompt_tokens = max(input_tokens, 0) + cache_creation + cache_read
 
         return UsageInfo(
@@ -439,54 +537,32 @@ class AnthropicLLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
-            kwargs.pop("_pivot_task_id", None)
-            kwargs.pop("_pivot_previous_response_id", None)
-            # Convert messages to Anthropic format
-            system_message, formatted_messages = self._convert_messages(messages)
+            url = self._build_api_url()
+            headers = self._build_headers()
+            payload = self._build_api_params(messages, **kwargs)
 
-            # Merge extra_config with kwargs (kwargs takes precedence)
-            merged_kwargs = {**self.extra_config, **kwargs}
+            response = requests.post(
+                url, headers=headers, json=payload, timeout=self.timeout
+            )
+            response.raise_for_status()
 
-            # Convert tools from OpenAI format to Anthropic format if present
-            tools = merged_kwargs.pop("tools", None)
-            anthropic_tools = self._convert_tools_to_anthropic(tools)
+            return self._parse_response(response.json())
 
-            # Set default max_tokens if not provided (required by Anthropic)
-            if "max_tokens" not in merged_kwargs:
-                merged_kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
-
-            # Build API call parameters
-            api_params: dict[str, Any] = {
-                "model": self.model,
-                "messages": formatted_messages,
-                **merged_kwargs,
-            }
-
-            # Add system message if present
-            if system_message:
-                api_params["system"] = system_message
-
-            # Add tools if present
-            if anthropic_tools:
-                api_params["tools"] = anthropic_tools
-
-            if self.cache_policy == "anthropic-auto-cache":
-                api_params["cache_control"] = {"type": "ephemeral"}
-            elif self.cache_policy == "anthropic-block-cache":
-                cached_system, cached_messages = self._apply_block_cache_to_prompt(
-                    system_message,
-                    formatted_messages,
-                )
-                if cached_system:
-                    api_params["system"] = cached_system
-                api_params["messages"] = cached_messages
-
-            # Call Anthropic API
-            response = self.client.messages.create(**api_params)
-
-            # Convert to our structured response format
-            return self._convert_anthropic_response(response, is_stream_chunk=False)
-
+        except requests.exceptions.HTTPError as e:
+            resp = getattr(e, "response", None)
+            text = self._http_error_detail(resp)
+            logger.error(
+                "Anthropic request failed endpoint=%s model=%s status=%s detail=%s",
+                self.endpoint,
+                self.model,
+                resp.status_code if resp is not None else "unknown",
+                text,
+            )
+            raise RuntimeError(
+                "Anthropic API request failed for "
+                f"{self.endpoint}: HTTP "
+                f"{resp.status_code if resp is not None else 'Unknown'} - {text}"
+            ) from e
         except Exception as e:
             raise RuntimeError(
                 f"Anthropic API request failed for {self.endpoint}: {e!s}"
@@ -509,63 +585,48 @@ class AnthropicLLM(AbstractLLM):
             RuntimeError: If the API request fails
         """
         try:
-            kwargs.pop("_pivot_task_id", None)
-            kwargs.pop("_pivot_previous_response_id", None)
-            # Convert messages to Anthropic format
-            system_message, formatted_messages = self._convert_messages(messages)
+            url = self._build_api_url()
+            headers = self._build_headers()
+            payload = self._build_api_params(messages, **kwargs)
+            payload["stream"] = True
 
-            # Merge extra_config with kwargs (kwargs takes precedence)
-            merged_kwargs = {**self.extra_config, **kwargs}
+            with requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.timeout,
+                stream=True,
+            ) as resp:
+                resp.raise_for_status()
 
-            # Convert tools from OpenAI format to Anthropic format if present
-            tools = merged_kwargs.pop("tools", None)
-            anthropic_tools = self._convert_tools_to_anthropic(tools)
+                stream_response_id = ""
 
-            # Set default max_tokens if not provided (required by Anthropic)
-            if "max_tokens" not in merged_kwargs:
-                merged_kwargs["max_tokens"] = self.DEFAULT_MAX_TOKENS
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    line = line.decode("utf-8")
+                    if not line.startswith("data:"):
+                        continue
 
-            # Build API call parameters
-            api_params: dict[str, Any] = {
-                "model": self.model,
-                "messages": formatted_messages,
-                **merged_kwargs,
-            }
+                    data_str = line[len("data:") :].strip()
+                    if not data_str:
+                        continue
 
-            # Add system message if present
-            if system_message:
-                api_params["system"] = system_message
+                    try:
+                        event_data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
 
-            # Add tools if present
-            if anthropic_tools:
-                api_params["tools"] = anthropic_tools
+                    # Track message ID from message_start.
+                    if event_data.get("type") == "message_start":
+                        msg_obj = event_data.get("message", {})
+                        msg_id = (
+                            msg_obj.get("id", "") if isinstance(msg_obj, dict) else ""
+                        )
+                        if isinstance(msg_id, str) and msg_id:
+                            stream_response_id = msg_id
 
-            if self.cache_policy == "anthropic-auto-cache":
-                api_params["cache_control"] = {"type": "ephemeral"}
-            elif self.cache_policy == "anthropic-block-cache":
-                cached_system, cached_messages = self._apply_block_cache_to_prompt(
-                    system_message,
-                    formatted_messages,
-                )
-                if cached_system:
-                    api_params["system"] = cached_system
-                api_params["messages"] = cached_messages
-
-            # Use low-level stream=True path. For some Anthropic-compatible
-            # providers this avoids SDK-level message snapshot accumulation
-            # errors in ``messages.stream(...)``.
-            stream = self.client.messages.create(**api_params, stream=True)
-            stream_response_id = ""
-            try:
-                for event in stream:
-                    event_type = getattr(event, "type", "")
-                    if event_type == "message_start":
-                        message_obj = getattr(event, "message", None)
-                        message_id = getattr(message_obj, "id", "")
-                        if isinstance(message_id, str) and message_id:
-                            stream_response_id = message_id
-
-                    usage = self._extract_stream_usage(event)
+                    usage = self._extract_stream_usage(event_data)
                     if usage is not None:
                         yield Response(
                             id=stream_response_id or str(uuid.uuid4()),
@@ -575,19 +636,27 @@ class AnthropicLLM(AbstractLLM):
                             usage=usage,
                         )
 
-                    converted = self._convert_anthropic_response(
-                        event,
-                        is_stream_chunk=True,
-                    )
-                    if stream_response_id:
-                        converted.id = stream_response_id
-                    if converted.choices:
-                        yield converted
-            finally:
-                close_stream = getattr(stream, "close", None)
-                if callable(close_stream):
-                    close_stream()
+                    parsed = self._parse_stream_event(event_data)
+                    if parsed is not None:
+                        if stream_response_id:
+                            parsed.id = stream_response_id
+                        yield parsed
 
+        except requests.exceptions.HTTPError as e:
+            resp = getattr(e, "response", None)
+            text = self._http_error_detail(resp)
+            logger.error(
+                "Anthropic streaming failed endpoint=%s model=%s status=%s detail=%s",
+                self.endpoint,
+                self.model,
+                resp.status_code if resp is not None else "unknown",
+                text,
+            )
+            raise RuntimeError(
+                "Anthropic streaming failed for "
+                f"{self.endpoint}: HTTP "
+                f"{resp.status_code if resp is not None else 'Unknown'} - {text}"
+            ) from e
         except Exception as e:
             raise RuntimeError(
                 f"Anthropic streaming failed for {self.endpoint}: {e!s}"
