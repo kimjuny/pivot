@@ -47,6 +47,7 @@ const PROTOCOL_LABELS: Record<string, string> = {
   openai_completion_llm: 'Completion',
   openai_response_llm: 'Response',
   anthropic_compatible: 'Anthropic',
+  gemini_compatible: 'Gemini',
 };
 
 function formatProtocolLabel(protocol: string): string {

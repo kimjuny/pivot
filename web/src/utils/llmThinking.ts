@@ -15,7 +15,8 @@ export type ThinkingProvider =
   | "completion_toggle"
   | "mimo"
   | "chatgpt"
-  | "claude";
+  | "claude"
+  | "gemini";
 
 /**
  * One provider option shown in the top-level Thinking selector.
@@ -73,6 +74,8 @@ const SUPPORTED_THINKING_POLICIES = new Set([
   "claude-thinking-adaptive",
   "mimo-anthropic-thinking-enabled",
   "mimo-anthropic-thinking-disabled",
+  "gemini-25-thinking-budget",
+  "gemini-3x-thinking-level",
 ]);
 
 /**
@@ -99,6 +102,10 @@ export const THINKING_PROVIDER_OPTIONS: Record<
     { value: "auto", label: "Auto" },
     { value: "claude", label: "Claude" },
     { value: "mimo", label: "MiMo" },
+  ],
+  gemini_compatible: [
+    { value: "auto", label: "Auto" },
+    { value: "gemini", label: "Gemini" },
   ],
 };
 
@@ -166,6 +173,15 @@ export function getDefaultThinkingEditorState(
       detailValue: "enabled",
       effortValue: "",
       budgetTokens: null,
+    };
+  }
+
+  if (protocol === "gemini_compatible") {
+    return {
+      provider,
+      detailValue: "3x",
+      effortValue: "medium",
+      budgetTokens: -1,
     };
   }
 
@@ -276,6 +292,20 @@ export function getThinkingEditorStateFromPolicy(
         effortValue: effort ?? "high",
         budgetTokens: null,
       };
+    case "gemini-25-thinking-budget":
+      return {
+        provider: "gemini",
+        detailValue: "25",
+        effortValue: "",
+        budgetTokens: budgetTokens ?? -1,
+      };
+    case "gemini-3x-thinking-level":
+      return {
+        provider: "gemini",
+        detailValue: "3x",
+        effortValue: effort ?? "medium",
+        budgetTokens: null,
+      };
     default:
       return getDefaultThinkingEditorState(protocol, "auto");
   }
@@ -365,6 +395,23 @@ export function buildThinkingPolicyFromEditorState(
             ? "mimo-anthropic-thinking-disabled"
             : "mimo-anthropic-thinking-enabled",
         thinking_effort: "",
+        thinking_budget_tokens: null,
+      };
+    }
+  }
+
+  if (protocol === "gemini_compatible") {
+    if (provider === "gemini") {
+      if (detailValue === "25") {
+        return {
+          thinking_policy: "gemini-25-thinking-budget",
+          thinking_effort: "",
+          thinking_budget_tokens: budgetTokens ?? -1,
+        };
+      }
+      return {
+        thinking_policy: "gemini-3x-thinking-level",
+        thinking_effort: effortValue || "medium",
         thinking_budget_tokens: null,
       };
     }

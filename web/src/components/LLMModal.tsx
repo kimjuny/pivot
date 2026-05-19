@@ -210,6 +210,9 @@ const CACHE_POLICY_OPTIONS: Record<string, { value: string; label: string }[]> =
     { value: 'anthropic-auto-cache', label: 'Anthropic Auto Cache' },
     { value: 'anthropic-block-cache', label: 'Anthropic Block Cache' },
   ],
+  gemini_compatible: [
+    { value: 'none', label: 'None' },
+  ],
 };
 
 function getThinkingTooltipContent(
@@ -243,6 +246,13 @@ function getThinkingTooltipContent(
         detailValue === 'adaptive'
           ? 'Current payload: {"thinking": {"type": "adaptive"}, "output_config": {"effort": "low" | "medium" | "high" | "max"}}'
           : 'Current payload: {"thinking": {"type": "enabled", "budget_tokens": number}}';
+    }
+  } else if (protocol === 'gemini_compatible') {
+    if (provider === 'gemini') {
+      payloadHint =
+        detailValue === '25'
+          ? 'Current payload: {"generationConfig": {"thinkingConfig": {"thinkingBudget": -1 | number, "includeThoughts": true}}}'
+          : 'Current payload: {"generationConfig": {"thinkingConfig": {"thinkingLevel": "minimal" | "low" | "medium" | "high", "includeThoughts": true}}}';
     }
   }
 
@@ -744,6 +754,9 @@ function LLMModal({
                     <SelectItem value="anthropic_compatible">
                       Anthropic Compatible
                     </SelectItem>
+                    <SelectItem value="gemini_compatible">
+                      Gemini Compatible
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1020,6 +1033,100 @@ function LLMModal({
                                 <SelectItem value="low">low</SelectItem>
                               </SelectContent>
                             </Select>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {currentThinkingState.provider === 'gemini' && (
+                      <>
+                        <div className="space-y-2">
+                          <FormLabel
+                            htmlFor="thinking_gemini_generation"
+                            label="Generation"
+                            tooltip="Gemini 2.5 models use thinkingBudget (token budget). Gemini 3.x models use thinkingLevel (effort tier)."
+                          />
+                          <Select
+                            value={currentThinkingState.detailValue}
+                            onValueChange={(value) =>
+                              applyThinkingEditorState(
+                                currentThinkingState.provider,
+                                value,
+                                value === '3x'
+                                  ? currentThinkingState.effortValue || 'medium'
+                                  : '',
+                                value === '25'
+                                  ? currentThinkingState.budgetTokens ?? -1
+                                  : null,
+                              )
+                            }
+                            disabled={isSubmitting}
+                          >
+                            <SelectTrigger id="thinking_gemini_generation">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="3x">Gemini 3.x (thinkingLevel)</SelectItem>
+                              <SelectItem value="25">Gemini 2.5 (thinkingBudget)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {currentThinkingState.detailValue === '3x' && (
+                          <div className="space-y-2">
+                            <FormLabel
+                              htmlFor="thinking_gemini_level"
+                              label="Thinking Level"
+                              tooltip="Gemini 3.x uses thinkingLevel in generationConfig.thinkingConfig."
+                            />
+                            <Select
+                              value={currentThinkingState.effortValue}
+                              onValueChange={(value) =>
+                                applyThinkingEditorState(
+                                  currentThinkingState.provider,
+                                  currentThinkingState.detailValue,
+                                  value,
+                                  currentThinkingState.budgetTokens,
+                                )
+                              }
+                              disabled={isSubmitting}
+                            >
+                              <SelectTrigger id="thinking_gemini_level">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="high">high</SelectItem>
+                                <SelectItem value="medium">medium</SelectItem>
+                                <SelectItem value="low">low</SelectItem>
+                                <SelectItem value="minimal">minimal</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+
+                        {currentThinkingState.detailValue === '25' && (
+                          <div className="space-y-2">
+                            <FormLabel
+                              htmlFor="thinking_gemini_budget"
+                              label="Thinking Budget"
+                              tooltip="Gemini 2.5 uses thinkingBudget. -1 = dynamic (default), 0 = disabled (Flash only)."
+                            />
+                            <Input
+                              id="thinking_gemini_budget"
+                              type="number"
+                              value={currentThinkingState.budgetTokens ?? ''}
+                              onChange={(e) =>
+                                applyThinkingEditorState(
+                                  currentThinkingState.provider,
+                                  currentThinkingState.detailValue,
+                                  currentThinkingState.effortValue,
+                                  Number.parseInt(e.target.value, 10) || -1,
+                                )
+                              }
+                              disabled={isSubmitting}
+                              placeholder="-1"
+                              autoComplete="off"
+                            />
                           </div>
                         )}
                       </>

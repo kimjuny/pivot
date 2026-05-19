@@ -61,8 +61,22 @@ def create_llm_from_config(llm_config: LLM) -> AbstractLLM:
             thinking_budget_tokens=llm_config.thinking_budget_tokens,
             extra_config=extra_config,
         )
+    elif protocol == "gemini_compatible":
+        from .gemini_llm import GeminiLLM
+
+        return GeminiLLM(
+            endpoint=llm_config.endpoint,
+            model=llm_config.model,
+            api_key=llm_config.api_key,
+            cache_policy=llm_config.cache_policy,
+            thinking_policy=llm_config.thinking_policy,
+            thinking_effort=llm_config.thinking_effort,
+            thinking_budget_tokens=llm_config.thinking_budget_tokens,
+            extra_config=extra_config,
+        )
     else:
         raise ValueError(
             f"Unsupported protocol: {llm_config.protocol}. "
-            f"Supported protocols: openai_completion_llm, openai_response_llm, anthropic_compatible"
+            f"Supported protocols: openai_completion_llm, openai_response_llm, "
+            f"anthropic_compatible, gemini_compatible"
         )

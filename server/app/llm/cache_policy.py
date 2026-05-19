@@ -20,6 +20,7 @@ PROTOCOL_CACHE_POLICIES: dict[str, tuple[str, ...]] = {
         "anthropic-auto-cache",
         "anthropic-block-cache",
     ),
+    "gemini_compatible": ("none",),
 }
 
 

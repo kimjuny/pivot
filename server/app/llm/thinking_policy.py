@@ -9,6 +9,8 @@ GENERIC_COMPLETION_THINKING_DISABLED = "generic-completion-thinking-disabled"
 DEFAULT_CLAUDE_EXTENDED_BUDGET_TOKENS = 10000
 DEFAULT_CLAUDE_ADAPTIVE_EFFORT = "high"
 DEFAULT_OPENAI_RESPONSE_REASONING_EFFORT = "medium"
+DEFAULT_GEMINI_25_THINKING_BUDGET = -1
+DEFAULT_GEMINI_3X_THINKING_LEVEL = "medium"
 
 ThinkingMode = Literal["auto", "fast", "thinking"]
 
@@ -32,6 +34,11 @@ PROTOCOL_THINKING_POLICIES: dict[str, tuple[str, ...]] = {
         "claude-thinking-adaptive",
         "mimo-anthropic-thinking-enabled",
         "mimo-anthropic-thinking-disabled",
+    ),
+    "gemini_compatible": (
+        "auto",
+        "gemini-25-thinking-budget",
+        "gemini-3x-thinking-level",
     ),
 }
 
@@ -59,6 +66,7 @@ LEGACY_THINKING_POLICY_ALIASES = {
 
 CLAUDE_ADAPTIVE_EFFORTS = {"low", "medium", "high", "max"}
 OPENAI_RESPONSE_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh"}
+GEMINI_3X_THINKING_LEVELS = {"minimal", "low", "medium", "high"}
 
 
 def get_thinking_policies_for_protocol(protocol: str) -> Sequence[str]:
@@ -135,6 +143,21 @@ def validate_thinking_policy(
             raise ValueError(
                 "thinking_effort must be one of "
                 f"{', '.join(sorted(OPENAI_RESPONSE_REASONING_EFFORTS))}"
+            )
+        return normalized_policy, normalized_effort, None
+
+    if normalized_policy == "gemini-25-thinking-budget":
+        if normalized_budget is None:
+            normalized_budget = DEFAULT_GEMINI_25_THINKING_BUDGET
+        return normalized_policy, None, normalized_budget
+
+    if normalized_policy == "gemini-3x-thinking-level":
+        if normalized_effort is None:
+            normalized_effort = DEFAULT_GEMINI_3X_THINKING_LEVEL
+        if normalized_effort not in GEMINI_3X_THINKING_LEVELS:
+            raise ValueError(
+                "thinking_effort must be one of "
+                f"{', '.join(sorted(GEMINI_3X_THINKING_LEVELS))}"
             )
         return normalized_policy, normalized_effort, None
 
@@ -311,6 +334,24 @@ def _build_thinking_kwargs(
             "thinking": {"type": "adaptive"},
             "output_config": {"effort": thinking_effort},
         }
+    if thinking_policy == "gemini-25-thinking-budget":
+        return {
+            "generationConfig": {
+                "thinkingConfig": {
+                    "thinkingBudget": thinking_budget_tokens,
+                    "includeThoughts": True,
+                }
+            }
+        }
+    if thinking_policy == "gemini-3x-thinking-level":
+        return {
+            "generationConfig": {
+                "thinkingConfig": {
+                    "thinkingLevel": thinking_effort,
+                    "includeThoughts": True,
+                }
+            }
+        }
     return _build_fast_kwargs(thinking_policy)
 
 
@@ -329,4 +370,8 @@ def _build_fast_kwargs(thinking_policy: str) -> dict[str, Any]:
         "mimo-anthropic-thinking-disabled",
     }:
         return {"thinking": {"type": "disabled"}}
+    if thinking_policy == "gemini-25-thinking-budget":
+        return {"generationConfig": {"thinkingConfig": {"thinkingBudget": 0}}}
+    if thinking_policy == "gemini-3x-thinking-level":
+        return {"generationConfig": {"thinkingConfig": {"thinkingLevel": "minimal"}}}
     return {}

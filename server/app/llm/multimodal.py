@@ -86,6 +86,33 @@ def to_openai_response_content(
     return result
 
 
+def to_gemini_content(
+    content: str | list[dict[str, Any]],
+) -> str | list[dict[str, Any]]:
+    """Convert neutral blocks to Gemini ``parts`` format."""
+    if isinstance(content, str):
+        return content
+    if not is_multimodal_content(content):
+        return ""
+
+    result: list[dict[str, Any]] = []
+    for block in content:
+        block_type = block["type"]
+        if block_type == "text":
+            result.append({"text": block["text"]})
+            continue
+
+        result.append(
+            {
+                "inline_data": {
+                    "mime_type": block["media_type"],
+                    "data": block["data"],
+                }
+            }
+        )
+    return result
+
+
 def to_anthropic_content(
     content: str | list[dict[str, Any]],
 ) -> str | list[dict[str, Any]]:
