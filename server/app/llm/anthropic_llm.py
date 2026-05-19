@@ -353,16 +353,22 @@ class AnthropicLLM(AbstractLLM):
         # Create choice
         choice = Choice(index=0, message=message, finish_reason=finish_reason)
 
-        # Extract usage information
+        # Extract usage information.
+        # Anthropic's `input_tokens` counts only uncached input; cache
+        # creation and cache read tokens must be added back to get the true
+        # total prompt size.
         usage = None
         raw_usage = getattr(raw_response, "usage", None)
         if raw_usage:
+            cache_creation = getattr(raw_usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(raw_usage, "cache_read_input_tokens", 0) or 0
+            prompt_tokens = getattr(raw_usage, "input_tokens", 0) + cache_creation + cache_read
+            completion_tokens = getattr(raw_usage, "output_tokens", 0)
             usage = UsageInfo(
-                prompt_tokens=getattr(raw_usage, "input_tokens", 0),
-                completion_tokens=getattr(raw_usage, "output_tokens", 0),
-                total_tokens=getattr(raw_usage, "input_tokens", 0)
-                + getattr(raw_usage, "output_tokens", 0),
-                cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
+                cached_input_tokens=cache_read,
             )
 
         return Response(
@@ -395,18 +401,27 @@ class AnthropicLLM(AbstractLLM):
         if raw_usage is None:
             return None
 
-        prompt_tokens = _read(raw_usage, "input_tokens")
+        input_tokens = _read(raw_usage, "input_tokens")
         completion_tokens = _read(raw_usage, "output_tokens")
-        if not isinstance(prompt_tokens, int):
-            prompt_tokens = 0
+        if not isinstance(input_tokens, int):
+            input_tokens = 0
         if not isinstance(completion_tokens, int):
             completion_tokens = 0
 
+        def _safe_int(val: Any) -> int:
+            if not isinstance(val, int):
+                return 0
+            return max(val, 0)
+
+        cache_creation = _safe_int(_read(raw_usage, "cache_creation_input_tokens"))
+        cache_read = _safe_int(_read(raw_usage, "cache_read_input_tokens"))
+        prompt_tokens = max(input_tokens, 0) + cache_creation + cache_read
+
         return UsageInfo(
-            prompt_tokens=max(prompt_tokens, 0),
+            prompt_tokens=prompt_tokens,
             completion_tokens=max(completion_tokens, 0),
-            total_tokens=max(prompt_tokens, 0) + max(completion_tokens, 0),
-            cached_input_tokens=self._extract_cached_input_tokens(raw_usage),
+            total_tokens=prompt_tokens + max(completion_tokens, 0),
+            cached_input_tokens=cache_read,
         )
 
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
