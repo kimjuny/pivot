@@ -648,6 +648,31 @@ class ReactTaskSupervisor:
                     extension_bundle=runtime_config.extension_bundle,
                 )
 
+                # Load delegation configuration
+                from app.services.agent_delegation_service import (
+                    AgentDelegationService,
+                )
+
+                delegation_service = AgentDelegationService(db)
+                delegations = delegation_service.list_enabled_by_caller(agent.id or 0)
+                delegation_agents = ""
+                if delegations:
+                    delegation_agents = (
+                        delegation_service.build_delegation_prompt_section(
+                            agent.id or 0
+                        )
+                    )
+                    # Ensure delegate_to_agent tool is in the filtered manager
+                    from app.orchestration.tool import get_tool_manager
+
+                    shared_manager = get_tool_manager()
+                    delegate_tool = shared_manager.get_tool("delegate_to_agent")
+                    if (
+                        delegate_tool is not None
+                        and request_tool_manager.get_tool("delegate_to_agent") is None
+                    ):
+                        request_tool_manager.add_entry(delegate_tool)
+
                 extension_skills = ExtensionService(db).build_bundle_skill_payloads(
                     runtime_config.extension_bundle
                 )
@@ -734,6 +759,7 @@ class ReactTaskSupervisor:
                     turn_user_message=launch.message,
                     turn_files=turn_files,
                     turn_attachments=turn_attachments,
+                    delegation_agents=delegation_agents,
                 ):
                     await self._publish_event(
                         db=db,

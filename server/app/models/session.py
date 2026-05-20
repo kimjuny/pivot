@@ -105,6 +105,23 @@ class Session(SQLModel, table=True):
             "Null means the session was never migrated."
         ),
     )
+    parent_task_id: str | None = Field(
+        default=None,
+        index=True,
+        description=(
+            "For delegation sessions: the parent ReactTask UUID "
+            "that triggered this delegation"
+        ),
+    )
+    parent_agent_id: int | None = Field(
+        default=None,
+        foreign_key="agent.id",
+        index=True,
+        description=(
+            "The agent that initiated this delegation. "
+            "Only non-None for delegation sessions."
+        ),
+    )
     chat_history: str | None = Field(
         default=None,
         description="JSON string of complete chat history",

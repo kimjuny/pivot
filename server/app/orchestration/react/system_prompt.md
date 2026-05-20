@@ -148,3 +148,7 @@ Available skills with metadata (`name`, `description`, `path`). If you need a sk
 ```json
 {{skills}}
 ```
+
+## Delegation Agents
+
+{{delegation_agents}}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from app.services.agent_delegation_service import AgentDelegationService
 from app.services.agent_service import AgentService
 from app.services.channel_service import ChannelService
 from app.services.extension_service import ExtensionService
@@ -90,6 +91,7 @@ class AgentSidebarService:
             msg = "User must be persisted before fetching sidebar stats"
             raise ValueError(msg)
         agent = AgentService(self.db).get_required_agent(agent_id)
+        delegation_service = AgentDelegationService(self.db)
         extension_service = ExtensionService(self.db)
         channel_service = ChannelService(self.db)
         media_generation_service = MediaGenerationService(self.db)
@@ -136,6 +138,21 @@ class AgentSidebarService:
         web_search_catalog = web_search_service.list_catalog(agent_id, user=user)
         web_search_bindings = web_search_service.list_agent_bindings(agent_id)
 
+        delegations = delegation_service.list_by_caller(agent_id)
+        from app.models.agent import Agent as AgentModel
+        from sqlmodel import col, select
+
+        all_agent_count = len(
+            list(
+                self.db.exec(
+                    select(AgentModel).where(
+                        AgentModel.id != agent_id,
+                        col(AgentModel.client_state).in_(["open", "paused"]),
+                    )
+                )
+            )
+        )
+
         return {
             "tools": {
                 "selected_count": tool_selected_count,
@@ -160,5 +177,9 @@ class AgentSidebarService:
             "web_search": {
                 "selected_count": len(web_search_bindings),
                 "total_count": len(web_search_catalog),
+            },
+            "delegations": {
+                "selected_count": len(delegations),
+                "total_count": all_agent_count,
             },
         }

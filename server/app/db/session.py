@@ -15,6 +15,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "agentsaveddraft",
     "agenttestsnapshot",
     "agentchannelbinding",
+    "agentdelegation",
     "agentimageproviderbinding",
     "agentwebsearchbinding",
     "channeleventlog",
@@ -265,6 +266,10 @@ def ensure_session_schema_compatibility() -> None:
             conn.execute(
                 text("ALTER TABLE session ADD COLUMN migrated_to_session_id VARCHAR")
             )
+        if "parent_task_id" not in columns:
+            conn.execute(text("ALTER TABLE session ADD COLUMN parent_task_id VARCHAR"))
+        if "parent_agent_id" not in columns:
+            conn.execute(text("ALTER TABLE session ADD COLUMN parent_agent_id INTEGER"))
         conn.execute(text("UPDATE session SET is_pinned = 0 WHERE is_pinned IS NULL"))
         conn.execute(text("UPDATE session SET type = 'client' WHERE type IS NULL"))
         conn.execute(
@@ -351,6 +356,26 @@ def ensure_react_schema_compatibility() -> None:
                     text(
                         "ALTER TABLE reacttask "
                         "ADD COLUMN mandatory_skill_names_json VARCHAR"
+                    )
+                )
+            if "parent_task_id" not in task_columns:
+                conn.execute(
+                    text("ALTER TABLE reacttask ADD COLUMN parent_task_id VARCHAR")
+                )
+            if "parent_agent_id" not in task_columns:
+                conn.execute(
+                    text("ALTER TABLE reacttask ADD COLUMN parent_agent_id INTEGER")
+                )
+            if "delegation_depth" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask ADD COLUMN delegation_depth INTEGER DEFAULT 0"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "UPDATE reacttask SET delegation_depth = 0 "
+                        "WHERE delegation_depth IS NULL"
                     )
                 )
             conn.execute(

@@ -55,13 +55,17 @@ export interface OperationsSession {
   /** Agent-scoped version number, if pinned. */
   release_version: number | null;
   /** Session type discriminator. */
-  type: "client" | "studio_test";
+  type: "client" | "studio_test" | "delegation";
   /** User ID that owns the session. */
   user_id: number;
   /** Session lifecycle status. */
   status: string;
   /** User-defined session display title. */
   title: string | null;
+  /** Parent task UUID for delegation sessions. */
+  parent_task_id: string | null;
+  /** Parent agent ID for delegation sessions. */
+  parent_agent_id: number | null;
   /** Number of tasks within this session. */
   task_count: number;
   /** Compact diagnostics summary used for list-page triage. */
@@ -90,10 +94,12 @@ export interface OperationsSessionDetail {
   agent_id: number;
   agent_name: string;
   release_version: number | null;
-  type: "client" | "studio_test";
+  type: "client" | "studio_test" | "delegation";
   user_id: number;
   status: string;
   title: string | null;
+  parent_task_id: string | null;
+  parent_agent_id: number | null;
   diagnostics: OperationsSessionDiagnostics;
   created_at: string;
   updated_at: string;

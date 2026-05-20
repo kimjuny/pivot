@@ -117,6 +117,7 @@ class ReactEngine:
         self.state_service = ReactStateService(db)
         self.cancelled = False  # Flag to signal cancellation
         self._pending_multimodal_blocks: list[dict[str, Any]] = []
+        self._delegation_agents: str = ""
 
     def _previous_recursion_failed(self, task: ReactTask) -> bool:
         """Return whether the latest persisted recursion ended in failure.
@@ -1509,6 +1510,11 @@ class ReactEngine:
         tool_call: ToolCallRequest,
     ) -> dict[str, Any]:
         """Execute one validated tool call and normalize its result payload."""
+        # Delegation is handled at the engine level (async sub-task),
+        # not through the sync tool execution path.
+        if tool_call.name == "delegate_to_agent":
+            return await self._execute_delegation(tool_call)
+
         try:
             result = await run_in_threadpool(
                 self.tool_manager.execute,
@@ -1539,6 +1545,82 @@ class ReactEngine:
                 "name": tool_call.name,
                 "arguments": tool_call.arguments,
                 "error": error_msg,
+                "success": False,
+            }
+
+    async def _execute_delegation(
+        self,
+        tool_call: ToolCallRequest,
+    ) -> dict[str, Any]:
+        """Execute an agent-to-agent delegation as a sub-task.
+
+        Intercepts the delegate_to_agent tool call, resolves the callee by
+        alias, and runs the sub-agent's ReAct loop via DelegationExecutor.
+        """
+        from app.services.agent_delegation_service import AgentDelegationService
+        from app.services.delegation_executor import DelegationExecutor
+
+        agent_alias = tool_call.arguments.get("agent", "")
+        instruction = tool_call.arguments.get("instruction", "")
+
+        if not agent_alias or not instruction:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "Both 'agent' and 'instruction' parameters are required",
+                "success": False,
+            }
+
+        if self.tool_execution_context is None:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "No execution context available for delegation",
+                "success": False,
+            }
+
+        ctx = self.tool_execution_context
+        delegation_service = AgentDelegationService(self.db)
+        delegation = delegation_service.resolve_by_alias(ctx.agent_id, agent_alias)
+
+        if delegation is None:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": (
+                    f"Agent '{agent_alias}' not found in delegation list. "
+                    "Check the available agents in your instructions."
+                ),
+                "success": False,
+            }
+
+        try:
+            executor = DelegationExecutor(self.db)
+            result = await executor.execute_delegation(
+                caller_context=ctx,
+                caller_task_id=getattr(self, "_current_task_id", ""),
+                caller_agent_id=ctx.agent_id,
+                delegation_depth=getattr(self, "_current_task_delegation_depth", 0),
+                delegation=delegation,
+                instruction=instruction,
+            )
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "result": result,
+                "success": True,
+            }
+        except Exception as e:
+            logger.error("Delegation execution failed: %s", e)
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": f"Delegation failed: {e!s}",
                 "success": False,
             }
 
@@ -2031,7 +2113,7 @@ class ReactEngine:
 
             session_title = ""
             if action_type == "ANSWER":
-                session_title = action_output.get("session_title", "")
+                session_title = action_output.get("session_title") or ""
 
             tokens_data = self.state_service.record_llm_decision(
                 task=task,
@@ -2261,6 +2343,7 @@ class ReactEngine:
         turn_user_message: str | None = None,
         turn_files: list[FileAssetListItem] | None = None,
         turn_attachments: list[dict[str, Any]] | None = None,
+        delegation_agents: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
@@ -2303,7 +2386,9 @@ class ReactEngine:
         system_prompt = build_runtime_system_prompt(
             tool_manager=self.tool_manager,
             skills=skills_metadata_json,
+            delegation_agents=delegation_agents,
         )
+        self._delegation_agents = delegation_agents
 
         should_append_user_history = (
             task.iteration == 0 or turn_user_message is not None
@@ -2379,6 +2464,8 @@ class ReactEngine:
             logged_message_count = len(runtime_state.messages)
 
         try:
+            self._current_task_delegation_depth = task.delegation_depth
+            self._current_task_id = task.task_id
             while task.iteration < task.max_iteration:
                 runtime_state = self.runtime_service.load(task)
                 (

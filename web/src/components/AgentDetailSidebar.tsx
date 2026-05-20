@@ -14,6 +14,7 @@ import {
     Settings2,
     PanelLeft,
     Globe,
+    Users,
 } from "lucide-react";
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -45,6 +46,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import AgentModal, { AgentFormData } from './AgentModal';
 import ToolSelectorDialog from './ToolSelectorDialog';
 import SkillSelectorDialog from './SkillSelectorDialog';
+import DelegationSelectorDialog from './DelegationSelectorDialog';
 import ChannelBindingDialog from './ChannelBindingDialog';
 import ExtensionBindingDialog from './ExtensionBindingDialog';
 import WebSearchBindingDialog from './WebSearchBindingDialog';
@@ -75,6 +77,7 @@ import {
     getAgentWebSearchBindings,
     deleteAgentWebSearchBinding,
     getAgentSidebarStats,
+    getAgentDelegations,
     updateAgentAccess,
     type AgentAccess,
     type AgentExtensionPackage,
@@ -462,6 +465,9 @@ function AgentDetailSidebar({
     const [isEditModalOpen, setIsEditModalOpen] = useState(false);
     const [isToolSelectorOpen, setIsToolSelectorOpen] = useState(false);
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
+    const [isDelegationsOpen, setIsDelegationsOpen] = useState(false);
+    const [isDelegationSelectorOpen, setIsDelegationSelectorOpen] = useState(false);
+    const [delegations, setDelegations] = useState<Array<{ callee_agent_id: number; callee_name: string | null; callee_alias: string }>>([]);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
     const [isMediaProviderDialogOpen, setIsMediaProviderDialogOpen] = useState(false);
     const [isWebSearchDialogOpen, setIsWebSearchDialogOpen] = useState(false);
@@ -544,6 +550,7 @@ function AgentDetailSidebar({
         setDeletingExtensionPackage(null);
         setIsToolsOpen(false);
         setIsSkillsOpen(false);
+        setIsDelegationsOpen(false);
         setIsExtensionsOpen(false);
         setIsChannelsOpen(false);
         setIsMediaProvidersOpen(false);
@@ -1079,6 +1086,21 @@ function AgentDetailSidebar({
     }, [agentChangedSinceLastRender, isSkillsOpen, loadExtensionPackages, loadSkills]);
 
     useEffect(() => {
+        if (!isDelegationsOpen || !agent?.id || agentChangedSinceLastRender) {
+            return;
+        }
+        void getAgentDelegations(agent.id).then(delegations => {
+            setDelegations(delegations.map(d => ({
+                callee_agent_id: d.callee_agent_id,
+                callee_name: d.callee_name ?? null,
+                callee_alias: d.callee_alias,
+            })));
+        }).catch(() => {
+            toast.error('Failed to load delegations');
+        });
+    }, [agentChangedSinceLastRender, isDelegationsOpen, agent?.id]);
+
+    useEffect(() => {
         if (!isExtensionsOpen || agentChangedSinceLastRender) {
             return;
         }
@@ -1147,7 +1169,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'tools' | 'skills' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
+    const handleSectionClick = (section: 'tools' | 'skills' | 'delegations' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -1155,6 +1177,7 @@ function AgentDetailSidebar({
             setTimeout(() => {
                 setIsToolsOpen(section === 'tools');
                 setIsSkillsOpen(section === 'skills');
+                setIsDelegationsOpen(section === 'delegations');
                 setIsExtensionsOpen(section === 'extensions');
                 setIsChannelsOpen(section === 'channels');
                 setIsMediaProvidersOpen(section === 'imageProviders');
@@ -1164,6 +1187,7 @@ function AgentDetailSidebar({
             // In expanded mode, toggle section immediately
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
+            setIsDelegationsOpen(section === 'delegations');
             setIsExtensionsOpen(section === 'extensions');
             setIsChannelsOpen(section === 'channels');
             setIsMediaProvidersOpen(section === 'imageProviders');
@@ -1758,6 +1782,80 @@ function AgentDetailSidebar({
                                                 </SidebarMenuItem>
                                                 );
                                             })}
+                                        </SidebarMenu>
+                                    )}
+                                </SidebarGroupContent>
+                            </CollapsibleContent>
+                        </SidebarGroup>
+                    </Collapsible>
+
+                    {/* Delegations / Agents Section */}
+                    <Collapsible
+                        open={isDelegationsOpen}
+                        onOpenChange={setIsDelegationsOpen}
+                        className="group/collapsible"
+                    >
+                        <SidebarGroup className="py-0">
+                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
+                                <SidebarMenuItem>
+                                    <SidebarMenuButton
+                                        onClick={() => handleSectionClick('delegations')}
+                                        tooltip="Agents"
+                                        isActive={isDelegationsOpen}
+                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                                    >
+                                        <Users className="size-4" />
+                                        <span>Agents</span>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            </SidebarMenu>
+
+                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
+                                <CollapsibleTrigger
+                                    onClick={() => handleSectionClick('delegations')}
+                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors"
+                                >
+                                    <SidebarSectionLeadingIcon icon={Users} isOpen={isDelegationsOpen} />
+                                    <span className="flex-1 text-left">Agents</span>
+                                    <SidebarCountBadge stats={sidebarStats?.delegations} animationIndex={6} />
+                                    {agent?.id && (
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={(e) => { e.stopPropagation(); setIsDelegationSelectorOpen(true); }}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setIsDelegationSelectorOpen(true); } }}
+                                                    className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
+                                                    aria-label="Configure agent delegations"
+                                                >
+                                                    <Settings2 className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
+                                                </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="right">Configure delegations</TooltipContent>
+                                        </Tooltip>
+                                    )}
+                                </CollapsibleTrigger>
+                            </SidebarGroupLabel>
+                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
+                                <SidebarGroupContent>
+                                    {delegations.length === 0 ? (
+                                        <div className="px-7 py-1.5 text-xs text-sidebar-foreground/40">
+                                            No agents configured
+                                        </div>
+                                    ) : (
+                                        <SidebarMenu className="gap-0.5">
+                                            {delegations.map((delegation) => (
+                                                <SidebarMenuItem key={delegation.callee_agent_id}>
+                                                    <SidebarMenuButton
+                                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                                                        tooltip={delegation.callee_name ?? delegation.callee_alias}
+                                                    >
+                                                        <Bot className="size-3.5" />
+                                                        <span className="truncate text-xs">{delegation.callee_name ?? delegation.callee_alias}</span>
+                                                    </SidebarMenuButton>
+                                                </SidebarMenuItem>
+                                            ))}
                                         </SidebarMenu>
                                     )}
                                 </SidebarGroupContent>
@@ -2375,6 +2473,27 @@ function AgentDetailSidebar({
                         extensionLabel: skill.extensionLabel ?? null,
                     }))}
                     onSaved={stageSkillIds}
+                />
+            )}
+
+            {/* Delegation Selector Dialog */}
+            {agent?.id && (
+                <DelegationSelectorDialog
+                    open={isDelegationSelectorOpen}
+                    onOpenChange={setIsDelegationSelectorOpen}
+                    agentId={agent.id}
+                    excludeAgentId={agent.id}
+                    onSaved={async () => {
+                        await loadSidebarStats();
+                        if (agent?.id) {
+                            const delegations = await getAgentDelegations(agent.id);
+                            setDelegations(delegations.map(d => ({
+                                callee_agent_id: d.callee_agent_id,
+                                callee_name: d.callee_name ?? null,
+                                callee_alias: d.callee_alias,
+                            })));
+                        }
+                    }}
                 />
             )}
 

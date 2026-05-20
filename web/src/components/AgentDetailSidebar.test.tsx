@@ -100,6 +100,7 @@ const baseSidebarStats = {
   channels: { selected_count: 0, total_count: 0 },
   media: { selected_count: 0, total_count: 0 },
   web_search: { selected_count: 0, total_count: 0 },
+  delegations: { selected_count: 0, total_count: 0 },
 };
 
 const baseAgent: Agent = {

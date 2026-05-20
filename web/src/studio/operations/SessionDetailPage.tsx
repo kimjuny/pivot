@@ -184,6 +184,14 @@ export default function SessionDetailPage() {
             )}
             <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
               <span>User: #{sessionMeta.user_id}</span>
+              {sessionMeta.type === "delegation" && sessionMeta.parent_agent_id != null && (
+                <span>
+                  Delegated from agent #{sessionMeta.parent_agent_id}
+                  {sessionMeta.parent_task_id && (
+                    <> (task <code className="rounded bg-muted px-1 font-mono text-[11px]">{sessionMeta.parent_task_id.slice(0, 8)}...</code>)</>
+                  )}
+                </span>
+              )}
               <span>
                 Created: {formatTimestamp(sessionMeta.created_at)}
               </span>

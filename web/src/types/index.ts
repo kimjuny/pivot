@@ -65,6 +65,28 @@ export interface Agent {
 }
 
 /**
+ * A delegation edge: caller agent can invoke callee agent as a tool.
+ */
+export interface AgentDelegation {
+  id: number;
+  caller_agent_id: number;
+  callee_agent_id: number;
+  callee_alias: string;
+  description_override: string | null;
+  pass_mode: string;
+  max_timeout_seconds: number;
+  max_iterations_override: number | null;
+  enabled: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+  /** Joined from the callee agent for display */
+  callee_name?: string | null;
+  callee_description?: string | null;
+  callee_llm_id?: number | null;
+}
+
+/**
  * Represents an LLM (Large Language Model) configuration.
  */
 export interface LLM {

@@ -1,4 +1,4 @@
-import type { Agent, LLM, LLMUsable } from '../types';
+import type { Agent, AgentDelegation, LLM, LLMUsable } from '../types';
 import { getAuthToken, isTokenValid, AUTH_EXPIRED_EVENT } from '../contexts/auth-core';
 import type {
   ChatSessionType,
@@ -153,6 +153,7 @@ export interface AgentSidebarStats {
   channels: AgentSidebarSectionStats;
   media: AgentSidebarSectionStats;
   web_search: AgentSidebarSectionStats;
+  delegations: AgentSidebarSectionStats;
 }
 
 export interface AgentAccess {
@@ -560,6 +561,75 @@ export const updateAgentSkillIds = async (
     method: 'PUT',
     body: JSON.stringify({ skill_ids }),
   }) as Promise<Agent>;
+};
+
+// ---------------------------------------------------------------------------
+// Delegations API
+// ---------------------------------------------------------------------------
+
+/**
+ * List all delegations configured for an agent.
+ */
+export const getAgentDelegations = async (
+  agentId: number
+): Promise<AgentDelegation[]> => {
+  return apiRequest(`/agents/${agentId}/delegations`) as Promise<AgentDelegation[]>;
+};
+
+/**
+ * Atomically replace all delegations for an agent.
+ */
+export const replaceAgentDelegations = async (
+  agentId: number,
+  delegations: Array<{
+    callee_agent_id: number;
+    callee_alias: string;
+    description_override?: string | null;
+    pass_mode?: string;
+    max_timeout_seconds?: number;
+    max_iterations_override?: number | null;
+    enabled?: boolean;
+    priority?: number;
+  }>
+): Promise<AgentDelegation[]> => {
+  return apiRequest(`/agents/${agentId}/delegations`, {
+    method: 'PUT',
+    body: JSON.stringify({ delegations }),
+  }) as Promise<AgentDelegation[]>;
+};
+
+/**
+ * Create a single delegation.
+ */
+export const createAgentDelegation = async (
+  agentId: number,
+  data: {
+    callee_agent_id: number;
+    callee_alias: string;
+    description_override?: string | null;
+    pass_mode?: string;
+    max_timeout_seconds?: number;
+    max_iterations_override?: number | null;
+    enabled?: boolean;
+    priority?: number;
+  }
+): Promise<AgentDelegation> => {
+  return apiRequest(`/agents/${agentId}/delegations`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }) as Promise<AgentDelegation>;
+};
+
+/**
+ * Delete a delegation.
+ */
+export const deleteAgentDelegation = async (
+  agentId: number,
+  delegationId: number
+): Promise<void> => {
+  await apiRequest(`/agents/${agentId}/delegations/${delegationId}`, {
+    method: 'DELETE',
+  });
 };
 
 // ---------------------------------------------------------------------------

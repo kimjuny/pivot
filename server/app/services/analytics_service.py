@@ -465,7 +465,9 @@ class AnalyticsService:
                 session_count=session_count,
                 task_count=task_count,
             )
-            for agent_id, agent_name, model, session_count, task_count in self.db.exec(stmt)
+            for agent_id, agent_name, model, session_count, task_count in self.db.exec(
+                stmt
+            )
         ]
 
     async def get_runtime_health(self) -> RuntimeHealth:

@@ -50,6 +50,8 @@ describe("SessionDetailPage", () => {
         user_id: 1,
         status: "failed",
         title: "Diagnose billing issue",
+        parent_task_id: null,
+        parent_agent_id: null,
         diagnostics: {
           task_count: 1,
           completed_task_count: 0,

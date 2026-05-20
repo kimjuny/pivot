@@ -23,6 +23,7 @@ from app.api.auth import router as auth_router  # noqa: E402
 from app.api.channels import router as channels_router  # noqa: E402
 from app.api.chat_surfaces import router as chat_surfaces_router  # noqa: E402
 from app.api.client import router as client_router  # noqa: E402
+from app.api.delegations import router as delegations_router  # noqa: E402
 from app.api.extensions import router as extensions_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
 from app.api.llms import router as llms_router  # noqa: E402
@@ -105,6 +106,7 @@ app.add_middleware(TimingMiddleware)
 
 # Include API routes
 app.include_router(agents_router, prefix="/api")
+app.include_router(delegations_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(files_router, prefix="/api")
 app.include_router(llms_router, prefix="/api")

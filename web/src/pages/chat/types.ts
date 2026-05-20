@@ -154,7 +154,10 @@ export type ReactStreamEventType =
   | "clarify"
   | "task_cancelled"
   | "task_complete"
-  | "error";
+  | "error"
+  | "delegation_start"
+  | "delegation_result"
+  | "delegation_error";
 
 /**
  * Token accounting metadata surfaced by task and recursion events.

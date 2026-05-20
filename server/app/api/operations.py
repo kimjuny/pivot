@@ -168,6 +168,8 @@ async def list_operations_sessions(
                 "user_id": session.user_id,
                 "status": session.status,
                 "title": session.title,
+                "parent_task_id": session.parent_task_id,
+                "parent_agent_id": session.parent_agent_id,
                 "task_count": task_counts.get(session.session_id, 0),
                 "diagnostics": _serialize_operations_diagnostics(
                     diagnostics_by_session.get(session.session_id)
@@ -300,6 +302,8 @@ async def get_operations_session_detail(
             "user_id": session.user_id,
             "status": session.status,
             "title": session.title,
+            "parent_task_id": session.parent_task_id,
+            "parent_agent_id": session.parent_agent_id,
             "diagnostics": _serialize_operations_diagnostics(diagnostics),
             "created_at": session.created_at.replace(tzinfo=UTC).isoformat(),
             "updated_at": session.updated_at.replace(tzinfo=UTC).isoformat(),

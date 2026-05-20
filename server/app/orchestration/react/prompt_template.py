@@ -39,6 +39,7 @@ _REACT_TASK_PROMPT = _read_template(_TASK_TEMPLATE_PATH)
 def build_runtime_system_prompt(
     tool_manager: ToolManager | None = None,
     skills: str = "[]",
+    delegation_agents: str = "",
 ) -> str:
     """Build the stable system prompt used once for an entire session.
 
@@ -50,6 +51,7 @@ def build_runtime_system_prompt(
     Args:
         tool_manager: Optional tool manager to describe available tools.
         skills: Runtime-visible skill metadata JSON for prompt injection.
+        delegation_agents: Markdown section listing delegatable agents.
 
     Returns:
         Rendered system prompt text with tool catalog and skills embedded.
@@ -58,9 +60,21 @@ def build_runtime_system_prompt(
     if tool_manager:
         tools_description = tool_manager.to_text_catalog()
 
-    return _REACT_SYSTEM_PROMPT.replace(
+    rendered = _REACT_SYSTEM_PROMPT.replace(
         "{{tools_description}}", tools_description
     ).replace("{{skills}}", skills)
+
+    # Strip the entire delegation section (header + body) when empty
+    delegation_section = "## Delegation Agents\n\n{{delegation_agents}}"
+    if delegation_agents:
+        rendered = rendered.replace(
+            delegation_section,
+            f"## Delegation Agents\n\n{delegation_agents}",
+        )
+    else:
+        rendered = rendered.replace(delegation_section, "")
+
+    return rendered
 
 
 def _format_task_start_time(

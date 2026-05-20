@@ -259,6 +259,7 @@ export default function SessionHistoryPage() {
             <SelectItem value="all">All Types</SelectItem>
             <SelectItem value="client">Client</SelectItem>
             <SelectItem value="studio_test">Studio Test</SelectItem>
+            <SelectItem value="delegation">Delegation</SelectItem>
           </SelectContent>
         </Select>
       </div>

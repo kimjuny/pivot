@@ -256,6 +256,31 @@ function getToolExecutionSummaryParts(
   const query = getStringArgument(args, "query");
   const content = getLiveOrResolvedStringArgument(args, livePayload, "content");
   const diff = getLiveOrResolvedStringArgument(args, livePayload, "diff");
+  const agentAlias = getStringArgument(args, "agent");
+  const delegationInstruction = getStringArgument(args, "instruction");
+
+  if (call.name === "delegate_to_agent" && agentAlias) {
+    return [
+      {
+        key: "agent",
+        content: agentAlias,
+        className: "min-w-0 truncate font-mono text-violet-400",
+      },
+      ...(delegationInstruction
+        ? [
+            {
+              key: "instruction",
+              content:
+                delegationInstruction.length > 60
+                  ? `${delegationInstruction.slice(0, 60)}...`
+                  : delegationInstruction,
+              className: "min-w-0 truncate text-muted-foreground",
+              title: delegationInstruction,
+            },
+          ]
+        : []),
+    ];
+  }
 
   if (
     (call.name === "write_file" ||
@@ -360,7 +385,7 @@ function ToolPayloadSection({
   label,
   value,
 }: {
-  label: "Arguments" | "Result";
+  label: "Arguments" | "Result" | "Full Result";
   value: string;
 }) {
   const [hasCopied, setHasCopied] = useState(false);
@@ -628,6 +653,16 @@ function ToolExecutionItem({
       ? getLiveOrResolvedStringArgument(args, livePayload, "diff")
       : null;
   const usesSpecialPreview = call.name === "write_file" || call.name === "edit_file";
+  const isDelegation = call.name === "delegate_to_agent";
+  const delegationResult =
+    isDelegation && resultPayload && typeof resultPayload === "object"
+      ? (resultPayload as {
+          delegated_agent?: string;
+          answer?: string;
+          iterations?: number;
+          token_usage?: { total_tokens?: number };
+        })
+      : null;
   const summaryParts = getToolExecutionSummaryParts(call, livePayload);
   const shimmerSummaryParts = summaryParts.filter((part) => !part.isCount);
   const countSummaryParts = summaryParts.filter((part) => part.isCount);
@@ -693,7 +728,34 @@ function ToolExecutionItem({
           <div className="px-3 pb-2.5 pl-8">
             <div className="rounded-md border border-border/70 bg-black/90 p-3 font-mono text-xs leading-relaxed text-zinc-100 shadow-inner">
               <div className="space-y-3">
-                {usesSpecialPreview ? (
+                {isDelegation && delegationResult ? (
+                  <>
+                    {delegationResult.answer && (
+                      <div>
+                        <div className="mb-1 flex items-center gap-1.5 font-semibold text-zinc-300">
+                          <span>
+                            {delegationResult.delegated_agent
+                              ? `Response from ${delegationResult.delegated_agent}`
+                              : "Response"}
+                          </span>
+                          {typeof delegationResult.iterations === "number" && (
+                            <span className="text-[11px] font-normal text-zinc-500">
+                              ({delegationResult.iterations} iterations
+                              {delegationResult.token_usage?.total_tokens != null
+                                ? `, ${formatTokenCount(delegationResult.token_usage.total_tokens)} tokens`
+                                : ""}
+                              )
+                            </span>
+                          )}
+                        </div>
+                        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
+                          {delegationResult.answer}
+                        </pre>
+                      </div>
+                    )}
+                    <ToolPayloadSection label="Full Result" value={resultText} />
+                  </>
+                ) : usesSpecialPreview ? (
                   call.name === "write_file" ? (
                     <ToolCodePreview
                       value={writeContent ?? ""}

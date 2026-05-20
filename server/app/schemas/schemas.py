@@ -201,6 +201,7 @@ class AgentSidebarStatsResponse(AppBaseModel):
     channels: AgentSidebarSectionStatsResponse
     media: AgentSidebarSectionStatsResponse
     web_search: AgentSidebarSectionStatsResponse
+    delegations: AgentSidebarSectionStatsResponse
 
 
 class AgentPublishRequest(AppBaseModel):

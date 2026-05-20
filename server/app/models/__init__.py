@@ -10,6 +10,7 @@ from app.models.access import (
     UserGroup,
 )
 from app.models.agent import Agent
+from app.models.agent_delegation import AgentDelegation
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
 from app.models.channel import (
     AgentChannelBinding,
@@ -52,6 +53,7 @@ __all__ = [
     "AccessLevel",
     "Agent",
     "AgentChannelBinding",
+    "AgentDelegation",
     "AgentExtensionBinding",
     "AgentMediaProviderBinding",
     "AgentRelease",

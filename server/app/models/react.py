@@ -103,6 +103,23 @@ class ReactTask(SQLModel, table=True):
         default=None,
         description="UTC timestamp when a user explicitly requested cancellation",
     )
+    parent_task_id: str | None = Field(
+        default=None,
+        index=True,
+        description="UUID of parent task if this is a delegation sub-task",
+    )
+    parent_agent_id: int | None = Field(
+        default=None,
+        foreign_key="agent.id",
+        index=True,
+        description="The agent that initiated this delegation. Non-None only for delegated tasks.",
+    )
+    delegation_depth: int = Field(
+        default=0,
+        description=(
+            "Nesting depth: 0 = user task, " "1 = first delegation, 2 = second, etc."
+        ),
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
