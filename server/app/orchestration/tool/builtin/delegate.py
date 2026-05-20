@@ -16,25 +16,41 @@ from app.orchestration.tool.decorator import Param, tool
         "Call another agent to handle a sub-task. Choose the most appropriate "
         "agent from the Delegation Agents section in your instructions. "
         "Provide a clear, self-contained instruction so the target agent can "
-        "work independently."
+        "work independently. "
+        "If the delegated agent returned a clarify result, respond using "
+        "delegation_context_id and response to continue the delegation."
     )
 )
 def delegate_to_agent(
     agent: Annotated[
-        str,
+        str | None,
         Param(
             "Agent identifier from the Delegation Agents section. "
-            "Must match exactly."
+            "Required for new delegations, omitted when responding to a clarify."
         ),
-    ],
+    ] = None,
     instruction: Annotated[
-        str,
+        str | None,
         Param(
             "Clear, self-contained task instruction for the target agent. "
             "Include all context the agent needs since it cannot see your "
-            "conversation history."
+            "conversation history. Required for new delegations."
         ),
-    ],
+    ] = None,
+    delegation_context_id: Annotated[
+        str | None,
+        Param(
+            "Context ID from a previous clarify result. "
+            "Provide this (along with response) to resume a paused delegation."
+        ),
+    ] = None,
+    response: Annotated[
+        str | None,
+        Param(
+            "Your answer to the delegated agent's clarify question. "
+            "Only used when delegation_context_id is provided."
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """Placeholder — actual execution handled by ReactEngine."""
     return {

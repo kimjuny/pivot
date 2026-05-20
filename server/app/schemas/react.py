@@ -283,6 +283,10 @@ class ReactStreamEventType(str, Enum):
     TASK_CANCELLED = "task_cancelled"
     ERROR = "error"
     TASK_COMPLETE = "task_complete"
+    DELEGATION_START = "delegation_start"
+    DELEGATION_RESULT = "delegation_result"
+    DELEGATION_CLARIFY = "delegation_clarify"
+    DELEGATION_ERROR = "delegation_error"
 
 
 class ReactStreamEvent(AppBaseModel):

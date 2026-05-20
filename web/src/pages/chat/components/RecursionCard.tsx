@@ -259,6 +259,32 @@ function getToolExecutionSummaryParts(
   const agentAlias = getStringArgument(args, "agent");
   const delegationInstruction = getStringArgument(args, "instruction");
 
+  const delegationContextId = getStringArgument(args, "delegation_context_id");
+  const delegationResponse = getStringArgument(args, "response");
+
+  if (call.name === "delegate_to_agent" && delegationContextId) {
+    return [
+      {
+        key: "mode",
+        content: "Resume",
+        className: "shrink-0 font-mono text-amber-400",
+      },
+      ...(delegationResponse
+        ? [
+            {
+              key: "response",
+              content:
+                delegationResponse.length > 60
+                  ? `${delegationResponse.slice(0, 60)}...`
+                  : delegationResponse,
+              className: "min-w-0 truncate text-muted-foreground",
+              title: delegationResponse,
+            },
+          ]
+        : []),
+    ];
+  }
+
   if (call.name === "delegate_to_agent" && agentAlias) {
     return [
       {
@@ -653,16 +679,6 @@ function ToolExecutionItem({
       ? getLiveOrResolvedStringArgument(args, livePayload, "diff")
       : null;
   const usesSpecialPreview = call.name === "write_file" || call.name === "edit_file";
-  const isDelegation = call.name === "delegate_to_agent";
-  const delegationResult =
-    isDelegation && resultPayload && typeof resultPayload === "object"
-      ? (resultPayload as {
-          delegated_agent?: string;
-          answer?: string;
-          iterations?: number;
-          token_usage?: { total_tokens?: number };
-        })
-      : null;
   const summaryParts = getToolExecutionSummaryParts(call, livePayload);
   const shimmerSummaryParts = summaryParts.filter((part) => !part.isCount);
   const countSummaryParts = summaryParts.filter((part) => part.isCount);
@@ -728,34 +744,7 @@ function ToolExecutionItem({
           <div className="px-3 pb-2.5 pl-8">
             <div className="rounded-md border border-border/70 bg-black/90 p-3 font-mono text-xs leading-relaxed text-zinc-100 shadow-inner">
               <div className="space-y-3">
-                {isDelegation && delegationResult ? (
-                  <>
-                    {delegationResult.answer && (
-                      <div>
-                        <div className="mb-1 flex items-center gap-1.5 font-semibold text-zinc-300">
-                          <span>
-                            {delegationResult.delegated_agent
-                              ? `Response from ${delegationResult.delegated_agent}`
-                              : "Response"}
-                          </span>
-                          {typeof delegationResult.iterations === "number" && (
-                            <span className="text-[11px] font-normal text-zinc-500">
-                              ({delegationResult.iterations} iterations
-                              {delegationResult.token_usage?.total_tokens != null
-                                ? `, ${formatTokenCount(delegationResult.token_usage.total_tokens)} tokens`
-                                : ""}
-                              )
-                            </span>
-                          )}
-                        </div>
-                        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-zinc-100">
-                          {delegationResult.answer}
-                        </pre>
-                      </div>
-                    )}
-                    <ToolPayloadSection label="Full Result" value={resultText} />
-                  </>
-                ) : usesSpecialPreview ? (
+                {usesSpecialPreview ? (
                   call.name === "write_file" ? (
                     <ToolCodePreview
                       value={writeContent ?? ""}

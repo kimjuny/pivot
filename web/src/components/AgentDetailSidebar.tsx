@@ -1852,7 +1852,7 @@ function AgentDetailSidebar({
                                                         tooltip={delegation.callee_name ?? delegation.callee_alias}
                                                     >
                                                         <Bot className="size-3.5" />
-                                                        <span className="truncate text-xs">{delegation.callee_name ?? delegation.callee_alias}</span>
+                                                        <span className="truncate font-mono text-xs">{delegation.callee_alias}</span>
                                                     </SidebarMenuButton>
                                                 </SidebarMenuItem>
                                             ))}

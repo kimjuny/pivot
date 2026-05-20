@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Search, Loader2, Inbox } from 'lucide-react';
+import { Search, Loader2, Inbox, Settings2, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getAgentDelegations,
@@ -35,6 +35,21 @@ interface AgentEntry {
   client_state?: string;
 }
 
+/** Per-row configuration state for a checked delegation. */
+interface DelegationRowConfig {
+  callee_alias: string;
+  description_override: string;
+  max_timeout_seconds: number;
+  /** String for empty-state handling; parsed to number|null on save. */
+  max_iterations_override: string;
+}
+
+interface DelegationRowState {
+  checked: boolean;
+  config: DelegationRowConfig;
+  configExpanded: boolean;
+}
+
 interface DelegationSelectorDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,15 +78,36 @@ function generateAlias(name: string): string {
     .slice(0, 32);
 }
 
+function makeDefaultConfig(agentName: string): DelegationRowConfig {
+  return {
+    callee_alias: generateAlias(agentName),
+    description_override: '',
+    max_timeout_seconds: 300,
+    max_iterations_override: '',
+  };
+}
+
+function configFromExisting(existing: AgentDelegation): DelegationRowConfig {
+  return {
+    callee_alias: existing.callee_alias,
+    description_override: existing.description_override ?? '',
+    max_timeout_seconds: existing.max_timeout_seconds,
+    max_iterations_override: existing.max_iterations_override != null
+      ? String(existing.max_iterations_override)
+      : '',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 /**
- * Agent delegation selector dialog.
+ * Agent delegation selector dialog with per-row configuration.
  *
- * Mirrors the ToolSelectorDialog interaction model for consistency.
- * Allows selecting which agents the current agent can delegate to.
+ * Allows selecting which agents the current agent can delegate to and
+ * configuring per-delegation settings (alias, description, timeout,
+ * max iterations).
  */
 function DelegationSelectorDialog({
   open,
@@ -84,7 +120,7 @@ function DelegationSelectorDialog({
   const [availableAgents, setAvailableAgents] = useState<AgentEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [checked, setChecked] = useState<Set<number>>(new Set());
+  const [rowStates, setRowStates] = useState<Map<number, DelegationRowState>>(new Map());
   const [searchQuery, setSearchQuery] = useState('');
 
   // ---------------------------------------------------------------------------
@@ -99,7 +135,6 @@ function DelegationSelectorDialog({
         getAgents(),
       ]);
       setExistingDelegations(delegations);
-      setChecked(new Set(delegations.filter(d => d.enabled).map(d => d.callee_agent_id)));
       setAvailableAgents(
         allAgents
           .filter(a => a.id !== excludeAgentId)
@@ -111,6 +146,19 @@ function DelegationSelectorDialog({
             client_state: a.client_state,
           }))
       );
+
+      // Build initial row states from existing delegations.
+      const initial = new Map<number, DelegationRowState>();
+      for (const d of delegations) {
+        if (d.enabled) {
+          initial.set(d.callee_agent_id, {
+            checked: true,
+            config: configFromExisting(d),
+            configExpanded: false,
+          });
+        }
+      }
+      setRowStates(initial);
     } catch {
       toast.error('Failed to load delegations');
     } finally {
@@ -144,25 +192,71 @@ function DelegationSelectorDialog({
   // Toggle helpers
   // ---------------------------------------------------------------------------
 
-  const isAgentChecked = (id: number) => checked.has(id);
+  const isAgentChecked = (id: number) => rowStates.get(id)?.checked === true;
 
   const toggleAgent = (id: number) => {
-    const next = new Set(checked);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setChecked(next);
+    setRowStates(prev => {
+      const next = new Map(prev);
+      const current = next.get(id);
+      if (current?.checked) {
+        next.delete(id);
+      } else {
+        const agent = availableAgents.find(a => a.id === id);
+        const existing = existingDelegations.find(d => d.callee_agent_id === id);
+        next.set(id, {
+          checked: true,
+          config: existing ? configFromExisting(existing) : makeDefaultConfig(agent?.name ?? `agent_${id}`),
+          configExpanded: false,
+        });
+      }
+      return next;
+    });
   };
 
   const toggleVisibleAll = () => {
     const visibleIds = filteredAgents.map(a => a.id);
     const allVisible = visibleIds.every(id => isAgentChecked(id));
-    const next = new Set(checked);
-    if (allVisible) {
-      visibleIds.forEach(id => next.delete(id));
-    } else {
-      visibleIds.forEach(id => next.add(id));
-    }
-    setChecked(next);
+    setRowStates(prev => {
+      const next = new Map(prev);
+      if (allVisible) {
+        for (const id of visibleIds) {
+          next.delete(id);
+        }
+      } else {
+        for (const id of visibleIds) {
+          if (!next.has(id)) {
+            const agent = availableAgents.find(a => a.id === id);
+            const existing = existingDelegations.find(d => d.callee_agent_id === id);
+            next.set(id, {
+              checked: true,
+              config: existing ? configFromExisting(existing) : makeDefaultConfig(agent?.name ?? `agent_${id}`),
+              configExpanded: false,
+            });
+          }
+        }
+      }
+      return next;
+    });
+  };
+
+  const toggleConfigExpanded = (id: number) => {
+    setRowStates(prev => {
+      const current = prev.get(id);
+      if (!current) return prev;
+      const next = new Map(prev);
+      next.set(id, { ...current, configExpanded: !current.configExpanded });
+      return next;
+    });
+  };
+
+  const updateConfig = (id: number, patch: Partial<DelegationRowConfig>) => {
+    setRowStates(prev => {
+      const current = prev.get(id);
+      if (!current) return prev;
+      const next = new Map(prev);
+      next.set(id, { ...current, config: { ...current.config, ...patch } });
+      return next;
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -172,20 +266,20 @@ function DelegationSelectorDialog({
   const handleSave = async () => {
     setIsSaving(true);
     try {
-      const items = Array.from(checked).map(calleeId => {
-        const agent = availableAgents.find(a => a.id === calleeId);
-        const existing = existingDelegations.find(d => d.callee_agent_id === calleeId);
-        return {
+      const items = Array.from(rowStates.entries())
+        .filter(([, state]) => state.checked)
+        .map(([calleeId, state]) => ({
           callee_agent_id: calleeId,
-          callee_alias: existing?.callee_alias ?? generateAlias(agent?.name ?? `agent_${calleeId}`),
-          description_override: existing?.description_override ?? null,
-          pass_mode: existing?.pass_mode ?? 'instruction_only',
-          max_timeout_seconds: existing?.max_timeout_seconds ?? 300,
-          max_iterations_override: existing?.max_iterations_override ?? null,
+          callee_alias: state.config.callee_alias,
+          description_override: state.config.description_override || null,
+          pass_mode: 'instruction_only' as const,
+          max_timeout_seconds: state.config.max_timeout_seconds,
+          max_iterations_override: state.config.max_iterations_override
+            ? Number(state.config.max_iterations_override)
+            : null,
           enabled: true,
-          priority: existing?.priority ?? 100,
-        };
-      });
+          priority: 100,
+        }));
       await replaceAgentDelegations(agentId, items);
       toast.success('Delegation configuration saved');
       onOpenChange(false);
@@ -203,6 +297,7 @@ function DelegationSelectorDialog({
 
   const visibleAllChecked = filteredAgents.length > 0 && filteredAgents.every(a => isAgentChecked(a.id));
   const visibleSomeChecked = !visibleAllChecked && filteredAgents.some(a => isAgentChecked(a.id));
+  const selectedCount = filteredAgents.filter(a => isAgentChecked(a.id)).length;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -263,7 +358,7 @@ function DelegationSelectorDialog({
                 </div>
               )
             ) : (
-              <table className="w-full caption-bottom text-sm table-fixed">
+              <table className="w-full caption-bottom text-sm">
                 <thead className="sticky top-0 bg-background z-10 [&_tr]:border-b">
                   <tr className="border-b transition-colors">
                     <th className="w-10 h-10 px-3 text-left align-middle font-medium text-muted-foreground">
@@ -275,39 +370,27 @@ function DelegationSelectorDialog({
                     </th>
                     <th className="w-[30%] h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Name</th>
                     <th className="h-10 px-2 text-left align-middle text-xs font-medium text-muted-foreground">Description</th>
+                    <th className="w-10 h-10 px-2 text-right align-middle font-medium text-muted-foreground" />
                   </tr>
                 </thead>
                 <tbody className="[&_tr:last-child]:border-0">
                   {filteredAgents.map(agent => {
-                    const isChecked = isAgentChecked(agent.id);
+                    const state = rowStates.get(agent.id);
+                    const isChecked = state?.checked === true;
+                    const isExpanded = state?.configExpanded === true;
+                    const config = state?.config;
+
                     return (
-                      <tr
+                      <AgentRow
                         key={agent.id}
-                        className="border-b transition-colors hover:bg-muted/50 cursor-pointer data-[state=selected]:bg-muted"
-                        onClick={() => toggleAgent(agent.id)}
-                        data-state={isChecked ? 'selected' : undefined}
-                      >
-                        <td className="px-3 py-2 align-middle">
-                          <Checkbox
-                            checked={isChecked}
-                            onCheckedChange={() => toggleAgent(agent.id)}
-                            onClick={e => e.stopPropagation()}
-                            aria-label={`Toggle ${agent.name}`}
-                          />
-                        </td>
-                        <td className="px-2 py-2 align-middle overflow-hidden">
-                          <span className="text-xs font-medium block truncate">{agent.name}</span>
-                        </td>
-                        <td className="px-2 py-2 align-middle overflow-hidden">
-                          {agent.description ? (
-                            <span className="text-xs text-muted-foreground block truncate">
-                              {firstLine(agent.description)}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground/40 italic">—</span>
-                          )}
-                        </td>
-                      </tr>
+                        agent={agent}
+                        isChecked={isChecked}
+                        isExpanded={isExpanded}
+                        config={config}
+                        onToggle={() => toggleAgent(agent.id)}
+                        onToggleConfig={() => toggleConfigExpanded(agent.id)}
+                        onUpdateConfig={patch => updateConfig(agent.id, patch)}
+                      />
                     );
                   })}
                 </tbody>
@@ -320,7 +403,7 @@ function DelegationSelectorDialog({
           <div className="flex items-center justify-end px-4 py-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-2">
               <span className="tabular-nums">
-                {filteredAgents.filter(a => isAgentChecked(a.id)).length} of {filteredAgents.length} shown selected
+                {selectedCount} of {filteredAgents.length} shown selected
               </span>
               <Button
                 size="sm"
@@ -335,6 +418,131 @@ function DelegationSelectorDialog({
         </div>
       )}
     </DraggableDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+/** Config section rendered below a checked row. */
+function ConfigSection({
+  config,
+  onUpdate,
+}: {
+  config: DelegationRowConfig;
+  onUpdate: (patch: Partial<DelegationRowConfig>) => void;
+}) {
+  return (
+    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 px-3 py-2 text-xs">
+      <label className="flex items-center text-muted-foreground whitespace-nowrap">Alias</label>
+      <Input
+        value={config.callee_alias}
+        onChange={e => onUpdate({ callee_alias: e.target.value })}
+        className="h-6 text-xs"
+        placeholder="agent_alias"
+      />
+      <label className="flex items-center text-muted-foreground whitespace-nowrap">Description</label>
+      <Input
+        value={config.description_override}
+        onChange={e => onUpdate({ description_override: e.target.value })}
+        className="h-6 text-xs"
+        placeholder="Custom description (optional)"
+      />
+      <label className="flex items-center text-muted-foreground whitespace-nowrap">Timeout</label>
+      <div className="flex items-center gap-1.5">
+        <Input
+          type="number"
+          value={config.max_timeout_seconds}
+          onChange={e => onUpdate({ max_timeout_seconds: Math.max(10, Number(e.target.value) || 300) })}
+          className="h-6 w-20 text-xs"
+          min={10}
+        />
+        <span className="text-muted-foreground">sec</span>
+        <span className="mx-2 text-muted-foreground/40">|</span>
+        <span className="text-muted-foreground whitespace-nowrap">Max Iterations</span>
+        <Input
+          type="number"
+          value={config.max_iterations_override}
+          onChange={e => onUpdate({ max_iterations_override: e.target.value })}
+          className="h-6 w-20 text-xs"
+          placeholder="Default"
+          min={1}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** One row in the delegation agent table, with optional expandable config. */
+function AgentRow({
+  agent,
+  isChecked,
+  isExpanded,
+  config,
+  onToggle,
+  onToggleConfig,
+  onUpdateConfig,
+}: {
+  agent: AgentEntry;
+  isChecked: boolean;
+  isExpanded: boolean;
+  config: DelegationRowConfig | undefined;
+  onToggle: () => void;
+  onToggleConfig: () => void;
+  onUpdateConfig: (patch: Partial<DelegationRowConfig>) => void;
+}) {
+  return (
+    <>
+      <tr
+        className={`border-b transition-colors hover:bg-muted/50 cursor-pointer ${isChecked ? 'bg-muted/30' : ''}`}
+        onClick={onToggle}
+        data-state={isChecked ? 'selected' : undefined}
+      >
+        <td className="px-3 py-2 align-middle">
+          <Checkbox
+            checked={isChecked}
+            onCheckedChange={onToggle}
+            onClick={e => e.stopPropagation()}
+            aria-label={`Toggle ${agent.name}`}
+          />
+        </td>
+        <td className="px-2 py-2 align-middle overflow-hidden">
+          <span className="text-xs font-medium block truncate">{agent.name}</span>
+        </td>
+        <td className="px-2 py-2 align-middle overflow-hidden">
+          {agent.description ? (
+            <span className="text-xs text-muted-foreground block truncate">
+              {firstLine(agent.description)}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground/40 italic">—</span>
+          )}
+        </td>
+        <td className="w-10 px-2 py-2 align-middle text-right">
+          {isChecked && (
+            <button
+              type="button"
+              className={`inline-flex items-center justify-center rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${isExpanded ? 'text-foreground' : ''}`}
+              onClick={e => {
+                e.stopPropagation();
+                onToggleConfig();
+              }}
+              aria-label={`Configure ${agent.name}`}
+            >
+              <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+            </button>
+          )}
+        </td>
+      </tr>
+      {isChecked && isExpanded && config && (
+        <tr className="border-b bg-muted/15">
+          <td colSpan={4} className="p-0">
+            <ConfigSection config={config} onUpdate={onUpdateConfig} />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

@@ -157,6 +157,7 @@ export type ReactStreamEventType =
   | "error"
   | "delegation_start"
   | "delegation_result"
+  | "delegation_clarify"
   | "delegation_error";
 
 /**

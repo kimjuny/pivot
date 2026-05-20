@@ -118,6 +118,7 @@ class ReactEngine:
         self.cancelled = False  # Flag to signal cancellation
         self._pending_multimodal_blocks: list[dict[str, Any]] = []
         self._delegation_agents: str = ""
+        self._delegation_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     def _previous_recursion_failed(self, task: ReactTask) -> bool:
         """Return whether the latest persisted recursion ended in failure.
@@ -1554,12 +1555,69 @@ class ReactEngine:
     ) -> dict[str, Any]:
         """Execute an agent-to-agent delegation as a sub-task.
 
-        Intercepts the delegate_to_agent tool call, resolves the callee by
-        alias, and runs the sub-agent's ReAct loop via DelegationExecutor.
+        Supports two modes:
+
+        1. **New delegation**: caller provides ``agent`` (alias) and
+           ``instruction``. Resolves callee, creates delegation session/task,
+           and runs the sub-agent ReAct loop.
+        2. **Resume delegation**: caller provides ``delegation_context_id``
+           and ``response`` to answer a sub-agent's CLARIFY question. Finds
+           the paused session/task and resumes the sub-agent loop.
         """
         from app.services.agent_delegation_service import AgentDelegationService
         from app.services.delegation_executor import DelegationExecutor
 
+        if self.tool_execution_context is None:
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": "No execution context available for delegation",
+                "success": False,
+            }
+
+        ctx = self.tool_execution_context
+
+        # --- Resume mode (CLARIFY response) ---
+        delegation_context_id = tool_call.arguments.get("delegation_context_id")
+        response = tool_call.arguments.get("response")
+        delegation_on_event = self._make_delegation_event_callback()
+
+        if delegation_context_id:
+            if not response:
+                return {
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                    "error": "'response' is required when providing delegation_context_id",
+                    "success": False,
+                }
+            try:
+                executor = DelegationExecutor(self.db)
+                result = await executor.resume_delegation(
+                    delegation_context_id=delegation_context_id,
+                    caller_context=ctx,
+                    response=response,
+                    on_event=delegation_on_event,
+                )
+                return {
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                    "result": result,
+                    "success": True,
+                }
+            except Exception as e:
+                logger.error("Delegation resume failed: %s", e)
+                return {
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.name,
+                    "arguments": tool_call.arguments,
+                    "error": f"Delegation resume failed: {e!s}",
+                    "success": False,
+                }
+
+        # --- New delegation mode ---
         agent_alias = tool_call.arguments.get("agent", "")
         instruction = tool_call.arguments.get("instruction", "")
 
@@ -1572,16 +1630,6 @@ class ReactEngine:
                 "success": False,
             }
 
-        if self.tool_execution_context is None:
-            return {
-                "tool_call_id": tool_call.id,
-                "name": tool_call.name,
-                "arguments": tool_call.arguments,
-                "error": "No execution context available for delegation",
-                "success": False,
-            }
-
-        ctx = self.tool_execution_context
         delegation_service = AgentDelegationService(self.db)
         delegation = delegation_service.resolve_by_alias(ctx.agent_id, agent_alias)
 
@@ -1606,6 +1654,7 @@ class ReactEngine:
                 delegation_depth=getattr(self, "_current_task_delegation_depth", 0),
                 delegation=delegation,
                 instruction=instruction,
+                on_event=delegation_on_event,
             )
             return {
                 "tool_call_id": tool_call.id,
@@ -1623,6 +1672,21 @@ class ReactEngine:
                 "error": f"Delegation failed: {e!s}",
                 "success": False,
             }
+
+    def _make_delegation_event_callback(
+        self,
+    ) -> Any:
+        """Create an ``on_event`` callback for ``DelegationExecutor``.
+
+        The callback puts delegation-level events into the engine's
+        delegation event queue so they can be yielded by the meter pump
+        loop and forwarded to the parent task's SSE subscribers.
+        """
+
+        async def _on_delegation_event(event: dict[str, Any]) -> None:
+            await self._delegation_event_queue.put(event)
+
+        return _on_delegation_event
 
     def _has_all_payloads_for_tool_call(
         self,
@@ -2585,6 +2649,21 @@ class ReactEngine:
                         cancelled_during_recursion = True
                         break
 
+                    # Drain delegation events emitted by sub-agent execution.
+                    for _ in range(self._delegation_event_queue.qsize()):
+                        try:
+                            _del_event = self._delegation_event_queue.get_nowait()
+                            yield {
+                                "type": _del_event["type"],
+                                "task_id": task.task_id,
+                                "trace_id": trace_id,
+                                "iteration": task.iteration,
+                                "data": _del_event.get("data", {}),
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            }
+                        except asyncio.QueueEmpty:
+                            break
+
                     if token_meter_queue is None:
                         done, _ = await asyncio.wait({recursion_task}, timeout=0.2)
                         if done:
@@ -2828,6 +2907,23 @@ class ReactEngine:
                         },
                         "timestamp": datetime.now(UTC).isoformat(),
                     }
+
+                # Final drain: delegation events arriving just before the
+                # recursion task completes may not have been yielded in the
+                # loop above.
+                while not self._delegation_event_queue.empty():
+                    try:
+                        _del_event = self._delegation_event_queue.get_nowait()
+                        yield {
+                            "type": _del_event["type"],
+                            "task_id": task.task_id,
+                            "trace_id": trace_id,
+                            "iteration": task.iteration,
+                            "data": _del_event.get("data", {}),
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+                    except asyncio.QueueEmpty:
+                        break
 
                 if cancelled_during_recursion:
                     break
