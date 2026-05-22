@@ -58,6 +58,10 @@ export interface Agent {
    * '[]' means no skills.
    */
   skill_ids?: string | null;
+  /** Whether other agents can delegate tasks to this agent. */
+  allow_delegation: boolean;
+  /** Capability description surfaced to calling agents in the delegation tool catalog. */
+  delegation_description?: string | null;
   /** UTC timestamp when agent was created */
   created_at: string;
   /** UTC timestamp when agent was last updated */
@@ -72,7 +76,6 @@ export interface AgentDelegation {
   caller_agent_id: number;
   callee_agent_id: number;
   callee_alias: string;
-  description_override: string | null;
   pass_mode: string;
   max_timeout_seconds: number;
   max_iterations_override: number | null;

@@ -148,13 +148,11 @@ class AgentDelegationService:
                 caller_agent_id=caller_agent_id,
                 callee_agent_id=int(item["callee_agent_id"]),  # type: ignore[arg-type]
                 callee_alias=str(item["callee_alias"]),
-                description_override=str(v)
-                if (v := item.get("description_override")) is not None
-                else None,
                 pass_mode=str(item.get("pass_mode", "instruction_only")),
                 max_timeout_seconds=int(item.get("max_timeout_seconds", 300)),  # type: ignore[arg-type]
                 max_iterations_override=int(item["max_iterations_override"])  # type: ignore[arg-type]
-                if "max_iterations_override" in item and item["max_iterations_override"] is not None
+                if "max_iterations_override" in item
+                and item["max_iterations_override"] is not None
                 else None,
                 enabled=bool(item.get("enabled", True)),
                 priority=int(item.get("priority", 100)),  # type: ignore[arg-type]
@@ -208,7 +206,9 @@ class AgentDelegationService:
             callee = self.db.get(Agent, d.callee_agent_id)
             if callee is None:
                 continue
-            desc = d.description_override or callee.description or ""
+            if not callee.allow_delegation or callee.active_release_id is None:
+                continue
+            desc = callee.delegation_description or ""
             # Escape pipe characters in description for markdown table
             desc_escaped = desc.replace("|", "\\|")
             rows.append(f"| {d.callee_alias} | {callee.name} | {desc_escaped} |")

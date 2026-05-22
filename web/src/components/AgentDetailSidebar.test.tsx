@@ -118,6 +118,8 @@ const baseAgent: Agent = {
   max_iteration: 8,
   tool_ids: null,
   skill_ids: null,
+  allow_delegation: false,
+  delegation_description: null,
   created_at: "2026-04-03T00:00:00+00:00",
   updated_at: "2026-04-03T00:00:00+00:00",
 };

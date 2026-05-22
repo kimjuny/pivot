@@ -33,12 +33,13 @@ interface AgentEntry {
   description: string | null;
   llm_id: number | null;
   client_state?: string;
+  allow_delegation: boolean;
+  active_release_id: number | null;
 }
 
 /** Per-row configuration state for a checked delegation. */
 interface DelegationRowConfig {
   callee_alias: string;
-  description_override: string;
   max_timeout_seconds: number;
   /** String for empty-state handling; parsed to number|null on save. */
   max_iterations_override: string;
@@ -81,7 +82,6 @@ function generateAlias(name: string): string {
 function makeDefaultConfig(agentName: string): DelegationRowConfig {
   return {
     callee_alias: generateAlias(agentName),
-    description_override: '',
     max_timeout_seconds: 300,
     max_iterations_override: '',
   };
@@ -90,7 +90,6 @@ function makeDefaultConfig(agentName: string): DelegationRowConfig {
 function configFromExisting(existing: AgentDelegation): DelegationRowConfig {
   return {
     callee_alias: existing.callee_alias,
-    description_override: existing.description_override ?? '',
     max_timeout_seconds: existing.max_timeout_seconds,
     max_iterations_override: existing.max_iterations_override != null
       ? String(existing.max_iterations_override)
@@ -137,13 +136,20 @@ function DelegationSelectorDialog({
       setExistingDelegations(delegations);
       setAvailableAgents(
         allAgents
-          .filter(a => a.id !== excludeAgentId)
+          .filter(
+            a =>
+              a.id !== excludeAgentId &&
+              a.allow_delegation === true &&
+              a.active_release_id != null
+          )
           .map(a => ({
             id: a.id,
             name: a.name,
             description: a.description ?? null,
             llm_id: a.llm_id ?? null,
             client_state: a.client_state,
+            allow_delegation: a.allow_delegation,
+            active_release_id: a.active_release_id ?? null,
           }))
       );
 
@@ -271,7 +277,6 @@ function DelegationSelectorDialog({
         .map(([calleeId, state]) => ({
           callee_agent_id: calleeId,
           callee_alias: state.config.callee_alias,
-          description_override: state.config.description_override || null,
           pass_mode: 'instruction_only' as const,
           max_timeout_seconds: state.config.max_timeout_seconds,
           max_iterations_override: state.config.max_iterations_override
@@ -441,13 +446,6 @@ function ConfigSection({
         onChange={e => onUpdate({ callee_alias: e.target.value })}
         className="h-6 text-xs"
         placeholder="agent_alias"
-      />
-      <label className="flex items-center text-muted-foreground whitespace-nowrap">Description</label>
-      <Input
-        value={config.description_override}
-        onChange={e => onUpdate({ description_override: e.target.value })}
-        className="h-6 text-xs"
-        placeholder="Custom description (optional)"
       />
       <label className="flex items-center text-muted-foreground whitespace-nowrap">Timeout</label>
       <div className="flex items-center gap-1.5">

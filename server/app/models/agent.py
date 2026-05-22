@@ -76,5 +76,16 @@ class Agent(SQLModel, table=True):
             "None = none."
         ),
     )
+    allow_delegation: bool = Field(
+        default=False,
+        description="Whether other agents can delegate tasks to this agent",
+    )
+    delegation_description: str | None = Field(
+        default=None,
+        description=(
+            "Capability description surfaced to calling agents in the delegation "
+            "tool catalog. Only used when allow_delegation is True."
+        ),
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -141,6 +141,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_task_attachment_schema_compatibility()
     ensure_skill_schema_compatibility()
     ensure_extension_schema_compatibility()
+    ensure_delegation_schema_compatibility()
 
     from app.services.permission_service import PermissionService
     from app.services.skill_service import sync_skill_registry
@@ -571,4 +572,23 @@ def ensure_extension_schema_compatibility() -> None:
                     "UPDATE agentextensionbinding "
                     "SET status = 'active' WHERE status IS NULL"
                 )
+            )
+
+
+def ensure_delegation_schema_compatibility() -> None:
+    """Apply additive schema updates for delegation-related agent fields."""
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("agent"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("agent")}
+    with engine.begin() as conn:
+        if "allow_delegation" not in columns:
+            conn.execute(
+                text("ALTER TABLE agent ADD COLUMN allow_delegation BOOLEAN DEFAULT 0")
+            )
+        if "delegation_description" not in columns:
+            conn.execute(
+                text("ALTER TABLE agent ADD COLUMN delegation_description VARCHAR")
             )

@@ -57,6 +57,14 @@ class AgentCreate(AppBaseModel):
     max_iteration: int = Field(
         default=100, ge=1, description="Maximum iterations for ReAct recursion"
     )
+    allow_delegation: bool = Field(
+        default=False,
+        description="Whether other agents can delegate tasks to this agent",
+    )
+    delegation_description: str | None = Field(
+        default=None,
+        description="Capability description for delegation context",
+    )
     use_scope: Literal["all", "selected"] = "selected"
     use_user_ids: list[int] = Field(default_factory=list)
     use_group_ids: list[int] = Field(default_factory=list)
@@ -74,6 +82,8 @@ class AgentUpdate(AppBaseModel):
     tool_ids: str | None = None
     # JSON-encoded list of globally unique skill names, or None to leave unchanged
     skill_ids: str | None = None
+    allow_delegation: bool | None = None
+    delegation_description: str | None = None
 
 
 class AgentClientStateUpdate(AppBaseModel):
@@ -152,6 +162,8 @@ class AgentResponse(AppBaseModel):
     max_iteration: int
     tool_ids: str | None
     skill_ids: str | None
+    allow_delegation: bool
+    delegation_description: str | None
     created_at: datetime
     updated_at: datetime
 

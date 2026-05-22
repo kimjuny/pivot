@@ -76,7 +76,6 @@ async def create_delegation(
             caller_agent_id=agent_id,
             callee_agent_id=data.callee_agent_id,
             callee_alias=data.callee_alias,
-            description_override=data.description_override,
             pass_mode=data.pass_mode,
             max_timeout_seconds=data.max_timeout_seconds,
             max_iterations_override=data.max_iterations_override,

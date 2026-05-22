@@ -50,6 +50,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import StaggeredFadeInList from '@/components/StaggeredFadeInList';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   Empty,
   EmptyContent,
   EmptyDescription,
@@ -244,6 +250,8 @@ function AgentList() {
     sandbox_timeout_seconds: number;
     compact_threshold_percent: number;
     max_iteration: number;
+    allow_delegation: boolean;
+    delegation_description?: string;
     access: AgentAccess;
   }) => {
     if (modalMode === 'create') {
@@ -256,6 +264,8 @@ function AgentList() {
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
         max_iteration: agentData.max_iteration,
+        allow_delegation: agentData.allow_delegation,
+        delegation_description: agentData.delegation_description,
         use_scope: agentData.access.use_scope,
         use_user_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_user_ids,
         use_group_ids: agentData.access.use_scope === 'all' ? [] : agentData.access.use_group_ids,
@@ -271,6 +281,8 @@ function AgentList() {
         sandbox_timeout_seconds: agentData.sandbox_timeout_seconds,
         compact_threshold_percent: agentData.compact_threshold_percent,
         max_iteration: agentData.max_iteration,
+        allow_delegation: agentData.allow_delegation,
+        delegation_description: agentData.delegation_description,
       });
       await updateAgentAccess(editingAgent.id, {
         ...agentData.access,
@@ -310,6 +322,7 @@ function AgentList() {
   // ---------------------------------------------------------------------------
 
   return (
+    <TooltipProvider>
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* Page header — same layout as LLMs and Tools pages */}
       <div className="flex items-center justify-between mb-6">
@@ -449,18 +462,25 @@ function AgentList() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1">
                         <span className="font-medium text-sm truncate leading-tight">{agent.name}</span>
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                            (agent.client_state ?? 'open') === 'open'
-                              ? 'bg-emerald-500'
-                              : agent.client_state === 'upgrade_required'
-                                ? 'bg-blue-500'
-                                : agent.client_state === 'draining_for_upgrade'
-                                  ? 'bg-amber-500'
-                                  : 'bg-muted-foreground/40'
-                          }`}
-                          aria-hidden="true"
-                        />
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 cursor-default ${
+                                (agent.client_state ?? 'open') === 'open'
+                                  ? 'bg-emerald-500'
+                                  : agent.client_state === 'upgrade_required'
+                                    ? 'bg-blue-500'
+                                    : agent.client_state === 'draining_for_upgrade'
+                                      ? 'bg-amber-500'
+                                      : 'bg-muted-foreground/40'
+                              }`}
+                              aria-label={getClientStateLabel(agent.client_state)}
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {getClientStateLabel(agent.client_state)}
+                          </TooltipContent>
+                        </Tooltip>
                       </div>
                       <div className="text-[11px] text-muted-foreground truncate leading-tight mt-0.5">
                         {formatTimestamp(agent.updated_at)}
@@ -534,18 +554,14 @@ function AgentList() {
                         v{agent.active_release_version}
                       </Badge>
                     )}
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] px-1.5 py-0 h-4 ${
-                        isClientOpen
-                          ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
-                          : agent.client_state === 'upgrade_required'
-                            ? 'border-blue-500/30 text-blue-700 dark:text-blue-300'
-                            : 'border-amber-500/30 text-amber-700 dark:text-amber-300'
-                      }`}
-                    >
-                      {getClientStateLabel(agent.client_state)}
-                    </Badge>
+                    {agent.allow_delegation && (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] px-1.5 py-0 h-4 border-violet-500/30 text-violet-700 dark:text-violet-300"
+                      >
+                        Subagent
+                      </Badge>
+                    )}
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 max-w-full truncate">
                       {agent.model_name || 'No LLM'}
                     </Badge>
@@ -639,6 +655,7 @@ function AgentList() {
         variant="danger"
       />
     </div>
+    </TooltipProvider>
   );
 }
 

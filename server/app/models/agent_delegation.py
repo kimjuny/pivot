@@ -27,13 +27,6 @@ class AgentDelegation(SQLModel, table=True):
             "delegate_to_agent tool calls. Must be unique per caller agent."
         ),
     )
-    description_override: str | None = Field(
-        default=None,
-        description=(
-            "Custom description for the callee in the tool catalog, "
-            "helping the LLM understand when to call this agent"
-        ),
-    )
     pass_mode: str = Field(
         default="instruction_only",
         description="instruction_only | with_context",

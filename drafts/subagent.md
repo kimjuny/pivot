@@ -95,7 +95,6 @@ class AgentDelegation(SQLModel, table=True):
     caller_agent_id: int = Field(foreign_key="agent.id", index=True)
     callee_agent_id: int = Field(foreign_key="agent.id", index=True)
     callee_alias: str          # 短标识符，LLM 调用时使用
-    description_override: str | None = Field(default=None)
     pass_mode: str = Field(default="instruction_only")
     max_timeout_seconds: int = Field(default=300)
     max_iterations_override: int | None = Field(default=None)
@@ -188,6 +187,39 @@ Example: delegate_to_agent(agent="research", instruction="Search for...")
 ### Agent 名称映射
 
 通过 `AgentDelegation.callee_alias` 字段提供短标识符映射。用户在配置界面选中一个 Agent 后系统自动生成 alias（默认用 agent name 的 slugified 版本）。
+
+### Agent Delegation Availability（Phase 2.5）✅
+
+每个 Agent 通过两个新字段控制是否可被其他 Agent 委托调用：
+
+```python
+class Agent(SQLModel, table=True):
+    # ... existing fields ...
+    allow_delegation: bool = Field(
+        default=False,
+        description="Whether other agents can delegate tasks to this agent",
+    )
+    delegation_description: str | None = Field(
+        default=None,
+        description="Capability description surfaced to calling agents in the delegation tool catalog",
+    )
+```
+
+设计要点：
+
+- **Opt-in 模式**：`allow_delegation` 默认 False，Agent 创建者需主动开启
+- **能力描述独立**：`delegation_description` 是专门给 LLM 看的能力描述，与 `agent.description`（面向用户的描述）完全独立，不 fallback
+- **Prompt 生成**：`build_delegation_prompt_section()` 仅使用 `callee.delegation_description`，不再使用 `description_override` 或 `agent.description`
+- **筛选条件**：只有同时满足 `allow_delegation=True` + `active_release_id IS NOT NULL`（已发布）的 Agent 才会：
+  - 出现在 system prompt 的委托列表中
+  - 出现在 DelegationSelectorDialog 的可选列表中
+  - 被引擎运行时 `resolve_by_alias()` 后的二次校验通过
+- **`description_override` 已移除**：之前的 `AgentDelegation.description_override` 字段已从模型、schemas、API、前端完全移除。子 Agent 的能力描述完全依赖其自身的 `delegation_description`
+
+UI 变更：
+
+- Agent Create/Edit Modal 的 General tab 新增 "Available for Delegation" Switch + 条件显示的 "Delegation Description" Textarea
+- DelegationSelectorDialog 的可选 Agent 列表自动过滤，只显示 allow_delegation=True 且已发布的 Agent
 
 ## 核心执行流程 ✅
 
@@ -565,7 +597,7 @@ Connections:
 
 ### Phase 2 剩余待办
 
-- [ ] Token 用量聚合：全链路汇总（主 Agent + 所有子 Agent）
+- [x] ~~Token 用量聚合~~：经验证，当前 Analytics 统计已是准确的——每个 ReactTask 各自记录 LLM 真实消耗，不存在重复统计问题，无需额外处理
 
 ### SSE 委托事件 ✅
 
@@ -584,7 +616,7 @@ Connections:
 在 `DelegationSelectorDialog` 中为每个已勾选的委托行添加可展开的配置区域：
 
 - [x] 状态管理：`Set<number>` → `Map<number, DelegationRowState>`，包含 `checked`、`config`、`configExpanded`
-- [x] 配置字段：Alias（`callee_alias`）、Description（`description_override`）、Timeout（`max_timeout_seconds`）、Max Iterations（`max_iterations_override`）
+- [x] 配置字段：Alias（`callee_alias`）、Timeout（`max_timeout_seconds`）、Max Iterations（`max_iterations_override`）。Description override 已移除，改用 Agent 自身的 `delegation_description`
 - [x] UI 交互：已勾选行显示齿轮图标，点击展开/折叠配置区域
 - [x] 保存逻辑：批量替换时包含每行的配置参数
 - [x] Sidebar 展示：委托列表显示 alias 而非 agent name，tooltip 显示 agent name
@@ -593,6 +625,15 @@ Connections:
 ### Phase 3 — 高级功能
 
 - [ ] Handoff 模式（对话转交，用户直接跟 B 聊）
-- [ ] 并行委托（Agent A 同时调用 B 和 C）
+- [x] 并行委托（Agent A 同时调用 B 和 C）— 已有 eager tool execution + batch orchestration 支持，E2E 验证通过（Gemini Agent 同时并行委托 Claude Agent + DeepSeek Agent）
 - [ ] Agent 编排模板（预设的 Agent 团队配置）
 - [ ] Workspace 隔离策略（子 Agent 是否使用独立 workspace）
+
+### 并行委托验证 ✅
+
+已通过 E2E 验证：Gemini Agent 在一个 CALL_TOOL action 中同时委托 Claude Agent 和 DeepSeek Agent。
+
+- LLM 根据 `system_prompt.md` 中的 batch orchestration 说明，自然生成多个同 batch 的 `delegate_to_agent` tool_call
+- 引擎的 eager execution 为每个 tool_call 创建独立 `asyncio.Task`，通过 `_execute_tool_call_request()` → `_execute_delegation()` 并行执行
+- 两个子 Agent 的 ReAct 循环并发运行，结果汇总到同一 `action_result` 中
+- 前端正确展示 "2 tools used" + 各自的 Arguments/Result 详情

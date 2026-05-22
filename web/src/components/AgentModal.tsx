@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
@@ -53,6 +54,10 @@ export interface AgentFormData {
   compact_threshold_percent: number;
   /** Maximum ReAct iterations allowed for one task. */
   max_iteration: number;
+  /** Whether other agents can delegate tasks to this agent. */
+  allow_delegation: boolean;
+  /** Capability description surfaced to calling agents. Only meaningful when allow_delegation is true. */
+  delegation_description: string | undefined;
   /** End-user access rules for Web, Desktop, and Channel clients. */
   access: AgentAccess;
 }
@@ -87,6 +92,8 @@ function createDefaultFormData(): AgentFormData {
     sandbox_timeout_seconds: 120,
     compact_threshold_percent: 80,
     max_iteration: 100,
+    allow_delegation: false,
+    delegation_description: '',
     access: { ...EMPTY_AGENT_ACCESS },
   };
 }
@@ -186,6 +193,8 @@ function AgentModal({
           compact_threshold_percent:
             initialData.compact_threshold_percent ?? 80,
           max_iteration: initialData.max_iteration ?? 100,
+          allow_delegation: initialData.allow_delegation ?? false,
+          delegation_description: initialData.delegation_description ?? '',
           access: initialData.access ?? { ...EMPTY_AGENT_ACCESS },
         });
       } else {
@@ -255,6 +264,10 @@ function AgentModal({
         sandbox_timeout_seconds: formData.sandbox_timeout_seconds,
         compact_threshold_percent: formData.compact_threshold_percent,
         max_iteration: formData.max_iteration,
+        allow_delegation: formData.allow_delegation,
+        delegation_description: formData.allow_delegation
+          ? formData.delegation_description?.trim() || undefined
+          : undefined,
         access: {
           ...formData.access,
           use_user_ids:
@@ -418,6 +431,46 @@ function AgentModal({
                     </SelectItem>
                   </SelectContent>
                 </Select>
+              )}
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label htmlFor="allow_delegation">Available for Delegation</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Allow other agents to delegate tasks to this agent as a sub-agent.
+                  </p>
+                </div>
+                <Switch
+                  id="allow_delegation"
+                  checked={formData.allow_delegation}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, allow_delegation: checked })
+                  }
+                  disabled={isSubmitting}
+                />
+              </div>
+              {formData.allow_delegation && (
+                <div className="space-y-2">
+                  <Label htmlFor="delegation_description">Delegation Description</Label>
+                  <Textarea
+                    id="delegation_description"
+                    value={formData.delegation_description}
+                    onChange={(e) =>
+                      setFormData({ ...formData, delegation_description: e.target.value })
+                    }
+                    disabled={isSubmitting}
+                    rows={3}
+                    placeholder="Describe what this agent excels at so calling agents know when to use it…"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This description is shown to other agents when they decide which
+                    sub-agent to call. Be specific about capabilities and strengths.
+                  </p>
+                </div>
               )}
             </div>
 

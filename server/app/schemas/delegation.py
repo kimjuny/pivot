@@ -13,9 +13,6 @@ class DelegationCreate(AppBaseModel):
     callee_alias: str = Field(
         ..., description="Short identifier for the callee in tool calls"
     )
-    description_override: str | None = Field(
-        None, description="Custom description for the LLM"
-    )
     pass_mode: str = Field(
         default="instruction_only",
         description="instruction_only | with_context",
@@ -35,7 +32,6 @@ class DelegationUpdate(AppBaseModel):
     """Schema for updating an existing delegation."""
 
     callee_alias: str | None = None
-    description_override: str | None = None
     pass_mode: str | None = None
     max_timeout_seconds: int | None = None
     max_iterations_override: int | None = None
@@ -50,7 +46,6 @@ class DelegationResponse(AppBaseModel):
     caller_agent_id: int
     callee_agent_id: int
     callee_alias: str
-    description_override: str | None
     pass_mode: str
     max_timeout_seconds: int
     max_iterations_override: int | None
@@ -69,7 +64,6 @@ class DelegationReplaceItem(AppBaseModel):
 
     callee_agent_id: int
     callee_alias: str
-    description_override: str | None = None
     pass_mode: str = "instruction_only"
     max_timeout_seconds: int = 300
     max_iterations_override: int | None = None

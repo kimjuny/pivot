@@ -373,6 +373,8 @@ export const createAgent = async (agentData: {
   sandbox_timeout_seconds?: number;
   compact_threshold_percent?: number;
   max_iteration?: number;
+  allow_delegation?: boolean;
+  delegation_description?: string;
   use_scope?: 'all' | 'selected';
   use_user_ids?: number[];
   use_group_ids?: number[];
@@ -476,6 +478,8 @@ export const updateAgent = async (
     sandbox_timeout_seconds?: number;
     compact_threshold_percent?: number;
     max_iteration?: number;
+    allow_delegation?: boolean;
+    delegation_description?: string;
     tool_ids?: string | null;
     skill_ids?: string | null;
   }
@@ -584,7 +588,6 @@ export const replaceAgentDelegations = async (
   delegations: Array<{
     callee_agent_id: number;
     callee_alias: string;
-    description_override?: string | null;
     pass_mode?: string;
     max_timeout_seconds?: number;
     max_iterations_override?: number | null;
@@ -606,7 +609,6 @@ export const createAgentDelegation = async (
   data: {
     callee_agent_id: number;
     callee_alias: string;
-    description_override?: string | null;
     pass_mode?: string;
     max_timeout_seconds?: number;
     max_iterations_override?: number | null;

@@ -1645,6 +1645,22 @@ class ReactEngine:
                 "success": False,
             }
 
+        callee = self.db.get(Agent, delegation.callee_agent_id)
+        if (
+            callee is None
+            or not callee.allow_delegation
+            or callee.active_release_id is None
+        ):
+            return {
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": tool_call.arguments,
+                "error": (
+                    f"Agent '{agent_alias}' is currently unavailable for delegation."
+                ),
+                "success": False,
+            }
+
         try:
             executor = DelegationExecutor(self.db)
             result = await executor.execute_delegation(

@@ -65,6 +65,8 @@ def _serialize_agent_response(
         "max_iteration": agent.max_iteration,
         "tool_ids": agent.tool_ids,
         "skill_ids": agent.skill_ids,
+        "allow_delegation": agent.allow_delegation,
+        "delegation_description": agent.delegation_description,
         "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
     }
@@ -211,6 +213,8 @@ async def create_agent(
         sandbox_timeout_seconds=agent_data.sandbox_timeout_seconds,
         compact_threshold_percent=agent_data.compact_threshold_percent,
         max_iteration=agent_data.max_iteration,
+        allow_delegation=agent_data.allow_delegation,
+        delegation_description=agent_data.delegation_description,
     )
     AccessService(db).grant_creator_edit(agent=agent, user=current_user)
     AccessService(db).set_agent_access(
@@ -452,6 +456,10 @@ async def update_agent(
         update_data["tool_ids"] = agent_data.tool_ids
     if "skill_ids" in agent_data.__fields_set__:
         update_data["skill_ids"] = agent_data.skill_ids
+    if "allow_delegation" in agent_data.__fields_set__:
+        update_data["allow_delegation"] = agent_data.allow_delegation
+    if "delegation_description" in agent_data.__fields_set__:
+        update_data["delegation_description"] = agent_data.delegation_description
 
     updated_agent = agent_crud.update(agent_id, db, **update_data)
     if not updated_agent:
