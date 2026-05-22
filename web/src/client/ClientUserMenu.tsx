@@ -1,4 +1,5 @@
-import { ChevronsUpDown, LogOut, Moon, Sun } from "lucide-react";
+import { useState } from "react";
+import { ChevronsUpDown, KeyRound, LogOut, Moon, Sun } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -18,6 +19,7 @@ import {
 import { useAuth } from "@/contexts/auth-core";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useTheme } from "@/lib/use-theme";
+import ChangePasswordDialog from "@/components/ChangePasswordDialog";
 
 interface ClientUserMenuProps {
   isCollapsed: boolean;
@@ -35,6 +37,7 @@ function ClientUserMenu({ isCollapsed }: ClientUserMenuProps) {
   const { logout, user } = useAuth();
   const { theme, setTheme } = useTheme();
   const { isMobile } = useSidebar();
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const nextTheme = theme === "dark" ? "light" : "dark";
   const accountName = user?.username ?? "Workspace";
   const accountSubtitle = user?.role
@@ -113,6 +116,13 @@ function ClientUserMenu({ isCollapsed }: ClientUserMenuProps) {
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={() => setChangePasswordOpen(true)}>
+                <KeyRound className="h-4 w-4" />
+                Change password
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={handleLogout}
               className="text-destructive focus:text-destructive"
@@ -123,6 +133,7 @@ function ClientUserMenu({ isCollapsed }: ClientUserMenuProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
+      <ChangePasswordDialog open={changePasswordOpen} onOpenChange={setChangePasswordOpen} />
     </SidebarMenu>
   );
 }

@@ -27,6 +27,7 @@ from app.models.extension import (
 )
 from app.models.file import FileAsset
 from app.models.llm import LLM
+from app.models.login_attempt import LoginAttempt
 from app.models.media_generation import (
     AgentMediaProviderBinding,
     MediaGenerationUsageLog,
@@ -69,6 +70,7 @@ __all__ = [
     "ExternalIdentityBinding",
     "FileAsset",
     "GroupMember",
+    "LoginAttempt",
     "MediaGenerationUsageLog",
     "PermissionRecord",
     "PrincipalType",

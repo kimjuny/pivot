@@ -51,6 +51,12 @@ class OperationsUserUpdate(AppBaseModel):
     email: str | None = None
 
 
+class OperationsResetPassword(AppBaseModel):
+    """Admin password reset payload."""
+
+    new_password: str
+
+
 def _role_keys_by_id(db: DBSession) -> dict[int, str]:
     return {
         role.id: role.key for role in db.exec(select(Role)).all() if role.id is not None
@@ -126,3 +132,26 @@ async def update_operations_user(
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return _serialize_user(user, _role_keys_by_id(db))
+
+
+@router.post("/operations/users/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: int,
+    payload: OperationsResetPassword,
+    db: DBSession = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.USERS_MANAGE)),
+) -> dict[str, str]:
+    """Reset one user's password (admin-only)."""
+    del current_user
+    if len(payload.new_password) < 8:
+        raise HTTPException(
+            status_code=422,
+            detail="Password must be at least 8 characters",
+        )
+    user = UserService(db).update_password(
+        user_id=user_id,
+        new_password=payload.new_password,
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": "Password reset successfully"}

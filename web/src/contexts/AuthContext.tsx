@@ -14,10 +14,12 @@ import { getApiBaseUrl, httpClient } from '@/utils/api';
  * Authentication Provider component.
  *
  * Manages user authentication state across the application using localStorage.
+ * Also checks whether the system needs initial admin setup on mount.
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
 
   /**
    * Check if the current token is valid (exists and not expired).
@@ -36,7 +38,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Initialize auth state from localStorage on mount.
+   * Initialize auth state from localStorage and check setup status on mount.
    */
   useEffect(() => {
     const storedUser = getStoredUser();
@@ -45,7 +47,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } else {
       clearAuthSession();
     }
-    setIsLoading(false);
+
+    void (async () => {
+      try {
+        const response = await httpClient(`${getApiBaseUrl()}/auth/setup-status`);
+        if (response.ok) {
+          const data = await response.json() as { needs_setup: boolean };
+          setNeedsSetup(data.needs_setup);
+        }
+      } catch {
+        // Silently ignore — setup check is best-effort
+      }
+      setIsLoading(false);
+    })();
   }, []);
 
   /**
@@ -92,8 +106,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  /**
+   * Mark the initial setup as completed.
+   */
+  const setupCompleted = useCallback(() => {
+    setNeedsSetup(false);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, checkTokenValidity, forceLogout }}>
+    <AuthContext.Provider value={{ user, isLoading, needsSetup, login, logout, checkTokenValidity, forceLogout, setupCompleted }}>
       {children}
     </AuthContext.Provider>
   );

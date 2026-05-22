@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import LoginPage from './components/LoginPage'
+import SetupPage from './components/SetupPage'
 import AgentList from './components/AgentList'
 import AgentDetailPage from './components/AgentDetailPage'
 import LLMList from './components/LLMList'
@@ -339,6 +340,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Routes>
             {/* Public route - Login page */}
             <Route path="/" element={<LoginPage />} />
+            <Route path="/setup" element={<SetupPage />} />
             <Route path="/access-denied" element={<AccessDeniedPage />} />
 
             {/* Protected routes */}

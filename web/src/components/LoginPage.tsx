@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useAuth, isTokenValid, hasPermission, getStoredUser } from '../contexts/auth-core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import PasswordInput from '@/components/PasswordInput';
 import {
   Card,
   CardContent,
@@ -32,48 +33,6 @@ function resolvePostLoginDestination(from: string | undefined): string {
   return '/studio';
 }
 
-/** Password input with show/hide toggle. */
-function PasswordInput({
-  value,
-  onChange,
-  disabled,
-  id,
-  invalid,
-}: {
-  value: string;
-  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  disabled?: boolean;
-  id?: string;
-  invalid?: boolean;
-}) {
-  const [visible, setVisible] = useState(false);
-
-  return (
-    <div className="relative">
-      <Input
-        id={id}
-        type={visible ? 'text' : 'password'}
-        placeholder="••••••••"
-        value={value}
-        onChange={onChange}
-        autoComplete="current-password"
-        disabled={disabled}
-        aria-invalid={invalid}
-        className="pr-9"
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        tabIndex={-1}
-        aria-label={visible ? 'Hide password' : 'Show password'}
-        className="absolute right-0 top-0 flex h-full items-center px-3 text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
-    </div>
-  );
-}
-
 /**
  * Full-page login form.
  *
@@ -84,7 +43,7 @@ function PasswordInput({
 function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, user } = useAuth();
+  const { login, user, needsSetup } = useAuth();
   const from = (location.state as { from?: string } | null)?.from;
 
   const [username, setUsername] = useState('');
@@ -98,6 +57,13 @@ function LoginPage() {
       navigate(resolvePostLoginDestination(from), { replace: true });
     }
   }, [user, navigate, from]);
+
+  /** Redirect to setup when no admin has been created yet. */
+  useEffect(() => {
+    if (needsSetup === true) {
+      navigate('/setup', { replace: true });
+    }
+  }, [needsSetup, navigate]);
 
   const clearError = () => {
     if (errorMessage) setErrorMessage('');

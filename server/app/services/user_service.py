@@ -20,28 +20,9 @@ class UserService:
     def __init__(self, db: DBSession) -> None:
         self.db = db
 
-    def ensure_default_admin(self) -> User:
-        """Create or update the development default admin user."""
-        admin_role = self.db.exec(select(Role).where(Role.key == "admin")).first()
-        if admin_role is None or admin_role.id is None:
-            raise RuntimeError("Default admin role has not been seeded.")
-
-        user = self.db.exec(select(User).where(User.username == "default")).first()
-        if user is None:
-            user = User(
-                username="default",
-                password_hash=get_password_hash("123456"),
-                role_id=admin_role.id,
-                status="active",
-            )
-        else:
-            user.role_id = admin_role.id
-            user.status = "active"
-            user.updated_at = datetime.now(UTC)
-        self.db.add(user)
-        self.db.commit()
-        self.db.refresh(user)
-        return user
+    def has_any_user(self) -> bool:
+        """Check whether any user exists in the database."""
+        return self.db.exec(select(User).limit(1)).first() is not None
 
     def list_users(self) -> list[User]:
         """List all users."""
@@ -118,6 +99,26 @@ class UserService:
             user.status = status
         if email is not None:
             user.email = email.strip() or None
+        user.updated_at = datetime.now(UTC)
+        self.db.add(user)
+        self.db.commit()
+        self.db.refresh(user)
+        return user
+
+    def update_password(self, *, user_id: int, new_password: str) -> User | None:
+        """Hash and persist a new password for the given user.
+
+        Args:
+            user_id: Primary key of the user to update.
+            new_password: Plain-text password to hash and store.
+
+        Returns:
+            The updated user, or None if the user does not exist.
+        """
+        user = self.db.get(User, user_id)
+        if user is None:
+            return None
+        user.password_hash = get_password_hash(new_password)
         user.updated_at = datetime.now(UTC)
         self.db.add(user)
         self.db.commit()

@@ -302,6 +302,22 @@ export async function updateOperationsUser(
   }) as Promise<OperationsUser>;
 }
 
+/**
+ * Admin-reset a user's password.
+ *
+ * @param userId - Target user ID.
+ * @param payload - Object containing the new password.
+ */
+export async function resetOperationsUserPassword(
+  userId: number,
+  payload: { new_password: string },
+): Promise<{ message: string }> {
+  return apiRequest(`/operations/users/${userId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }) as Promise<{ message: string }>;
+}
+
 export async function listOperationsGroups(): Promise<OperationsGroup[]> {
   return apiRequest("/operations/groups") as Promise<OperationsGroup[]>;
 }

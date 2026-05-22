@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
 
+    # Auth
+    LOGIN_RATE_LIMIT_PER_MINUTE: int = 5
+
     # Sandbox manager
     SANDBOX_MANAGER_URL: str = "http://sandbox-manager:8051"
     SANDBOX_MANAGER_TOKEN: str = "dev-sandbox-token"

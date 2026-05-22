@@ -64,6 +64,8 @@ def _serialize_client_agent_response(
         "max_iteration": agent.max_iteration,
         "tool_ids": agent.tool_ids,
         "skill_ids": agent.skill_ids,
+        "allow_delegation": agent.allow_delegation,
+        "delegation_description": agent.delegation_description,
         "created_at": agent.created_at.replace(tzinfo=UTC).isoformat(),
         "updated_at": agent.updated_at.replace(tzinfo=UTC).isoformat(),
     }

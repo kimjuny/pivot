@@ -67,3 +67,24 @@ class CurrentUserResponse(SQLModel):
     username: str
     role: str
     permissions: list[str]
+
+
+class SetupRequest(SQLModel):
+    """Schema for the initial admin setup request."""
+
+    username: str
+    password: str
+    email: str | None = None
+
+
+class SetupStatusResponse(SQLModel):
+    """Schema for the setup status check response."""
+
+    needs_setup: bool
+
+
+class ChangePasswordRequest(SQLModel):
+    """Schema for an authenticated user changing their own password."""
+
+    current_password: str
+    new_password: str

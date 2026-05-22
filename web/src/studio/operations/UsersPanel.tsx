@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import ResetPasswordDialog from "@/studio/operations/ResetPasswordDialog";
 import {
   Dialog,
   DialogContent,
@@ -66,6 +67,7 @@ const UsersPanel = forwardRef<PanelHandle>(function UsersPanel(_props, ref) {
   const [form, setForm] = useState(EMPTY_USER_FORM);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [resetUser, setResetUser] = useState<OperationsUser | null>(null);
 
   const isEditing = editingUser !== null;
 
@@ -276,6 +278,15 @@ const UsersPanel = forwardRef<PanelHandle>(function UsersPanel(_props, ref) {
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        aria-label={`Reset password for ${user.username}`}
+                        onClick={() => setResetUser(user)}
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -423,6 +434,12 @@ const UsersPanel = forwardRef<PanelHandle>(function UsersPanel(_props, ref) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ResetPasswordDialog
+        user={resetUser}
+        open={resetUser !== null}
+        onOpenChange={(v) => { if (!v) setResetUser(null); }}
+      />
     </>
   );
 });

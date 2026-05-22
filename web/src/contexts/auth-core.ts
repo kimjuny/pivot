@@ -14,6 +14,8 @@ export interface AuthContextType {
   user: User | null;
   /** Whether authentication is currently being checked. */
   isLoading: boolean;
+  /** Whether the system needs initial admin setup. Null = unknown/loading. */
+  needsSetup: boolean | null;
   /** Login function with username and password. */
   login: (username: string, password: string) => Promise<void>;
   /** Logout function to clear authentication state. */
@@ -22,6 +24,8 @@ export interface AuthContextType {
   checkTokenValidity: () => boolean;
   /** Force logout and redirect to login. */
   forceLogout: () => void;
+  /** Mark setup as completed after the first admin is created. */
+  setupCompleted: () => void;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);

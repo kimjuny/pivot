@@ -26,6 +26,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "groupmember",
     "imagegenerationusagelog",
     "llm",
+    "loginattempt",
     "permissionrecord",
     "project",
     "reactplanstep",
@@ -145,11 +146,9 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
 
     from app.services.permission_service import PermissionService
     from app.services.skill_service import sync_skill_registry
-    from app.services.user_service import UserService
 
     with Session(engine) as session:
         PermissionService(session).seed_defaults()
-        UserService(session).ensure_default_admin()
         sync_skill_registry(session)
 
 

@@ -5,6 +5,7 @@ import {
   Blocks,
   Bot,
   ArrowLeft,
+  KeyRound,
   Layers,
   Link2,
   ImagePlus,
@@ -46,6 +47,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import ChangePasswordDialog from '@/components/ChangePasswordDialog';
 
 interface StudioMenuLinkItem {
   title: string;
@@ -155,6 +157,7 @@ function Navigation() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isAgentsButtonHovered, setIsAgentsButtonHovered] = useState(false);
   const [currentAgent, setCurrentAgent] = useState<Agent | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const currentPath = location.pathname;
   const isDashboardActive = currentPath === '/studio' || currentPath === '/studio/dashboard';
@@ -594,6 +597,13 @@ function Navigation() {
                 </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
+                  onClick={() => setChangePasswordOpen(true)}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  <span>Change password</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   onClick={handleLogout}
                   className="flex items-center gap-2 cursor-pointer"
                 >
@@ -616,6 +626,7 @@ function Navigation() {
           )}
         </div>
       </div>
+      <ChangePasswordDialog open={changePasswordOpen} onOpenChange={setChangePasswordOpen} />
     </nav>
   );
 }
