@@ -77,6 +77,7 @@ import {
 import { ChatComposer } from "./components/ChatComposer";
 import { CompactStatusPill } from "./components/CompactStatusPill";
 import { ConversationView } from "./components/ConversationView";
+import { RoundAnchor } from "./components/RoundAnchor";
 import { ExtensionDock } from "./components/ExtensionDock";
 import type { InstalledChatSurfaceDescriptor } from "./components/ExtensionDock";
 import { useRegisterChatDebugPanelSection } from "./components/ChatDebugPanelContext";
@@ -84,6 +85,7 @@ import ProjectAccessDialog from "./components/ProjectAccessDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
 import StaleSessionDialog from "@/components/StaleSessionDialog";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
+import { useConversationRounds } from "./hooks/useConversationRounds";
 import { useChatUploads } from "./hooks/useChatUploads";
 import type {
   ChatWebSearchProviderOption,
@@ -872,6 +874,8 @@ function ChatContainer({
   const currentSessionIdRef = useRef<string | null>(null);
   const sessionStreamAbortControllerRef = useRef<AbortController | null>(null);
   const sessionStreamReconnectTimerRef = useRef<number | null>(null);
+  const sessionStreamReconnectCountRef = useRef(0);
+  const SESSION_STREAM_MAX_RECONNECTS = 10;
   const sessionEventCursorRef = useRef(0);
   const historyReloadInFlightRef = useRef(false);
   const liveAssistantMessageIdRef = useRef<string | null>(null);
@@ -933,8 +937,12 @@ function ChatContainer({
     handleDocumentInputChange,
     handlePaste,
   } = useChatUploads(primaryLlmId, initialLlm);
-  const { scrollContainerRef, handleScroll, prepareForProgrammaticScroll } =
-    useChatAutoScroll(messages);
+  const {
+    scrollContainerRef,
+    handleScroll,
+    prepareForProgrammaticScroll,
+    scrollToMessage,
+  } = useChatAutoScroll(messages);
   const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
     sessionIdleTimeoutMinutes,
   );
@@ -1268,6 +1276,7 @@ function ChatContainer({
       sessionStreamAbortControllerRef.current.abort();
       sessionStreamAbortControllerRef.current = null;
     }
+    sessionStreamReconnectCountRef.current = 0;
   }, []);
 
   /**
@@ -1980,6 +1989,7 @@ function ChatContainer({
     (sessionId: string, initialCursor: number) => {
       stopSessionStream();
       sessionEventCursorRef.current = initialCursor;
+      sessionStreamReconnectCountRef.current = 0;
       const controller = new AbortController();
       sessionStreamAbortControllerRef.current = controller;
 
@@ -2050,15 +2060,24 @@ function ChatContainer({
             return;
           }
           console.error("Session stream disconnected:", streamError);
+          scheduleReconnect();
         }
 
-        if (
-          !controller.signal.aborted &&
-          currentSessionIdRef.current === sessionId
-        ) {
-          sessionStreamReconnectTimerRef.current = window.setTimeout(() => {
-            void connect();
-          }, 1000);
+        function scheduleReconnect() {
+          if (
+            !controller.signal.aborted &&
+            currentSessionIdRef.current === sessionId &&
+            sessionStreamReconnectCountRef.current < SESSION_STREAM_MAX_RECONNECTS
+          ) {
+            sessionStreamReconnectCountRef.current += 1;
+            const backoff = Math.min(
+              1000 * 2 ** (sessionStreamReconnectCountRef.current - 1),
+              30_000,
+            );
+            sessionStreamReconnectTimerRef.current = window.setTimeout(() => {
+              void connect();
+            }, backoff);
+          }
         }
       };
 
@@ -3816,6 +3835,7 @@ function ChatContainer({
     isExtensionDockOpen,
   ]);
 
+  const conversationRounds = useConversationRounds(messages);
   const isConversationEmpty = messages.length === 0;
   const composerTaskPlan = useMemo(
     () => deriveComposerTaskPlan(messages),
@@ -3844,6 +3864,10 @@ function ChatContainer({
       aria-busy={isLoadingSession}
     >
       <SessionLoadingOverlay isActive={isLoadingSession} />
+      <RoundAnchor
+        rounds={conversationRounds}
+        onNavigateToRound={scrollToMessage}
+      />
       <ScrollArea
         viewportRef={scrollContainerRef}
         className="flex-1"

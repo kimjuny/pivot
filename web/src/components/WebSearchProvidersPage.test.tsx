@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("sonner", () => ({
@@ -55,7 +56,11 @@ describe("WebSearchProvidersPage", () => {
       },
     ]);
 
-    render(<WebSearchProvidersPage />);
+    render(
+      <MemoryRouter>
+        <WebSearchProvidersPage />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByText("Test")).toBeInTheDocument();

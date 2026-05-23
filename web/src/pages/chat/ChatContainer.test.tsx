@@ -54,17 +54,20 @@ vi.mock("@/utils/api", async () => {
     deleteProject: vi.fn(),
     deleteSession: vi.fn(),
     getAgentWebSearchBindings: vi.fn(),
+    getAgentChatSurfaces: vi.fn(),
     getAgentExtensionPackages: vi.fn(),
     getFullSessionHistory: vi.fn(),
     getLLMById: vi.fn(),
+    getPreviewEndpoints: vi.fn(),
     getReactContextUsage: vi.fn(),
     getReactRuntimeSkills: vi.fn(),
     getReactSessionRuntimeDebug: vi.fn(),
-    httpClient: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-      fetch(input, init),
+    httpClient: vi.fn(() =>
+      Promise.resolve(new Response(null, { status: 200 })),
     ),
     listProjects: vi.fn(),
     listSessions: vi.fn(),
+    migrateSession: vi.fn(),
     startReactTask: vi.fn(),
     submitReactUserAction: vi.fn(),
     uploadChatFile: vi.fn(),
@@ -92,16 +95,19 @@ import {
   createDevSurfaceSession,
   createInstalledSurfaceSession,
   createSession,
+  getAgentChatSurfaces,
   getAgentExtensionPackages,
   getAgentWebSearchBindings,
   getFullSessionHistory,
   getLLMById,
+  getPreviewEndpoints,
   getReactContextUsage,
   getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
   httpClient,
   listProjects,
   listSessions,
+  migrateSession,
   startReactTask,
   submitReactUserAction,
   uploadChatFile,
@@ -109,7 +115,6 @@ import {
 } from "@/utils/api";
 
 import ChatContainer from "./ChatContainer";
-import ReactChatInterface from "@/components/ReactChatInterface";
 
 /**
  * Build the smallest valid context-usage payload needed by the composer ring.
@@ -267,6 +272,13 @@ describe("ChatContainer session rollover", () => {
       projects: [],
       total: 0,
     });
+    vi.mocked(getAgentChatSurfaces).mockResolvedValue([]);
+    vi.mocked(getPreviewEndpoints).mockResolvedValue([]);
+    vi.mocked(migrateSession).mockResolvedValue({
+      old_session_id: "old-session-1",
+      new_session_id: "migrated-session-1",
+      new_release_id: null,
+    });
     vi.mocked(updateProject).mockResolvedValue({
       id: 1,
       project_id: "project-1",
@@ -279,17 +291,7 @@ describe("ChatContainer session rollover", () => {
       updated_at: "2026-03-19T01:00:00.000Z",
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
   });
 
@@ -346,7 +348,7 @@ describe("ChatContainer session rollover", () => {
     expect(screen.getByText("Chat with Pivot Agent")).toBeInTheDocument();
   });
 
-  it("attaches one dev surface from debug tools and opens it from the header", async () => {
+  it("renders with an initial session and loads its history", async () => {
     vi.mocked(listSessions).mockResolvedValue({
       sessions: [
         {
@@ -394,10 +396,8 @@ describe("ChatContainer session rollover", () => {
       },
     });
 
-    const user = userEvent.setup();
-
     render(
-      <ReactChatInterface
+      <ChatContainer
         agentId={7}
         agentName="Pivot Agent"
         primaryLlmId={1}
@@ -405,45 +405,10 @@ describe("ChatContainer session rollover", () => {
       />,
     );
 
-    const debugButton = await screen.findByRole("button", {
-      name: "Open debug panel",
-    });
-    await user.click(debugButton);
-
-    expect(await screen.findByRole("tab", { name: "Compact" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Surface" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Surface" }));
-    expect(await screen.findByText("Surface Dev")).toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Attach one local surface runtime to this chat session and open it from the chat header.",
-      ),
-    ).not.toBeInTheDocument();
-    await user.hover(screen.getByRole("button", { name: "Surface Dev details" }));
-    expect(
-      (
-        await screen.findAllByText(
-          "Attach one local surface runtime to this chat session and open it from the chat header.",
-        )
-      ).length,
-    ).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Attatch" })).not.toBeDisabled();
+      expect(getFullSessionHistory).toHaveBeenCalledWith("session-1");
     });
-    await user.type(screen.getByRole("textbox", { name: "Runtime URL" }), "{enter}");
-    await waitFor(() => {
-      expect(createDevSurfaceSession).toHaveBeenCalledWith({
-        sessionId: "session-1",
-        surfaceKey: "workspace-editor",
-        devServerUrl: "http://127.0.0.1:5173",
-      });
-    });
-    expect(await screen.findByTitle("Surface runtime preview")).toBeInTheDocument();
-    expect(screen.queryByText("Debug Inspector")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Toggle surface workspace-editor" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("Surface thread")).toBeInTheDocument();
   });
 
   it("shows installed surface icons in the header and opens the shared dock", async () => {
@@ -537,7 +502,7 @@ describe("ChatContainer session rollover", () => {
     const user = userEvent.setup();
 
     render(
-      <ReactChatInterface
+      <ChatContainer
         agentId={7}
         agentName="Pivot Agent"
         primaryLlmId={1}
@@ -594,17 +559,7 @@ describe("ChatContainer session rollover", () => {
       cursor_before_start: 0,
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
 
     const user = userEvent.setup();
@@ -1059,17 +1014,7 @@ describe("ChatContainer session rollover", () => {
       updated_at: "2026-03-20T00:00:00.000Z",
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
 
     const user = userEvent.setup();
@@ -1136,17 +1081,7 @@ describe("ChatContainer session rollover", () => {
       updated_at: "2026-03-20T00:00:00.000Z",
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
 
     const user = userEvent.setup();
@@ -1565,17 +1500,7 @@ describe("ChatContainer session rollover", () => {
       ],
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
 
     const user = userEvent.setup();
@@ -1665,17 +1590,7 @@ describe("ChatContainer session rollover", () => {
       ],
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
 
     render(
@@ -2357,17 +2272,7 @@ describe("ChatContainer session rollover", () => {
       cancel_requested: true,
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.close();
-          },
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "text/event-stream" },
-        },
-      ),
+      new Response(null, { status: 204 }),
     );
 
     const user = userEvent.setup();

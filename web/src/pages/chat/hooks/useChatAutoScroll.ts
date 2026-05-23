@@ -224,9 +224,21 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     };
   }, [scrollToBottom]);
 
+  /** Scrolls to an arbitrary message and disables auto-scroll-to-bottom. */
+  const scrollToMessage = useCallback(
+    (messageId: string) => {
+      autoScrollEnabledRef.current = false;
+      scrolledToUserMessageRef.current = null;
+      clearUserMessagePadding();
+      scrollToMessageTop(messageId, "smooth");
+    },
+    [scrollToMessageTop, clearUserMessagePadding],
+  );
+
   return {
     scrollContainerRef,
     handleScroll,
     prepareForProgrammaticScroll,
+    scrollToMessage,
   };
 }
