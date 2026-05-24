@@ -1,4 +1,10 @@
-import { useCallback, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import type { ConversationRound } from "../hooks/useConversationRounds";
 import { Card } from "@/components/ui/card";
@@ -6,30 +12,90 @@ import { Card } from "@/components/ui/card";
 interface RoundAnchorProps {
   rounds: ConversationRound[];
   onNavigateToRound: (messageId: string) => void;
+  scrollContainerRef: RefObject<HTMLElement | null>;
 }
 
 /** Each row height in px — matches sidebar list-item density. */
 const ROW_H = 28;
-/** Gap between rows — gives visual separation like sidebar gap-1. */
+/** Gap between rows — visual separation between items. */
 const ROW_GAP = 4;
 /** Card fixed width — wide enough for ~15 CJK characters at text-xs. */
 const CARD_W = 168;
-/** Card inner padding / item left padding. */
+/** Card inner padding. */
 const PAD = 8;
 /** Container paddingRight — controls distance from screen right edge to dots. */
 const DOT_OFFSET = 25;
+/** Gap between the card and the dot column. */
+const CARD_DOT_GAP = 8;
+
+/**
+ * Tracks which conversation round is currently visible in the scroll
+ * container. The round whose user-message is closest to the 1/3 point
+ * from the top of the container is considered active.
+ */
+function useActiveRoundIndex(
+  rounds: ConversationRound[],
+  scrollContainerRef: RefObject<HTMLElement | null>,
+): number {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || rounds.length === 0) return;
+
+    const update = () => {
+      const containerRect = container.getBoundingClientRect();
+      const refY = containerRect.top + 80;
+
+      let active = 0;
+      rounds.forEach((round, i) => {
+        const el = container.querySelector(
+          `[data-message-id="${round.userMessageId}"]`,
+        );
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= refY) {
+          active = i;
+        }
+      });
+
+      setActiveIndex(active);
+    };
+
+    const onScroll = () => {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(update);
+    };
+
+    container.addEventListener("scroll", onScroll, { passive: true });
+    update();
+
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [rounds, scrollContainerRef]);
+
+  return activeIndex;
+}
 
 /**
  * Compact anchor dots on the right edge of the chat pane.
- * The same dots are always visible. Hovering reveals a Card background
- * and text labels — the dots never move or re-render.
+ * Dots are always visible outside the card. Hovering reveals a Card with
+ * text labels to the left of the dots. The active dot tracks scroll position.
  */
-export function RoundAnchor({ rounds, onNavigateToRound }: RoundAnchorProps) {
+export function RoundAnchor({
+  rounds,
+  onNavigateToRound,
+  scrollContainerRef,
+}: RoundAnchorProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
   const lastIndex = rounds.length - 1;
+  const activeIndex = useActiveRoundIndex(rounds, scrollContainerRef);
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current !== null) return;
@@ -66,42 +132,68 @@ export function RoundAnchor({ rounds, onNavigateToRound }: RoundAnchorProps) {
           scheduleHide();
         }}
       >
+        {/* Card with text labels — appears to the left of dots */}
         {isExpanded && (
           <Card
-            className="animate-in fade-in-0 absolute border-border/50 bg-popover/95 shadow-md backdrop-blur-sm"
-            style={{
-              width: CARD_W,
-              padding: PAD,
-              right: DOT_OFFSET - PAD,
-              top: -PAD,
-            }}
+            className="animate-in fade-in-0 border-border/50 bg-popover/95 shadow-md backdrop-blur-sm"
+            style={{ width: CARD_W, padding: PAD, marginRight: CARD_DOT_GAP }}
           >
             <div className="flex flex-col" style={{ gap: ROW_GAP }}>
-              {rounds.map((_, i) => (
-                <div key={i} style={{ height: ROW_H }} />
-              ))}
+              {rounds.map((round, index) => {
+                const isItemHovered = hoveredIndex === index;
+
+                return (
+                  <button
+                    key={round.taskId}
+                    type="button"
+                    className={`flex w-full items-center rounded-lg transition-colors ${
+                      isItemHovered ? "bg-accent" : ""
+                    }`}
+                    style={{ height: ROW_H, paddingLeft: 4, paddingRight: 4 }}
+                    onClick={() => {
+                      onNavigateToRound(round.userMessageId);
+                    }}
+                    onMouseEnter={() => {
+                      cancelHide();
+                      setHoveredIndex(index);
+                    }}
+                    onMouseLeave={() => setHoveredIndex(null)}
+                  >
+                    <span
+                      className={`min-w-0 flex-1 truncate text-left text-xs ${
+                        isItemHovered
+                          ? "text-accent-foreground"
+                          : index === activeIndex
+                            ? "font-medium text-popover-foreground"
+                            : "text-muted-foreground"
+                      }`}
+                    >
+                      {round.preview}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </Card>
         )}
 
-        {/* The only set of dots — always rendered */}
-        <div className="relative flex flex-col" style={{ gap: ROW_GAP }}>
+        {/* Dots — always visible, positioned to the right of the card */}
+        <div className="flex flex-col" style={{ gap: ROW_GAP }}>
           {rounds.map((round, index) => {
+            const isActive = index === activeIndex;
             const isItemHovered = hoveredIndex === index;
-            const isLastRound = index === lastIndex;
 
             return (
               <button
                 key={round.taskId}
                 type="button"
-                className={`relative flex items-center transition-colors ${
-                  isExpanded ? "rounded-lg" : ""
-                } ${isExpanded && isItemHovered ? "bg-accent" : ""}`}
                 style={{
                   height: ROW_H,
-                  width: isExpanded ? CARD_W - PAD * 2 : "auto",
-                  paddingLeft: isExpanded ? PAD : 0,
-                  justifyContent: isExpanded ? undefined : "flex-end",
+                  width: 24,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-end",
+                  paddingRight: 1,
                 }}
                 onClick={() => {
                   onNavigateToRound(round.userMessageId);
@@ -113,31 +205,12 @@ export function RoundAnchor({ rounds, onNavigateToRound }: RoundAnchorProps) {
                 onMouseLeave={() => setHoveredIndex(null)}
                 aria-label={`Go to round ${round.roundNumber}`}
               >
-                {isExpanded && (
-                  <span
-                    className={`min-w-0 flex-1 truncate text-left text-xs ${
-                      isItemHovered
-                        ? "text-accent-foreground"
-                        : isLastRound
-                          ? "font-medium text-popover-foreground"
-                          : "text-muted-foreground"
-                    }`}
-                  >
-                    {round.preview}
-                  </span>
-                )}
-
                 <span
-                  className={`shrink-0 rounded-full transition-colors ${
-                    isLastRound
-                      ? "bg-foreground"
-                      : isItemHovered
-                        ? "bg-foreground/70"
-                        : "bg-muted-foreground/60"
-                  }`}
+                  className="rounded-full bg-foreground transition-all"
                   style={{
-                    width: isLastRound ? 6 : 5,
-                    height: isLastRound ? 6 : 5,
+                    width: isActive ? 6 : 4,
+                    height: isActive ? 6 : 4,
+                    opacity: isActive ? 0.5 : isItemHovered ? 0.4 : 0.2,
                   }}
                 />
               </button>

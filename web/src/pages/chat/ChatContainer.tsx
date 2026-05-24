@@ -3867,6 +3867,7 @@ function ChatContainer({
       <RoundAnchor
         rounds={conversationRounds}
         onNavigateToRound={scrollToMessage}
+        scrollContainerRef={scrollContainerRef}
       />
       <ScrollArea
         viewportRef={scrollContainerRef}
