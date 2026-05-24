@@ -492,11 +492,11 @@ Handles a single automation run:
 10. Prompt template variable system
 11. Stale run watchdog
 
-### Phase 3 — Enhancements (future iterations)
+### Phase 3 — Enhancements
 
-12. Event-based trigger type (schema extension)
-13. Notification system integration (notify on completion/failure)
-14. Dashboard KPI integration (automation activity metrics)
+12. Click into run's session chat from Run History (navigate to the session conversation to view agent results)
+13. Notification via sonner toast (enhance trigger toast with "View Chat" action; scheduled runs found via Run History)
+14. Dashboard integration (Session Activity chart + KPI stats)
 15. Extension hook support for automation lifecycle events
 16. Automation run result delivery (email, channel push, etc.)
 
@@ -601,9 +601,36 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `PromptTemplateEditor.tsx` as standalone component (currently inline in dialog)
 - `AutomationRunHistory.tsx` as standalone component (currently inline in detail view)
 - Studio `AgentDetailSidebar.tsx` AUTOMATIONS section (read-only builder view)
-- Click into run's session for full conversation view
 
-#### File inventory
+### Phase 3 — Enhancements Status: **IN PROGRESS** (2026-05-25)
+
+#### Completed items
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| 12 | Click into run's session chat | ✅ | All run history rows (completed, failed, timeout) are clickable if they have a `session_uuid`. Navigates to the session's chat view via `onNavigateToSession`. |
+| 13 | Custom toast notification | ✅ | `toast.custom()` with `LLMBrandAvatar` (agent icon), title + status/duration text, "View →" link. Polls run status until terminal state, shows success (green checkmark) or failure (red X) with duration. 10s display duration. |
+| 14a | Session Activity chart integration | ✅ | Added "Automation" as third series in `SessionTrendChart` stacked area chart alongside "Client" and "Studio". Backend `analytics_service.py` returns `automation` count per day. Colors aligned with `TokenUsageChart` palette (`--chart-4`, `--chart-3`, `--chart-2`). Tooltip shows all 3 values + total. |
+| — | Run status accuracy | ✅ | Executor now propagates actual `ReactTask.status` (not hardcoded "completed"), extracts error from `ReactRecursion.error_log`, and builds token usage JSON from `total_prompt_tokens`/`total_completion_tokens`/`total_tokens`. |
+| — | Scheduler `claim_run` dedup | ✅ | Added SELECT-before-INSERT check for existing pending/running runs at the same slot. Eliminates noisy `IntegrityError` tracebacks on scheduler restart. UNIQUE constraint still acts as safety net. |
+
+#### Bugs fixed during Phase 3
+
+| Issue | Root cause | Fix |
+|-------|-----------|-----|
+| Runs always show "completed" regardless of actual result | `_wait_for_task_completion()` hardcoded status as "completed" | Refactored to return `tuple[str, str | None, str | None]` (status, error_message, token_usage) from actual `ReactTask` + `ReactRecursion` records |
+| Token usage not recorded on runs | `ReactTask` model has `total_prompt_tokens`/`total_completion_tokens`/`total_tokens`, not `token_usage` | Build JSON manually: `{"prompt": N, "completion": N, "total": N}` |
+| Error message missing on failed runs | `ReactTask` has no `error_message` field | Query last failed `ReactRecursion` (status="error") and extract `error_log` |
+| Pyright: `desc()` not found on `int` | `ReactRecursion.iteration_index` typed as `int`, pyright can't resolve `.desc()` | Wrapped with `col(ReactRecursion.iteration_index).desc()` |
+| Scheduler IntegrityError spam on restart | `claim_run` INSERT fails when run already exists | Added SELECT for existing pending/running runs before INSERT; UNIQUE constraint kept as safety net |
+| API missing `automation` field in session-trends | `analytics.py` endpoints manually constructed dicts with only `date`, `client`, `studio_test` | Added `"automation": item.automation` to both studio and agent session-trends endpoints |
+| Tooltip not showing Automation value | Same root cause as above — frontend receives no `automation` field from API | Fixed by backend API serialization fix above |
+
+#### Not yet implemented (remaining Phase 3)
+
+- Dashboard KPI cards for automation stats (runs count, success rate, token usage)
+- Extension hook support for automation lifecycle events
+- Automation run result delivery (email, channel push, etc.)
 
 **New backend files:**
 - `server/app/models/automation.py`
@@ -625,8 +652,15 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `server/app/models/__init__.py` — export new models
 - `server/app/models/session.py` — session type docstring
 - `server/app/orchestration/tool/manager.py` — renamed execute param to avoid collision
+- `server/app/services/automation_service.py` — claim_run SELECT-before-INSERT dedup
+- `server/app/services/automation_executor.py` — accurate run status propagation, error/token extraction
+- `server/app/services/analytics_service.py` — `DailySessionCount` dataclass + `get_session_trends()`/`get_agent_session_trends()` 3-bucket logic
+- `server/app/api/analytics.py` — added `automation` field to session-trends API responses
 - `pyproject.toml` — added `croniter` dependency
-- `web/src/client/api.ts` — automation types + API functions
+- `web/src/client/api.ts` — automation types + API functions + `DailySessionCount` with `automation` field
 - `web/src/client/ClientAgentsPage.tsx` — nav items + view toggle
+- `web/src/client/ClientAutomationDetailView.tsx` — custom toast, clickable all-status runs, poll-based trigger feedback
+- `web/src/components/analytics/SessionTrendChart.tsx` — 3-series stacked area chart (Client/Studio/Automation)
+- `web/src/utils/api.ts` — `DailySessionCount` interface updated with `automation` field
 - `web/src/pages/chat/ChatContainer.tsx` — agent fetch for dialog, pass agents prop
 - `web/src/pages/chat/utils/actionHandlers.ts` — propose_automation handler registration

@@ -14,6 +14,7 @@ export interface DailySessionCount {
   date: string;
   client: number;
   studio_test: number;
+  automation: number;
 }
 
 /** Props for the session activity area chart. */
@@ -29,6 +30,10 @@ const chartConfig: ChartConfig = {
   },
   studio_test: {
     label: "Studio",
+    color: "oklch(var(--chart-3))",
+  },
+  automation: {
+    label: "Automation",
     color: "oklch(var(--chart-2))",
   },
 };
@@ -68,14 +73,16 @@ export function SessionTrendChart({ data }: SessionTrendChartProps) {
                         <div className="ml-auto font-mono font-medium tabular-nums text-foreground">
                           {typeof value === "number" ? value.toLocaleString() : String(value)}
                         </div>
-                        {index === 1 && (
+                        {index === 2 && (
                           <div className="mt-1.5 flex basis-full items-center border-t pt-1.5 text-xs font-medium text-foreground">
                             Total
                             <div className="ml-auto font-mono font-medium tabular-nums">
                               {(() => {
                                 const p = item.payload as Record<string, unknown>;
                                 const total =
-                                  Number(p.client ?? 0) + Number(p.studio_test ?? 0);
+                                  Number(p.client ?? 0) +
+                                  Number(p.studio_test ?? 0) +
+                                  Number(p.automation ?? 0);
                                 return total.toLocaleString();
                               })()}
                             </div>
@@ -101,6 +108,14 @@ export function SessionTrendChart({ data }: SessionTrendChartProps) {
                 stackId="sessions"
                 stroke="var(--color-studio_test)"
                 fill="var(--color-studio_test)"
+                fillOpacity={0.4}
+              />
+              <Area
+                type="monotone"
+                dataKey="automation"
+                stackId="sessions"
+                stroke="var(--color-automation)"
+                fill="var(--color-automation)"
                 fillOpacity={0.4}
               />
             </AreaChart>

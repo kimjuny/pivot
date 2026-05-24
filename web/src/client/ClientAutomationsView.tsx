@@ -27,8 +27,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   type ClientAutomation,
+  type ClientAutomationStats,
   deleteClientAutomation,
   getClientAutomations,
+  getClientAutomationStats,
   triggerClientAutomation,
   updateClientAutomation,
 } from "@/client/api";
@@ -86,14 +88,16 @@ const STATUS_FILTERS = [
 interface ClientAutomationsViewProps {
   agents: Agent[];
   defaultAgentId?: number;
+  onNavigateToSession?: (agentId: number, sessionUuid: string) => void;
 }
 
 /**
  * Displays the user's automations with CRUD controls, triggered from the
  * Client sidebar "Automations" navigation item.
  */
-export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomationsViewProps) {
+export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSession }: ClientAutomationsViewProps) {
   const [automations, setAutomations] = useState<ClientAutomation[]>([]);
+  const [stats, setStats] = useState<ClientAutomationStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
@@ -105,8 +109,12 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
     try {
       setIsLoading(true);
       setError(null);
-      const response = await getClientAutomations(statusFilter || undefined);
+      const [response, statsRes] = await Promise.all([
+        getClientAutomations(statusFilter || undefined),
+        getClientAutomationStats(),
+      ]);
       setAutomations(response.automations);
+      setStats(statsRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load automations");
     } finally {
@@ -159,6 +167,7 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
         <ClientAutomationDetailView
           automation={selectedAutomation}
           agents={agents}
+          onNavigateToSession={onNavigateToSession}
           onBack={() => {
             void fetchAutomations();
             setSelectedAutomation(null);
@@ -203,6 +212,27 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
             </Button>
           </div>
         </div>
+
+        {stats && (
+          <div className="flex gap-6 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
+            <div>
+              <span className="text-muted-foreground">Active</span>{" "}
+              <span className="font-medium">{stats.active_count}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Runs (7d)</span>{" "}
+              <span className="font-medium">{stats.runs_last_7_days}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Success</span>{" "}
+              <span className="font-medium">{stats.success_rate}%</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Tokens (7d)</span>{" "}
+              <span className="font-medium">{stats.total_tokens_last_7_days.toLocaleString()}</span>
+            </div>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">

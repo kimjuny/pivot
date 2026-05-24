@@ -129,6 +129,11 @@ function ClientAgentsPage() {
     navigate(`/app/agents/${session.agent_id}?session=${session.session_id}`);
   };
 
+  /** Navigate to a specific automation run's chat session. */
+  const handleNavigateToSession = (agentId: number, sessionUuid: string) => {
+    navigate(`/app/agents/${agentId}?session=${sessionUuid}`);
+  };
+
   /**
    * Keeps the browser sidebar in sync with lightweight session metadata edits.
    */
@@ -219,6 +224,7 @@ function ClientAgentsPage() {
           {activeView === "automations" ? (
             <ClientAutomationsView
               agents={agents}
+              onNavigateToSession={handleNavigateToSession}
               defaultAgentId={
                 searchParams.get("agentId")
                   ? Number(searchParams.get("agentId"))

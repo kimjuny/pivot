@@ -6,7 +6,6 @@ from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from app.api.permissions import permissions
-from app.models.automation import Automation, AutomationRun
 from app.schemas.automation import (
     AutomationCreateRequest,
     AutomationResponse,
@@ -17,10 +16,12 @@ from app.security.permission_catalog import Permission
 from app.services.automation_service import AutomationService
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlmodel import col
 
 from .dependencies import get_db
 
 if TYPE_CHECKING:
+    from app.models.automation import Automation, AutomationRun
     from app.models.user import User
     from sqlmodel import Session as DbSession
 
@@ -60,7 +61,9 @@ def _serialize_automation(automation: Automation) -> dict[str, Any]:
     }
 
 
-def _serialize_run(run: AutomationRun) -> dict[str, Any]:
+def _serialize_run(
+    run: AutomationRun, *, session_uuid_map: dict[int, str] | None = None
+) -> dict[str, Any]:
     """Serialize an AutomationRun row into the API response shape."""
     return {
         "id": run.id,
@@ -68,6 +71,11 @@ def _serialize_run(run: AutomationRun) -> dict[str, Any]:
         "automation_id": run.automation_id,
         "scheduled_at": run.scheduled_at.replace(tzinfo=UTC).isoformat(),
         "session_id": run.session_id,
+        "session_uuid": (
+            session_uuid_map.get(run.session_id)
+            if session_uuid_map and run.session_id is not None
+            else None
+        ),
         "task_id": run.task_id,
         "status": run.status,
         "started_at": (
@@ -82,6 +90,19 @@ def _serialize_run(run: AutomationRun) -> dict[str, Any]:
     }
 
 
+def _build_session_uuid_map(db: DbSession, session_ids: list[int]) -> dict[int, str]:
+    """Look up string session_id values for a list of integer session PKs."""
+    if not session_ids:
+        return {}
+    from app.models.session import Session as SessionModel
+    from sqlmodel import select
+
+    rows = db.exec(
+        select(SessionModel).where(col(SessionModel.id).in_(session_ids))
+    ).all()
+    return {r.id: r.session_id for r in rows if r.id is not None}
+
+
 class AutomationListResponse(BaseModel):
     """Paginated automation list."""
 
@@ -94,6 +115,37 @@ class AutomationRunListResponse(BaseModel):
 
     runs: list[AutomationRunResponse]
     total: int
+
+
+class AutomationStatsResponse(BaseModel):
+    """Aggregated automation statistics for the current user."""
+
+    total_automations: int
+    active_count: int
+    paused_count: int
+    runs_last_7_days: int
+    success_rate: float
+    total_tokens_last_7_days: int
+
+
+@router.get("/client/automations/stats", response_model=AutomationStatsResponse)
+async def get_automation_stats(
+    db: DbSession = Depends(get_db),
+    current_user: User = Depends(permissions(Permission.CLIENT_ACCESS)),
+) -> AutomationStatsResponse:
+    """Return aggregated automation statistics for the current user."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    svc = AutomationService(db)
+    stats = svc.get_user_stats(current_user.id)
+    return AutomationStatsResponse(
+        total_automations=int(stats["total_automations"]),
+        active_count=int(stats["active_count"]),
+        paused_count=int(stats["paused_count"]),
+        runs_last_7_days=int(stats["runs_last_7_days"]),
+        success_rate=float(stats["success_rate"]),
+        total_tokens_last_7_days=int(stats["total_tokens_last_7_days"]),
+    )
 
 
 @router.get("/client/automations", response_model=AutomationListResponse)
@@ -237,8 +289,10 @@ async def list_automation_runs(
         limit=limit,
         offset=offset,
     )
+    session_ids = [r.session_id for r in runs if r.session_id]
+    uuid_map = _build_session_uuid_map(db, session_ids)
     return AutomationRunListResponse(
-        runs=[AutomationRunResponse(**_serialize_run(r)) for r in runs],
+        runs=[AutomationRunResponse(**_serialize_run(r, session_uuid_map=uuid_map)) for r in runs],
         total=total,
     )
 
@@ -265,7 +319,8 @@ async def get_automation_run(
     run = svc.get_run_by_uuid(run_id)
     if run is None or run.automation_id != automation.id:
         raise HTTPException(status_code=404, detail="Run not found")
-    return AutomationRunResponse(**_serialize_run(run))
+    uuid_map = _build_session_uuid_map(db, [run.session_id] if run.session_id else [])
+    return AutomationRunResponse(**_serialize_run(run, session_uuid_map=uuid_map))
 
 
 @router.post(
@@ -302,6 +357,6 @@ async def trigger_automation(
 
     from app.services.automation_executor import execute_automation_run
 
-    asyncio.create_task(execute_automation_run(run.id))
+    _bg_task = asyncio.create_task(execute_automation_run(run.id))  # noqa: RUF006
 
     return AutomationRunResponse(**_serialize_run(run))

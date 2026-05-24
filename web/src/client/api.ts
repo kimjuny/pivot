@@ -36,6 +36,7 @@ export interface ClientAutomationRun {
   automation_id: number;
   scheduled_at: string;
   session_id: number;
+  session_uuid: string | null;
   task_id: string | null;
   status: "pending" | "running" | "completed" | "failed" | "timeout" | "cancelled";
   started_at: string | null;
@@ -83,6 +84,18 @@ export interface ClientAutomationCreatePayload {
 export type ClientAutomationUpdatePayload = Partial<ClientAutomationCreatePayload> & {
   status?: "active" | "paused" | "disabled";
 };
+
+/**
+ * Aggregated automation statistics for the current user.
+ */
+export interface ClientAutomationStats {
+  total_automations: number;
+  active_count: number;
+  paused_count: number;
+  runs_last_7_days: number;
+  success_rate: number;
+  total_tokens_last_7_days: number;
+}
 
 /**
  * Lightweight Client session summary used by the recent sessions surfaces.
@@ -145,6 +158,13 @@ export async function getClientSessions(
 }
 
 // ── Automations ──────────────────────────────────────────────
+
+/**
+ * Fetch aggregated automation statistics for the current user.
+ */
+export async function getClientAutomationStats(): Promise<ClientAutomationStats> {
+  return apiRequest("/client/automations/stats") as Promise<ClientAutomationStats>;
+}
 
 /**
  * Fetch all automations owned by the current user.

@@ -58,6 +58,7 @@ def get_session_trends(
             "date": item.date,
             "client": item.client,
             "studio_test": item.studio_test,
+            "automation": item.automation,
         }
         for item in service.get_session_trends(days)
     ]
@@ -240,6 +241,7 @@ def get_agent_session_trends(
             "date": item.date,
             "client": item.client,
             "studio_test": item.studio_test,
+            "automation": item.automation,
         }
         for item in service.get_agent_session_trends(agent_id, days)
     ]

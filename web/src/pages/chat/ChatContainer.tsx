@@ -2110,6 +2110,7 @@ function ChatContainer({
               : existingSessions;
           const autoSelectedSessionId =
             requestedSession?.session_id ??
+            requestedSessionId ??
             (sessionType === "studio_test"
               ? getAutoSelectedSessionId(
                   studioMatchingSessions,
@@ -2154,17 +2155,49 @@ function ChatContainer({
             setIsStreaming(false);
           }
         } else {
-          setCurrentProjectId(null);
-          setCurrentSessionId(null);
-          currentSessionIdRef.current = null;
-          setReplyTaskId(null);
-          setActiveContextTaskId(null);
-          setActiveContextIteration(null);
-          syncLiveRefsFromMessages([]);
-          resetCompactTimelineItems();
-          commitMessages([]);
-          setIsStreaming(false);
-          stopSessionStream();
+          // No sessions in the sidebar list, but a specific session was
+          // requested via URL (e.g. an automation session). Load it directly.
+          const fallbackSessionId =
+            typeof initialSessionId === "string" &&
+            initialSessionId.trim().length > 0
+              ? initialSessionId.trim()
+              : null;
+
+          if (fallbackSessionId) {
+            setCurrentProjectId(null);
+            setCurrentSessionId(fallbackSessionId);
+            currentSessionIdRef.current = fallbackSessionId;
+            setReplyTaskId(null);
+            setActiveContextTaskId(null);
+            setActiveContextIteration(null);
+
+            try {
+              const history = await getFullSessionHistory(fallbackSessionId);
+              const nextMessages = buildMessagesFromHistory(history.tasks);
+              applyHistoryMessages(nextMessages);
+              openSessionStream(
+                fallbackSessionId,
+                history.resume_from_event_id,
+              );
+            } catch (historyError) {
+              console.error(
+                "Failed to load requested session history:",
+                historyError,
+              );
+            }
+          } else {
+            setCurrentProjectId(null);
+            setCurrentSessionId(null);
+            currentSessionIdRef.current = null;
+            setReplyTaskId(null);
+            setActiveContextTaskId(null);
+            setActiveContextIteration(null);
+            syncLiveRefsFromMessages([]);
+            resetCompactTimelineItems();
+            commitMessages([]);
+            setIsStreaming(false);
+            stopSessionStream();
+          }
         }
 
         setIsInitialized(true);

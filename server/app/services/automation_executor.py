@@ -156,21 +156,32 @@ async def execute_automation_run(run_id: int) -> None:
             timeout=timeout_seconds,
         )
 
-        await _wait_for_task_completion(result.task_id, timeout_seconds)
+        task_status, task_error, task_tokens = await _wait_for_task_completion(
+            result.task_id, timeout_seconds
+        )
 
         with managed_session() as db:
             svc = AutomationService(db)
             run = svc.get_run(run_id)
             if run is not None:
-                svc.update_run_result(run, status="completed")
+                run_status = (
+                    "completed" if task_status == "completed" else "failed"
+                )
+                svc.update_run_result(
+                    run,
+                    status=run_status,
+                    error_message=task_error,
+                    token_usage=task_tokens,
+                )
                 automation = svc.get_required_automation(run.automation_id)
                 svc.update_automation_after_run(automation)
 
         logger.info(
-            "Automation %d run %d completed (task %s)",
+            "Automation %d run %d finished (task %s, status=%s)",
             automation_id,
             run_id,
             result.task_id,
+            task_status,
         )
 
     except TimeoutError:
@@ -212,15 +223,25 @@ async def execute_automation_run(run_id: int) -> None:
                 svc.update_automation_after_run(automation)
 
 
-async def _wait_for_task_completion(task_id: str, timeout: int) -> None:
-    """Poll until the ReactTask reaches a terminal state."""
+async def _wait_for_task_completion(
+    task_id: str, timeout: int
+) -> tuple[str, str | None, str | None]:
+    """Poll until the ReactTask reaches a terminal state.
+
+    Returns:
+        (status, error_message, token_usage_json) from the ReactTask.
+        error_message is extracted from the last failed recursion if any.
+        token_usage_json is ``{"prompt": N, "completion": N, "total": N}``.
+    """
+    import json
     import time
+
+    from sqlmodel import col, select
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with managed_session() as db:
             from app.models.react import ReactTask
-            from sqlmodel import select
 
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             task = db.exec(statement).first()
@@ -229,6 +250,28 @@ async def _wait_for_task_completion(task_id: str, timeout: int) -> None:
                 "failed",
                 "cancelled",
             ):
-                return
+                token_json = json.dumps({
+                    "prompt": task.total_prompt_tokens,
+                    "completion": task.total_completion_tokens,
+                    "total": task.total_tokens,
+                })
+
+                error_msg: str | None = None
+                if task.status in ("failed", "cancelled"):
+                    from app.models.react import ReactRecursion
+
+                    err_stmt = (
+                        select(ReactRecursion)
+                        .where(
+                            ReactRecursion.react_task_id == task.id,
+                            ReactRecursion.status == "error",
+                        )
+                        .order_by(col(ReactRecursion.iteration_index).desc())
+                    )
+                    last_err = db.exec(err_stmt).first()
+                    if last_err is not None and last_err.error_log:
+                        error_msg = last_err.error_log
+
+                return (task.status, error_msg, token_json)
         await asyncio.sleep(2)
-    raise TimeoutError()
+    raise TimeoutError

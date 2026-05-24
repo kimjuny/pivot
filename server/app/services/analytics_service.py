@@ -46,6 +46,7 @@ class DailySessionCount:
     date: str
     client: int
     studio_test: int
+    automation: int
 
 
 @dataclass(frozen=True)
@@ -327,20 +328,25 @@ class AnalyticsService:
         for row in self.db.exec(stmt):
             date_str, session_type, count = row
             if date_str not in raw:
-                raw[date_str] = {"client": 0, "studio_test": 0}
-            key = "client" if session_type == "client" else "studio_test"
+                raw[date_str] = {"client": 0, "studio_test": 0, "automation": 0}
+            key = (
+                session_type
+                if session_type in ("client", "automation")
+                else "studio_test"
+            )
             raw[date_str][key] = count
 
         filled = _fill_date_range(
             raw,
             days,
-            lambda d: {"client": 0, "studio_test": 0},
+            lambda d: {"client": 0, "studio_test": 0, "automation": 0},
         )
         return [
             DailySessionCount(
                 date=date_str,
                 client=counts["client"],
                 studio_test=counts["studio_test"],
+                automation=counts["automation"],
             )
             for date_str, counts in filled.items()
         ]
@@ -697,20 +703,25 @@ class AnalyticsService:
         for row in self.db.exec(stmt):
             date_str, session_type, count = row
             if date_str not in raw:
-                raw[date_str] = {"client": 0, "studio_test": 0}
-            key = "client" if session_type == "client" else "studio_test"
+                raw[date_str] = {"client": 0, "studio_test": 0, "automation": 0}
+            key = (
+                session_type
+                if session_type in ("client", "automation")
+                else "studio_test"
+            )
             raw[date_str][key] = count
 
         filled = _fill_date_range(
             raw,
             days,
-            lambda d: {"client": 0, "studio_test": 0},
+            lambda d: {"client": 0, "studio_test": 0, "automation": 0},
         )
         return [
             DailySessionCount(
                 date=date_str,
                 client=counts["client"],
                 studio_test=counts["studio_test"],
+                automation=counts["automation"],
             )
             for date_str, counts in filled.items()
         ]

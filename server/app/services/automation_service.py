@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from app.models.automation import Automation, AutomationRun
@@ -259,6 +259,55 @@ class AutomationService:
         )
         return len(self.db.exec(base).all())
 
+    def get_user_stats(self, user_id: int) -> dict[str, int | float]:
+        """Aggregate automation and run statistics for a user.
+
+        Returns:
+            Dict with total, active, paused counts plus 7-day run metrics.
+        """
+
+        automations = self.list_automations(user_id)
+        total = len(automations)
+        active = sum(1 for a in automations if a.status == "active")
+        paused = sum(1 for a in automations if a.status == "paused")
+
+        seven_days_ago = datetime.now(UTC) - timedelta(days=7)
+        automation_ids = [a.id for a in automations if a.id is not None]
+
+        runs_7d: int = 0
+        success_7d: int = 0
+        tokens_7d: int = 0
+
+        if automation_ids:
+            run_statement = (
+                select(AutomationRun)
+                .where(col(AutomationRun.automation_id).in_(automation_ids))
+                .where(col(AutomationRun.scheduled_at) >= seven_days_ago)
+            )
+            for run in self.db.exec(run_statement).all():
+                runs_7d += 1
+                if run.status in ("completed",):
+                    success_7d += 1
+                if run.token_usage:
+                    try:
+                        usage = json.loads(run.token_usage)
+                        tokens_7d += (usage.get("prompt", 0) or 0) + (
+                            usage.get("completion", 0) or 0
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+        success_rate = round(success_7d / runs_7d * 100, 1) if runs_7d > 0 else 0.0
+
+        return {
+            "total_automations": total,
+            "active_count": active,
+            "paused_count": paused,
+            "runs_last_7_days": runs_7d,
+            "success_rate": success_rate,
+            "total_tokens_last_7_days": tokens_7d,
+        }
+
     def get_run(self, run_id: int) -> AutomationRun | None:
         """Return one run or None."""
         return self.db.get(AutomationRun, run_id)
@@ -275,10 +324,25 @@ class AutomationService:
     ) -> AutomationRun | None:
         """Atomically claim a run slot for the given automation and time.
 
-        Uses the UNIQUE(automation_id, scheduled_at) constraint so only one
-        instance can successfully insert. Returns the run on success, or
-        ``None`` if another instance already claimed this slot.
+        First checks for an existing pending/running run at this slot to
+        avoid a noisy IntegrityError.  The UNIQUE(automation_id, scheduled_at)
+        constraint still acts as a safety net for concurrent writes.
         """
+        existing = self.db.exec(
+            select(AutomationRun).where(
+                AutomationRun.automation_id == automation_id,
+                AutomationRun.scheduled_at == scheduled_at,
+                col(AutomationRun.status).in_(["pending", "running"]),
+            )
+        ).first()
+        if existing is not None:
+            logger.debug(
+                "Slot already claimed: automation_id=%d scheduled_at=%s",
+                automation_id,
+                scheduled_at.isoformat(),
+            )
+            return None
+
         run = AutomationRun(
             automation_id=automation_id,
             scheduled_at=scheduled_at,
@@ -295,7 +359,6 @@ class AutomationService:
                 "claim_run failed for automation_id=%d scheduled_at=%s",
                 automation_id,
                 scheduled_at.isoformat(),
-                exc_info=True,
             )
             return None
 

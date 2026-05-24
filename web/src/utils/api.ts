@@ -4226,6 +4226,7 @@ export interface DailySessionCount {
   date: string;
   client: number;
   studio_test: number;
+  automation: number;
 }
 
 /** Fetch studio dashboard KPI overview for the given time range. */

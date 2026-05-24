@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bot,
+  CheckCircle2,
   CirclePlay,
   Clock,
   Loader2,
   Pencil,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -96,6 +98,8 @@ interface ClientAutomationDetailViewProps {
   onTriggered: () => void;
   /** Called when automation data is updated (edit save). */
   onUpdated?: () => void;
+  /** Navigate to a specific session's chat view. */
+  onNavigateToSession?: (agentId: number, sessionUuid: string) => void;
 }
 
 /** Detail view for a single automation with run history table. */
@@ -105,6 +109,7 @@ export function ClientAutomationDetailView({
   onBack,
   onTriggered,
   onUpdated,
+  onNavigateToSession,
 }: ClientAutomationDetailViewProps) {
   const [runs, setRuns] = useState<ClientAutomationRun[]>([]);
   const [totalRuns, setTotalRuns] = useState(0);
@@ -136,13 +141,95 @@ export function ClientAutomationDetailView({
     void fetchRuns();
   }, [fetchRuns]);
 
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Poll a run until it reaches a terminal state, then show a toast. */
+  const startPollingForRun = useCallback(
+    (runId: string) => {
+      if (pollRef.current) clearInterval(pollRef.current);
+
+      pollRef.current = setInterval(() => {
+        void (async () => {
+        try {
+          const res = await getClientAutomationRuns(automation.automation_id, 50, 0);
+          const run = res.runs.find((r) => r.run_id === runId);
+          if (!run) return;
+
+          if (run.status === "completed" || run.status === "failed" || run.status === "timeout") {
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+            await fetchRuns();
+
+            const duration = formatDuration(run.started_at, run.finished_at);
+            const isSuccess = run.status === "completed";
+            const canView = run.session_uuid && onNavigateToSession;
+
+            toast.custom(() => (
+              <div
+                className="flex w-full max-w-sm items-center gap-3 rounded-lg border bg-background p-3 shadow-lg"
+                role="alert"
+              >
+                <div className="shrink-0">
+                  <LLMBrandAvatar
+                    model={agent?.model_name}
+                    containerClassName="flex size-9 items-center justify-center rounded-lg bg-primary/10"
+                    imageClassName="size-4"
+                    fallback={<Bot className="size-4 text-primary" aria-hidden="true" />}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">
+                    {automation.name}
+                  </p>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    {isSuccess ? (
+                      <CheckCircle2 className="size-3 text-green-500" aria-hidden="true" />
+                    ) : (
+                      <XCircle className="size-3 text-destructive" aria-hidden="true" />
+                    )}
+                    <span className={isSuccess ? "text-green-600" : "text-destructive"}>
+                      {isSuccess ? "Completed" : run.status === "timeout" ? "Timed out" : "Failed"}
+                    </span>
+                    <span>· {duration}</span>
+                  </div>
+                </div>
+                {canView && (
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs font-medium text-primary hover:underline"
+                    onClick={() => onNavigateToSession(automation.agent_id, run.session_uuid!)}
+                  >
+                    View →
+                  </button>
+                )}
+              </div>
+            ), { duration: 10000 });
+          }
+        } catch {
+          // Silently retry on transient errors
+        }
+        })();
+      }, 3000);
+    },
+    [automation.automation_id, automation.agent_id, automation.name, agent?.model_name, fetchRuns, onNavigateToSession],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
   const handleTrigger = async () => {
     setIsTriggering(true);
     try {
-      await triggerClientAutomation(automation.automation_id);
+      const run = await triggerClientAutomation(automation.automation_id);
       toast.success("Automation triggered");
       onTriggered();
       await fetchRuns();
+      startPollingForRun(run.run_id);
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to trigger automation",
@@ -303,8 +390,19 @@ export function ClientAutomationDetailView({
                     }
                   }
 
+                  const canViewChat =
+                    !!run.session_uuid && !!onNavigateToSession;
+
                   return (
-                    <TableRow key={run.run_id}>
+                    <TableRow
+                      key={run.run_id}
+                      className={canViewChat ? "cursor-pointer hover:bg-accent/50" : undefined}
+                      onClick={() => {
+                        if (canViewChat && run.session_uuid) {
+                          onNavigateToSession(automation.agent_id, run.session_uuid);
+                        }
+                      }}
+                    >
                       <TableCell className="text-muted-foreground">
                         {totalRuns - i}
                       </TableCell>
