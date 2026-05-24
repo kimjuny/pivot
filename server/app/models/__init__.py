@@ -1,4 +1,3 @@
-from app.models.automation import Automation, AutomationRun
 from app.models.access import (
     AccessLevel,
     GroupMember,
@@ -13,6 +12,7 @@ from app.models.access import (
 from app.models.agent import Agent
 from app.models.agent_delegation import AgentDelegation
 from app.models.agent_release import AgentRelease, AgentSavedDraft, AgentTestSnapshot
+from app.models.automation import Automation, AutomationRun
 from app.models.channel import (
     AgentChannelBinding,
     ChannelEventLog,
@@ -54,8 +54,6 @@ __all__ = [
     "LLM",
     "AccessLevel",
     "Agent",
-    "Automation",
-    "AutomationRun",
     "AgentChannelBinding",
     "AgentDelegation",
     "AgentExtensionBinding",
@@ -64,6 +62,8 @@ __all__ = [
     "AgentSavedDraft",
     "AgentTestSnapshot",
     "AgentWebSearchBinding",
+    "Automation",
+    "AutomationRun",
     "ChannelEventLog",
     "ChannelLinkToken",
     "ChannelSession",

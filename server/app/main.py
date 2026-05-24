@@ -44,13 +44,13 @@ from app.api.tools import router as tools_router  # noqa: E402
 from app.api.web_search import router as web_search_router  # noqa: E402
 from app.api.workspace import router as workspace_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
-from app.services.automation_scheduler import automation_scheduler  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
     init_db,
     managed_session,
 )
 from app.orchestration.tool import get_tool_manager  # noqa: E402
+from app.services.automation_scheduler import automation_scheduler  # noqa: E402
 from app.services.file_service import FileService  # noqa: E402
 from app.utils.logging_config import get_logger, setup_logging  # noqa: E402
 

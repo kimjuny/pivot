@@ -240,7 +240,7 @@ def _approval_question(*, skill_name: str, change_type: str) -> str:
     return f"Approve the request to {action_text} Skill `{skill_name}`?"
 
 
-def _build_pending_user_action(
+def _build_pivot_action(
     *,
     submission_id: int,
     skill_name: str,
@@ -249,7 +249,7 @@ def _build_pending_user_action(
     file_count: int,
     total_bytes: int,
 ) -> dict[str, object]:
-    """Build the system-owned waiting action persisted on the task row."""
+    """Build the ``pivot_action`` envelope for skill change approval."""
     approval_request = SkillChangeApprovalRequest(
         submission_id=submission_id,
         skill_name=skill_name,
@@ -263,8 +263,11 @@ def _build_pending_user_action(
         total_bytes=total_bytes,
     )
     return {
-        "kind": "skill_change_approval",
-        "approval_request": approval_request.to_dict(),
+        "type": "skill_change_approval",
+        "category": "approval",
+        "payload": {
+            "approval_request": approval_request.to_dict(),
+        },
     }
 
 
@@ -359,7 +362,7 @@ def stage_skill_change_submission(
         session.commit()
         raise
 
-    pending_user_action = _build_pending_user_action(
+    pivot_action = _build_pivot_action(
         submission_id=submission.id or 0,
         skill_name=submission.skill_name,
         change_type=submission.change_type,
@@ -373,7 +376,7 @@ def stage_skill_change_submission(
         "target_kind": submission.target_kind,
         "change_type": submission.change_type,
         "status": "pending_approval",
-        "pending_user_action": pending_user_action,
+        "pivot_action": pivot_action,
     }
 
 

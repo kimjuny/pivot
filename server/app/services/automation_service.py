@@ -6,12 +6,11 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from croniter import croniter
-from sqlmodel import col, select
-
 from app.models.automation import Automation, AutomationRun
 from app.models.session import Session
 from app.services.agent_service import AgentService
+from croniter import croniter
+from sqlmodel import col, select
 
 if TYPE_CHECKING:
     from sqlmodel import Session as DBSession

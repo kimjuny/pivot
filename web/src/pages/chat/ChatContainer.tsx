@@ -28,6 +28,7 @@ import {
   getReactContextUsage,
   getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
+  getAgents,
   listProjects,
   listSessions,
   migrateSession,
@@ -62,6 +63,11 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  type AutomationProposal,
+  AutomationCreateDialog,
+} from "@/components/AutomationCreateDialog";
+import type { Agent } from "@/types";
 import {
   Tooltip,
   TooltipContent,
@@ -122,6 +128,10 @@ import {
   extractSkillChangeApprovalRequestFromClarifyData,
   isClarifyMessage,
 } from "./utils/chatSelectors";
+import {
+  type ActionHandlerContext,
+  dispatchPivotActionFromToolResult,
+} from "./utils/actionHandlers";
 
 const COMPACT_STATUS_MIN_VISIBLE_MS = 2200;
 const COMPACT_SKILL_NAME = "compact";
@@ -182,66 +192,6 @@ function toWebSearchProviderOptions(
       name: binding.manifest.name,
       logoUrl: binding.manifest.logo_url ?? null,
     }));
-}
-
-function extractWorkspacePreviewIntent(
-  event: ReactStreamEvent,
-): {
-  preview: PreviewEndpointResponse;
-  availablePreviews: PreviewEndpointResponse[];
-  activePreviewId: string | null;
-} | null {
-  if (event.type !== "tool_result" || !event.data || typeof event.data !== "object") {
-    return null;
-  }
-
-  const toolResults = (event.data as { tool_results?: unknown }).tool_results;
-  if (!Array.isArray(toolResults)) {
-    return null;
-  }
-
-  for (const item of toolResults) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const result = (item as { result?: unknown; success?: unknown }).result;
-    const success = (item as { success?: unknown }).success;
-    if (success !== true || !result || typeof result !== "object") {
-      continue;
-    }
-
-    const uiIntent = (result as { ui_intent?: unknown }).ui_intent;
-    if (!uiIntent || typeof uiIntent !== "object") {
-      continue;
-    }
-    if (
-      (uiIntent as { type?: unknown }).type !== "open_workspace_web_preview"
-    ) {
-      continue;
-    }
-
-    const preview = normalizePreviewEndpoint(
-      (uiIntent as { preview?: unknown }).preview,
-    );
-    if (!preview) {
-      continue;
-    }
-    return {
-      preview,
-      availablePreviews: normalizePreviewEndpointList(
-        (uiIntent as { available_previews?: unknown }).available_previews,
-      ),
-      activePreviewId:
-        typeof (uiIntent as { active_preview_id?: unknown }).active_preview_id ===
-        "string"
-          ? String(
-              (uiIntent as { active_preview_id?: unknown }).active_preview_id,
-            )
-          : null,
-    };
-  }
-
-  return null;
 }
 
 function getToolEventPayload(
@@ -846,6 +796,10 @@ function ChatContainer({
   const [isRuntimeDebugLoading, setIsRuntimeDebugLoading] =
     useState<boolean>(false);
   const [runtimeDebugError, setRuntimeDebugError] = useState<string | null>(null);
+  const [automationProposal, setAutomationProposal] =
+    useState<AutomationProposal | null>(null);
+  const [isAutomationDialogOpen, setIsAutomationDialogOpen] = useState(false);
+  const [automationAgents, setAutomationAgents] = useState<Agent[]>([]);
   const [webSearchProviders, setWebSearchProviders] = useState<
     ChatWebSearchProviderOption[]
   >(
@@ -899,6 +853,26 @@ function ChatContainer({
       activePreviewId: string | null;
     }) => {},
   );
+  const actionHandlerContextRef = useRef<ActionHandlerContext>({
+    openWorkspacePreviewIntent: (intent: {
+      preview: unknown;
+      availablePreviews: unknown[];
+      activePreviewId: string | null;
+    }) => {
+      const preview = normalizePreviewEndpoint(intent.preview);
+      if (!preview) return;
+      openWorkspacePreviewIntentRef.current({
+        preview,
+        availablePreviews: normalizePreviewEndpointList(intent.availablePreviews),
+        activePreviewId: intent.activePreviewId,
+      });
+    },
+    openAutomationProposalDialog: (proposal) => {
+      setAutomationProposal(proposal);
+      setIsAutomationDialogOpen(true);
+      void getAgents().then(setAutomationAgents).catch(() => {});
+    },
+  });
   const isCompactMode = useMemo(
     () => selectedMandatorySkills.some(isCompactSkillSelection),
     [selectedMandatorySkills],
@@ -1393,9 +1367,18 @@ function ChatContainer({
         return;
       }
 
-      const previewIntent = extractWorkspacePreviewIntent(event);
-      if (previewIntent) {
-        openWorkspacePreviewIntentRef.current(previewIntent);
+      // Unified pivot_action dispatch for tool_result events.
+      if (
+        event.type === "tool_result" &&
+        event.data &&
+        typeof event.data === "object"
+      ) {
+        const toolResults = (event.data as { tool_results?: unknown })
+          .tool_results;
+        dispatchPivotActionFromToolResult(
+          toolResults,
+          actionHandlerContextRef.current,
+        );
       }
 
       if (event.type === "compact_start") {
@@ -4105,6 +4088,20 @@ function ChatContainer({
         isMigrating={isMigratingStaleSession}
         migratedSessionId={migratedSessionId}
         onGoToMigrated={handleGoToMigratedSession}
+      />
+      <AutomationCreateDialog
+        open={isAutomationDialogOpen}
+        agents={automationAgents}
+        defaultAgentId={agentId}
+        proposal={automationProposal ?? undefined}
+        onClose={() => {
+          setIsAutomationDialogOpen(false);
+          setAutomationProposal(null);
+        }}
+        onCreated={() => {
+          setIsAutomationDialogOpen(false);
+          setAutomationProposal(null);
+        }}
       />
     </SidebarProvider>
   );

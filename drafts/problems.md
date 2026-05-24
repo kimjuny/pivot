@@ -1,46 +1,43 @@
 # Open Problems & Design Debt
 
-## 1. Tool → Frontend Action Channel: No Shared Abstraction
+## 1. Tool → Frontend Action Channel: Unified `pivot_action` Protocol
 
-**Status**: Open
+**Status**: Resolved (Phase 1 — dual-key coexistence)
 **Discovered**: 2026-05-24
+**Resolved**: 2026-05-24
 **Context**: Automation feature design discussion
 
-### Problem
+### Solution
 
-Tools that need to control or influence the frontend UI currently use ad-hoc, hardcoded conventions. There is no unified framework for "tool X wants the frontend to do Y."
+Introduced a unified `pivot_action` envelope that tools include in their return dicts:
 
-Two existing mechanisms:
+```python
+"pivot_action": {
+    "type": str,       # unique action identifier
+    "category": str,   # "notify" (fire-and-forget) or "approval" (pause engine)
+    "payload": { ... }, # action-type-specific data
+}
+```
 
-| Mechanism | Tool | Key | Frontend Detection |
-|---|---|---|---|
-| `ui_intent` | `create_preview_endpoint` | `result.ui_intent.type === "open_workspace_web_preview"` | `ChatContainer.extractWorkspacePreviewIntent()` |
-| `pending_user_action` | `submit_skill_change` | `result.pending_user_action.kind === "skill_change_approval"` | Engine wraps in `clarify` event → `ChatContainer` checks `kind` |
+**Engine**: `_extract_pivot_action_from_tool_results()` replaces `_extract_pending_user_action_from_tool_results()`. Checks `pivot_action` first, falls back to legacy `pending_user_action` for backward compat. The `category` field determines whether the engine pauses (`"approval"`) or continues (`"notify"`).
 
-Both work by embedding special keys in tool return dicts, which get serialized into SSE `tool_result` events. The frontend scans events with hardcoded string matching.
+**Frontend**: Handler registry at `web/src/pages/chat/utils/actionHandlers.ts`. Built-in handlers for `open_workspace_web_preview` and `skill_change_approval`. Adding a new action type requires only: (a) tool constructing the payload, (b) calling `registerActionHandler()`.
 
-### Why This Matters
+**Migration**: Both tools (`create_preview_endpoint`, `submit_skill_change`) now emit both the legacy key and `pivot_action`. The supervisor dispatches by `type` field. Legacy keys can be removed in a future Phase 2.
 
-- **`ui_intent`**: TypeScript types are not extensible — one `type` literal, one handler function, no registry.
-- **`pending_user_action`**: The `kind` field is a literal `"skill_change_approval"`, not a union type. Engine-level extraction exists but frontend handling is hardcoded.
-- **New features blocked**: Automation's "agent proposes → user confirms via pre-filled dialog" pattern needs a third ad-hoc convention. Future features will face the same problem.
+### Remaining (Phase 2)
 
-### Open Questions
-
-1. **Should there be a unified `ui_action` protocol?** A standardized envelope in tool results that the frontend dispatches through a registry (action type → handler).
-2. **What are the distinct action categories?** Candidates:
-   - `open_surface` — open a dock/panel (current `ui_intent`)
-   - `request_approval` — pause for user confirmation (current `pending_user_action`)
-   - `open_dialog` — open a pre-filled creation/edit dialog (Automation proposal)
-   - `navigate` — navigate to a specific page/route
-   - `notify` — show a toast/notification
-3. **Should the engine be aware of these, or stay agnostic?** `pending_user_action` goes through engine-level extraction (`_extract_pending_user_action_from_tool_results`). `ui_intent` is purely frontend-scanned. Which model is correct?
-4. **Frontend action registry design**: Should this be a context-based registry (`ActionRegistryProvider`) where tools register handlers, or a simpler switch/dispatch in `ChatContainer`?
+- Remove `ui_intent` from `create_preview_endpoint` once frontend fully uses `pivot_action`
+- Remove `pending_user_action` from `skill_change_service` once engine no longer needs fallback
+- Remove `extractWorkspacePreviewIntent` from `ChatContainer.tsx`
+- Remove `_extract_pending_user_action_from_tool_results` legacy path from engine
 
 ### Affected Files
 
-- `server/app/orchestration/tool/builtin/create_preview_endpoint.py` — `ui_intent` emitter
-- `server/app/orchestration/tool/builtin/submit_skill_change.py` — `pending_user_action` emitter
-- `server/app/orchestration/react/engine.py` — `_extract_pending_user_action_from_tool_results()`
-- `web/src/pages/chat/ChatContainer.tsx` — `extractWorkspacePreviewIntent()`, clarify event handling
-- `web/src/pages/chat/types.ts` — `ChatPendingUserAction` type with literal `kind`
+- `server/app/orchestration/react/engine.py` — `_extract_pivot_action_from_tool_results()`, updated clarify event, generic `_compact_result_for_llm` stripping
+- `server/app/orchestration/tool/builtin/create_preview_endpoint.py` — emits `pivot_action` alongside `ui_intent`
+- `server/app/services/skill_change_service.py` — emits `pivot_action` alongside `pending_user_action`
+- `server/app/services/react_task_supervisor.py` — dispatches by `pivot_action.type`
+- `web/src/pages/chat/utils/actionHandlers.ts` (new) — handler registry
+- `web/src/pages/chat/ChatContainer.tsx` — integrated `dispatchPivotActionFromToolResult`
+- `web/src/pages/chat/types.ts` — `ChatPendingUserAction.kind` expanded to union type

@@ -158,12 +158,15 @@ def create_preview_endpoint(
         **serialized_preview,
         "available_previews": serialized_previews,
         "active_preview_id": record.preview_id,
-        "ui_intent": {
+        "pivot_action": {
             "type": "open_workspace_web_preview",
-            "surface_key": "workspace-editor",
-            "view": "web",
-            "preview": serialized_preview,
-            "available_previews": serialized_previews,
-            "active_preview_id": record.preview_id,
+            "category": "notify",
+            "payload": {
+                "surface_key": "workspace-editor",
+                "view": "web",
+                "preview": serialized_preview,
+                "available_previews": serialized_previews,
+                "active_preview_id": record.preview_id,
+            },
         },
     }

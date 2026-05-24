@@ -547,6 +547,7 @@ All backend and core frontend pieces are implemented and passing lint/type check
 | 8 | API client | ✅ | `client/api.ts` extended with types + 7 API functions |
 | 9 | Dependency | ✅ | `croniter` added to `pyproject.toml` |
 | 10 | Session type | ✅ | `"automation"` added as third session type in `Session.type` |
+| 11 | `propose_automation` tool | ✅ | Built-in tool that lets agents propose automations to users via chat. Returns `pivot_action` envelope → frontend opens pre-filled `AutomationCreateDialog`. Handler registered in `actionHandlers.ts`. |
 
 #### Bugs fixed during implementation
 
@@ -555,6 +556,9 @@ All backend and core frontend pieces are implemented and passing lint/type check
 | `ModuleNotFoundError: No module named 'croniter'` | New dependency not in container venv | `pip install croniter` in container |
 | `NoReferencedTableError: table 'agent_release'` | SQLModel default table name for `AgentRelease` is `agentrelease` (no underscore) | Changed FK to `foreign_key="agentrelease.id"` |
 | `InvalidRequestError: generic class in relationship()` | `from __future__ import annotations` breaks SQLAlchemy runtime relationship resolution | Removed future import, used quoted string `list["AutomationRun"]` |
+| `propose_automation` crashes: "got multiple values for argument 'name'" | `ToolManager.execute(name=...)` positional param collides with tool's own `name` kwarg in `**kwargs` | Renamed execute's param from `name` to `_tool_name` |
+| `AutomationCreateDialog` opens empty (no pre-filled data) | `useState` initializer only runs once on mount, when `proposal` is still `null` | Added `useEffect` watching `open` + `proposal` to re-initialize form data |
+| Agent selector empty in `AutomationCreateDialog` | Rendered with `agents={[]}` — no agent list fetched | Added `getAgents()` call when dialog opens, pass `automationAgents` state to dialog |
 
 #### Not yet implemented (Phase 2)
 
@@ -575,6 +579,7 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `server/app/services/automation_executor.py`
 - `server/app/schemas/automation.py`
 - `server/app/api/client_automations.py`
+- `server/app/orchestration/tool/builtin/propose_automation.py`
 
 **New frontend files:**
 - `web/src/client/ClientAutomationsView.tsx`
@@ -585,6 +590,10 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `server/app/main.py` — router + scheduler lifecycle
 - `server/app/models/__init__.py` — export new models
 - `server/app/models/session.py` — session type docstring
+- `server/app/orchestration/tool/manager.py` — renamed execute param to avoid collision
 - `pyproject.toml` — added `croniter` dependency
 - `web/src/client/api.ts` — automation types + API functions
 - `web/src/client/ClientAgentsPage.tsx` — nav items + view toggle
+- `web/src/components/AutomationCreateDialog.tsx` — useEffect re-init form on open, fetch agents
+- `web/src/pages/chat/ChatContainer.tsx` — agent fetch for dialog, pass agents prop
+- `web/src/pages/chat/utils/actionHandlers.ts` — propose_automation handler registration

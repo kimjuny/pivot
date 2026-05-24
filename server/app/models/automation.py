@@ -1,7 +1,6 @@
 """Database models for scheduled automation tasks."""
 
 from datetime import UTC, datetime
-from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import UniqueConstraint

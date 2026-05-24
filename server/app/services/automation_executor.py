@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from typing import Any
 
 from app.db.session import managed_session
 from app.services.automation_service import AutomationService
@@ -14,9 +14,6 @@ from app.services.react_task_supervisor import (
     get_react_task_supervisor,
 )
 from app.utils.logging_config import get_logger
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger("automation.executor")
 
@@ -148,7 +145,7 @@ async def execute_automation_run(run_id: int) -> None:
             result.task_id,
         )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "Automation %d run %d timed out after %ds",
             automation.id,
@@ -194,9 +191,8 @@ async def _wait_for_task_completion(task_id: str, timeout: int) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with managed_session() as db:
-            from sqlmodel import select
-
             from app.models.react import ReactTask
+            from sqlmodel import select
 
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             task = db.exec(statement).first()
@@ -207,4 +203,4 @@ async def _wait_for_task_completion(task_id: str, timeout: int) -> None:
             ):
                 return
         await asyncio.sleep(2)
-    raise asyncio.TimeoutError()
+    raise TimeoutError()

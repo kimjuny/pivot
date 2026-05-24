@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
+from app.api.permissions import permissions
 from app.models.automation import Automation, AutomationRun
 from app.schemas.automation import (
     AutomationCreateRequest,
@@ -12,7 +13,6 @@ from app.schemas.automation import (
     AutomationRunResponse,
     AutomationUpdateRequest,
 )
-from app.api.permissions import permissions
 from app.security.permission_catalog import Permission
 from app.services.automation_service import AutomationService
 from fastapi import APIRouter, Depends, HTTPException
@@ -298,8 +298,9 @@ async def trigger_automation(
     if run is None:
         raise HTTPException(status_code=409, detail="A run is already in progress")
 
-    from app.services.automation_executor import execute_automation_run
     import asyncio
+
+    from app.services.automation_executor import execute_automation_run
 
     asyncio.create_task(execute_automation_run(run.id))
 

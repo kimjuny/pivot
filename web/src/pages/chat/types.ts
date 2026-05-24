@@ -251,10 +251,14 @@ export interface SkillChangeApprovalRequest {
 
 /**
  * System-owned waiting action attached to a task while execution is paused.
+ *
+ * ``kind`` is a string discriminator so new action types can be added without
+ * extending this union.  Known types: ``"skill_change_approval"``,
+ * ``"propose_automation"``.
  */
 export interface ChatPendingUserAction {
   /** Stable action kind so the UI can dispatch the correct controls. */
-  kind: "skill_change_approval";
+  kind: string;
   /** Structured approval request for one staged skill submission. */
   approvalRequest: SkillChangeApprovalRequest;
 }

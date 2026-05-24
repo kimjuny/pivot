@@ -85,7 +85,7 @@ class ToolManager:
             name: The name of the tool to remove.
 
         Raises:
-            KeyError: If the tool is not found in the registry.
+            KeyError: If the tool is not found in registry.
         """
         if name not in self._registry:
             raise KeyError(f"Tool '{name}' not found in registry.")
@@ -114,7 +114,7 @@ class ToolManager:
 
     def execute(
         self,
-        name: str,
+        _tool_name: str,
         *args: Any,
         context: ToolExecutionContext | None = None,
         **kwargs: Any,
@@ -123,7 +123,7 @@ class ToolManager:
         Execute a tool by name with the given arguments.
 
         Args:
-            name: The name of the tool to execute.
+            _tool_name: The registered name of the tool to execute.
             *args: Positional arguments to pass to the tool.
             **kwargs: Keyword arguments to pass to the tool.
 
@@ -131,11 +131,11 @@ class ToolManager:
             The result of the tool execution.
 
         Raises:
-            KeyError: If the tool is not found in the registry.
+            KeyError: If the tool is not found in registry.
         """
-        tool_metadata = self.get_tool(name)
+        tool_metadata = self.get_tool(_tool_name)
         if tool_metadata is None:
-            raise KeyError(f"Tool '{name}' not found in registry.")
+            raise KeyError(f"Tool '{_tool_name}' not found in registry.")
         token = None
         if context is not None:
             token = _tool_execution_context.set(context)

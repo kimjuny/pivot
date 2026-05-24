@@ -138,7 +138,11 @@ class ReactTaskSupervisor:
         user_id: int,
         decision: Literal["approve", "reject"],
     ) -> ReactTaskLaunchResult:
-        """Apply one structured waiting action and resume the task."""
+        """Apply one structured waiting action and resume the task.
+
+        Dispatches by the ``type`` field in the persisted action dict.
+        Currently supports ``"skill_change_approval"``.
+        """
         with managed_session() as db:
             statement = select(ReactTask).where(ReactTask.task_id == task_id)
             task = db.exec(statement).first()
@@ -152,10 +156,15 @@ class ReactTaskSupervisor:
             pending_user_action = self._load_pending_user_action(task)
             if pending_user_action is None:
                 raise ValueError("Task does not have a structured pending user action")
-            if pending_user_action.get("kind") != "skill_change_approval":
-                raise ValueError("Unsupported pending user action kind")
 
-            approval_request = pending_user_action.get("approval_request")
+            action_type = pending_user_action.get("type")
+            if action_type != "skill_change_approval":
+                raise ValueError(f"Unsupported pending user action type: {action_type}")
+
+            payload = pending_user_action.get("payload")
+            if not isinstance(payload, dict):
+                raise ValueError("Pending user action is missing payload")
+            approval_request = payload.get("approval_request")
             if not isinstance(approval_request, dict):
                 raise ValueError("Pending user action is missing approval metadata")
             submission_id = approval_request.get("submission_id")

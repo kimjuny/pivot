@@ -1247,32 +1247,49 @@ class ReactEngine:
                 ]
             return compact
 
-        if tool_name == "submit_skill_change":
-            strip = {"pending_user_action", "target_kind"}
-            return {k: v for k, v in raw_result.items() if k not in strip}
-
         if tool_name == "run_bash":
             return {k: v for k, v in raw_result.items() if k != "ok"}
 
         if tool_name == "edit_file":
             return {k: v for k, v in raw_result.items() if k != "message"}
 
+        # Generic: strip the unified pivot_action envelope from any tool.
+        if "pivot_action" in raw_result:
+            return {k: v for k, v in raw_result.items() if k != "pivot_action"}
+
         return raw_result
 
-    def _extract_pending_user_action_from_tool_results(
+    def _extract_pivot_action_from_tool_results(
         self,
         tool_results: list[dict[str, Any]],
+        *,
+        category_filter: str | None = None,
     ) -> dict[str, Any] | None:
-        """Extract one system-owned waiting action from tool results, if any."""
+        """Extract a pivot_action envelope from tool results.
+
+        Args:
+            tool_results: Tool result dicts from ``_execute_tool_call_request``.
+            category_filter: If set, only return actions matching this category
+                (e.g. ``"approval"``).
+
+        Returns:
+            The ``pivot_action`` dict or ``None``.
+        """
         for result_item in tool_results:
             if result_item.get("success") is not True:
                 continue
             raw_result = result_item.get("result")
             if not isinstance(raw_result, dict):
                 continue
-            pending_user_action = raw_result.get("pending_user_action")
-            if isinstance(pending_user_action, dict):
-                return dict(pending_user_action)
+            pivot_action = raw_result.get("pivot_action")
+            if not isinstance(pivot_action, dict):
+                continue
+            if (
+                category_filter is not None
+                and pivot_action.get("category") != category_filter
+            ):
+                continue
+            return dict(pivot_action)
         return None
 
     @staticmethod
@@ -1863,7 +1880,9 @@ class ReactEngine:
             batch_results = [
                 eager_state.result_by_call_id[tool_call.id] for tool_call in batch_calls
             ]
-            if self._extract_pending_user_action_from_tool_results(batch_results):
+            if self._extract_pivot_action_from_tool_results(
+                batch_results, category_filter="approval",
+            ):
                 await self._skip_unstarted_eager_tool_calls(
                     eager_state,
                     token_meter_queue,
@@ -2111,8 +2130,8 @@ class ReactEngine:
                             for item in preview_decision.action.step_status_update
                         ]
                         pending_user_action = (
-                            self._extract_pending_user_action_from_tool_results(
-                                tool_results
+                            self._extract_pivot_action_from_tool_results(
+                                tool_results, category_filter="approval",
                             )
                         )
                         tokens_data = self.state_service.finalize_partial_tool_error(
@@ -2249,10 +2268,9 @@ class ReactEngine:
                         batch_results = [
                             result_by_call_id[tool_call.id] for tool_call in batch_calls
                         ]
-                        if self._extract_pending_user_action_from_tool_results(
-                            batch_results
+                        if self._extract_pivot_action_from_tool_results(
+                            batch_results, category_filter="approval",
                         ):
-                            should_stop_after_batch = True
                             break
                         continue
 
@@ -2298,8 +2316,8 @@ class ReactEngine:
                         for tool_call in batch_calls
                         if tool_call.id in result_by_call_id
                     ]
-                    if self._extract_pending_user_action_from_tool_results(
-                        batch_results
+                    if self._extract_pivot_action_from_tool_results(
+                        batch_results, category_filter="approval",
                     ):
                         should_stop_after_batch = True
                     if should_stop_after_batch:
@@ -2337,8 +2355,8 @@ class ReactEngine:
             step_status_updates_validated = [
                 item.to_dict() for item in action.step_status_update
             ]
-            pending_user_action = self._extract_pending_user_action_from_tool_results(
-                tool_results
+            pending_user_action = self._extract_pivot_action_from_tool_results(
+                tool_results, category_filter="approval",
             )
             self.state_service.finalize_success(
                 task=task,
@@ -3108,6 +3126,15 @@ class ReactEngine:
                             if isinstance(approval_request, dict)
                             else None
                         )
+                        # Build the payload dict for the pivot_action field.
+                        payload = pending_user_action.get("payload")
+                        if not isinstance(payload, dict):
+                            # Legacy shape: construct payload from the top-level keys.
+                            payload = {
+                                k: v
+                                for k, v in pending_user_action.items()
+                                if k not in ("type", "category", "kind")
+                            }
                         yield {
                             "type": "clarify",
                             "task_id": task.task_id,
@@ -3117,11 +3144,20 @@ class ReactEngine:
                                 "question": (
                                     question
                                     if isinstance(question, str)
-                                    else "Approve this skill change?"
+                                    else "Approve this action?"
                                 ),
                                 "approval_request": approval_request
                                 if isinstance(approval_request, dict)
                                 else None,
+                                "pivot_action": {
+                                    "type": pending_user_action.get("type")
+                                    or pending_user_action.get("kind", ""),
+                                    "category": pending_user_action.get(
+                                        "category",
+                                        "approval",
+                                    ),
+                                    "payload": payload,
+                                },
                             },
                             "timestamp": datetime.now(UTC).isoformat(),
                         }

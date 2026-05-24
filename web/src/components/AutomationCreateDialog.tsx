@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -25,10 +25,21 @@ import {
 } from "@/client/api";
 import type { Agent } from "@/types";
 
+export interface AutomationProposal {
+  name: string;
+  description?: string;
+  promptTemplate: string;
+  cron: string;
+  timezone?: string;
+  sessionStrategy?: "reuse" | "isolate";
+}
+
 interface AutomationCreateDialogProps {
   open: boolean;
   agents: Agent[];
   defaultAgentId?: number;
+  /** Agent-proposed automation that pre-fills the form. */
+  proposal?: AutomationProposal;
   onClose: () => void;
   onCreated: () => void;
 }
@@ -99,6 +110,7 @@ export function AutomationCreateDialog({
   open,
   agents,
   defaultAgentId,
+  proposal,
   onClose,
   onCreated,
 }: AutomationCreateDialogProps) {
@@ -107,9 +119,37 @@ export function AutomationCreateDialog({
     if (defaultAgentId !== undefined) {
       defaults.agentId = String(defaultAgentId);
     }
+    if (proposal) {
+      defaults.name = proposal.name;
+      defaults.description = proposal.description ?? "";
+      defaults.promptTemplate = proposal.promptTemplate;
+      defaults.frequency = "custom";
+      defaults.customCron = proposal.cron;
+      defaults.timezone = proposal.timezone ?? "UTC";
+      defaults.sessionStrategy = proposal.sessionStrategy ?? "reuse";
+    }
     return defaults;
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Re-initialize form when the dialog opens with a new proposal
+  useEffect(() => {
+    if (!open) return;
+    const defaults = buildDefaultFormData();
+    if (defaultAgentId !== undefined) {
+      defaults.agentId = String(defaultAgentId);
+    }
+    if (proposal) {
+      defaults.name = proposal.name;
+      defaults.description = proposal.description ?? "";
+      defaults.promptTemplate = proposal.promptTemplate;
+      defaults.frequency = "custom";
+      defaults.customCron = proposal.cron;
+      defaults.timezone = proposal.timezone ?? "UTC";
+      defaults.sessionStrategy = proposal.sessionStrategy ?? "reuse";
+    }
+    setFormData(defaults);
+  }, [open, proposal, defaultAgentId]);
   const [error, setError] = useState<string | null>(null);
 
   const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
