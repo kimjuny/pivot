@@ -63,6 +63,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
+   * Listen for auth expiry events dispatched by API helpers and force redirect
+   * to the login page. Calling logout() clears the token and sets user to null,
+   * which causes ProtectedRoute to redirect to "/".
+   */
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      clearAuthSession();
+      setUser(null);
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+  }, []);
+
+  /**
    * Login with username and password.
    *
    * Stores the access token and user data in localStorage for persistence.

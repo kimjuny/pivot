@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bot } from "lucide-react";
+import { Bot, Clock } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
@@ -111,6 +111,14 @@ function ClientAgentPage() {
             icon: <Bot className="h-4 w-4" />,
             isActive: false,
             onSelect: () => navigate("/app/agents"),
+          },
+          {
+            key: "automations",
+            label: "Automations",
+            icon: <Clock className="h-4 w-4" />,
+            isActive: false,
+            onSelect: () =>
+              navigate(`/app/agents?view=automations&agentId=${agent.id}`),
           },
         ]}
         sidebarFooter={(isCollapsed) => (

@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     WORK_WECHAT_WS_REQUEST_TIMEOUT_SECONDS: int = 10
     SYSTEM_TIME_ZONE: str = "Asia/Shanghai"
 
+    # Automation scheduler
+    AUTOMATION_SCHEDULER_ENABLED: bool = True
+    AUTOMATION_SCHEDULER_SCAN_INTERVAL_SECONDS: int = 30
+    AUTOMATION_SCHEDULER_MAX_CONCURRENT_RUNS: int = 5
+    AUTOMATION_RUN_TIMEOUT_SECONDS: int = 300
+
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
 

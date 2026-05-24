@@ -1,3 +1,4 @@
+from app.models.automation import Automation, AutomationRun
 from app.models.access import (
     AccessLevel,
     GroupMember,
@@ -53,6 +54,8 @@ __all__ = [
     "LLM",
     "AccessLevel",
     "Agent",
+    "Automation",
+    "AutomationRun",
     "AgentChannelBinding",
     "AgentDelegation",
     "AgentExtensionBinding",

@@ -3,6 +3,88 @@ import type { ChatSessionType } from "@/utils/agentTestSnapshot";
 import { apiRequest } from "@/utils/api";
 
 /**
+ * Automation entity returned by the client API.
+ */
+export interface ClientAutomation {
+  id: number;
+  automation_id: string;
+  name: string;
+  description: string | null;
+  agent_id: number;
+  release_id: number;
+  trigger_type: string;
+  trigger_config: string;
+  prompt_template: string;
+  session_strategy: "reuse" | "isolate";
+  status: "active" | "paused" | "disabled";
+  max_iterations: number | null;
+  timeout_seconds: number;
+  notify_on_completion: boolean;
+  notify_on_failure: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Automation run execution record.
+ */
+export interface ClientAutomationRun {
+  id: number;
+  run_id: string;
+  automation_id: number;
+  scheduled_at: string;
+  session_id: number;
+  task_id: string | null;
+  status: "pending" | "running" | "completed" | "failed" | "timeout" | "cancelled";
+  started_at: string | null;
+  finished_at: string | null;
+  result_summary: string | null;
+  error_message: string | null;
+  token_usage: string | null;
+}
+
+/**
+ * Paginated automation list response.
+ */
+export interface ClientAutomationListResponse {
+  automations: ClientAutomation[];
+  total: number;
+}
+
+/**
+ * Paginated automation run list response.
+ */
+export interface ClientAutomationRunListResponse {
+  runs: ClientAutomationRun[];
+  total: number;
+}
+
+/**
+ * Payload for creating a new automation.
+ */
+export interface ClientAutomationCreatePayload {
+  name: string;
+  description?: string | null;
+  agent_id: number;
+  prompt_template: string;
+  trigger_config: string;
+  session_strategy?: "reuse" | "isolate";
+  max_iterations?: number | null;
+  timeout_seconds?: number;
+  notify_on_completion?: boolean;
+  notify_on_failure?: boolean;
+}
+
+/**
+ * Payload for updating an automation (all fields optional).
+ */
+export type ClientAutomationUpdatePayload = Partial<ClientAutomationCreatePayload> & {
+  status?: "active" | "paused" | "disabled";
+};
+
+/**
  * Lightweight Client session summary used by the recent sessions surfaces.
  */
 export interface ClientSessionListItem {
@@ -60,4 +142,74 @@ export async function getClientSessions(
   limit: number = 20,
 ): Promise<ClientSessionListResponse> {
   return apiRequest(`/client/sessions?limit=${limit}`) as Promise<ClientSessionListResponse>;
+}
+
+// ── Automations ──────────────────────────────────────────────
+
+/**
+ * Fetch all automations owned by the current user.
+ */
+export async function getClientAutomations(
+  status?: string,
+): Promise<ClientAutomationListResponse> {
+  const params = status ? `?status=${status}` : "";
+  return apiRequest(`/client/automations${params}`) as Promise<ClientAutomationListResponse>;
+}
+
+/**
+ * Create a new automation.
+ */
+export async function createClientAutomation(
+  payload: ClientAutomationCreatePayload,
+): Promise<ClientAutomation> {
+  return apiRequest("/client/automations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }) as Promise<ClientAutomation>;
+}
+
+/**
+ * Update an existing automation.
+ */
+export async function updateClientAutomation(
+  automationId: string,
+  payload: ClientAutomationUpdatePayload,
+): Promise<ClientAutomation> {
+  return apiRequest(`/client/automations/${automationId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  }) as Promise<ClientAutomation>;
+}
+
+/**
+ * Delete an automation.
+ */
+export async function deleteClientAutomation(
+  automationId: string,
+): Promise<void> {
+  await apiRequest(`/client/automations/${automationId}`, { method: "DELETE" });
+}
+
+/**
+ * Manually trigger an automation run.
+ */
+export async function triggerClientAutomation(
+  automationId: string,
+): Promise<ClientAutomationRun> {
+  return apiRequest(`/client/automations/${automationId}/trigger`, {
+    method: "POST",
+  }) as Promise<ClientAutomationRun>;
+}
+
+/**
+ * Fetch execution runs for an automation.
+ */
+export async function getClientAutomationRuns(
+  automationId: string,
+  limit: number = 50,
+  offset: number = 0,
+): Promise<ClientAutomationRunListResponse> {
+  return apiRequest(
+    `/client/automations/${automationId}/runs?limit=${limit}&offset=${offset}`,
+  ) as Promise<ClientAutomationRunListResponse>;
 }

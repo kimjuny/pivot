@@ -23,6 +23,7 @@ from app.api.auth import router as auth_router  # noqa: E402
 from app.api.channels import router as channels_router  # noqa: E402
 from app.api.chat_surfaces import router as chat_surfaces_router  # noqa: E402
 from app.api.client import router as client_router  # noqa: E402
+from app.api.client_automations import router as client_automations_router  # noqa: E402
 from app.api.delegations import router as delegations_router  # noqa: E402
 from app.api.extensions import router as extensions_router  # noqa: E402
 from app.api.files import router as files_router  # noqa: E402
@@ -43,6 +44,7 @@ from app.api.tools import router as tools_router  # noqa: E402
 from app.api.web_search import router as web_search_router  # noqa: E402
 from app.api.workspace import router as workspace_router  # noqa: E402
 from app.channels.runtime import channel_runtime_manager  # noqa: E402
+from app.services.automation_scheduler import automation_scheduler  # noqa: E402
 from app.config import get_settings  # noqa: E402
 from app.db.session import (  # noqa: E402
     init_db,
@@ -118,6 +120,7 @@ app.include_router(task_attachments_router, prefix="/api")
 app.include_router(channels_router, prefix="/api")
 app.include_router(chat_surfaces_router, prefix="/api")
 app.include_router(client_router, prefix="/api")
+app.include_router(client_automations_router, prefix="/api")
 app.include_router(extensions_router, prefix="/api")
 app.include_router(media_generation_router, prefix="/api")
 app.include_router(tools_router, prefix="/api")
@@ -197,6 +200,7 @@ async def startup_event():
 
     app.state.file_prune_task = create_task(_prune_unused_files_loop())
     await channel_runtime_manager.start()
+    await automation_scheduler.start()
 
     logger.info("=" * 50)
     logger.info("Application startup complete")
@@ -217,6 +221,7 @@ async def shutdown_event():
     if prune_task is not None:
         prune_task.cancel()
     await channel_runtime_manager.stop()
+    await automation_scheduler.stop()
 
 
 # Global exception handler for better error logging
