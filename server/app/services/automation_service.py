@@ -9,8 +9,11 @@ from typing import TYPE_CHECKING
 from app.models.automation import Automation, AutomationRun
 from app.models.session import Session
 from app.services.agent_service import AgentService
+from app.utils.logging_config import get_logger
 from croniter import croniter
 from sqlmodel import col, select
+
+logger = get_logger("automation.service")
 
 if TYPE_CHECKING:
     from sqlmodel import Session as DBSession
@@ -249,6 +252,13 @@ class AutomationService:
         )
         return runs, total
 
+    def count_runs(self, automation_id: int) -> int:
+        """Return total run count for an automation without loading rows."""
+        base = select(AutomationRun).where(
+            AutomationRun.automation_id == automation_id,
+        )
+        return len(self.db.exec(base).all())
+
     def get_run(self, run_id: int) -> AutomationRun | None:
         """Return one run or None."""
         return self.db.get(AutomationRun, run_id)
@@ -281,6 +291,12 @@ class AutomationService:
             return run
         except Exception:
             self.db.rollback()
+            logger.warning(
+                "claim_run failed for automation_id=%d scheduled_at=%s",
+                automation_id,
+                scheduled_at.isoformat(),
+                exc_info=True,
+            )
             return None
 
     def get_due_automations(self) -> list[Automation]:
@@ -289,7 +305,7 @@ class AutomationService:
             select(Automation)
             .where(Automation.status == "active")
             .where(col(Automation.next_run_at).is_not(None))
-            .where(Automation.next_run_at <= datetime.now(UTC))
+            .where(col(Automation.next_run_at) <= datetime.now(UTC))
         )
         return list(self.db.exec(statement).all())
 
@@ -325,12 +341,17 @@ class AutomationService:
 
         from app.services.workspace_service import WorkspaceService
 
+        session_id = uuid4().hex
+
         workspace = WorkspaceService(self.db).create_workspace(
-            label=f"automation-{automation.automation_id[:8]}",
+            agent_id=automation.agent_id,
+            user_id=automation.owner_id,
+            scope="session_private",
+            session_id=session_id,
         )
 
         session = Session(
-            session_id=uuid4().hex,
+            session_id=session_id,
             agent_id=automation.agent_id,
             type="automation",
             release_id=automation.release_id,

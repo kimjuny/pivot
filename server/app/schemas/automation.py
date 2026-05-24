@@ -72,7 +72,7 @@ class AutomationRunResponse(AppBaseModel):
     run_id: str
     automation_id: int
     scheduled_at: str
-    session_id: int
+    session_id: int | None
     task_id: str | None
     status: str
     started_at: str | None

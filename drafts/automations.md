@@ -549,7 +549,7 @@ All backend and core frontend pieces are implemented and passing lint/type check
 | 10 | Session type | ✅ | `"automation"` added as third session type in `Session.type` |
 | 11 | `propose_automation` tool | ✅ | Built-in tool that lets agents propose automations to users via chat. Returns `pivot_action` envelope → frontend opens pre-filled `AutomationCreateDialog`. Handler registered in `actionHandlers.ts`. |
 
-#### Bugs fixed during implementation
+#### Bugs fixed during Phase 1
 
 | Issue | Root cause | Fix |
 |-------|-----------|-----|
@@ -560,17 +560,50 @@ All backend and core frontend pieces are implemented and passing lint/type check
 | `AutomationCreateDialog` opens empty (no pre-filled data) | `useState` initializer only runs once on mount, when `proposal` is still `null` | Added `useEffect` watching `open` + `proposal` to re-initialize form data |
 | Agent selector empty in `AutomationCreateDialog` | Rendered with `agents={[]}` — no agent list fetched | Added `getAgents()` call when dialog opens, pass `automationAgents` state to dialog |
 
-#### Not yet implemented (Phase 2)
+### Phase 2 — Polish Status: **DONE** (2026-05-24)
 
-- Automation detail view with run history table
-- Manual trigger from UI (API exists, UI button shows toast "coming soon")
-- Studio sidebar integration (`AgentDetailSidebar.tsx` AUTOMATIONS section)
+#### Completed items
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| 7 | Detail view with Card layout | ✅ | `ClientAutomationDetailView.tsx` — Hero card (LLMBrandAvatar + title + description), Separator, info grid (Status badge, Schedule, Context Strategy, Timeout, Last/Next Run). Prompt Template card with `MarkdownRenderer`. Run History card with `Table`. |
+| 8 | Manual trigger from UI | ✅ | "Trigger" button in detail header + "Trigger Now" in list card dropdown. End-to-end tested via Chrome DevTools. |
+| 9 | Studio sidebar integration | ✅ | "Automations" nav item in `SessionSidebar` navigation items. |
+| 10 | Template variable system | ✅ | All 6 variables working: `{{date}}`, `{{time}}`, `{{datetime}}`, `{{weekday}}`, `{{agent_name}}`, `{{run_number}}`. |
+| 11 | Edit mode (via dialog) | ✅ | `AutomationCreateDialog` extended with `automation` prop for edit mode. Pre-fills form from existing automation data (including cron → frequency reverse-parse via `parseCronForForm`). Calls `updateClientAutomation` on save. |
+| 12 | List layout overhaul | ✅ | 2-column responsive grid (`md:grid-cols-2`). Compact cards with Clock icon, name + agent name, status badge, dropdown menu (pause/resume/trigger/delete), schedule + timing info row. Click card → detail view. |
+| 13 | Markdown rendering | ✅ | Prompt Template card uses `MarkdownRenderer` (shared component from chat). |
+| 14 | Agent avatar in detail | ✅ | Hero card uses `LLMBrandAvatar` with agent's model, falling back to `Bot` icon. |
+
+#### Bugs fixed during Phase 2
+
+| Issue | Root cause | Fix |
+|-------|-----------|-----|
+| `WorkspaceService.create_workspace()` TypeError on trigger | `_create_automation_session` passed wrong params (`label=...`) | Fixed to pass `agent_id=automation.agent_id, user_id=automation.owner_id, scope="session_private", session_id=session_id` |
+| `DetachedInstanceError` in `automation_executor.py` | ORM attributes accessed after `managed_session()` context closed | Extracted scalar values (`automation_id`, `agent_id`, `owner_id`, `timeout_seconds`, `prompt_template`, `session_id_str`) while DB session active, stored as local variables |
+| Pyright: `automation.id` is `int | None` | SQLModel primary key is nullable in type stubs | Added `if automation.id is None` guard before assignment |
+| Pyright: nullable `next_run_at` comparison | Direct column comparison not allowed | Changed to `col(Automation.next_run_at) <= datetime.now(UTC)` |
+
+#### Design decisions during Phase 2
+
+| Decision | Rationale |
+|----------|-----------|
+| Edit uses dialog (not inline editing) | User explicitly requested: "复用原来的Create Automation Dialog". Reusing the dialog keeps form logic (cron builder, validation) in one place. |
+| Info fields as plain label/value pairs (not badges) | Only Status is naturally a badge. Schedule, Timeout, Context Strategy etc. are text values — badges looked forced. |
+| Description as subtitle (fallback to agent name) | Hero card pattern from ExtensionDetailPage: avatar + title + description subtitle gives immediate context. |
+| `MarkdownRenderer` for Prompt Template | Same rendering engine as chat ANSWER blocks ensures consistency and supports rich formatting in prompts. |
+| `parseCronForForm` helper | Needed to reverse a cron expression back into the dialog's frequency/time fields when editing. |
+
+#### Not yet implemented (Phase 3+)
+
+- Stale run watchdog (scheduler code exists but not tested end-to-end)
 - `TriggerConfigurator.tsx` as standalone component (currently inline in dialog)
 - `PromptTemplateEditor.tsx` as standalone component (currently inline in dialog)
-- `AutomationRunHistory.tsx` component
-- `{{agent_name}}` and `{{run_number}}` template variables (core 4 variables work)
+- `AutomationRunHistory.tsx` as standalone component (currently inline in detail view)
+- Studio `AgentDetailSidebar.tsx` AUTOMATIONS section (read-only builder view)
+- Click into run's session for full conversation view
 
-#### File inventory — actually created
+#### File inventory
 
 **New backend files:**
 - `server/app/models/automation.py`
@@ -583,6 +616,7 @@ All backend and core frontend pieces are implemented and passing lint/type check
 
 **New frontend files:**
 - `web/src/client/ClientAutomationsView.tsx`
+- `web/src/client/ClientAutomationDetailView.tsx`
 - `web/src/components/AutomationCreateDialog.tsx`
 
 **Modified files:**
@@ -594,6 +628,5 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `pyproject.toml` — added `croniter` dependency
 - `web/src/client/api.ts` — automation types + API functions
 - `web/src/client/ClientAgentsPage.tsx` — nav items + view toggle
-- `web/src/components/AutomationCreateDialog.tsx` — useEffect re-init form on open, fetch agents
 - `web/src/pages/chat/ChatContainer.tsx` — agent fetch for dialog, pass agents prop
 - `web/src/pages/chat/utils/actionHandlers.ts` — propose_automation handler registration

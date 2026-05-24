@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.db.session import managed_session
+from app.services.agent_service import AgentService
 from app.services.automation_service import AutomationService
 from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
     get_react_task_supervisor,
 )
 from app.utils.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = get_logger("automation.executor")
 
@@ -70,6 +73,14 @@ async def execute_automation_run(run_id: int) -> None:
     It resolves the session, renders the prompt, calls
     ``ReactTaskSupervisor.start_task()``, and records the result.
     """
+    # ── Setup phase: extract scalar values while DB session is active. ──
+    automation_id: int
+    agent_id: int
+    owner_id: int
+    timeout_seconds: int
+    prompt_template: str
+    session_id_str: str
+
     with managed_session() as db:
         svc = AutomationService(db)
         run = svc.get_run(run_id)
@@ -96,26 +107,45 @@ async def execute_automation_run(run_id: int) -> None:
             )
             return
 
-    # Resolve or create session.
-    with managed_session() as db:
-        svc = AutomationService(db)
-        automation = svc.get_required_automation(run.automation_id)
+        # Capture scalars before session closes.
+        if automation.id is None:
+            logger.error("Automation has no primary key")
+            return
+        automation_id = automation.id
+        agent_id = automation.agent_id
+        owner_id = automation.owner_id
+        timeout_seconds = automation.timeout_seconds
+        prompt_template = automation.prompt_template
+
         session = svc.get_or_create_automation_session(automation)
+        session_id_str = session.session_id
+
         run.session_id = session.id
         run.status = "running"
         run.started_at = datetime.now(UTC)
         db.add(run)
         db.commit()
 
+    # Resolve agent name and run count for template variables.
+    extra_vars: dict[str, str] = {}
+    with managed_session() as db:
+        agent_row = AgentService(db).get_agent(agent_id)
+        if agent_row is not None:
+            extra_vars["agent_name"] = agent_row.name
+        run_number = AutomationService(db).count_runs(automation_id) + 1
+        extra_vars["run_number"] = str(run_number)
+
     # Render prompt template.
-    rendered_prompt = render_prompt_template(automation.prompt_template)
+    rendered_prompt = render_prompt_template(
+        prompt_template, extra_vars=extra_vars
+    )
 
     # Launch task via supervisor.
     launch = ReactTaskLaunchRequest(
-        agent_id=automation.agent_id,
+        agent_id=agent_id,
         message=rendered_prompt,
-        user_id=automation.owner_id,
-        session_id=session.session_id,
+        user_id=owner_id,
+        session_id=session_id_str,
         file_ids=[],
     )
 
@@ -123,12 +153,10 @@ async def execute_automation_run(run_id: int) -> None:
         supervisor = get_react_task_supervisor()
         result = await asyncio.wait_for(
             supervisor.start_task(launch),
-            timeout=automation.timeout_seconds,
+            timeout=timeout_seconds,
         )
-        run.task_id = result.task_id
 
-        # Wait for task completion by polling.
-        await _wait_for_task_completion(result.task_id, automation.timeout_seconds)
+        await _wait_for_task_completion(result.task_id, timeout_seconds)
 
         with managed_session() as db:
             svc = AutomationService(db)
@@ -140,7 +168,7 @@ async def execute_automation_run(run_id: int) -> None:
 
         logger.info(
             "Automation %d run %d completed (task %s)",
-            automation.id,
+            automation_id,
             run_id,
             result.task_id,
         )
@@ -148,9 +176,9 @@ async def execute_automation_run(run_id: int) -> None:
     except TimeoutError:
         logger.warning(
             "Automation %d run %d timed out after %ds",
-            automation.id,
+            automation_id,
             run_id,
-            automation.timeout_seconds,
+            timeout_seconds,
         )
         with managed_session() as db:
             svc = AutomationService(db)
@@ -159,7 +187,7 @@ async def execute_automation_run(run_id: int) -> None:
                 svc.update_run_result(
                     run,
                     status="timeout",
-                    error_message=f"Timed out after {automation.timeout_seconds}s",
+                    error_message=f"Timed out after {timeout_seconds}s",
                 )
                 automation = svc.get_required_automation(run.automation_id)
                 svc.update_automation_after_run(automation)
@@ -167,7 +195,7 @@ async def execute_automation_run(run_id: int) -> None:
     except Exception as exc:
         logger.exception(
             "Automation %d run %d failed: %s",
-            automation.id,
+            automation_id,
             run_id,
             exc,
         )

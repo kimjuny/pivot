@@ -134,7 +134,7 @@ class AutomationRun(SQLModel, table=True):
     scheduled_at: datetime = Field(index=True)
 
     # Execution context
-    session_id: int = Field(foreign_key="session.id", index=True)
+    session_id: int | None = Field(default=None, foreign_key="session.id", index=True)
     task_id: str | None = Field(default=None, index=True)
 
     # Status

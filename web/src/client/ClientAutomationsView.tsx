@@ -6,9 +6,8 @@ import {
   Pause,
   Play,
   Plus,
-  Square,
   Trash2,
-  Zap,
+  CirclePlay,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,7 +17,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   DropdownMenu,
@@ -31,10 +29,12 @@ import {
   type ClientAutomation,
   deleteClientAutomation,
   getClientAutomations,
+  triggerClientAutomation,
   updateClientAutomation,
 } from "@/client/api";
 import type { Agent } from "@/types";
 import { AutomationCreateDialog } from "@/components/AutomationCreateDialog";
+import { ClientAutomationDetailView } from "./ClientAutomationDetailView";
 
 /** Format an ISO string into a human-friendly relative/local string. */
 function formatScheduleTime(iso: string | null): string {
@@ -98,6 +98,8 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [selectedAutomation, setSelectedAutomation] =
+    useState<ClientAutomation | null>(null);
 
   const fetchAutomations = useCallback(async () => {
     try {
@@ -122,7 +124,7 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
       await updateClientAutomation(automation.automation_id, { status: newStatus });
       toast.success(newStatus === "paused" ? "Automation paused" : "Automation resumed");
       await fetchAutomations();
-    } catch (err) {
+    } catch {
       toast.error("Failed to update automation");
     }
   };
@@ -132,8 +134,20 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
       await deleteClientAutomation(automation.automation_id);
       toast.success("Automation deleted");
       await fetchAutomations();
-    } catch (err) {
+    } catch {
       toast.error("Failed to delete automation");
+    }
+  };
+
+  const handleTrigger = async (automation: ClientAutomation) => {
+    try {
+      await triggerClientAutomation(automation.automation_id);
+      toast.success("Automation triggered");
+      await fetchAutomations();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to trigger automation",
+      );
     }
   };
 
@@ -141,149 +155,188 @@ export function ClientAutomationsView({ agents, defaultAgentId }: ClientAutomati
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-4 pb-5 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">
-            Automations
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Schedule recurring tasks with your agents.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="flex gap-1">
-            {STATUS_FILTERS.map((filter) => (
-              <Button
-                key={filter.value}
-                variant={statusFilter === filter.value ? "default" : "outline"}
-                size="sm"
-                onClick={() => setStatusFilter(filter.value)}
-              >
-                {filter.label}
-              </Button>
-            ))}
-          </div>
-          <Button size="sm" onClick={() => setIsCreateOpen(true)}>
-            <Plus className="mr-1 h-4 w-4" />
-            New
-          </Button>
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Loading automations…</span>
-        </div>
-      ) : error ? (
-        <div className="py-12 text-sm text-destructive">{error}</div>
-      ) : automations.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 py-16 text-center">
-          <Clock className="h-10 w-10 text-muted-foreground/40" />
-          <p className="text-sm text-muted-foreground">
-            {statusFilter
-              ? `No ${statusFilter} automations.`
-              : "No automations yet. Create one to schedule recurring agent tasks."}
-          </p>
-          {!statusFilter && (
-            <Button variant="outline" size="sm" onClick={() => setIsCreateOpen(true)}>
-              <Plus className="mr-1 h-4 w-4" />
-              Create Automation
-            </Button>
-          )}
-        </div>
+      {selectedAutomation ? (
+        <ClientAutomationDetailView
+          automation={selectedAutomation}
+          agents={agents}
+          onBack={() => {
+            void fetchAutomations();
+            setSelectedAutomation(null);
+          }}
+          onTriggered={() => void fetchAutomations()}
+          onUpdated={() => void fetchAutomations().then(() => {
+            setAutomations((prev) => {
+              const updated = prev.find((a) => a.id === selectedAutomation.id);
+              if (updated) setSelectedAutomation(updated);
+              return prev;
+            });
+          })}
+        />
       ) : (
-        <div className="flex flex-col gap-3">
-          {automations.map((automation) => {
-            const agent = agentMap.get(automation.agent_id);
-            return (
-              <Card key={automation.id}>
-                <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
-                  <div className="flex items-center gap-3">
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                      <Clock className="size-4 text-primary" />
+      <>
+        <div className="flex flex-col gap-4 pb-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+              Automations
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Schedule recurring tasks with your agents.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1">
+              {STATUS_FILTERS.map((filter) => (
+                <Button
+                  key={filter.value}
+                  variant={statusFilter === filter.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter(filter.value)}
+                >
+                  {filter.label}
+                </Button>
+              ))}
+            </div>
+            <Button size="sm" onClick={() => setIsCreateOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" />
+              New
+            </Button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Loading automations...</span>
+          </div>
+        ) : error ? (
+          <div className="py-12 text-sm text-destructive">{error}</div>
+        ) : automations.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-16 text-center">
+            <Clock className="h-10 w-10 text-muted-foreground/40" />
+            <p className="text-sm text-muted-foreground">
+              {statusFilter
+                ? `No ${statusFilter} automations.`
+                : "No automations yet. Create one to schedule recurring agent tasks."}
+            </p>
+            {!statusFilter && (
+              <Button variant="outline" size="sm" onClick={() => setIsCreateOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" />
+                Create Automation
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {automations.map((automation) => {
+              const agent = agentMap.get(automation.agent_id);
+              return (
+                <Card
+                  key={automation.id}
+                  className="cursor-pointer transition-colors hover:bg-accent/30"
+                  onClick={() => setSelectedAutomation(automation)}
+                >
+                  <CardHeader className="space-y-2 p-4 pb-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                          <Clock className="size-4 text-primary" />
+                        </div>
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="truncate text-sm font-medium">
+                            {automation.name}
+                          </p>
+                          {agent && (
+                            <p className="truncate text-xs text-muted-foreground">
+                              {agent.name}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <Badge
+                          variant={
+                            automation.status === "active"
+                              ? "default"
+                              : automation.status === "paused"
+                                ? "secondary"
+                                : "outline"
+                          }
+                        >
+                          {automation.status}
+                        </Badge>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handlePauseResume(automation);
+                              }}
+                            >
+                              {automation.status === "active" ? (
+                                <>
+                                  <Pause className="mr-2 h-4 w-4" />
+                                  Pause
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="mr-2 h-4 w-4" />
+                                  Resume
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleTrigger(automation);
+                              }}
+                            >
+                              <CirclePlay className="mr-2 h-4 w-4" />
+                              Trigger Now
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleDelete(automation);
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
-                    <div>
-                      <CardTitle className="text-sm font-medium">
-                        {automation.name}
-                      </CardTitle>
-                      {agent && (
-                        <p className="text-xs text-muted-foreground">
-                          Agent: {agent.name}
-                        </p>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-3 pt-0">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <span>{cronToLabel(automation.trigger_config)}</span>
+                      {automation.last_run_at && (
+                        <span>Last: {formatScheduleTime(automation.last_run_at)}</span>
+                      )}
+                      {automation.next_run_at && (
+                        <span>Next: {formatScheduleTime(automation.next_run_at)}</span>
                       )}
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={
-                        automation.status === "active"
-                          ? "default"
-                          : automation.status === "paused"
-                            ? "secondary"
-                            : "outline"
-                      }
-                    >
-                      {automation.status}
-                    </Badge>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="size-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => void handlePauseResume(automation)}
-                        >
-                          {automation.status === "active" ? (
-                            <>
-                              <Pause className="mr-2 h-4 w-4" />
-                              Pause
-                            </>
-                          ) : (
-                            <>
-                              <Play className="mr-2 h-4 w-4" />
-                              Resume
-                            </>
-                          )}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => {
-                            toast.info("Manual trigger coming soon");
-                          }}
-                        >
-                          <Zap className="mr-2 h-4 w-4" />
-                          Trigger Now
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive"
-                          onClick={() => void handleDelete(automation)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </CardHeader>
-                <CardContent className="pb-3 pt-1">
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>{cronToLabel(automation.trigger_config)}</span>
-                    <span>
-                      Last: {formatScheduleTime(automation.last_run_at)}
-                    </span>
-                    <span>
-                      Next: {formatScheduleTime(automation.next_run_at)}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </>
       )}
 
       <AutomationCreateDialog

@@ -121,10 +121,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Mark the initial setup as completed.
+   * Mark the initial setup as completed and set the created admin as the
+   * current user so that downstream consumers (menus, permissions) see the
+   * new session immediately without a page refresh.
    */
-  const setupCompleted = useCallback(() => {
+  const setupCompleted = useCallback((createdUser: User) => {
     setNeedsSetup(false);
+    setUser(createdUser);
   }, []);
 
   return (

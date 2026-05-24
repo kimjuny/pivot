@@ -1247,7 +1247,10 @@ class ChannelService:
         statement = (
             select(ReactRecursion)
             .where(ReactRecursion.task_id == task.task_id)
-            .order_by(desc(col(ReactRecursion.iteration_index)))
+            .order_by(
+                desc(col(ReactRecursion.iteration_index)),
+                desc(col(ReactRecursion.id)),
+            )
         )
         last_recursion = self.db.exec(statement).first()
         if last_recursion is None or last_recursion.action_type != "CLARIFY":

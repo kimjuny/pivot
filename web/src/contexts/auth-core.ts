@@ -25,7 +25,7 @@ export interface AuthContextType {
   /** Force logout and redirect to login. */
   forceLogout: () => void;
   /** Mark setup as completed after the first admin is created. */
-  setupCompleted: () => void;
+  setupCompleted: (createdUser: User) => void;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);

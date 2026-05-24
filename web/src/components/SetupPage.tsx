@@ -114,7 +114,7 @@ function SetupPage() {
           permissions: data.permissions,
         };
         saveAuthSession(loggedInUser, data.access_token);
-        setupCompleted();
+        setupCompleted(loggedInUser);
         navigate('/studio', { replace: true });
       } catch (error) {
         setErrorMessage(

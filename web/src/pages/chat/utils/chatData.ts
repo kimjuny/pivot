@@ -579,11 +579,14 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       });
 
       if (segment.payload.reply) {
+        const replyTimestamp = new Date(
+          new Date(sourceRecursion.updated_at).getTime() + 1,
+        ).toISOString();
         loadedMessages.push({
           id: `user-${task.task_id}-clarify-reply-${segmentKey}`,
           role: "user",
           content: segment.payload.reply,
-          timestamp: sourceRecursion.updated_at,
+          timestamp: replyTimestamp,
           task_id: task.task_id,
         });
       }

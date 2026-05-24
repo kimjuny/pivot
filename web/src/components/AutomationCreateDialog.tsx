@@ -20,8 +20,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  type ClientAutomation,
   type ClientAutomationCreatePayload,
   createClientAutomation,
+  updateClientAutomation,
 } from "@/client/api";
 import type { Agent } from "@/types";
 
@@ -34,14 +36,19 @@ export interface AutomationProposal {
   sessionStrategy?: "reuse" | "isolate";
 }
 
-interface AutomationCreateDialogProps {
+interface AutomationDialogProps {
   open: boolean;
   agents: Agent[];
   defaultAgentId?: number;
   /** Agent-proposed automation that pre-fills the form. */
   proposal?: AutomationProposal;
+  /** Existing automation to edit. When provided, dialog runs in edit mode. */
+  automation?: ClientAutomation;
   onClose: () => void;
-  onCreated: () => void;
+  /** Called after a new automation is created. */
+  onCreated?: () => void;
+  /** Called after an existing automation is updated. */
+  onUpdated?: () => void;
 }
 
 interface FormData {
@@ -94,6 +101,33 @@ function buildCronExpression(data: FormData): string {
   }
 }
 
+/** Try to reverse a cron expression back into frequency + time fields. */
+function parseCronForForm(cron: string): Pick<FormData, "frequency" | "customCron" | "timeHour" | "timeMinute"> {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    return { frequency: "custom", customCron: cron, timeHour: "9", timeMinute: "0" };
+  }
+
+  const [minute, hour, dayOfMonth, , dayOfWeek] = parts;
+
+  if (dayOfWeek === "1-5" && dayOfMonth === "*") {
+    return { frequency: "weekdays", customCron: "", timeHour: hour, timeMinute: minute };
+  }
+  if (dayOfWeek === "1" && dayOfMonth === "*") {
+    return { frequency: "weekly", customCron: "", timeHour: hour, timeMinute: minute };
+  }
+  if (dayOfMonth === "1" && dayOfWeek === "*") {
+    return { frequency: "monthly", customCron: "", timeHour: hour, timeMinute: minute };
+  }
+  if (hour === "*") {
+    return { frequency: "hourly", customCron: "", timeHour: "9", timeMinute: minute };
+  }
+  if (dayOfMonth === "*" && dayOfWeek === "*") {
+    return { frequency: "daily", customCron: "", timeHour: hour, timeMinute: minute };
+  }
+  return { frequency: "custom", customCron: cron, timeHour: "9", timeMinute: "0" };
+}
+
 const FREQUENCY_OPTIONS = [
   { value: "hourly", label: "Every hour" },
   { value: "daily", label: "Every day" },
@@ -104,53 +138,44 @@ const FREQUENCY_OPTIONS = [
 ];
 
 /**
- * Dialog for creating a new automation with schedule and prompt configuration.
+ * Dialog for creating or editing an automation.
+ * Pass `automation` to open in edit mode.
  */
 export function AutomationCreateDialog({
   open,
   agents,
   defaultAgentId,
   proposal,
+  automation,
   onClose,
   onCreated,
-}: AutomationCreateDialogProps) {
+  onUpdated,
+}: AutomationDialogProps) {
+  const isEdit = automation !== undefined;
+
   const [formData, setFormData] = useState<FormData>(() => {
+    if (automation) return buildEditFormData(automation);
     const defaults = buildDefaultFormData();
-    if (defaultAgentId !== undefined) {
-      defaults.agentId = String(defaultAgentId);
-    }
-    if (proposal) {
-      defaults.name = proposal.name;
-      defaults.description = proposal.description ?? "";
-      defaults.promptTemplate = proposal.promptTemplate;
-      defaults.frequency = "custom";
-      defaults.customCron = proposal.cron;
-      defaults.timezone = proposal.timezone ?? "UTC";
-      defaults.sessionStrategy = proposal.sessionStrategy ?? "reuse";
-    }
+    if (defaultAgentId !== undefined) defaults.agentId = String(defaultAgentId);
+    if (proposal) applyProposal(defaults, proposal);
     return defaults;
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Re-initialize form when the dialog opens with a new proposal
+  // Re-initialize form when the dialog opens.
   useEffect(() => {
     if (!open) return;
-    const defaults = buildDefaultFormData();
-    if (defaultAgentId !== undefined) {
-      defaults.agentId = String(defaultAgentId);
+    if (automation) {
+      setFormData(buildEditFormData(automation));
+    } else {
+      const defaults = buildDefaultFormData();
+      if (defaultAgentId !== undefined) defaults.agentId = String(defaultAgentId);
+      if (proposal) applyProposal(defaults, proposal);
+      setFormData(defaults);
     }
-    if (proposal) {
-      defaults.name = proposal.name;
-      defaults.description = proposal.description ?? "";
-      defaults.promptTemplate = proposal.promptTemplate;
-      defaults.frequency = "custom";
-      defaults.customCron = proposal.cron;
-      defaults.timezone = proposal.timezone ?? "UTC";
-      defaults.sessionStrategy = proposal.sessionStrategy ?? "reuse";
-    }
-    setFormData(defaults);
-  }, [open, proposal, defaultAgentId]);
-  const [error, setError] = useState<string | null>(null);
+    setError(null);
+  }, [open, automation, proposal, defaultAgentId]);
 
   const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -163,7 +188,7 @@ export function AutomationCreateDialog({
       setError("Name is required");
       return;
     }
-    if (!formData.agentId) {
+    if (!isEdit && !formData.agentId) {
       setError("Agent is required");
       return;
     }
@@ -178,26 +203,34 @@ export function AutomationCreateDialog({
       return;
     }
 
-    const payload: ClientAutomationCreatePayload = {
-      name: formData.name.trim(),
-      description: formData.description.trim() || null,
-      agent_id: Number(formData.agentId),
-      prompt_template: formData.promptTemplate.trim(),
-      trigger_config: JSON.stringify({
-        cron,
-        timezone: formData.timezone,
-      }),
-      session_strategy: formData.sessionStrategy,
-    };
-
     setIsSubmitting(true);
     try {
-      await createClientAutomation(payload);
-      toast.success("Automation created");
-      setFormData(buildDefaultFormData());
-      onCreated();
+      if (isEdit && automation) {
+        await updateClientAutomation(automation.automation_id, {
+          name: formData.name.trim(),
+          description: formData.description.trim() || null,
+          prompt_template: formData.promptTemplate.trim(),
+          trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
+          session_strategy: formData.sessionStrategy,
+        });
+        toast.success("Automation updated");
+        onUpdated?.();
+      } else {
+        const payload: ClientAutomationCreatePayload = {
+          name: formData.name.trim(),
+          description: formData.description.trim() || null,
+          agent_id: Number(formData.agentId),
+          prompt_template: formData.promptTemplate.trim(),
+          trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
+          session_strategy: formData.sessionStrategy,
+        };
+        await createClientAutomation(payload);
+        toast.success("Automation created");
+        setFormData(buildDefaultFormData());
+        onCreated?.();
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create automation");
+      setError(err instanceof Error ? err.message : `Failed to ${isEdit ? "update" : "create"} automation`);
     } finally {
       setIsSubmitting(false);
     }
@@ -207,7 +240,7 @@ export function AutomationCreateDialog({
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-[640px] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New Automation</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit Automation" : "New Automation"}</DialogTitle>
         </DialogHeader>
 
         {error && (
@@ -239,25 +272,27 @@ export function AutomationCreateDialog({
             />
           </div>
 
-          {/* Agent */}
-          <div className="flex flex-col gap-1.5">
-            <Label>Agent</Label>
-            <Select
-              value={formData.agentId}
-              onValueChange={(val) => updateField("agentId", val)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select an agent" />
-              </SelectTrigger>
-              <SelectContent>
-                {agents.map((agent) => (
-                  <SelectItem key={agent.id} value={String(agent.id)}>
-                    {agent.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Agent — only shown when creating */}
+          {!isEdit && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Agent</Label>
+              <Select
+                value={formData.agentId}
+                onValueChange={(val) => updateField("agentId", val)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select an agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  {agents.map((agent) => (
+                    <SelectItem key={agent.id} value={String(agent.id)}>
+                      {agent.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Schedule */}
           <div className="flex flex-col gap-3">
@@ -326,7 +361,7 @@ export function AutomationCreateDialog({
               onChange={(e) => updateField("promptTemplate", e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Variables: {"{{date}}"}, {"{{time}}"}, {"{{datetime}}"}, {"{{weekday}}"}
+              Variables: {"{{date}}"}, {"{{time}}"}, {"{{datetime}}"}, {"{{weekday}}"}, {"{{agent_name}}"}, {"{{run_number}}"}
             </p>
           </div>
 
@@ -374,10 +409,60 @@ export function AutomationCreateDialog({
           </Button>
           <Button onClick={() => void handleSubmit()} disabled={isSubmitting}>
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Create
+            {isEdit ? "Save" : "Create"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Apply a proposal's fields into an existing FormData object. */
+function applyProposal(data: FormData, proposal: AutomationProposal): void {
+  data.name = proposal.name;
+  data.description = proposal.description ?? "";
+  data.promptTemplate = proposal.promptTemplate;
+  data.timezone = proposal.timezone ?? "UTC";
+  data.sessionStrategy = proposal.sessionStrategy ?? "reuse";
+
+  const parsed = parseCronForForm(proposal.cron);
+  data.frequency = parsed.frequency;
+  data.customCron = parsed.customCron;
+  data.timeHour = parsed.timeHour;
+  data.timeMinute = parsed.timeMinute;
+}
+
+/** Build FormData from an existing automation for edit mode. */
+function buildEditFormData(automation: ClientAutomation): FormData {
+  let cron = "";
+  try {
+    const config = JSON.parse(automation.trigger_config) as { cron?: string; timezone?: string };
+    cron = config.cron ?? "";
+    const parsed = parseCronForForm(cron);
+    return {
+      name: automation.name,
+      description: automation.description ?? "",
+      agentId: String(automation.agent_id),
+      promptTemplate: automation.prompt_template,
+      frequency: parsed.frequency,
+      customCron: parsed.customCron,
+      timeHour: parsed.timeHour,
+      timeMinute: parsed.timeMinute,
+      timezone: config.timezone ?? "UTC",
+      sessionStrategy: automation.session_strategy,
+    };
+  } catch {
+    return {
+      name: automation.name,
+      description: automation.description ?? "",
+      agentId: String(automation.agent_id),
+      promptTemplate: automation.prompt_template,
+      frequency: "custom",
+      customCron: "",
+      timeHour: "9",
+      timeMinute: "0",
+      timezone: "UTC",
+      sessionStrategy: automation.session_strategy,
+    };
+  }
 }

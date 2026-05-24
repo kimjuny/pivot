@@ -55,7 +55,8 @@ export const ConversationView = memo(function ConversationView({
     const leftTimestamp = Date.parse(left.timestamp);
     const rightTimestamp = Date.parse(right.timestamp);
 
-    // Same task: user before assistant, regardless of timestamp drift
+    // Same task: user before assistant — but only for the original exchange,
+    // not clarify sub-dialogs where the assistant question precedes the reply.
     if (leftIsMessage && rightIsMessage) {
       if (
         left.task_id &&
@@ -63,7 +64,12 @@ export const ConversationView = memo(function ConversationView({
         left.task_id === right.task_id &&
         left.role !== right.role
       ) {
-        return left.role === "user" ? -1 : 1;
+        const isClarifyReply =
+          left.id.includes("-clarify-reply-") ||
+          right.id.includes("-clarify-reply-");
+        if (!isClarifyReply) {
+          return left.role === "user" ? -1 : 1;
+        }
       }
     }
 
