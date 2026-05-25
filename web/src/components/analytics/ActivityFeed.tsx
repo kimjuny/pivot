@@ -1,4 +1,4 @@
-import { Bot, User, Wrench } from "lucide-react";
+import { Bot, Clock, User, Wrench } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
@@ -71,6 +71,8 @@ export function ActivityFeed({ data }: ActivityFeedProps) {
                     <span className="font-medium">{item.agent_name}</span>
                     {item.session_type === "client" ? (
                       <User className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+                    ) : item.session_type === "automation" ? (
+                      <Clock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
                     ) : (
                       <Wrench className="h-3 w-3 shrink-0 text-muted-foreground/60" />
                     )}

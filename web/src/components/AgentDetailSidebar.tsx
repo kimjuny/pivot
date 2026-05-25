@@ -15,7 +15,6 @@ import {
     PanelLeft,
     Globe,
     Users,
-    Clock,
 } from "lucide-react";
 import { useSidebar } from '@/hooks/use-sidebar';
 import {
@@ -96,7 +95,6 @@ import {
 } from '../utils/api';
 import { toast } from 'sonner';
 import { useAgentTabStore } from '../store/agentTabStore';
-import { getClientAutomations, type ClientAutomation } from '@/client/api';
 
 /** Unified tool entry for sidebar display. */
 interface SidebarTool {
@@ -469,8 +467,7 @@ function AgentDetailSidebar({
     const [isSkillSelectorOpen, setIsSkillSelectorOpen] = useState(false);
     const [isDelegationsOpen, setIsDelegationsOpen] = useState(false);
     const [isDelegationSelectorOpen, setIsDelegationSelectorOpen] = useState(false);
-    const [isAutomationsOpen, setIsAutomationsOpen] = useState(false);
-    const [delegations, setDelegations] = useState<Array<{ callee_agent_id: number; callee_name: string | null; callee_alias: string }>>([]);
+    const [delegations, setDelegations] = useState<Array<{ callee_agent_id: number; callee_name: string | null; callee_alias: string; callee_model_name: string | null }>>([]);
     const [isChannelDialogOpen, setIsChannelDialogOpen] = useState(false);
     const [isMediaProviderDialogOpen, setIsMediaProviderDialogOpen] = useState(false);
     const [isWebSearchDialogOpen, setIsWebSearchDialogOpen] = useState(false);
@@ -497,7 +494,6 @@ function AgentDetailSidebar({
     const [imageProvidersLoading, setMediaProvidersLoading] = useState(false);
     const [webSearchLoading, setWebSearchLoading] = useState(false);
     const [extensionsLoading, setExtensionsLoading] = useState(false);
-    const [automations, setAutomations] = useState<ClientAutomation[]>([]);
     // Local copy of the agent's tool_ids so it updates without a page reload
     const [localToolIds, setLocalToolIds] = useState<string | null | undefined>(agent?.tool_ids);
     // Local copy of the agent's skill_ids so it updates without a page reload
@@ -559,7 +555,6 @@ function AgentDetailSidebar({
         setIsChannelsOpen(false);
         setIsMediaProvidersOpen(false);
         setIsWebSearchOpen(false);
-        setIsAutomationsOpen(false);
         setIsChannelDialogOpen(false);
         setIsMediaProviderDialogOpen(false);
         setIsWebSearchDialogOpen(false);
@@ -569,7 +564,6 @@ function AgentDetailSidebar({
         hasFetchedChannelsRef.current = false;
         hasFetchedMediaProvidersRef.current = false;
         hasFetchedWebSearchRef.current = false;
-        setAutomations([]);
     }, [agent?.id]);
 
     /**
@@ -1100,24 +1094,12 @@ function AgentDetailSidebar({
                 callee_agent_id: d.callee_agent_id,
                 callee_name: d.callee_name ?? null,
                 callee_alias: d.callee_alias,
+                callee_model_name: d.callee_model_name ?? null,
             })));
         }).catch(() => {
             toast.error('Failed to load delegations');
         });
     }, [agentChangedSinceLastRender, isDelegationsOpen, agent?.id]);
-
-    useEffect(() => {
-        if (!isAutomationsOpen || !agent?.id || agentChangedSinceLastRender) {
-            return;
-        }
-        getClientAutomations()
-            .then((res) => {
-                setAutomations(res.automations.filter((a) => a.agent_id === agent.id));
-            })
-            .catch(() => {
-                toast.error('Failed to load automations');
-            });
-    }, [agentChangedSinceLastRender, isAutomationsOpen, agent?.id]);
 
     useEffect(() => {
         if (!isExtensionsOpen || agentChangedSinceLastRender) {
@@ -1188,7 +1170,7 @@ function AgentDetailSidebar({
      * Handle section icon click in collapsed mode.
      * Expands sidebar and opens the clicked section while closing others.
      */
-    const handleSectionClick = (section: 'tools' | 'skills' | 'delegations' | 'automations' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
+    const handleSectionClick = (section: 'tools' | 'skills' | 'delegations' | 'extensions' | 'channels' | 'imageProviders' | 'webSearch') => {
         if (state === 'collapsed') {
             // Expand sidebar first
             setOpen(true);
@@ -1197,7 +1179,6 @@ function AgentDetailSidebar({
                 setIsToolsOpen(section === 'tools');
                 setIsSkillsOpen(section === 'skills');
                 setIsDelegationsOpen(section === 'delegations');
-                setIsAutomationsOpen(section === 'automations');
                 setIsExtensionsOpen(section === 'extensions');
                 setIsChannelsOpen(section === 'channels');
                 setIsMediaProvidersOpen(section === 'imageProviders');
@@ -1208,7 +1189,6 @@ function AgentDetailSidebar({
             setIsToolsOpen(section === 'tools');
             setIsSkillsOpen(section === 'skills');
             setIsDelegationsOpen(section === 'delegations');
-            setIsAutomationsOpen(section === 'automations');
             setIsExtensionsOpen(section === 'extensions');
             setIsChannelsOpen(section === 'channels');
             setIsMediaProvidersOpen(section === 'imageProviders');
@@ -1861,8 +1841,16 @@ function AgentDetailSidebar({
                             <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
                                 <SidebarGroupContent>
                                     {delegations.length === 0 ? (
-                                        <div className="px-7 py-1.5 text-xs text-sidebar-foreground/40">
-                                            No agents configured
+                                        <div className="mx-2 my-1 rounded-md border border-dashed border-sidebar-border">
+                                            <SidebarMenuButton
+                                                size="sm"
+                                                onClick={() => setIsDelegationSelectorOpen(true)}
+                                                disabled={!agent?.id}
+                                                className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                                            >
+                                                <Plus className="size-3.5" />
+                                                Add first agent
+                                            </SidebarMenuButton>
                                         </div>
                                     ) : (
                                         <SidebarMenu className="gap-0.5">
@@ -1872,72 +1860,13 @@ function AgentDetailSidebar({
                                                         className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
                                                         tooltip={delegation.callee_name ?? delegation.callee_alias}
                                                     >
-                                                        <Bot className="size-3.5" />
+                                                        <LLMBrandAvatar
+                                                            model={delegation.callee_model_name}
+                                                            fallback={<Bot className="size-3.5" aria-hidden="true" />}
+                                                            containerClassName="flex size-3.5 shrink-0 items-center justify-center rounded-sm"
+                                                            imageClassName="size-full object-contain"
+                                                        />
                                                         <span className="truncate font-mono text-xs">{delegation.callee_alias}</span>
-                                                    </SidebarMenuButton>
-                                                </SidebarMenuItem>
-                                            ))}
-                                        </SidebarMenu>
-                                    )}
-                                </SidebarGroupContent>
-                            </CollapsibleContent>
-                        </SidebarGroup>
-                    </Collapsible>
-
-                    {/* Automations Section */}
-                    <Collapsible
-                        open={isAutomationsOpen}
-                        onOpenChange={setIsAutomationsOpen}
-                        className="group/collapsible"
-                    >
-                        <SidebarGroup className="py-0">
-                            <SidebarMenu className="group-data-[collapsible=icon]:flex hidden">
-                                <SidebarMenuItem>
-                                    <SidebarMenuButton
-                                        onClick={() => handleSectionClick('automations')}
-                                        tooltip="Automations"
-                                        isActive={isAutomationsOpen}
-                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
-                                    >
-                                        <Clock className="size-4" />
-                                        <span>Automations</span>
-                                    </SidebarMenuButton>
-                                </SidebarMenuItem>
-                            </SidebarMenu>
-
-                            <SidebarGroupLabel asChild className="group-data-[collapsible=icon]:hidden">
-                                <CollapsibleTrigger
-                                    onClick={() => handleSectionClick('automations')}
-                                    className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors"
-                                >
-                                    <SidebarSectionLeadingIcon icon={Clock} isOpen={isAutomationsOpen} />
-                                    <span className="flex-1 text-left">Automations</span>
-                                    {automations.length > 0 && (
-                                        <span className="text-[10px] font-medium text-sidebar-foreground/40 tabular-nums">
-                                            {automations.length}
-                                        </span>
-                                    )}
-                                </CollapsibleTrigger>
-                            </SidebarGroupLabel>
-                            <CollapsibleContent className="group-data-[collapsible=icon]:hidden pt-1">
-                                <SidebarGroupContent>
-                                    {automations.length === 0 ? (
-                                        <div className="px-7 py-1.5 text-xs text-sidebar-foreground/40">
-                                            No automations
-                                        </div>
-                                    ) : (
-                                        <SidebarMenu className="gap-0.5">
-                                            {automations.map((automation) => (
-                                                <SidebarMenuItem key={automation.automation_id}>
-                                                    <SidebarMenuButton
-                                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
-                                                        tooltip={automation.name}
-                                                    >
-                                                        <Clock className="size-3.5" />
-                                                        <span className="truncate text-xs">{automation.name}</span>
-                                                        <span className={`ml-auto text-[10px] font-medium ${automation.status === 'active' ? 'text-emerald-500' : 'text-sidebar-foreground/40'}`}>
-                                                            {automation.status}
-                                                        </span>
                                                     </SidebarMenuButton>
                                                 </SidebarMenuItem>
                                             ))}
@@ -2576,6 +2505,7 @@ function AgentDetailSidebar({
                                 callee_agent_id: d.callee_agent_id,
                                 callee_name: d.callee_name ?? null,
                                 callee_alias: d.callee_alias,
+                                callee_model_name: d.callee_model_name ?? null,
                             })));
                         }
                     }}

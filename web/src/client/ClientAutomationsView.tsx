@@ -14,6 +14,14 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
   Card,
   CardContent,
   CardHeader,
@@ -63,16 +71,26 @@ function cronToLabel(triggerConfig: string): string {
     const parts = cron.split(/\s+/);
     if (parts.length !== 5) return cron;
 
-    const [, hour, dayOfMonth, month, dayOfWeek] = parts;
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+
+    // Interval patterns: */N in minute or hour position.
+    const intervalMin = /^\*\/(\d+)$/.exec(minute);
+    const intervalHour = /^\*\/(\d+)$/.exec(hour);
+    if (intervalMin && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return `Every ${intervalMin[1]} min`;
+    }
+    if (intervalHour && minute !== "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return `Every ${intervalHour[1]}h at :${minute}`;
+    }
 
     if (dayOfWeek !== "*" && dayOfMonth === "*" && month === "*") {
       const days = dayOfWeek.split(",").length;
-      if (days === 5 && dayOfWeek.includes("-")) return `Weekdays at ${hour}:00`;
-      if (days === 7 || dayOfWeek === "*") return `Daily at ${hour}:00`;
-      return `Custom at ${hour}:00`;
+      if (days === 5 && dayOfWeek.includes("-")) return `Weekdays at ${hour}:${minute.padStart(2, "0")}`;
+      if (days === 7 || dayOfWeek === "*") return `Daily at ${hour}:${minute.padStart(2, "0")}`;
+      return `Custom at ${hour}:${minute.padStart(2, "0")}`;
     }
-    if (dayOfMonth !== "*" && dayOfWeek === "*") return `Monthly at ${hour}:00`;
-    if (dayOfMonth === "*" && dayOfWeek === "*" && month === "*") return `Daily at ${hour}:00`;
+    if (dayOfMonth !== "*" && dayOfWeek === "*") return `Monthly at ${hour}:${minute.padStart(2, "0")}`;
+    if (dayOfMonth === "*" && dayOfWeek === "*" && month === "*" && hour !== "*") return `Daily at ${hour}:${minute.padStart(2, "0")}`;
     return cron;
   } catch {
     return "Custom schedule";
@@ -242,20 +260,36 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
         ) : error ? (
           <div className="py-12 text-sm text-destructive">{error}</div>
         ) : automations.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 py-16 text-center">
-            <Clock className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">
-              {statusFilter
-                ? `No ${statusFilter} automations.`
-                : "No automations yet. Create one to schedule recurring agent tasks."}
-            </p>
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Clock className="size-6" />
+              </EmptyMedia>
+              {statusFilter ? (
+                <>
+                  <EmptyTitle>No {statusFilter} automations</EmptyTitle>
+                  <EmptyDescription>
+                    No automations match the selected filter.
+                  </EmptyDescription>
+                </>
+              ) : (
+                <>
+                  <EmptyTitle>No automations yet</EmptyTitle>
+                  <EmptyDescription>
+                    Create one to schedule recurring agent tasks.
+                  </EmptyDescription>
+                </>
+              )}
+            </EmptyHeader>
             {!statusFilter && (
-              <Button variant="outline" size="sm" onClick={() => setIsCreateOpen(true)}>
-                <Plus className="mr-1 h-4 w-4" />
-                Create Automation
-              </Button>
+              <EmptyContent>
+                <Button size="sm" variant="outline" onClick={() => setIsCreateOpen(true)}>
+                  <Plus className="mr-1 h-4 w-4" />
+                  Create Automation
+                </Button>
+              </EmptyContent>
             )}
-          </div>
+          </Empty>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {automations.map((automation) => {

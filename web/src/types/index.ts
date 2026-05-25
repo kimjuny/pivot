@@ -87,6 +87,7 @@ export interface AgentDelegation {
   callee_name?: string | null;
   callee_description?: string | null;
   callee_llm_id?: number | null;
+  callee_model_name?: string | null;
 }
 
 /**

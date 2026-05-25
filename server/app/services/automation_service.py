@@ -324,23 +324,34 @@ class AutomationService:
     ) -> AutomationRun | None:
         """Atomically claim a run slot for the given automation and time.
 
-        First checks for an existing pending/running run at this slot to
-        avoid a noisy IntegrityError.  The UNIQUE(automation_id, scheduled_at)
-        constraint still acts as a safety net for concurrent writes.
+        Checks for any existing run at this slot:
+        - Pending/running: slot is already claimed, return None.
+        - Terminal (completed/failed/timeout/cancelled): advance the
+          automation's next_run_at past this slot and return None so
+          the next scheduler scan uses the updated time.
         """
         existing = self.db.exec(
             select(AutomationRun).where(
                 AutomationRun.automation_id == automation_id,
                 AutomationRun.scheduled_at == scheduled_at,
-                col(AutomationRun.status).in_(["pending", "running"]),
             )
         ).first()
         if existing is not None:
-            logger.debug(
-                "Slot already claimed: automation_id=%d scheduled_at=%s",
+            if existing.status in ("pending", "running"):
+                logger.debug(
+                    "Slot already claimed: automation_id=%d scheduled_at=%s",
+                    automation_id,
+                    scheduled_at.isoformat(),
+                )
+                return None
+
+            # Terminal run blocks this slot — advance automation past it.
+            logger.info(
+                "Slot has terminal run (status=%s), advancing automation_id=%d",
+                existing.status,
                 automation_id,
-                scheduled_at.isoformat(),
             )
+            self.advance_stuck_automation(automation_id)
             return None
 
         run = AutomationRun(
@@ -371,6 +382,34 @@ class AutomationService:
             .where(col(Automation.next_run_at) <= datetime.now(UTC))
         )
         return list(self.db.exec(statement).all())
+
+    def advance_stuck_automation(self, automation_id: int) -> None:
+        """Advance next_run_at past the current stuck slot.
+
+        Recomputes from trigger_config until the next fire time is in
+        the future, then persists it.
+        """
+        automation = self.db.get(Automation, automation_id)
+        if automation is None or automation.status != "active":
+            return
+        next_at = _compute_next_run(automation.trigger_config)
+        # Guard against cron expressions that still resolve to the past.
+        now = datetime.now(UTC)
+        for _ in range(100):
+            if next_at > now:
+                break
+            next_at = croniter(
+                json.loads(automation.trigger_config)["cron"], next_at
+            ).get_next(datetime)
+        automation.next_run_at = next_at
+        automation.updated_at = now
+        self.db.add(automation)
+        self.db.commit()
+        logger.info(
+            "Advanced automation_id=%d next_run_at to %s",
+            automation_id,
+            next_at.isoformat(),
+        )
 
     def get_or_create_automation_session(
         self,

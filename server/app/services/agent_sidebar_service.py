@@ -142,12 +142,13 @@ class AgentSidebarService:
         from app.models.agent import Agent as AgentModel
         from sqlmodel import col, select
 
-        all_agent_count = len(
+        delegatable_agent_count = len(
             list(
                 self.db.exec(
                     select(AgentModel).where(
                         AgentModel.id != agent_id,
-                        col(AgentModel.client_state).in_(["open", "paused"]),
+                        AgentModel.allow_delegation == True,  # noqa: E712
+                        col(AgentModel.active_release_id).is_not(None),
                     )
                 )
             )
@@ -180,6 +181,6 @@ class AgentSidebarService:
             },
             "delegations": {
                 "selected_count": len(delegations),
-                "total_count": all_agent_count,
+                "total_count": delegatable_agent_count,
             },
         }

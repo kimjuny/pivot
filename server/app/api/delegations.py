@@ -31,6 +31,7 @@ def _enrich_response(delegation: object, db: Session) -> DelegationResponse:
         resp.callee_name = callee.name
         resp.callee_description = callee.description
         resp.callee_llm_id = callee.llm_id
+        resp.callee_model_name = callee.model_name
     return resp
 
 

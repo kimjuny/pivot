@@ -57,6 +57,7 @@ class DelegationResponse(AppBaseModel):
     callee_name: str | None = None
     callee_description: str | None = None
     callee_llm_id: int | None = None
+    callee_model_name: str | None = None
 
 
 class DelegationReplaceItem(AppBaseModel):

@@ -161,6 +161,7 @@ class AutomationScheduler:
                             status="timeout",
                             error_message="Reaped by stale-run watchdog",
                         )
+                        svc.advance_stuck_automation(stale_run.automation_id)
 
 
 # Module-level singleton, started/stopped from main.py.

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Bot, Info, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import {
   Dialog,
   DialogContent,
@@ -10,8 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -110,22 +118,86 @@ function parseCronForForm(cron: string): Pick<FormData, "frequency" | "customCro
 
   const [minute, hour, dayOfMonth, , dayOfWeek] = parts;
 
-  if (dayOfWeek === "1-5" && dayOfMonth === "*") {
+  // Patterns with interval minute (e.g. */10) or interval hour are not
+  // representable by the standard frequency presets → fall through to custom.
+  const hasIntervalMinute = /^\*\/\d+$/.test(minute);
+  const hasIntervalHour = /^\*\/\d+$/.test(hour);
+
+  if (dayOfWeek === "1-5" && dayOfMonth === "*" && !hasIntervalMinute && !hasIntervalHour) {
     return { frequency: "weekdays", customCron: "", timeHour: hour, timeMinute: minute };
   }
-  if (dayOfWeek === "1" && dayOfMonth === "*") {
+  if (dayOfWeek === "1" && dayOfMonth === "*" && !hasIntervalMinute && !hasIntervalHour) {
     return { frequency: "weekly", customCron: "", timeHour: hour, timeMinute: minute };
   }
-  if (dayOfMonth === "1" && dayOfWeek === "*") {
+  if (dayOfMonth === "1" && dayOfWeek === "*" && !hasIntervalMinute && !hasIntervalHour) {
     return { frequency: "monthly", customCron: "", timeHour: hour, timeMinute: minute };
   }
-  if (hour === "*") {
+  if (hour === "*" && !hasIntervalMinute) {
     return { frequency: "hourly", customCron: "", timeHour: "9", timeMinute: minute };
   }
-  if (dayOfMonth === "*" && dayOfWeek === "*") {
+  if (dayOfMonth === "*" && dayOfWeek === "*" && !hasIntervalMinute && !hasIntervalHour) {
     return { frequency: "daily", customCron: "", timeHour: hour, timeMinute: minute };
   }
   return { frequency: "custom", customCron: cron, timeHour: "9", timeMinute: "0" };
+}
+
+/**
+ * Validate a standard 5-field cron expression.
+ * Returns an error message or null if valid.
+ */
+function validateCron(cron: string): string | null {
+  const trimmed = cron.trim();
+  if (!trimmed) return "Cron expression is required";
+
+  const parts = trimmed.split(/\s+/);
+  if (parts.length !== 5) return "Must have exactly 5 fields: minute hour day month weekday";
+
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+
+  const fieldRules: [string, string, number, number][] = [
+    ["Minute", minute, 0, 59],
+    ["Hour", hour, 0, 23],
+    ["Day of month", dayOfMonth, 1, 31],
+    ["Month", month, 1, 12],
+    ["Day of week", dayOfWeek, 0, 7],
+  ];
+
+  for (const [label, field, min, max] of fieldRules) {
+    if (!isValidCronField(field, min, max)) {
+      return `${label} is invalid (range ${min}–${max})`;
+    }
+  }
+
+  return null;
+}
+
+// Supports: *, */n, n, n-m, n,m, and combinations.
+function isValidCronField(field: string, min: number, max: number): boolean {
+  if (field === "*") return true;
+  if (/^\*\/\d+$/.test(field)) {
+    const step = parseInt(field.slice(2), 10);
+    return step >= 1 && step <= max;
+  }
+  const atoms = field.split(",");
+  return atoms.every((atom) => {
+    if (/^\d+$/.test(atom)) {
+      const v = parseInt(atom, 10);
+      return v >= min && v <= max;
+    }
+    const rangeMatch = /^(\d+)-(\d+)$/.exec(atom);
+    if (rangeMatch) {
+      const lo = parseInt(rangeMatch[1], 10);
+      const hi = parseInt(rangeMatch[2], 10);
+      return lo >= min && hi <= max && lo <= hi;
+    }
+    if (/^\d+-\d+\/\d+$/.test(atom)) {
+      const [range, stepStr] = atom.split("/");
+      const [lo, hi] = range.split("-").map(Number);
+      const step = parseInt(stepStr, 10);
+      return lo >= min && hi <= max && lo <= hi && step >= 1;
+    }
+    return false;
+  });
 }
 
 const FREQUENCY_OPTIONS = [
@@ -162,6 +234,7 @@ export function AutomationCreateDialog({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cronError, setCronError] = useState<string | null>(null);
 
   // Re-initialize form when the dialog opens.
   useEffect(() => {
@@ -175,10 +248,17 @@ export function AutomationCreateDialog({
       setFormData(defaults);
     }
     setError(null);
+    setCronError(null);
   }, [open, automation, proposal, defaultAgentId]);
 
   const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
+    if (key === "customCron") {
+      setCronError(value.trim() ? validateCron(value) : null);
+    }
+    if (key === "frequency" && value !== "custom") {
+      setCronError(null);
+    }
   };
 
   const handleSubmit = async () => {
@@ -201,6 +281,13 @@ export function AutomationCreateDialog({
     if (!cron.trim()) {
       setError("Schedule configuration is required");
       return;
+    }
+    if (formData.frequency === "custom") {
+      const err = validateCron(cron);
+      if (err) {
+        setCronError(err);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -286,7 +373,15 @@ export function AutomationCreateDialog({
                 <SelectContent>
                   {agents.map((agent) => (
                     <SelectItem key={agent.id} value={String(agent.id)}>
-                      {agent.name}
+                      <div className="flex items-center gap-2">
+                        <LLMBrandAvatar
+                          model={agent.model_name}
+                          fallback={<Bot className="size-3.5" aria-hidden="true" />}
+                          containerClassName="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10"
+                          imageClassName="size-3.5"
+                        />
+                        <span>{agent.name}</span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -297,72 +392,112 @@ export function AutomationCreateDialog({
           {/* Schedule */}
           <div className="flex flex-col gap-3">
             <Label>Schedule</Label>
-            <div className="flex items-center gap-2">
-              <Select
-                value={formData.frequency}
-                onValueChange={(val) => updateField("frequency", val)}
-              >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {FREQUENCY_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {formData.frequency === "custom" ? (
+              <Field data-invalid={cronError ? "" : undefined}>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={formData.frequency}
+                    onValueChange={(val) => updateField("frequency", val)}
+                  >
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FREQUENCY_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    placeholder="0 9 * * 1-5"
+                    className="flex-1"
+                    aria-invalid={cronError ? true : undefined}
+                    value={formData.customCron}
+                    onChange={(e) => updateField("customCron", e.target.value)}
+                  />
+                </div>
+                {cronError && <FieldError>{cronError}</FieldError>}
+              </Field>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Select
+                  value={formData.frequency}
+                  onValueChange={(val) => updateField("frequency", val)}
+                >
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FREQUENCY_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
 
-              {formData.frequency !== "custom" && formData.frequency !== "hourly" ? (
-                <>
-                  <span className="text-sm text-muted-foreground">at</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="23"
-                    className="w-16"
-                    value={formData.timeHour}
-                    onChange={(e) => updateField("timeHour", e.target.value)}
-                  />
-                  <span className="text-sm text-muted-foreground">:</span>
-                  <Input
-                    type="number"
-                    min="0"
-                    max="59"
-                    className="w-16"
-                    value={formData.timeMinute}
-                    onChange={(e) => updateField("timeMinute", e.target.value)}
-                  />
-                </>
-              ) : formData.frequency === "custom" ? (
-                <Input
-                  placeholder="0 9 * * 1-5"
-                  className="flex-1"
-                  value={formData.customCron}
-                  onChange={(e) => updateField("customCron", e.target.value)}
-                />
-              ) : (
-                <span className="text-sm text-muted-foreground">
-                  at :{formData.timeMinute || "0"}
-                </span>
-              )}
-            </div>
+                {formData.frequency !== "hourly" ? (
+                  <>
+                    <span className="text-sm text-muted-foreground">at</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="23"
+                      className="w-16"
+                      value={formData.timeHour}
+                      onChange={(e) => updateField("timeHour", e.target.value)}
+                    />
+                    <span className="text-sm text-muted-foreground">:</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      max="59"
+                      className="w-16"
+                      value={formData.timeMinute}
+                      onChange={(e) => updateField("timeMinute", e.target.value)}
+                    />
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    at :{formData.timeMinute || "0"}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Prompt Template */}
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="auto-prompt">Prompt Template</Label>
+            <Label htmlFor="auto-prompt" className="flex items-center gap-1">
+              Prompt Template
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Info className="h-3 w-3 cursor-help text-muted-foreground/60" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-72 text-xs leading-relaxed">
+                    <p className="font-medium mb-1.5">Available template variables:</p>
+                    <ul className="space-y-1">
+                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{date}}`}</code> — Current date</li>
+                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{time}}`}</code> — Current time</li>
+                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{datetime}}`}</code> — Current date and time</li>
+                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{weekday}}`}</code> — Day of the week</li>
+                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{agent_name}}`}</code> — Agent name</li>
+                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{run_number}}`}</code> — Run sequence number</li>
+                    </ul>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </Label>
             <textarea
               id="auto-prompt"
-              className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-[100px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               placeholder="Summarize workspace files changed today. Use {{date}} for the current date."
               value={formData.promptTemplate}
               onChange={(e) => updateField("promptTemplate", e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">
-              Variables: {"{{date}}"}, {"{{time}}"}, {"{{datetime}}"}, {"{{weekday}}"}, {"{{agent_name}}"}, {"{{run_number}}"}
-            </p>
           </div>
 
           {/* Session Strategy */}

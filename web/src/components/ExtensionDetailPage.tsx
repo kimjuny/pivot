@@ -741,7 +741,10 @@ export default function ExtensionDetailPage() {
   return (
     <ScrollArea className="h-full">
       <div className="mx-auto max-w-5xl px-6 py-8">
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div
+        className="staggered-fade-in-card mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+        style={{ "--stagger-index": 0, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
+      >
         <Button asChild variant="ghost" className="-ml-3 w-fit">
           <Link to={listPath}>
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -804,7 +807,10 @@ export default function ExtensionDetailPage() {
         ) : null}
       </div>
 
-      <div className="mb-6">
+      <div
+        className="staggered-fade-in-card mb-6"
+        style={{ "--stagger-index": 1, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
+      >
         <Card>
           <CardHeader className="space-y-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -842,7 +848,11 @@ export default function ExtensionDetailPage() {
         </Card>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-6">
+      <Tabs
+        defaultValue="overview"
+        className="staggered-fade-in-card space-y-6"
+        style={{ "--stagger-index": 2, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
+      >
         <TabsList
           className="grid h-auto w-full"
           style={{
