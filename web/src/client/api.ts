@@ -9,7 +9,6 @@ export interface ClientAutomation {
   id: number;
   automation_id: string;
   name: string;
-  description: string | null;
   agent_id: number;
   release_id: number;
   trigger_type: string;
@@ -67,7 +66,6 @@ export interface ClientAutomationRunListResponse {
  */
 export interface ClientAutomationCreatePayload {
   name: string;
-  description?: string | null;
   agent_id: number;
   prompt_template: string;
   trigger_config: string;

@@ -292,7 +292,7 @@ export function ClientAutomationDetailView({
             <div className="min-w-0 flex-1 space-y-1.5">
               <CardTitle className="min-w-0 text-xl">{automation.name}</CardTitle>
               <CardDescription className="text-sm">
-                {automation.description || agentName}
+                {agentName}
               </CardDescription>
             </div>
           </div>

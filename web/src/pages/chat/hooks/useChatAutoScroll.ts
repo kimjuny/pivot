@@ -235,10 +235,16 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     [scrollToMessageTop, clearUserMessagePadding],
   );
 
+  const pauseAutoScroll = useCallback(() => {
+    autoScrollEnabledRef.current = false;
+    forceAutoScrollNextRef.current = false;
+  }, []);
+
   return {
     scrollContainerRef,
     handleScroll,
     prepareForProgrammaticScroll,
     scrollToMessage,
+    pauseAutoScroll,
   };
 }

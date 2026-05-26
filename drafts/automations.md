@@ -525,7 +525,7 @@ Handles a single automation run:
 | `server/app/main.py` | Start scheduler on startup, stop on shutdown |
 | `web/src/client/ClientAgentsPage.tsx` | Add Automations nav item + view toggle |
 | `web/src/client/api.ts` | Add automation API functions |
-| `web/src/components/AgentDetailSidebar.tsx` | Add AUTOMATIONS section |
+| `web/src/components/AgentDetailSidebar.tsx` | Sub-agent LLM avatars, Agents empty state fix, removed Automations section |
 
 ## Implementation Progress
 
@@ -600,7 +600,6 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `TriggerConfigurator.tsx` as standalone component (currently inline in dialog)
 - `PromptTemplateEditor.tsx` as standalone component (currently inline in dialog)
 - `AutomationRunHistory.tsx` as standalone component (currently inline in detail view)
-- Studio `AgentDetailSidebar.tsx` AUTOMATIONS section (read-only builder view)
 
 ### Phase 3 — Enhancements Status: **IN PROGRESS** (2026-05-25)
 
@@ -611,8 +610,14 @@ All backend and core frontend pieces are implemented and passing lint/type check
 | 12 | Click into run's session chat | ✅ | All run history rows (completed, failed, timeout) are clickable if they have a `session_uuid`. Navigates to the session's chat view via `onNavigateToSession`. |
 | 13 | Custom toast notification | ✅ | `toast.custom()` with `LLMBrandAvatar` (agent icon), title + status/duration text, "View →" link. Polls run status until terminal state, shows success (green checkmark) or failure (red X) with duration. 10s display duration. |
 | 14a | Session Activity chart integration | ✅ | Added "Automation" as third series in `SessionTrendChart` stacked area chart alongside "Client" and "Studio". Backend `analytics_service.py` returns `automation` count per day. Colors aligned with `TokenUsageChart` palette (`--chart-4`, `--chart-3`, `--chart-2`). Tooltip shows all 3 values + total. |
+| 14b | Activity Feed automation icon | ✅ | `ActivityFeed.tsx` shows `Clock` icon for `session_type === "automation"` entries, distinguishing them from Client (`User`) and Studio (`Wrench`) sessions. |
 | — | Run status accuracy | ✅ | Executor now propagates actual `ReactTask.status` (not hardcoded "completed"), extracts error from `ReactRecursion.error_log`, and builds token usage JSON from `total_prompt_tokens`/`total_completion_tokens`/`total_tokens`. |
 | — | Scheduler `claim_run` dedup | ✅ | Added SELECT-before-INSERT check for existing pending/running runs at the same slot. Eliminates noisy `IntegrityError` tracebacks on scheduler restart. UNIQUE constraint still acts as safety net. |
+| — | Scheduler stuck-state recovery | ✅ | `advance_stuck_automation()` iterates croniter forward from current fire time until finding a future `next_run_at`. Called from both `claim_run` (when a terminal-state run blocks the slot) and `_reap_stale_runs`. Prevents permanent stuck state after timeout/failure. |
+| — | Cron interval pattern support | ✅ | `cronToLabel` and `parseCronForForm` now handle `*/N` minute/hour patterns (e.g., "Every 10 min" instead of "Daily at *:00"). Falls through to "custom" frequency for intervals not matching presets. |
+| — | UI consistency polish | ✅ | Automations list empty state uses shared `<Empty>` component family (matching Channels, Media, Web Search pages). Agent dropdown in create dialog shows `LLMBrandAvatar` per agent. Edit dialog pre-fills correctly for interval crons. |
+| — | Agent detail sidebar cleanup | ✅ | Removed Automations section from `AgentDetailSidebar` (not needed — users manage automations from Client view). Fixed Agents empty state to use "Add first agent" dashed-border pattern matching other sections. Added `LLMBrandAvatar` for sub-agents via `callee_model_name` in delegation response. |
+| — | Delegations sidebar count fix | ✅ | Backend `delegations.total_count` now filters by `allow_delegation=True` AND `active_release_id IS NOT NULL`, matching the frontend `DelegationSelectorDialog` filter criteria. |
 
 #### Bugs fixed during Phase 3
 
@@ -623,8 +628,20 @@ All backend and core frontend pieces are implemented and passing lint/type check
 | Error message missing on failed runs | `ReactTask` has no `error_message` field | Query last failed `ReactRecursion` (status="error") and extract `error_log` |
 | Pyright: `desc()` not found on `int` | `ReactRecursion.iteration_index` typed as `int`, pyright can't resolve `.desc()` | Wrapped with `col(ReactRecursion.iteration_index).desc()` |
 | Scheduler IntegrityError spam on restart | `claim_run` INSERT fails when run already exists | Added SELECT for existing pending/running runs before INSERT; UNIQUE constraint kept as safety net |
+| Scheduler stuck on past `next_run_at` permanently | Stale run reaper marked run as "timeout" but never advanced `next_run_at`; scheduler kept finding the automation as "due" and trying to claim the same slot → UNIQUE failure → loop | Added `advance_stuck_automation()` that iterates croniter forward until finding a future fire time. Called from both `claim_run` (terminal-state detection) and `_reap_stale_runs`. |
+| `claim_run` invisible terminal-state runs | Only checked for pending/running runs; terminal runs (timeout/completed) at the same slot were invisible → INSERT failed on UNIQUE | Now checks for ANY existing run; pending/running returns None, terminal calls `advance_stuck_automation` |
 | API missing `automation` field in session-trends | `analytics.py` endpoints manually constructed dicts with only `date`, `client`, `studio_test` | Added `"automation": item.automation` to both studio and agent session-trends endpoints |
-| Tooltip not showing Automation value | Same root cause as above — frontend receives no `automation` field from API | Fixed by backend API serialization fix above |
+| Edit dialog shows "Every hour at :*/10" for `*/10 * * * *` | `parseCronForForm` matched `hour="*"` to the hourly branch, used `*/10` as minute value | Added `hasIntervalMinute`/`hasIntervalHour` regex checks; interval patterns fall through to "custom" |
+| List card shows "Daily at *:00" for `*/10 * * * *` | `cronToLabel` didn't handle `*/N` minute patterns; `hour="*"` matched daily branch | Added interval pattern detection first; returns "Every N min" |
+| Sidebar delegations shows "0/2" but only 1 configurable | Backend counted all agents with `client_state in ["open","paused"]`; frontend filters by `allow_delegation` + `active_release_id` | Backend now counts only agents with `allow_delegation=True` AND `active_release_id IS NOT NULL` |
+
+#### Design decisions during Phase 3
+
+| Decision | Rationale |
+|----------|-----------|
+| Removed Automations section from AgentDetailSidebar | Users manage automations from the Client view. Studio sidebar already shows relevant agent capabilities; automations don't need to be there yet. Removes unused UI surface. |
+| `advance_stuck_automation()` as public method | Needed from both `claim_run` (terminal run detected) and `_reap_stale_runs` (timeout recovery). Public visibility keeps the scheduler loosely coupled from service internals. |
+| `callee_model_name` added to DelegationResponse | Enables `LLMBrandAvatar` rendering in sidebar without a secondary frontend lookup. Minimal backend change (one joined field). |
 
 #### Not yet implemented (remaining Phase 3)
 
@@ -652,15 +669,24 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `server/app/models/__init__.py` — export new models
 - `server/app/models/session.py` — session type docstring
 - `server/app/orchestration/tool/manager.py` — renamed execute param to avoid collision
-- `server/app/services/automation_service.py` — claim_run SELECT-before-INSERT dedup
+- `server/app/services/automation_service.py` — claim_run SELECT-before-INSERT dedup, `advance_stuck_automation()` for stuck-state recovery
+- `server/app/services/automation_scheduler.py` — stale run reaper calls `advance_stuck_automation`
 - `server/app/services/automation_executor.py` — accurate run status propagation, error/token extraction
 - `server/app/services/analytics_service.py` — `DailySessionCount` dataclass + `get_session_trends()`/`get_agent_session_trends()` 3-bucket logic
+- `server/app/services/agent_sidebar_service.py` — delegations count filters by `allow_delegation` + `active_release_id`
 - `server/app/api/analytics.py` — added `automation` field to session-trends API responses
+- `server/app/api/delegations.py` — enriched `callee_model_name` in delegation response
+- `server/app/schemas/delegation.py` — added `callee_model_name` field
 - `pyproject.toml` — added `croniter` dependency
 - `web/src/client/api.ts` — automation types + API functions + `DailySessionCount` with `automation` field
 - `web/src/client/ClientAgentsPage.tsx` — nav items + view toggle
+- `web/src/client/ClientAutomationsView.tsx` — shared `<Empty>` component for zero-state, cron interval labels
 - `web/src/client/ClientAutomationDetailView.tsx` — custom toast, clickable all-status runs, poll-based trigger feedback
+- `web/src/components/AutomationCreateDialog.tsx` — `LLMBrandAvatar` in agent dropdown, cron interval pattern parsing, edit mode cron validation
+- `web/src/components/AgentDetailSidebar.tsx` — removed Automations section, added `LLMBrandAvatar` for sub-agents, fixed Agents empty state
+- `web/src/components/analytics/ActivityFeed.tsx` — `Clock` icon for automation session type
 - `web/src/components/analytics/SessionTrendChart.tsx` — 3-series stacked area chart (Client/Studio/Automation)
 - `web/src/utils/api.ts` — `DailySessionCount` interface updated with `automation` field
+- `web/src/types/index.ts` — `AgentDelegation` interface updated with `callee_model_name`
 - `web/src/pages/chat/ChatContainer.tsx` — agent fetch for dialog, pass agents prop
 - `web/src/pages/chat/utils/actionHandlers.ts` — propose_automation handler registration

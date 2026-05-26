@@ -4,6 +4,7 @@ import logging
 
 from app.api.dependencies import get_db
 from app.api.permissions import permissions
+from app.crud.llm import llm as llm_crud
 from app.models.agent import Agent
 from app.models.user import User
 from app.schemas.delegation import (
@@ -23,6 +24,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _resolve_model_display(agent: Agent, db: Session) -> str | None:
+    """Resolve the LLM model display string for an agent.
+
+    Why: ``Agent.model_name`` is deprecated and often ``None``.  The canonical
+    source is the linked ``LLM`` record via ``agent.llm_id``, which mirrors how
+    the agents API resolves the display name shown in Studio.
+    """
+    if agent.llm_id is not None:
+        llm = llm_crud.get(agent.llm_id, db)
+        if llm is not None:
+            return f"{llm.name} ({llm.model})"
+    return agent.model_name
+
+
 def _enrich_response(delegation: object, db: Session) -> DelegationResponse:
     """Build a DelegationResponse with joined callee agent data."""
     resp = DelegationResponse.model_validate(delegation)
@@ -31,7 +46,7 @@ def _enrich_response(delegation: object, db: Session) -> DelegationResponse:
         resp.callee_name = callee.name
         resp.callee_description = callee.description
         resp.callee_llm_id = callee.llm_id
-        resp.callee_model_name = callee.model_name
+        resp.callee_model_name = _resolve_model_display(callee, db)
     return resp
 
 

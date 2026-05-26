@@ -10,7 +10,6 @@ class AutomationCreateRequest(AppBaseModel):
     """Request body for creating a new automation."""
 
     name: str = Field(min_length=1, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
     agent_id: int
     prompt_template: str = Field(min_length=1)
     trigger_config: str = Field(
@@ -30,7 +29,6 @@ class AutomationUpdateRequest(AppBaseModel):
     """
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
     prompt_template: str | None = Field(default=None, min_length=1)
     trigger_config: str | None = Field(default=None)
     session_strategy: str | None = Field(default=None, pattern="^(reuse|isolate)$")
@@ -47,7 +45,6 @@ class AutomationResponse(AppBaseModel):
     id: int
     automation_id: str
     name: str
-    description: str | None
     agent_id: int
     release_id: int
     trigger_type: str

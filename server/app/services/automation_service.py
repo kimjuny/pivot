@@ -98,7 +98,6 @@ class AutomationService:
         name: str,
         prompt_template: str,
         trigger_config: str,
-        description: str | None = None,
         session_strategy: str = "reuse",
         max_iterations: int | None = None,
         timeout_seconds: int = 300,
@@ -113,7 +112,6 @@ class AutomationService:
             name: Human-readable name.
             prompt_template: Message template with optional {{variables}}.
             trigger_config: JSON trigger configuration.
-            description: Optional description.
             session_strategy: "reuse" or "isolate".
             max_iterations: Optional override for agent max_iteration.
             timeout_seconds: Per-run timeout.
@@ -142,7 +140,6 @@ class AutomationService:
             agent_id=agent_id,
             release_id=release_id,
             name=name,
-            description=description,
             trigger_type="cron",
             trigger_config=trigger_config,
             prompt_template=prompt_template,

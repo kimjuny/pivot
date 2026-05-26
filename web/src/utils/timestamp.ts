@@ -5,7 +5,7 @@
 const ISO_DATE_TIME_WITHOUT_TIMEZONE_RE =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
 
-const parseUtcTimestamp = (timestamp: string | Date): Date => {
+export const parseUtcTimestamp = (timestamp: string | Date): Date => {
   if (timestamp instanceof Date) {
     return timestamp;
   }

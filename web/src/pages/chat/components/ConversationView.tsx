@@ -1,6 +1,8 @@
 import { memo } from "react";
 import { MessageSquare } from "lucide-react";
 
+import { parseUtcTimestamp } from "@/utils/timestamp";
+
 import type {
   ChatMessage,
   CompactTimelineItem,
@@ -52,8 +54,8 @@ export const ConversationView = memo(function ConversationView({
       return leftIsMessage ? -1 : 1;
     }
 
-    const leftTimestamp = Date.parse(left.timestamp);
-    const rightTimestamp = Date.parse(right.timestamp);
+    const leftTimestamp = parseUtcTimestamp(left.timestamp).getTime();
+    const rightTimestamp = parseUtcTimestamp(right.timestamp).getTime();
 
     // Same task: user before assistant — but only for the original exchange,
     // not clarify sub-dialogs where the assistant question precedes the reply.

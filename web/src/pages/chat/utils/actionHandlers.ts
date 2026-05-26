@@ -129,8 +129,6 @@ registerActionHandler({
   handle(payload, context) {
     context.openAutomationProposalDialog({
       name: typeof payload.name === "string" ? payload.name : "",
-      description:
-        typeof payload.description === "string" ? payload.description : "",
       promptTemplate:
         typeof payload.prompt_template === "string"
           ? payload.prompt_template

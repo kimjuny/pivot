@@ -916,6 +916,7 @@ function ChatContainer({
     handleScroll,
     prepareForProgrammaticScroll,
     scrollToMessage,
+    pauseAutoScroll,
   } = useChatAutoScroll(messages);
   const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
     sessionIdleTimeoutMinutes,
@@ -1776,6 +1777,7 @@ function ChatContainer({
                   pendingUserAction: undefined,
                   status: "running" as const,
                   errorMessage: undefined,
+                  content: "",
                   timestamp: event.timestamp,
                 };
               }
@@ -3380,12 +3382,13 @@ function ChatContainer({
    * Tracks recursion accordion state per message without leaking that detail into message models.
    */
   const toggleRecursion = useCallback((messageId: string, recursionUid: string) => {
+    pauseAutoScroll();
     const key = `${messageId}-${recursionUid}`;
     setExpandedRecursions((previous) => ({
       ...previous,
       [key]: !previous[key],
     }));
-  }, []);
+  }, [pauseAutoScroll]);
 
   /**
    * Mirrors the latest composer draft into a ref so send and estimate paths

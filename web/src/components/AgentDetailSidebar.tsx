@@ -1790,7 +1790,7 @@ function AgentDetailSidebar({
                         </SidebarGroup>
                     </Collapsible>
 
-                    {/* Delegations / Agents Section */}
+                    {/* Delegations / Subagents Section */}
                     <Collapsible
                         open={isDelegationsOpen}
                         onOpenChange={setIsDelegationsOpen}
@@ -1801,12 +1801,12 @@ function AgentDetailSidebar({
                                 <SidebarMenuItem>
                                     <SidebarMenuButton
                                         onClick={() => handleSectionClick('delegations')}
-                                        tooltip="Agents"
+                                        tooltip="Subagents"
                                         isActive={isDelegationsOpen}
                                         className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
                                     >
                                         <Users className="size-4" />
-                                        <span>Agents</span>
+                                        <span>Subagents</span>
                                     </SidebarMenuButton>
                                 </SidebarMenuItem>
                             </SidebarMenu>
@@ -1817,7 +1817,7 @@ function AgentDetailSidebar({
                                     className="group/section-trigger relative flex w-full items-center gap-2 rounded-md py-1.5 pl-7 pr-2 text-xs font-medium text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors"
                                 >
                                     <SidebarSectionLeadingIcon icon={Users} isOpen={isDelegationsOpen} />
-                                    <span className="flex-1 text-left">Agents</span>
+                                    <span className="flex-1 text-left">Subagents</span>
                                     <SidebarCountBadge stats={sidebarStats?.delegations} animationIndex={6} />
                                     {agent?.id && (
                                         <Tooltip>
@@ -1828,12 +1828,12 @@ function AgentDetailSidebar({
                                                     onClick={(e) => { e.stopPropagation(); setIsDelegationSelectorOpen(true); }}
                                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); setIsDelegationSelectorOpen(true); } }}
                                                     className="p-0.5 rounded hover:bg-sidebar-accent transition-colors cursor-pointer"
-                                                    aria-label="Configure agent delegations"
+                                                    aria-label="Configure subagent delegations"
                                                 >
                                                     <Settings2 className="size-3 text-sidebar-foreground/50 hover:text-sidebar-foreground" />
                                                 </div>
                                             </TooltipTrigger>
-                                            <TooltipContent side="right">Configure delegations</TooltipContent>
+                                            <TooltipContent side="right">Configure subagent delegations</TooltipContent>
                                         </Tooltip>
                                     )}
                                 </CollapsibleTrigger>
@@ -1849,7 +1849,7 @@ function AgentDetailSidebar({
                                                 className="justify-center text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                                             >
                                                 <Plus className="size-3.5" />
-                                                Add first agent
+                                                Add first subagent
                                             </SidebarMenuButton>
                                         </div>
                                     ) : (
@@ -1857,7 +1857,8 @@ function AgentDetailSidebar({
                                             {delegations.map((delegation) => (
                                                 <SidebarMenuItem key={delegation.callee_agent_id}>
                                                     <SidebarMenuButton
-                                                        className="text-sidebar-foreground/60 hover:text-sidebar-foreground"
+                                                        size="sm"
+                                                        className="pl-3 text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
                                                         tooltip={delegation.callee_name ?? delegation.callee_alias}
                                                     >
                                                         <LLMBrandAvatar

@@ -35,10 +35,6 @@ def propose_automation(
             "'30 8 * * *' (daily at 8:30), '0 10 1 * *' (monthly on the 1st)."
         ),
     ],
-    description: Annotated[
-        str,
-        Param("Optional description of what this automation does."),
-    ] = "",
     timezone: Annotated[
         str,
         Param("IANA timezone for the schedule (e.g. 'UTC', 'Asia/Shanghai')."),
@@ -62,7 +58,6 @@ def propose_automation(
         name: Short human-readable name.
         prompt_template: Message template with optional ``{{variables}}``.
         schedule: Five-field cron expression.
-        description: Optional description.
         timezone: IANA timezone string.
         session_strategy: ``"reuse"`` or ``"isolate"``.
 
@@ -71,7 +66,6 @@ def propose_automation(
     """
     return {
         "name": name,
-        "description": description,
         "prompt_template": prompt_template,
         "schedule": schedule,
         "timezone": timezone,
@@ -81,7 +75,6 @@ def propose_automation(
             "category": "notify",
             "payload": {
                 "name": name,
-                "description": description,
                 "prompt_template": prompt_template,
                 "cron": schedule,
                 "timezone": timezone,

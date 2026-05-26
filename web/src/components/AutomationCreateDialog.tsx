@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Tooltip,
   TooltipContent,
@@ -37,7 +36,6 @@ import type { Agent } from "@/types";
 
 export interface AutomationProposal {
   name: string;
-  description?: string;
   promptTemplate: string;
   cron: string;
   timezone?: string;
@@ -61,7 +59,6 @@ interface AutomationDialogProps {
 
 interface FormData {
   name: string;
-  description: string;
   agentId: string;
   promptTemplate: string;
   frequency: string;
@@ -75,7 +72,6 @@ interface FormData {
 function buildDefaultFormData(): FormData {
   return {
     name: "",
-    description: "",
     agentId: "",
     promptTemplate: "",
     frequency: "daily",
@@ -118,8 +114,6 @@ function parseCronForForm(cron: string): Pick<FormData, "frequency" | "customCro
 
   const [minute, hour, dayOfMonth, , dayOfWeek] = parts;
 
-  // Patterns with interval minute (e.g. */10) or interval hour are not
-  // representable by the standard frequency presets → fall through to custom.
   const hasIntervalMinute = /^\*\/\d+$/.test(minute);
   const hasIntervalHour = /^\*\/\d+$/.test(hour);
 
@@ -233,8 +227,7 @@ export function AutomationCreateDialog({
     return defaults;
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cronError, setCronError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   // Re-initialize form when the dialog opens.
   useEffect(() => {
@@ -247,55 +240,38 @@ export function AutomationCreateDialog({
       if (proposal) applyProposal(defaults, proposal);
       setFormData(defaults);
     }
-    setError(null);
-    setCronError(null);
+    setValidationErrors({});
   }, [open, automation, proposal, defaultAgentId]);
 
   const updateField = <K extends keyof FormData>(key: K, value: FormData[K]) => {
     setFormData((prev) => ({ ...prev, [key]: value }));
-    if (key === "customCron") {
-      setCronError(value.trim() ? validateCron(value) : null);
-    }
-    if (key === "frequency" && value !== "custom") {
-      setCronError(null);
-    }
   };
 
   const handleSubmit = async () => {
-    setError(null);
+    const errors: Record<string, string> = {};
 
-    if (!formData.name.trim()) {
-      setError("Name is required");
-      return;
-    }
-    if (!isEdit && !formData.agentId) {
-      setError("Agent is required");
-      return;
-    }
-    if (!formData.promptTemplate.trim()) {
-      setError("Prompt template is required");
-      return;
-    }
+    if (!formData.name.trim()) errors.name = "Name is required";
+    if (!isEdit && !formData.agentId) errors.agentId = "Agent is required";
+    if (!formData.promptTemplate.trim()) errors.promptTemplate = "Prompt template is required";
 
     const cron = buildCronExpression(formData);
-    if (!cron.trim()) {
-      setError("Schedule configuration is required");
-      return;
-    }
     if (formData.frequency === "custom") {
-      const err = validateCron(cron);
-      if (err) {
-        setCronError(err);
-        return;
+      if (!cron.trim()) {
+        errors.schedule = "Schedule configuration is required";
+      } else {
+        const cronErr = validateCron(cron);
+        if (cronErr) errors.schedule = cronErr;
       }
     }
+
+    setValidationErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     setIsSubmitting(true);
     try {
       if (isEdit && automation) {
         await updateClientAutomation(automation.automation_id, {
           name: formData.name.trim(),
-          description: formData.description.trim() || null,
           prompt_template: formData.promptTemplate.trim(),
           trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
           session_strategy: formData.sessionStrategy,
@@ -305,7 +281,6 @@ export function AutomationCreateDialog({
       } else {
         const payload: ClientAutomationCreatePayload = {
           name: formData.name.trim(),
-          description: formData.description.trim() || null,
           agent_id: Number(formData.agentId),
           prompt_template: formData.promptTemplate.trim(),
           trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
@@ -317,7 +292,7 @@ export function AutomationCreateDialog({
         onCreated?.();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : `Failed to ${isEdit ? "update" : "create"} automation`);
+      toast.error(err instanceof Error ? err.message : `Failed to ${isEdit ? "update" : "create"} automation`);
     } finally {
       setIsSubmitting(false);
     }
@@ -330,44 +305,29 @@ export function AutomationCreateDialog({
           <DialogTitle>{isEdit ? "Edit Automation" : "New Automation"}</DialogTitle>
         </DialogHeader>
 
-        {error && (
-          <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
         <div className="flex flex-col gap-5 py-2">
           {/* Name */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="auto-name">Name</Label>
+          <Field data-invalid={validationErrors.name ? "" : undefined}>
+            <FieldLabel htmlFor="auto-name">Name<span className="text-destructive ml-0.5">*</span></FieldLabel>
             <Input
               id="auto-name"
               placeholder="Daily Report"
+              aria-invalid={validationErrors.name ? true : undefined}
               value={formData.name}
               onChange={(e) => updateField("name", e.target.value)}
             />
-          </div>
-
-          {/* Description */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="auto-desc">Description</Label>
-            <Input
-              id="auto-desc"
-              placeholder="Optional description"
-              value={formData.description}
-              onChange={(e) => updateField("description", e.target.value)}
-            />
-          </div>
+            {validationErrors.name && <FieldError>{validationErrors.name}</FieldError>}
+          </Field>
 
           {/* Agent — only shown when creating */}
           {!isEdit && (
-            <div className="flex flex-col gap-1.5">
-              <Label>Agent</Label>
+            <Field data-invalid={validationErrors.agentId ? "" : undefined}>
+              <FieldLabel>Agent<span className="text-destructive ml-0.5">*</span></FieldLabel>
               <Select
                 value={formData.agentId}
                 onValueChange={(val) => updateField("agentId", val)}
               >
-                <SelectTrigger>
+                <SelectTrigger aria-invalid={validationErrors.agentId ? true : undefined}>
                   <SelectValue placeholder="Select an agent" />
                 </SelectTrigger>
                 <SelectContent>
@@ -386,14 +346,15 @@ export function AutomationCreateDialog({
                   ))}
                 </SelectContent>
               </Select>
-            </div>
+              {validationErrors.agentId && <FieldError>{validationErrors.agentId}</FieldError>}
+            </Field>
           )}
 
           {/* Schedule */}
-          <div className="flex flex-col gap-3">
-            <Label>Schedule</Label>
+          <Field data-invalid={validationErrors.schedule ? "" : undefined}>
+            <FieldLabel>Schedule<span className="text-destructive ml-0.5">*</span></FieldLabel>
             {formData.frequency === "custom" ? (
-              <Field data-invalid={cronError ? "" : undefined}>
+              <>
                 <div className="flex items-center gap-2">
                   <Select
                     value={formData.frequency}
@@ -413,13 +374,13 @@ export function AutomationCreateDialog({
                   <Input
                     placeholder="0 9 * * 1-5"
                     className="flex-1"
-                    aria-invalid={cronError ? true : undefined}
+                    aria-invalid={validationErrors.schedule ? true : undefined}
                     value={formData.customCron}
                     onChange={(e) => updateField("customCron", e.target.value)}
                   />
                 </div>
-                {cronError && <FieldError>{cronError}</FieldError>}
-              </Field>
+                {validationErrors.schedule && <FieldError>{validationErrors.schedule}</FieldError>}
+              </>
             ) : (
               <div className="flex items-center gap-2">
                 <Select
@@ -466,12 +427,12 @@ export function AutomationCreateDialog({
                 )}
               </div>
             )}
-          </div>
+          </Field>
 
           {/* Prompt Template */}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="auto-prompt" className="flex items-center gap-1">
-              Prompt Template
+          <Field data-invalid={validationErrors.promptTemplate ? "" : undefined}>
+            <FieldLabel htmlFor="auto-prompt" className="flex items-center gap-1">
+              Prompt Template<span className="text-destructive ml-0.5">*</span>
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -490,19 +451,21 @@ export function AutomationCreateDialog({
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-            </Label>
+            </FieldLabel>
             <textarea
               id="auto-prompt"
-              className="flex min-h-[100px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex min-h-[100px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:ring-destructive"
               placeholder="Summarize workspace files changed today. Use {{date}} for the current date."
+              aria-invalid={validationErrors.promptTemplate ? true : undefined}
               value={formData.promptTemplate}
               onChange={(e) => updateField("promptTemplate", e.target.value)}
             />
-          </div>
+            {validationErrors.promptTemplate && <FieldError>{validationErrors.promptTemplate}</FieldError>}
+          </Field>
 
           {/* Session Strategy */}
-          <div className="flex flex-col gap-2">
-            <Label>Context Strategy</Label>
+          <Field>
+            <FieldLabel>Context Strategy</FieldLabel>
             <div className="flex flex-col gap-2 rounded-md border p-3">
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
@@ -535,7 +498,7 @@ export function AutomationCreateDialog({
                 </div>
               </label>
             </div>
-          </div>
+          </Field>
         </div>
 
         <DialogFooter>
@@ -555,7 +518,6 @@ export function AutomationCreateDialog({
 /** Apply a proposal's fields into an existing FormData object. */
 function applyProposal(data: FormData, proposal: AutomationProposal): void {
   data.name = proposal.name;
-  data.description = proposal.description ?? "";
   data.promptTemplate = proposal.promptTemplate;
   data.timezone = proposal.timezone ?? "UTC";
   data.sessionStrategy = proposal.sessionStrategy ?? "reuse";
@@ -569,14 +531,11 @@ function applyProposal(data: FormData, proposal: AutomationProposal): void {
 
 /** Build FormData from an existing automation for edit mode. */
 function buildEditFormData(automation: ClientAutomation): FormData {
-  let cron = "";
   try {
     const config = JSON.parse(automation.trigger_config) as { cron?: string; timezone?: string };
-    cron = config.cron ?? "";
-    const parsed = parseCronForForm(cron);
+    const parsed = parseCronForForm(config.cron ?? "");
     return {
       name: automation.name,
-      description: automation.description ?? "",
       agentId: String(automation.agent_id),
       promptTemplate: automation.prompt_template,
       frequency: parsed.frequency,
@@ -589,7 +548,6 @@ function buildEditFormData(automation: ClientAutomation): FormData {
   } catch {
     return {
       name: automation.name,
-      description: automation.description ?? "",
       agentId: String(automation.agent_id),
       promptTemplate: automation.prompt_template,
       frequency: "custom",

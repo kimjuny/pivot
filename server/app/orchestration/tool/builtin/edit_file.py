@@ -126,7 +126,13 @@ def parse_diff(diff_text: str) -> tuple[list[dict[str, object]], list[str]]:
                 index += 1
                 continue
             if body_line == "\n":
-                fail(f"Patch failed: hunk {hunk_index} contains an empty patch line.")
+                # Bare newline — treat as an empty context line (common in
+                # LLM-generated diffs where the leading space is omitted).
+                old_lines.append(body_line)
+                new_lines.append(body_line)
+                body_entries.append((" ", body_line))
+                index += 1
+                continue
             prefix = body_line[:1]
             content = body_line[1:]
             if prefix == " ":
@@ -303,8 +309,10 @@ for hunk in hunks:
     end_index = start_index + len(old_lines)
     if start_index < 0 or end_index > len(updated_lines):
         fail(
-            f"Patch failed at hunk {hunk_index}: line range starts outside "
-            "the current file. No changes were written."
+            f"Patch failed at hunk {hunk_index}: hunk references line "
+            f"{old_start} but the file only has {len(updated_lines)} lines. "
+            "Re-run read_file on this file first and use its line numbers. "
+            "No changes were written."
         )
     current_slice = updated_lines[start_index:end_index]
     if normalized_line_bodies(current_slice) != normalized_line_bodies(old_lines):
@@ -364,7 +372,9 @@ print(json.dumps(payload, ensure_ascii=False))
 @tool(
     description=(
         "Apply simplified unified diff hunks to one file under /workspace. "
-        "Use after read_file. One edit_file call per file per recursion; "
+        "ALWAYS call read_file on the target file first — hunk line numbers "
+        "MUST match the output of read_file exactly; wrong line numbers will "
+        "cause the patch to fail. One edit_file call per file per recursion; "
         "send multiple @@ hunks if the file needs several changes."
     ),
     tool_type="sandbox",

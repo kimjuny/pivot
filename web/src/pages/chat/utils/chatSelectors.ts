@@ -1,3 +1,4 @@
+import { parseUtcTimestamp } from "@/utils/timestamp";
 import type {
   ChatPendingUserAction,
   ChatMessage,
@@ -27,8 +28,8 @@ export function calculateDuration(startTime: string, endTime?: string): number {
     return 0;
   }
 
-  const start = new Date(startTime).getTime();
-  const end = new Date(endTime).getTime();
+  const start = parseUtcTimestamp(startTime).getTime();
+  const end = parseUtcTimestamp(endTime).getTime();
   return Math.max(0, Math.round(((end - start) / 1000) * 10) / 10);
 }
 

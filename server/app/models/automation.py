@@ -14,7 +14,6 @@ class Automation(SQLModel, table=True):
         id: Primary key.
         automation_id: UUID for global unique identification.
         name: Human-readable automation name.
-        description: Optional description of what this automation does.
         owner_id: User who created and owns this automation.
         agent_id: Published agent this automation talks to.
         release_id: Pinned release snapshot (same as client sessions).
@@ -43,7 +42,6 @@ class Automation(SQLModel, table=True):
         index=True,
     )
     name: str = Field(min_length=1, max_length=200)
-    description: str | None = Field(default=None, max_length=1000)
 
     # Ownership
     owner_id: int = Field(foreign_key="user.id", index=True)
