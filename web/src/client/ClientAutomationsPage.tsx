@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
-import { Bot, Clock, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bot, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { Badge } from "@/components/ui/badge";
 import {
   SidebarInset,
   SidebarProvider,
@@ -14,16 +13,15 @@ import {
   updateSession,
 } from "@/utils/api";
 import { SessionSidebar } from "@/pages/chat/components/SessionSidebar";
-import { Input } from "@/components/ui/input";
 import {
   getClientAgents,
   getClientSessions,
   type ClientSessionListItem,
 } from "@/client/api";
 import ClientUserMenu from "@/client/ClientUserMenu";
-import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import type { Agent } from "@/types";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
+import { ClientAutomationsView } from "@/client/ClientAutomationsView";
 
 function sortClientSessions(
   sessions: ClientSessionListItem[],
@@ -36,53 +34,29 @@ function sortClientSessions(
   });
 }
 
-/** Browse all Client-visible agents and open one chat workspace. */
-function ClientAgentsPage() {
+/** Browse and manage scheduled automations. */
+function ClientAutomationsPage() {
   const navigate = useNavigate();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<ClientSessionListItem[]>([]);
-  const [query, setQuery] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
-        setIsLoading(true);
-        setError(null);
         const [nextAgents, sessionResponse] = await Promise.all([
           getClientAgents(),
           getClientSessions(30),
         ]);
         setAgents(nextAgents);
         setSessions(sessionResponse.sessions);
-      } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load client agents.",
-        );
+      } catch {
+        // Automations view handles its own error state
       } finally {
         setIsLoading(false);
       }
     })();
   }, []);
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredAgents = useMemo(
-    () =>
-      agents.filter((agent) => {
-        if (normalizedQuery.length === 0) {
-          return true;
-        }
-        const description = agent.description?.toLowerCase() ?? "";
-        return (
-          agent.name.toLowerCase().includes(normalizedQuery) ||
-          description.includes(normalizedQuery)
-        );
-      }),
-    [agents, normalizedQuery],
-  );
 
   const handleNewSession = () => {
     const latestSession = sessions[0];
@@ -102,6 +76,10 @@ function ClientAgentsPage() {
     const session = sessions.find((item) => item.session_id === sessionId);
     if (!session) return;
     navigate(`/app/agents/${session.agent_id}?session=${session.session_id}`);
+  };
+
+  const handleNavigateToSession = (agentId: number, sessionUuid: string) => {
+    navigate(`/app/agents/${agentId}?session=${sessionUuid}`);
   };
 
   const replaceSidebarSession = (
@@ -167,15 +145,15 @@ function ClientAgentsPage() {
             key: "agents",
             label: "Agents",
             icon: <Bot className="h-4 w-4" />,
-            isActive: true,
-            onSelect: () => {},
+            isActive: false,
+            onSelect: () => navigate("/app/agents"),
           },
           {
             key: "automations",
             label: "Automations",
             icon: <Clock className="h-4 w-4" />,
-            isActive: false,
-            onSelect: () => navigate("/app/automations"),
+            isActive: true,
+            onSelect: () => {},
           },
         ]}
         footer={(isCollapsed) => (
@@ -188,86 +166,14 @@ function ClientAgentsPage() {
           <SidebarTrigger className="pointer-events-auto h-8 w-8 rounded-lg bg-transparent text-muted-foreground shadow-none hover:bg-accent/70 hover:text-foreground" />
         </div>
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-6">
-          <div className="flex flex-col gap-4 pb-5 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight text-foreground">
-                Agents
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                Choose an agent and start a conversation.
-              </p>
-            </div>
-
-            <div className="w-full md:max-w-xs">
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search agents…"
-                aria-label="Search client agents"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1">
-            {isLoading ? (
-              <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                <span>Loading agents…</span>
-              </div>
-            ) : error ? (
-              <div className="py-12 text-sm text-destructive">{error}</div>
-            ) : filteredAgents.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                {agents.length === 0
-                  ? "No agents available yet."
-                  : "No agents match your search."}
-              </div>
-            ) : (
-              <div className="flex flex-col">
-                {filteredAgents.map((agent) => (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
-                    onClick={() => navigate(`/app/agents/${agent.id}`)}
-                  >
-                    <LLMBrandAvatar
-                      model={agent.model_name}
-                      containerClassName="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10"
-                      imageClassName="size-4"
-                      fallback={
-                        <Bot
-                          className="size-4 text-primary"
-                          aria-hidden="true"
-                        />
-                      }
-                    />
-
-                    <span className="min-w-0 shrink-0 text-sm font-medium">
-                      {agent.name}
-                    </span>
-
-                    <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                      {agent.description?.trim() ?? ""}
-                    </span>
-
-                    {agent.model_name && (
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 text-[10px]"
-                      >
-                        {agent.model_name}
-                      </Badge>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <ClientAutomationsView
+            agents={agents}
+            onNavigateToSession={handleNavigateToSession}
+          />
         </div>
       </SidebarInset>
     </SidebarProvider>
   );
 }
 
-export default ClientAgentsPage;
+export default ClientAutomationsPage;

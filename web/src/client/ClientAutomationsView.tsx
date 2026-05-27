@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock,
-  Loader2,
-  MoreHorizontal,
+  CirclePlay,
   Pause,
   Play,
   Plus,
   Trash2,
-  CirclePlay,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -22,28 +20,31 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Table,
+  TableBody,
+  TableCell,
+  TableRow,
+} from "@/components/ui/table";
 import {
   type ClientAutomation,
-  type ClientAutomationStats,
   deleteClientAutomation,
   getClientAutomations,
-  getClientAutomationStats,
   triggerClientAutomation,
   updateClientAutomation,
 } from "@/client/api";
 import type { Agent } from "@/types";
 import { AutomationCreateDialog } from "@/components/AutomationCreateDialog";
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
+import ConfirmationModal from "@/components/ConfirmationModal";
 import { ClientAutomationDetailView } from "./ClientAutomationDetailView";
 
 /** Format an ISO string into a human-friendly relative/local string. */
@@ -73,7 +74,6 @@ function cronToLabel(triggerConfig: string): string {
 
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
 
-    // Interval patterns: */N in minute or hour position.
     const intervalMin = /^\*\/(\d+)$/.exec(minute);
     const intervalHour = /^\*\/(\d+)$/.exec(hour);
     if (intervalMin && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
@@ -85,23 +85,31 @@ function cronToLabel(triggerConfig: string): string {
 
     if (dayOfWeek !== "*" && dayOfMonth === "*" && month === "*") {
       const days = dayOfWeek.split(",").length;
-      if (days === 5 && dayOfWeek.includes("-")) return `Weekdays at ${hour}:${minute.padStart(2, "0")}`;
-      if (days === 7 || dayOfWeek === "*") return `Daily at ${hour}:${minute.padStart(2, "0")}`;
-      return `Custom at ${hour}:${minute.padStart(2, "0")}`;
+      if (days === 5 && dayOfWeek.includes("-")) return `Weekdays ${hour}:${minute.padStart(2, "0")}`;
+      if (days === 7 || dayOfWeek === "*") return `Daily ${hour}:${minute.padStart(2, "0")}`;
+      return `Custom ${hour}:${minute.padStart(2, "0")}`;
     }
-    if (dayOfMonth !== "*" && dayOfWeek === "*") return `Monthly at ${hour}:${minute.padStart(2, "0")}`;
-    if (dayOfMonth === "*" && dayOfWeek === "*" && month === "*" && hour !== "*") return `Daily at ${hour}:${minute.padStart(2, "0")}`;
+    if (dayOfMonth !== "*" && dayOfWeek === "*") return `Monthly ${hour}:${minute.padStart(2, "0")}`;
+    if (dayOfMonth === "*" && dayOfWeek === "*" && month === "*" && hour !== "*") return `Daily ${hour}:${minute.padStart(2, "0")}`;
     return cron;
   } catch {
     return "Custom schedule";
   }
 }
 
-const STATUS_FILTERS = [
-  { value: "", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "paused", label: "Paused" },
-] as const;
+const PAGE_SIZE = 10;
+
+function buildPageList(current: number, total: number): (number | "ellipsis")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | "ellipsis")[] = [1];
+  if (current > 3) pages.push("ellipsis");
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (current < total - 2) pages.push("ellipsis");
+  pages.push(total);
+  return pages;
+}
 
 interface ClientAutomationsViewProps {
   agents: Agent[];
@@ -109,40 +117,44 @@ interface ClientAutomationsViewProps {
   onNavigateToSession?: (agentId: number, sessionUuid: string) => void;
 }
 
-/**
- * Displays the user's automations with CRUD controls, triggered from the
- * Client sidebar "Automations" navigation item.
- */
 export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSession }: ClientAutomationsViewProps) {
   const [automations, setAutomations] = useState<ClientAutomation[]>([]);
-  const [stats, setStats] = useState<ClientAutomationStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedAutomation, setSelectedAutomation] =
     useState<ClientAutomation | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{
+    isOpen: boolean;
+    automation: ClientAutomation | null;
+  }>({ isOpen: false, automation: null });
 
   const fetchAutomations = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const [response, statsRes] = await Promise.all([
-        getClientAutomations(statusFilter || undefined),
-        getClientAutomationStats(),
-      ]);
+      const response = await getClientAutomations();
       setAutomations(response.automations);
-      setStats(statsRes);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load automations");
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter]);
+  }, []);
 
   useEffect(() => {
     void fetchAutomations();
   }, [fetchAutomations]);
+
+  const totalPages = Math.max(1, Math.ceil(automations.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedAutomations = useMemo(
+    () => automations.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [automations, safePage],
+  );
+
+  const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
   const handlePauseResume = async (automation: ClientAutomation) => {
     const newStatus = automation.status === "active" ? "paused" : "active";
@@ -155,12 +167,15 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
     }
   };
 
-  const handleDelete = async (automation: ClientAutomation) => {
+  const confirmDelete = async () => {
+    if (!deleteConfirmation.automation) return;
     try {
-      await deleteClientAutomation(automation.automation_id);
+      await deleteClientAutomation(deleteConfirmation.automation.automation_id);
+      setDeleteConfirmation({ isOpen: false, automation: null });
       toast.success("Automation deleted");
       await fetchAutomations();
     } catch {
+      setDeleteConfirmation({ isOpen: false, automation: null });
       toast.error("Failed to delete automation");
     }
   };
@@ -176,8 +191,6 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
       );
     }
   };
-
-  const agentMap = new Map(agents.map((a) => [a.id, a]));
 
   return (
     <div className="flex flex-col gap-6">
@@ -212,18 +225,6 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="flex gap-1">
-              {STATUS_FILTERS.map((filter) => (
-                <Button
-                  key={filter.value}
-                  variant={statusFilter === filter.value ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setStatusFilter(filter.value)}
-                >
-                  {filter.label}
-                </Button>
-              ))}
-            </div>
             <Button size="sm" onClick={() => setIsCreateOpen(true)}>
               <Plus className="mr-1 h-4 w-4" />
               New
@@ -231,32 +232,8 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
           </div>
         </div>
 
-        {stats && (
-          <div className="flex gap-6 rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-            <div>
-              <span className="text-muted-foreground">Active</span>{" "}
-              <span className="font-medium">{stats.active_count}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Runs (7d)</span>{" "}
-              <span className="font-medium">{stats.runs_last_7_days}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Success</span>{" "}
-              <span className="font-medium">{stats.success_rate}%</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Tokens (7d)</span>{" "}
-              <span className="font-medium">{stats.total_tokens_last_7_days.toLocaleString()}</span>
-            </div>
-          </div>
-        )}
-
         {isLoading ? (
-          <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Loading automations...</span>
-          </div>
+          <CenteredLoadingIndicator label="Loading automations..." className="min-h-[50vh]" />
         ) : error ? (
           <div className="py-12 text-sm text-destructive">{error}</div>
         ) : automations.length === 0 ? (
@@ -265,48 +242,33 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
               <EmptyMedia variant="icon">
                 <Clock className="size-6" />
               </EmptyMedia>
-              {statusFilter ? (
-                <>
-                  <EmptyTitle>No {statusFilter} automations</EmptyTitle>
-                  <EmptyDescription>
-                    No automations match the selected filter.
-                  </EmptyDescription>
-                </>
-              ) : (
-                <>
-                  <EmptyTitle>No automations yet</EmptyTitle>
-                  <EmptyDescription>
-                    Create one to schedule recurring agent tasks.
-                  </EmptyDescription>
-                </>
-              )}
+              <EmptyTitle>No automations yet</EmptyTitle>
+              <EmptyDescription>
+                Create one to schedule recurring agent tasks.
+              </EmptyDescription>
             </EmptyHeader>
-            {!statusFilter && (
-              <EmptyContent>
-                <Button size="sm" variant="outline" onClick={() => setIsCreateOpen(true)}>
-                  <Plus className="mr-1 h-4 w-4" />
-                  Create Automation
-                </Button>
-              </EmptyContent>
-            )}
+            <EmptyContent>
+              <Button size="sm" variant="outline" onClick={() => setIsCreateOpen(true)}>
+                <Plus className="mr-1 h-4 w-4" />
+                Create Automation
+              </Button>
+            </EmptyContent>
           </Empty>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {automations.map((automation) => {
-              const agent = agentMap.get(automation.agent_id);
-              return (
-                <Card
-                  key={automation.id}
-                  className="cursor-pointer transition-colors hover:bg-accent/30"
-                  onClick={() => setSelectedAutomation(automation)}
-                >
-                  <CardHeader className="space-y-2 p-4 pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                          <Clock className="size-4 text-primary" />
-                        </div>
-                        <div className="min-w-0 space-y-0.5">
+          <>
+            <Table>
+              <TableBody>
+                {pagedAutomations.map((automation) => {
+                  const agent = agentMap.get(automation.agent_id);
+                  return (
+                    <TableRow
+                      key={automation.id}
+                      className="group cursor-pointer hover:bg-muted"
+                      onClick={() => setSelectedAutomation(automation)}
+                    >
+                      {/* Name + Agent */}
+                      <TableCell className="min-w-0 flex-1 py-3">
+                        <div className="min-w-0">
                           <p className="truncate text-sm font-medium">
                             {automation.name}
                           </p>
@@ -316,89 +278,131 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
                             </p>
                           )}
                         </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        <Badge
-                          variant={
-                            automation.status === "active"
-                              ? "default"
-                              : automation.status === "paused"
-                                ? "secondary"
-                                : "outline"
-                          }
-                        >
-                          {automation.status}
-                        </Badge>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
+                      </TableCell>
+
+                      {/* Status / Schedule / Last Run — visible by default, hidden on hover */}
+                      <TableCell className="py-3">
+                        <div className="relative flex items-center justify-end gap-3">
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground transition-opacity duration-[180ms] group-hover:opacity-0">
+                            <Badge
+                              variant={
+                                automation.status === "active"
+                                  ? "default"
+                                  : automation.status === "paused"
+                                    ? "secondary"
+                                    : "outline"
+                              }
+                              className="text-[10px]"
+                            >
+                              {automation.status}
+                            </Badge>
+                            <span>{cronToLabel(automation.trigger_config)}</span>
+                            <span>{formatScheduleTime(automation.last_run_at)}</span>
+                          </div>
+
+                          {/* Action buttons — hidden by default, visible on hover */}
+                          <div className="absolute right-0 flex items-center gap-0.5 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100">
                             <Button
                               variant="ghost"
                               size="icon"
                               className="size-7"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handlePauseResume(automation);
                               }}
                             >
                               {automation.status === "active" ? (
-                                <>
-                                  <Pause className="mr-2 h-4 w-4" />
-                                  Pause
-                                </>
+                                <Pause className="size-3.5" />
                               ) : (
-                                <>
-                                  <Play className="mr-2 h-4 w-4" />
-                                  Resume
-                                </>
+                                <Play className="size-3.5" />
                               )}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void handleTrigger(automation);
                               }}
                             >
-                              <CirclePlay className="mr-2 h-4 w-4" />
-                              Trigger Now
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive"
+                              <CirclePlay className="size-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-7 text-destructive hover:text-destructive"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                void handleDelete(automation);
+                                setDeleteConfirmation({ isOpen: true, automation });
                               }}
                             >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-4 pb-3 pt-0">
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>{cronToLabel(automation.trigger_config)}</span>
-                      {automation.last_run_at && (
-                        <span>Last: {formatScheduleTime(automation.last_run_at)}</span>
-                      )}
-                      {automation.next_run_at && (
-                        <span>Next: {formatScheduleTime(automation.next_run_at)}</span>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {automations.length} automation{automations.length !== 1 ? "s" : ""}
+                </span>
+                <Pagination className="w-auto mx-0 justify-end">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (safePage > 1) setCurrentPage((p) => p - 1);
+                        }}
+                        className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+
+                    {buildPageList(safePage, totalPages).map((page, idx) =>
+                      page === "ellipsis" ? (
+                        <PaginationItem key={`ellipsis-${idx}`}>
+                          <PaginationEllipsis />
+                        </PaginationItem>
+                      ) : (
+                        <PaginationItem key={page}>
+                          <PaginationLink
+                            href="#"
+                            isActive={page === safePage}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setCurrentPage(page);
+                            }}
+                          >
+                            {page}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ),
+                    )}
+
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (safePage < totalPages) setCurrentPage((p) => p + 1);
+                        }}
+                        className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            )}
+          </>
         )}
       </>
       )}
@@ -412,6 +416,17 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
           setIsCreateOpen(false);
           void fetchAutomations();
         }}
+      />
+
+      <ConfirmationModal
+        isOpen={deleteConfirmation.isOpen}
+        title="Delete Automation"
+        message={`Are you sure you want to delete "${deleteConfirmation.automation?.name}"? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={() => void confirmDelete()}
+        onCancel={() => setDeleteConfirmation({ isOpen: false, automation: null })}
+        variant="danger"
       />
     </div>
   );

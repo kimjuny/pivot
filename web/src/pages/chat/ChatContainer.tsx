@@ -2382,10 +2382,6 @@ function ChatContainer({
   const readyPendingFileIdsKey = readyPendingFileIds.join(",");
 
   useEffect(() => {
-    if (!currentSessionId && sessionType === "client") {
-      return;
-    }
-
     let isCancelled = false;
 
     const loadRuntimeSkills = async () => {

@@ -24,7 +24,7 @@ import { Toaster } from '@/components/ui/sonner'
 import ClientEntryPage from '@/client/ClientEntryPage'
 import ClientAgentsPage from '@/client/ClientAgentsPage'
 import ClientAgentPage from '@/client/ClientAgentPage'
-import { CenteredLoadingIndicator } from '@/components/CenteredLoadingIndicator'
+import ClientAutomationsPage from '@/client/ClientAutomationsPage'
 import SessionHistoryPage from '@/studio/operations/SessionHistoryPage'
 import SessionDetailPage from '@/studio/operations/SessionDetailPage'
 import AccessManagementPage from '@/studio/operations/AccessManagementPage'
@@ -84,17 +84,11 @@ function firstAllowedTarget(
  * intended destination so login can return the user to where they came from.
  */
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user } = useAuth();
   const persistedUser = getStoredUser();
   const activeUser = user ?? persistedUser;
   const location = useLocation();
 
-  // Show loading while checking auth state
-  if (isLoading) {
-    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
-  }
-
-  // Redirect to login if not authenticated
   if (!activeUser || !isTokenValid()) {
     return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
   }
@@ -111,13 +105,9 @@ export function PermissionRoute({
   fallback?: string;
   children: React.ReactNode;
 }) {
-  const { user, isLoading } = useAuth();
+  const { user } = useAuth();
   const activeUser = user ?? getStoredUser();
   const location = useLocation();
-
-  if (isLoading) {
-    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
-  }
 
   if (!activeUser || !isTokenValid()) {
     return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
@@ -132,13 +122,9 @@ export function PermissionRoute({
 
 /** Permission gate for Access Management page — allows entry with any of the three permissions. */
 function AccessManagementGate({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
+  const { user } = useAuth();
   const activeUser = user ?? getStoredUser();
   const location = useLocation();
-
-  if (isLoading) {
-    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
-  }
 
   if (!activeUser || !isTokenValid()) {
     return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
@@ -163,13 +149,9 @@ export function PermissionRedirect({
   targets: PermissionTarget[];
   fallback?: string;
 }) {
-  const { user, isLoading } = useAuth();
+  const { user } = useAuth();
   const activeUser = user ?? getStoredUser();
   const location = useLocation();
-
-  if (isLoading) {
-    return <CenteredLoadingIndicator className="h-screen" label="Loading" />;
-  }
 
   if (!activeUser || !isTokenValid()) {
     return <Navigate to="/" state={{ from: location.pathname + location.search }} replace />;
@@ -348,6 +330,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route index element={<ClientEntryPage />} />
               <Route path="agents" element={<ClientAgentsPage />} />
               <Route path="agents/:agentId" element={<ClientAgentPage />} />
+              <Route path="automations" element={<ClientAutomationsPage />} />
             </Route>
 
             <Route path="/studio" element={<PermissionRedirect targets={studioTargets} />} />

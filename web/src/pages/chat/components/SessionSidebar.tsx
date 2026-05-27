@@ -566,8 +566,7 @@ export function SessionSidebar({
         </SidebarMenu>
       </SidebarHeader>
 
-      {!isCollapsed ? (
-        <SidebarContent className="session-sidebar-scroll-area gap-0">
+      <SidebarContent className="session-sidebar-scroll-area gap-0 transition-opacity duration-200 ease-in-out group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:pointer-events-none">
           {onCreateProject || projects.length > 0 ? (
             <SidebarGroup className="py-2">
               <SidebarGroupLabel className="flex h-6 items-center justify-between px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sidebar-foreground/42">
@@ -793,7 +792,6 @@ export function SessionSidebar({
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-      ) : null}
 
       {footer ? (
         <SidebarFooter

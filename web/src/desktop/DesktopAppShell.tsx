@@ -6,6 +6,7 @@ import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator"
 import { ThemeProvider } from "@/components/ui/theme-provider";
 import ClientAgentPage from "@/client/ClientAgentPage";
 import ClientAgentsPage from "@/client/ClientAgentsPage";
+import ClientAutomationsPage from "@/client/ClientAutomationsPage";
 import ClientEntryPage from "@/client/ClientEntryPage";
 import { DesktopSetup } from "@/desktop/DesktopSetup";
 import {
@@ -86,6 +87,7 @@ function DesktopAppRoutes() {
         <Route index element={<ClientEntryPage />} />
         <Route path="agents" element={<ClientAgentsPage />} />
         <Route path="agents/:agentId" element={<ClientAgentPage />} />
+        <Route path="automations" element={<ClientAutomationsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/app" replace />} />
     </Routes>

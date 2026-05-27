@@ -118,7 +118,7 @@ function ClientAgentPage() {
             icon: <Clock className="h-4 w-4" />,
             isActive: false,
             onSelect: () =>
-              navigate(`/app/agents?view=automations&agentId=${agent.id}`),
+              navigate("/app/automations"),
           },
         ]}
         sidebarFooter={(isCollapsed) => (
