@@ -10,14 +10,12 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
 
-from app.config import get_settings
-from app.crud.llm import llm as llm_crud
 from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
 from app.llm.thinking_policy import build_runtime_thinking_kwargs
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
@@ -27,9 +25,13 @@ from app.models.react import (
     ReactRecursion,
     ReactTask,
 )
-from app.orchestration.compact.compact_prompt import COMPACT_PROMPT
+from app.orchestration.compact.compact_prompt import (
+    CompactPromptMode,
+    build_compact_prompt,
+)
 from app.orchestration.tool.manager import ToolExecutionContext, ToolManager
 from app.schemas.file import FileAssetListItem
+from app.services.react_prompt_usage_service import ReactPromptUsageService
 from app.services.react_runtime_service import ReactRuntimeService, TaskRuntimeState
 from app.services.react_state_service import ReactStateService
 from app.services.session_service import SessionService
@@ -51,7 +53,16 @@ from .parser import (
     resolve_tool_call_payloads,
     safe_load_json,
 )
-from .prompt_template import build_runtime_system_prompt, build_runtime_user_prompt
+from .prompt_template import (
+    build_runtime_payload_message,
+    build_runtime_system_prompt,
+    build_runtime_task_bootstrap_message,
+    build_runtime_user_prompt,
+)
+from .runtime_payload import (
+    build_current_plan_payload,
+    build_recursion_user_payload,
+)
 from .types import ToolCallRequest
 
 if TYPE_CHECKING:
@@ -348,58 +359,40 @@ class ReactEngine:
         normalized_output["attachments"] = public_payload
         return normalized_output, public_payload
 
-    @staticmethod
-    def _to_percent(used_tokens: int, max_context_tokens: int) -> int:
-        """Convert token counts into a bounded integer percentage."""
-        if max_context_tokens <= 0:
-            return 0
-        raw_percent = round((used_tokens / max_context_tokens) * 100)
-        return max(min(int(raw_percent), 100), 0)
-
     def _build_usage_snapshot(
         self,
         *,
         task: ReactTask,
-        messages: list[dict[str, Any]],
+        runtime_state: TaskRuntimeState,
         max_context_tokens: int,
+        preview_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Build a context-usage snapshot for runtime events and decisions."""
-        used_tokens = estimate_messages_tokens(messages)
-        remaining_tokens = max(max_context_tokens - used_tokens, 0)
-        used_percent = self._to_percent(used_tokens, max_context_tokens)
-        system_tokens = 0
-        if messages and messages[0].get("role") == "system":
-            system_tokens = estimate_messages_tokens([messages[0]])
-        conversation_tokens = max(used_tokens - system_tokens, 0)
-        return {
-            "task_id": task.task_id,
-            "session_id": task.session_id,
-            "estimation_mode": "active_task",
-            "message_count": len(messages),
-            "session_message_count": len(messages),
-            "used_tokens": used_tokens,
-            "remaining_tokens": remaining_tokens,
-            "max_context_tokens": max_context_tokens,
-            "used_percent": used_percent,
-            "remaining_percent": max(100 - used_percent, 0),
-            "system_tokens": system_tokens,
-            "conversation_tokens": conversation_tokens,
-            "session_tokens": used_tokens,
-            "preview_tokens": 0,
-            "bootstrap_tokens": 0,
-            "draft_tokens": 0,
-            "includes_task_bootstrap": False,
-        }
+        return ReactPromptUsageService.build_usage_summary(
+            task_id=task.task_id,
+            session_id=task.session_id,
+            estimation_mode=(
+                "next_iteration_preview" if preview_messages else "active_task"
+            ),
+            messages=runtime_state.messages,
+            max_context_tokens=max_context_tokens,
+            exact_prompt_tokens=runtime_state.exact_prompt_tokens,
+            exact_prompt_message_count=runtime_state.exact_prompt_message_count,
+            preview_messages=preview_messages,
+        )
 
     async def _execute_compaction(
         self,
         *,
         task: ReactTask,
         source_messages: list[dict[str, Any]],
+        compact_mode: CompactPromptMode = "session",
     ) -> tuple[str, dict[str, int]]:
         """Run one compact-model call over the provided runtime messages."""
         compact_messages = [dict(message) for message in source_messages]
-        compact_messages.append({"role": "user", "content": COMPACT_PROMPT})
+        compact_messages.append(
+            {"role": "user", "content": build_compact_prompt(mode=compact_mode)}
+        )
 
         response = await run_in_threadpool(
             self.llm.chat,
@@ -424,6 +417,8 @@ class ReactEngine:
         max_context_tokens: int,
         threshold_percent: int,
         reason: str,
+        preview_messages: list[dict[str, Any]] | None = None,
+        emit_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> tuple[TaskRuntimeState, list[dict[str, Any]]]:
         """Compact the runtime prompt window when the configured threshold is hit."""
         if max_context_tokens <= 0 or threshold_percent <= 0:
@@ -431,8 +426,9 @@ class ReactEngine:
 
         usage_before = self._build_usage_snapshot(
             task=task,
-            messages=runtime_state.messages,
+            runtime_state=runtime_state,
             max_context_tokens=max_context_tokens,
+            preview_messages=preview_messages,
         )
         if usage_before["used_percent"] < threshold_percent:
             return runtime_state, []
@@ -457,32 +453,60 @@ class ReactEngine:
             for message in prefix_messages
             if message.get("role") != "system"
         ]
-        if not source_messages:
-            return runtime_state, []
-        if (
+        compact_mode: CompactPromptMode = "session"
+        in_task_compaction = False
+        source_is_current_compact = (
             runtime_state.compact_result is not None
             and len(source_messages) == 1
             and source_messages[0].get("role") == "assistant"
             and source_messages[0].get("content") == runtime_state.compact_result
+        )
+        if (not source_messages or source_is_current_compact) and (
+            reason == "iteration_threshold" and stashed_messages
         ):
+            source_messages = [dict(message) for message in stashed_messages]
+            compact_mode = "in_task"
+            in_task_compaction = True
+        elif not source_messages or source_is_current_compact:
             return runtime_state, []
 
-        events = [
-            {
-                "type": "compact_start",
-                "task_id": task.task_id,
-                "iteration": task.iteration,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "data": {
-                    "reason": reason,
-                    "threshold_percent": threshold_percent,
-                    "usage_before": usage_before,
-                },
-            }
-        ]
+        events: list[dict[str, Any]] = []
+        start_event = {
+            "type": "compact_start",
+            "task_id": task.task_id,
+            "iteration": task.iteration,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "data": {
+                "reason": reason,
+                "compact_mode": compact_mode,
+                "threshold_percent": threshold_percent,
+                "usage_before": usage_before,
+            },
+        }
+        compact_started_at = perf_counter()
+        logger.info(
+            "Context compact started task_id=%s iteration=%s reason=%s "
+            "compact_mode=%s threshold_percent=%s used_percent=%s "
+            "used_tokens=%s max_context_tokens=%s source_messages=%s "
+            "stashed_messages=%s",
+            task.task_id,
+            task.iteration,
+            reason,
+            compact_mode,
+            threshold_percent,
+            usage_before.get("used_percent"),
+            usage_before.get("used_tokens"),
+            usage_before.get("max_context_tokens"),
+            len(source_messages),
+            len(stashed_messages),
+        )
+        if emit_event is not None:
+            await emit_event(start_event)
+        else:
+            events.append(start_event)
 
         try:
-            if stashed_messages:
+            if stashed_messages and not in_task_compaction:
                 self.runtime_service.stash_task_messages(task, stashed_messages)
                 runtime_state = self.runtime_service.replace_runtime_messages(
                     task,
@@ -490,11 +514,13 @@ class ReactEngine:
                     compact_result=original_compact_result,
                     preserve_pending_action_result=True,
                     preserve_cache_state=True,
+                    preserve_exact_prompt_usage_baseline=True,
                 )
 
             compact_result, compact_usage = await self._execute_compaction(
                 task=task,
                 source_messages=source_messages,
+                compact_mode=compact_mode,
             )
             self.state_service.record_task_usage(task, compact_usage)
 
@@ -502,11 +528,13 @@ class ReactEngine:
                 {"role": "system", "content": system_prompt},
                 {"role": "assistant", "content": compact_result},
             ]
-            if stashed_messages:
+            if stashed_messages and not in_task_compaction:
                 restored_messages.extend(
                     self.runtime_service.load_stashed_task_messages(task)
                 )
                 task.runtime_message_start_index = 2
+            elif in_task_compaction:
+                task.runtime_message_start_index = 1
             else:
                 task.runtime_message_start_index = 0
 
@@ -518,13 +546,14 @@ class ReactEngine:
                 compact_result=compact_result,
                 preserve_pending_action_result=True,
                 preserve_cache_state=False,
+                preserve_exact_prompt_usage_baseline=False,
             )
-            if stashed_messages:
+            if stashed_messages and not in_task_compaction:
                 self.runtime_service.clear_stashed_task_messages(task)
 
             usage_after = self._build_usage_snapshot(
                 task=task,
-                messages=runtime_state.messages,
+                runtime_state=runtime_state,
                 max_context_tokens=max_context_tokens,
             )
             events.append(
@@ -535,6 +564,7 @@ class ReactEngine:
                     "timestamp": datetime.now(UTC).isoformat(),
                     "data": {
                         "reason": reason,
+                        "compact_mode": compact_mode,
                         "threshold_percent": threshold_percent,
                         "usage_before": usage_before,
                         "usage_after": usage_after,
@@ -542,13 +572,35 @@ class ReactEngine:
                     },
                 }
             )
-            return runtime_state, events
-        except Exception as exc:
-            logger.exception(
-                "Context compact failed task_id=%s iteration=%s reason=%s",
+            logger.info(
+                "Context compact completed task_id=%s iteration=%s reason=%s "
+                "compact_mode=%s elapsed_ms=%s used_percent_before=%s "
+                "used_percent_after=%s used_tokens_before=%s used_tokens_after=%s "
+                "compact_prompt_tokens=%s compact_completion_tokens=%s "
+                "compact_total_tokens=%s",
                 task.task_id,
                 task.iteration,
                 reason,
+                compact_mode,
+                round((perf_counter() - compact_started_at) * 1000),
+                usage_before.get("used_percent"),
+                usage_after.get("used_percent"),
+                usage_before.get("used_tokens"),
+                usage_after.get("used_tokens"),
+                compact_usage.get("prompt_tokens"),
+                compact_usage.get("completion_tokens"),
+                compact_usage.get("total_tokens"),
+            )
+            return runtime_state, events
+        except Exception as exc:
+            logger.exception(
+                "Context compact failed task_id=%s iteration=%s reason=%s "
+                "compact_mode=%s elapsed_ms=%s",
+                task.task_id,
+                task.iteration,
+                reason,
+                compact_mode,
+                round((perf_counter() - compact_started_at) * 1000),
             )
             if stashed_messages:
                 runtime_state = self.runtime_service.replace_runtime_messages(
@@ -557,6 +609,7 @@ class ReactEngine:
                     compact_result=original_compact_result,
                     preserve_pending_action_result=True,
                     preserve_cache_state=True,
+                    preserve_exact_prompt_usage_baseline=True,
                 )
                 self.runtime_service.clear_stashed_task_messages(task)
             events.append(
@@ -567,6 +620,7 @@ class ReactEngine:
                     "timestamp": datetime.now(UTC).isoformat(),
                     "data": {
                         "reason": reason,
+                        "compact_mode": compact_mode,
                         "threshold_percent": threshold_percent,
                         "usage_before": usage_before,
                         "error": str(exc) or repr(exc),
@@ -965,94 +1019,6 @@ class ReactEngine:
         """Whether current LLM transport uses incremental-only request messages."""
         return self.llm.uses_incremental_request_messages()
 
-    def _build_current_plan_payload(
-        self, context: ReactContext
-    ) -> list[dict[str, Any]]:
-        """Convert current in-memory plan context to compact user-message payload.
-
-        Args:
-            context: Current ReAct context snapshot.
-
-        Returns:
-            List of plan step dictionaries for user-message injection.
-        """
-        current_plan: list[dict[str, Any]] = []
-        history_limit = max(get_settings().REACT_CURRENT_PLAN_HISTORY_LIMIT, 0)
-        for step in context.context.get("plan", []):
-            if not isinstance(step, dict):
-                continue
-            step_id = step.get("step_id")
-            if not isinstance(step_id, str):
-                continue
-            recursion_history: list[dict[str, Any]] = []
-            raw_history = step.get("recursion_history", [])
-            if isinstance(raw_history, list):
-                history_slice = (
-                    raw_history[-history_limit:] if history_limit > 0 else []
-                )
-                for history_entry in history_slice:
-                    if not isinstance(history_entry, dict):
-                        continue
-                    recursion_history.append(
-                        {
-                            "iteration": history_entry.get("iteration"),
-                            "message": history_entry.get("message", ""),
-                        }
-                    )
-            current_plan.append(
-                {
-                    "step_id": step_id,
-                    "general_goal": step.get("general_goal", ""),
-                    "specific_description": step.get("specific_description", ""),
-                    "completion_criteria": step.get("completion_criteria", ""),
-                    "status": step.get("status", "pending"),
-                    "recursion_history": recursion_history,
-                }
-            )
-        return current_plan
-
-    @staticmethod
-    def _build_plan_status_line(context: ReactContext) -> str:
-        """Build a one-line plan status summary for pre-compaction recursions.
-
-        Args:
-            context: Current ReAct context snapshot.
-
-        Returns:
-            Compact status string like "Steps 1-3 done, Step 4 in_progress, Step 5 pending"
-            or an empty string when no plan exists.
-        """
-        steps: list[dict[str, Any]] = [
-            s
-            for s in context.context.get("plan", [])
-            if isinstance(s, dict) and isinstance(s.get("step_id"), str)
-        ]
-        if not steps:
-            return ""
-
-        done_ids: list[str] = []
-        in_progress_ids: list[str] = []
-        pending_ids: list[str] = []
-        for step in steps:
-            step_id = str(step.get("step_id", ""))
-            status = step.get("status", "pending")
-            if status == "done":
-                done_ids.append(step_id)
-            elif status == "in_progress":
-                in_progress_ids.append(step_id)
-            else:
-                pending_ids.append(step_id)
-
-        parts: list[str] = []
-        if done_ids:
-            parts.append(f"Steps {','.join(done_ids)} done")
-        if in_progress_ids:
-            parts.append(f"Step {','.join(in_progress_ids)} in_progress")
-        if pending_ids:
-            parts.append(f"Steps {','.join(pending_ids)} pending")
-
-        return ", ".join(parts) if parts else ""
-
     def _persist_session_title(
         self,
         task: ReactTask,
@@ -1078,49 +1044,6 @@ class ReactEngine:
         if updated_session is None or updated_session.title is None:
             return ""
         return updated_session.title
-
-    def _build_recursion_user_payload(
-        self,
-        task: ReactTask,
-        context: ReactContext,
-        trace_id: str,
-        pending_action_result: list[dict[str, Any]] | None,
-        attachments: list[dict[str, Any]] | None = None,
-        *,
-        after_compaction: bool = False,
-    ) -> dict[str, Any]:
-        """Build the per-recursion user payload appended to messages.
-
-        Args:
-            task: Current running task.
-            context: Current context snapshot.
-            trace_id: Server-generated recursion trace ID for this iteration.
-            pending_action_result: Result payload from the prior recursion, if any.
-            attachments: File attachment path hints for the first iteration.
-            after_compaction: When true, inject the full plan (plan details were
-                lost during compaction). When false, inject only a one-line status
-                summary to save tokens.
-
-        Returns:
-            Serializable payload for the recursion user message.
-        """
-        if after_compaction:
-            plan_value: str | list[dict[str, Any]] = self._build_current_plan_payload(
-                context
-            )
-        else:
-            plan_value = self._build_plan_status_line(context)
-
-        payload: dict[str, Any] = {
-            "iteration": task.iteration + 1,
-            **({"user_intent": task.user_intent} if task.iteration == 0 else {}),
-            "current_plan": plan_value,
-        }
-        if pending_action_result is not None:
-            payload["action_result"] = pending_action_result
-        if attachments:
-            payload["attachments"] = attachments
-        return payload
 
     def _build_next_pending_action_result(
         self, event_data: dict[str, Any]
@@ -2172,7 +2095,7 @@ class ReactEngine:
                             "tool_results": tool_results,
                             "pending_user_action": pending_user_action,
                             "step_status_update": step_status_updates_validated,
-                            "current_plan": self._build_current_plan_payload(context),
+                            "current_plan": build_current_plan_payload(context),
                         }
                 tokens_data = self.state_service.finalize_error(
                     task,
@@ -2386,7 +2309,7 @@ class ReactEngine:
                 "tool_results": tool_results,  # Tool execution results
                 "pending_user_action": pending_user_action,
                 "step_status_update": step_status_updates_validated,
-                "current_plan": self._build_current_plan_payload(context),
+                "current_plan": build_current_plan_payload(context),
             }
 
             # Add token usage if available
@@ -2433,6 +2356,9 @@ class ReactEngine:
     async def run_task(
         self,
         task: ReactTask,
+        max_context_tokens: int = 0,
+        compact_threshold_percent: int = 0,
+        emit_event: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
         skills_metadata_json: str = "[]",
         mandatory_skills_json: str = "[]",
         workspace_guidance: str = "",
@@ -2448,6 +2374,12 @@ class ReactEngine:
 
         Args:
             task: The ReactTask to execute.
+            max_context_tokens: Effective LLM context window for this task's
+                resolved runtime configuration.
+            compact_threshold_percent: Effective auto-compact threshold for this
+                task's resolved runtime configuration.
+            emit_event: Optional event publisher used for long-running internal
+                phases that need to reach clients before this generator resumes.
             skills_metadata_json: Visible skill metadata JSON injected in the
                 once-per-task bootstrap user prompt.
             mandatory_skills_json: Full mandatory skill payload JSON injected
@@ -2469,18 +2401,8 @@ class ReactEngine:
         Raises:
             asyncio.CancelledError: If the task is cancelled by client disconnect
         """
-        agent = self.db.get(Agent, task.agent_id)
-        if agent is None:
-            raise RuntimeError(
-                f"Agent {task.agent_id} not found for task {task.task_id}."
-            )
-
-        max_context_tokens = 0
-        if agent.llm_id is not None:
-            llm_config = llm_crud.get(agent.llm_id, self.db)
-            if llm_config is not None:
-                max_context_tokens = max(int(llm_config.max_context or 0), 0)
-        compact_threshold_percent = max(int(agent.compact_threshold_percent or 0), 0)
+        max_context_tokens = max(int(max_context_tokens or 0), 0)
+        compact_threshold_percent = max(int(compact_threshold_percent or 0), 0)
         system_prompt = build_runtime_system_prompt(
             tool_manager=self.tool_manager,
             skills=skills_metadata_json,
@@ -2512,6 +2434,14 @@ class ReactEngine:
         pending_turn_attachments = turn_attachments
 
         if task.iteration == 0:
+            task_bootstrap_message = build_runtime_task_bootstrap_message(
+                build_runtime_user_prompt(
+                    mandatory_skills=mandatory_skills_json,
+                    workspace_guidance=workspace_guidance,
+                    prefix_blocks=task_bootstrap_prefix_blocks,
+                    suffix_blocks=task_bootstrap_suffix_blocks,
+                )
+            )
             runtime_state, compact_events = await self._maybe_compact_runtime_window(
                 task=task,
                 runtime_state=runtime_state,
@@ -2519,18 +2449,15 @@ class ReactEngine:
                 max_context_tokens=max_context_tokens,
                 threshold_percent=compact_threshold_percent,
                 reason="task_start_threshold",
+                preview_messages=[task_bootstrap_message],
+                emit_event=emit_event,
             )
             for compact_event in compact_events:
                 yield compact_event
             logged_message_count = len(runtime_state.messages)
             runtime_state = self.runtime_service.append_task_bootstrap_prompt(
                 task,
-                build_runtime_user_prompt(
-                    mandatory_skills=mandatory_skills_json,
-                    workspace_guidance=workspace_guidance,
-                    prefix_blocks=task_bootstrap_prefix_blocks,
-                    suffix_blocks=task_bootstrap_suffix_blocks,
-                ),
+                str(task_bootstrap_message["content"]),
             )
             self._log_messages_pretty(
                 messages=runtime_state.messages,
@@ -2566,6 +2493,19 @@ class ReactEngine:
             self._current_task_id = task.task_id
             while task.iteration < task.max_iteration:
                 runtime_state = self.runtime_service.load(task)
+                context = self.state_service.load_context(task)
+                preview_payload = build_recursion_user_payload(
+                    task,
+                    context,
+                    runtime_state.pending_action_result,
+                    attachments=pending_turn_attachments,
+                    after_compaction=runtime_state.compact_result is not None,
+                )
+                preview_content_blocks = (
+                    list(self._pending_multimodal_blocks)
+                    if self._pending_multimodal_blocks
+                    else None
+                )
                 (
                     runtime_state,
                     compact_events,
@@ -2576,11 +2516,25 @@ class ReactEngine:
                     max_context_tokens=max_context_tokens,
                     threshold_percent=compact_threshold_percent,
                     reason="iteration_threshold",
+                    preview_messages=[
+                        build_runtime_payload_message(
+                            preview_payload,
+                            attachments=preview_content_blocks,
+                        )
+                    ],
+                    emit_event=emit_event,
                 )
                 for compact_event in compact_events:
                     yield compact_event
                 if compact_events:
                     logged_message_count = len(runtime_state.messages)
+                    preview_payload = build_recursion_user_payload(
+                        task,
+                        context,
+                        runtime_state.pending_action_result,
+                        attachments=pending_turn_attachments,
+                        after_compaction=runtime_state.compact_result is not None,
+                    )
 
                 trace_id = str(uuid.uuid4())
 
@@ -2590,8 +2544,6 @@ class ReactEngine:
                     self.state_service.mark_cancelled(task)
                     self.runtime_service.clear_task_state(task)
                     break
-                # Load current context
-                context = self.state_service.load_context(task)
 
                 # Yield recursion start event
                 yield {
@@ -2603,14 +2555,7 @@ class ReactEngine:
                 }
 
                 # Append iteration payload as a new user message.
-                user_payload = self._build_recursion_user_payload(
-                    task,
-                    context,
-                    trace_id,
-                    runtime_state.pending_action_result,
-                    attachments=pending_turn_attachments,
-                    after_compaction=runtime_state.compact_result is not None,
-                )
+                user_payload = preview_payload
                 # Inject pending multimodal blocks from prior tool results
                 multimodal_attachments: list[dict[str, Any]] | None = None
                 if self._pending_multimodal_blocks:
@@ -2635,6 +2580,7 @@ class ReactEngine:
                 logged_message_count = len(runtime_state.messages)
 
                 messages_for_llm = runtime_state.messages
+                used_incremental_request_messages = False
                 llm_chat_kwargs: dict[str, Any] = {
                     **self._build_iteration_llm_runtime_kwargs(task),
                     "_pivot_task_id": task.task_id,
@@ -2643,6 +2589,7 @@ class ReactEngine:
                     self._uses_incremental_request_messages()
                     and runtime_state.previous_response_id
                 ):
+                    used_incremental_request_messages = True
                     llm_chat_kwargs["_pivot_previous_response_id"] = (
                         runtime_state.previous_response_id
                     )
@@ -2764,7 +2711,7 @@ class ReactEngine:
                                 "delta": preview_message,
                                 "timestamp": preview_timestamp,
                                 "data": {
-                                    "current_plan": self._build_current_plan_payload(
+                                    "current_plan": build_current_plan_payload(
                                         context
                                     ),
                                     "session_title": "",
@@ -2983,6 +2930,20 @@ class ReactEngine:
                             None,
                         )
                 else:
+                    token_usage = event_data.get("tokens")
+                    if (
+                        not used_incremental_request_messages
+                        and isinstance(token_usage, dict)
+                    ):
+                        prompt_tokens = token_usage.get("prompt_tokens")
+                        if isinstance(prompt_tokens, int) and prompt_tokens > 0:
+                            runtime_state = (
+                                self.runtime_service.set_exact_prompt_usage_baseline(
+                                    task,
+                                    prompt_tokens=prompt_tokens,
+                                    message_count=len(runtime_state.messages),
+                                )
+                            )
                     assistant_message = event_data.get("assistant_message")
                     if isinstance(assistant_message, str) and assistant_message:
                         runtime_state = self.runtime_service.append_assistant_message(

@@ -89,6 +89,7 @@ function ClientAgentPage() {
         agentToolIds={agent.tool_ids}
         primaryLlmId={agent.llm_id}
         sessionIdleTimeoutMinutes={agent.session_idle_timeout_minutes}
+        compactThresholdPercent={agent.compact_threshold_percent}
         showCompactDebug={false}
         initialLlm={llm}
         initialSessions={bootstrap.sessions}

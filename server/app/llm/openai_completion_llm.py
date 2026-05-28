@@ -23,6 +23,7 @@ from .abstract_llm import (
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_openai_completion_content
+from .openrouter_attribution import build_openrouter_attribution_headers
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,14 @@ class OpenAICompletionLLM(AbstractLLM):
         stream_options["include_usage"] = True
         updated_kwargs["stream_options"] = stream_options
         return updated_kwargs
+
+    def _build_headers(self) -> dict[str, str]:
+        """Build HTTP headers for Chat Completions requests."""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **build_openrouter_attribution_headers(self.endpoint),
+        }
 
     def _parse_dict_response(self, raw_dict: dict[str, Any], model: str) -> Response:
         """Parse raw JSON dict into structured Response object."""
@@ -367,10 +376,7 @@ class OpenAICompletionLLM(AbstractLLM):
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = self._build_headers()
 
             request_messages: list[dict[str, Any]] = [
                 {
@@ -450,10 +456,7 @@ class OpenAICompletionLLM(AbstractLLM):
                 normalized_kwargs = self._with_stream_usage_enabled(normalized_kwargs)
 
             url = f"{self.endpoint.rstrip('/')}/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = self._build_headers()
 
             request_messages: list[dict[str, Any]] = [
                 {

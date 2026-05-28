@@ -555,14 +555,21 @@ def _ensure_skills_volume(user_id: int, workspace_id: str) -> str:
     try:
         client.volumes.get(volume_name)
     except Exception:
-        client.volumes.create(
-            name=volume_name,
-            labels={
-                "pivot.sandbox.user_id": str(user_id),
-                "pivot.sandbox.workspace_id": workspace_id,
-                "pivot.sandbox.kind": "skills",
-            },
-        )
+        try:
+            client.volumes.create(
+                name=volume_name,
+                labels={
+                    "pivot.sandbox.user_id": str(user_id),
+                    "pivot.sandbox.workspace_id": workspace_id,
+                    "pivot.sandbox.kind": "skills",
+                },
+            )
+        except Exception:
+            # Race condition: another concurrent request may have created it.
+            try:
+                client.volumes.get(volume_name)
+            except Exception:
+                raise
     return volume_name
 
 

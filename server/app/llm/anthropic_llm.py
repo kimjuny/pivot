@@ -24,6 +24,7 @@ from .abstract_llm import (
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_anthropic_content
+from .openrouter_attribution import build_openrouter_attribution_headers
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 logger = logging.getLogger(__name__)
@@ -272,6 +273,7 @@ class AnthropicLLM(AbstractLLM):
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
+            **build_openrouter_attribution_headers(self.endpoint),
         }
 
     def _build_api_url(self) -> str:

@@ -17,8 +17,17 @@ const EMPTY_DEBUG_STATE: ChatRuntimeDebugState = {
   compactStatusMessage: null,
   loadState: "idle",
   runtimeDebug: null,
+  contextUsage: null,
+  compactThresholdPercent: null,
   error: null,
 };
+
+function formatDebugTokenCount(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "None";
+  }
+  return value.toLocaleString();
+}
 
 /**
  * Render the latest compact payload as readable JSON without hiding fields.
@@ -81,6 +90,10 @@ function CompactDebugButton({
   );
   const isLoading = debugState.loadState === "loading";
   const hasError = debugState.loadState === "error";
+  const exactPromptTokens = debugState.runtimeDebug?.exact_prompt_tokens ?? null;
+  const exactPromptMessageCount =
+    debugState.runtimeDebug?.exact_prompt_message_count ?? null;
+  const contextUsage = debugState.contextUsage;
 
   useEffect(() => {
     if (closeSignal > 0) {
@@ -132,41 +145,109 @@ function CompactDebugButton({
                 </TabsList>
 
                 <TabsContent value="compact" className="space-y-3 pt-4">
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                      <span className="truncate font-mono">
-                        {debugState.currentSessionId ?? "No active session"}
-                      </span>
-                      <span className="shrink-0">
-                        {debugState.runtimeDebug?.updated_at
-                          ? formatTimestamp(debugState.runtimeDebug.updated_at)
-                          : "No snapshot"}
-                      </span>
+                  <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                    <span className="truncate font-mono">
+                      {debugState.currentSessionId ?? "No active session"}
+                    </span>
+                    <span className="shrink-0">
+                      {debugState.runtimeDebug?.updated_at
+                        ? formatTimestamp(debugState.runtimeDebug.updated_at)
+                        : "No snapshot"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-md border bg-muted/20 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Exact Prompt Tokens
+                      </div>
+                      <div className="mt-1 font-mono text-foreground">
+                        {formatDebugTokenCount(exactPromptTokens)}
+                      </div>
                     </div>
-
-                    {hasError && (
-                      <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                        {debugState.error ?? "Failed to load compact debug data."}
+                    <div className="rounded-md border bg-muted/20 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Baseline Message Count
                       </div>
-                    )}
-
-                    {isLoading && (
-                      <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Loading latest compact result…</span>
+                      <div className="mt-1 font-mono text-foreground">
+                        {formatDebugTokenCount(exactPromptMessageCount)}
                       </div>
-                    )}
+                    </div>
+                    <div className="rounded-md border bg-muted/20 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Estimated Used Tokens
+                      </div>
+                      <div className="mt-1 font-mono text-foreground">
+                        {formatDebugTokenCount(contextUsage?.used_tokens)}
+                      </div>
+                    </div>
+                    <div className="rounded-md border bg-muted/20 px-3 py-2">
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        Auto Compact Threshold
+                      </div>
+                      <div className="mt-1 font-mono text-foreground">
+                        {debugState.compactThresholdPercent !== null
+                          ? `${debugState.compactThresholdPercent}%`
+                          : "None"}
+                      </div>
+                    </div>
+                  </div>
 
-                    {hasCompactResult ? (
-                      <pre className="max-h-[min(70vh,36rem)] overflow-auto rounded-md border bg-muted/35 p-3 text-[11px] leading-relaxed text-foreground/90">
-                        {compactResultText}
-                      </pre>
-                    ) : (
-                      !isLoading && (
-                        <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
-                          No compact result has been stored for this session yet.
-                        </div>
-                      )
-                    )}
+                  {contextUsage ? (
+                    <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                      <div>
+                        Mode:{" "}
+                        <span className="font-mono text-foreground">
+                          {contextUsage.estimation_mode}
+                        </span>
+                      </div>
+                      <div>
+                        Usage:{" "}
+                        <span className="font-mono text-foreground">
+                          {contextUsage.used_percent}%
+                        </span>{" "}
+                        of{" "}
+                        <span className="font-mono text-foreground">
+                          {formatDebugTokenCount(contextUsage.max_context_tokens)}
+                        </span>
+                      </div>
+                      <div>
+                        Runtime:{" "}
+                        <span className="font-mono text-foreground">
+                          {formatDebugTokenCount(contextUsage.session_tokens)}
+                        </span>
+                        {" · "}Preview:{" "}
+                        <span className="font-mono text-foreground">
+                          {formatDebugTokenCount(contextUsage.preview_tokens)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {hasError && (
+                    <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      {debugState.error ?? "Failed to load compact debug data."}
+                    </div>
+                  )}
+
+                  {isLoading && (
+                    <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Loading latest compact result…</span>
+                    </div>
+                  )}
+
+                  {hasCompactResult ? (
+                    <pre className="max-h-[min(70vh,36rem)] overflow-auto rounded-md border bg-muted/35 p-3 text-[11px] leading-relaxed text-foreground/90">
+                      {compactResultText}
+                    </pre>
+                  ) : (
+                    !isLoading && (
+                      <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+                        No compact result has been stored for this session yet.
+                      </div>
+                    )
+                  )}
                 </TabsContent>
 
                 <TabsContent value="surface" className="space-y-3 pt-4">

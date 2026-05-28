@@ -1,6 +1,7 @@
 import type {
   FileUploadSource,
   ProjectResponse,
+  ReactContextUsageSummary,
   ReactSessionRuntimeDebug,
   SessionListItem,
   TaskAttachmentAsset,
@@ -64,6 +65,8 @@ export interface ReactChatInterfaceProps {
   primaryLlmId?: number;
   /** Minutes of inactivity before chat rolls over into a new session. */
   sessionIdleTimeoutMinutes?: number;
+  /** Percent of the context window that triggers automatic compact. */
+  compactThresholdPercent?: number;
   /** Optional workspace shortcuts shown above the session list. */
   sidebarNavigationItems?: ChatSidebarNavigationItem[];
   /** Optional identity icon shown beside the sidebar title. */
@@ -118,6 +121,10 @@ export interface ChatRuntimeDebugState {
   loadState: "idle" | "loading" | "ready" | "error";
   /** Latest fetched runtime debug payload for the current session. */
   runtimeDebug: ReactSessionRuntimeDebug | null;
+  /** Latest context-usage estimate shown to the composer. */
+  contextUsage: ReactContextUsageSummary | null;
+  /** Agent-level auto-compact threshold percent for this chat surface. */
+  compactThresholdPercent: number | null;
   /** Loader or fetch error for the runtime debug payload. */
   error: string | null;
 }
@@ -376,20 +383,4 @@ export interface ChatMessage {
     | "error"
     | "waiting_input";
   totalTokens?: TokenUsage;
-}
-
-/**
- * One compact lifecycle marker rendered inline with the chat timeline.
- */
-export interface CompactTimelineItem {
-  /** Stable key for React rendering and event reconciliation. */
-  id: string;
-  /** Start timestamp used for timeline placement and duration formatting. */
-  timestamp: string;
-  /** Lifecycle state of this compact pass. */
-  status: "running" | "completed" | "failed";
-  /** Human-readable label shown in the separator body. */
-  label: string;
-  /** Optional completed or failed timestamp used to compute elapsed time. */
-  finishedAt?: string;
 }

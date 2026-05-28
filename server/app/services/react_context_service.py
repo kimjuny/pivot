@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from app.config import get_settings
 from app.crud.llm import llm as llm_crud
 from app.llm.token_estimator import estimate_messages_tokens
 from app.models.react import ReactTask
@@ -17,6 +16,7 @@ from app.orchestration.react.prompt_template import (
     build_runtime_task_bootstrap_message,
     build_runtime_user_prompt,
 )
+from app.orchestration.react.runtime_payload import build_recursion_user_payload
 from app.schemas.react import ReactContextUsageResponse
 from app.services.agent_release_runtime_service import (
     AgentReleaseRuntimeService,
@@ -24,7 +24,8 @@ from app.services.agent_release_runtime_service import (
 )
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
-from app.services.react_runtime_service import ReactRuntimeService
+from app.services.react_prompt_usage_service import ReactPromptUsageService
+from app.services.react_runtime_service import ReactRuntimeService, TaskRuntimeState
 from app.services.skill_service import (
     build_mandatory_skills_prompt_json,
     build_skills_metadata_prompt_json,
@@ -113,20 +114,19 @@ class ReactContextUsageService:
         if llm_config is None:
             raise ValueError(f"LLM configuration {runtime_config.llm_id} not found.")
 
-        base_messages = self._load_session_runtime_messages(
-            session_id=effective_session_id,
+        runtime_state = (
+            self.runtime_service.load(task)
+            if task is not None
+            else self._load_runtime_state(session_id=effective_session_id)
         )
-        messages = [dict(message) for message in base_messages]
+        messages = [dict(message) for message in runtime_state.messages]
         estimation_mode = "session_runtime"
         draft_tokens = 0
         bootstrap_tokens = 0
-        preview_tokens = 0
         includes_task_bootstrap = False
+        preview_messages: list[dict[str, Any]] = []
 
         if task is not None:
-            runtime_state = self.runtime_service.load(task)
-            messages = [dict(message) for message in runtime_state.messages]
-            base_messages = [dict(message) for message in runtime_state.messages]
             estimation_mode = "active_task"
             if draft_message or attachment_blocks:
                 if mandatory_skill_names:
@@ -136,9 +136,9 @@ class ReactContextUsageService:
                             user_id=user_id,
                             session_id=effective_session_id,
                             mandatory_skill_names=mandatory_skill_names,
-                        )
+                        ),
                     )
-                    messages.append(resume_prompt_object)
+                    preview_messages.append(resume_prompt_object)
                     bootstrap_tokens = estimate_messages_tokens([resume_prompt_object])
                     includes_task_bootstrap = True
                 draft_message_payload = self._build_task_user_payload(
@@ -151,7 +151,7 @@ class ReactContextUsageService:
                     draft_message_payload,
                     attachments=attachment_blocks,
                 )
-                messages.append(draft_message_object)
+                preview_messages.append(draft_message_object)
                 draft_tokens = estimate_messages_tokens([draft_message_object])
                 estimation_mode = (
                     "reply_preview"
@@ -171,7 +171,6 @@ class ReactContextUsageService:
                 mandatory_skill_names=mandatory_skill_names,
             )
             if preview_messages:
-                messages.extend(preview_messages)
                 includes_task_bootstrap = True
                 if len(preview_messages) >= 1:
                     bootstrap_tokens = estimate_messages_tokens([preview_messages[0]])
@@ -179,37 +178,21 @@ class ReactContextUsageService:
                     draft_tokens = estimate_messages_tokens([preview_messages[1]])
                 estimation_mode = "next_turn_preview"
 
-        session_tokens = estimate_messages_tokens(base_messages)
-        used_tokens = estimate_messages_tokens(messages)
-        preview_tokens = max(used_tokens - session_tokens, 0)
         max_context_tokens = max(int(llm_config.max_context or 0), 0)
-        remaining_tokens = max(max_context_tokens - used_tokens, 0)
-        used_percent = self._to_percent(used_tokens, max_context_tokens)
-        remaining_percent = max(100 - used_percent, 0)
-
-        system_tokens = 0
-        if messages and messages[0].get("role") == "system":
-            system_tokens = estimate_messages_tokens([messages[0]])
-        conversation_tokens = max(used_tokens - system_tokens, 0)
-
         return ReactContextUsageResponse(
-            task_id=task.task_id if task is not None else None,
-            session_id=effective_session_id,
-            estimation_mode=estimation_mode,
-            message_count=len(messages),
-            session_message_count=len(base_messages),
-            used_tokens=used_tokens,
-            remaining_tokens=remaining_tokens,
-            max_context_tokens=max_context_tokens,
-            used_percent=used_percent,
-            remaining_percent=remaining_percent,
-            system_tokens=system_tokens,
-            conversation_tokens=conversation_tokens,
-            session_tokens=session_tokens,
-            preview_tokens=preview_tokens,
-            bootstrap_tokens=bootstrap_tokens,
-            draft_tokens=draft_tokens,
-            includes_task_bootstrap=includes_task_bootstrap,
+            **ReactPromptUsageService.build_usage_summary(
+                task_id=task.task_id if task is not None else None,
+                session_id=effective_session_id,
+                estimation_mode=estimation_mode,
+                messages=messages,
+                max_context_tokens=max_context_tokens,
+                exact_prompt_tokens=runtime_state.exact_prompt_tokens,
+                exact_prompt_message_count=runtime_state.exact_prompt_message_count,
+                preview_messages=preview_messages,
+                bootstrap_tokens=bootstrap_tokens,
+                draft_tokens=draft_tokens,
+                includes_task_bootstrap=includes_task_bootstrap,
+            )
         )
 
     @staticmethod
@@ -311,7 +294,6 @@ class ReactContextUsageService:
             user_id=user_id,
             session_id=session_id,
             mandatory_skill_names=mandatory_skill_names,
-            skills_json=skills_json,
         )
         messages.append(build_runtime_task_bootstrap_message(user_prompt))
         payload = {
@@ -334,7 +316,6 @@ class ReactContextUsageService:
         user_id: int,
         session_id: str | None,
         mandatory_skill_names: list[str] | None = None,
-        skills_json: str = "[]",
     ) -> str:
         """Build the task bootstrap user prompt used for next-turn previews.
 
@@ -345,8 +326,6 @@ class ReactContextUsageService:
                 migrated to user_id.
             session_id: Optional session whose workspace guidance should be injected.
             mandatory_skill_names: Ordered mandatory skill names to include.
-            skills_json: Pre-built skills metadata JSON (unused here, kept for
-                interface compatibility).
 
         Returns:
             Rendered user prompt string for the task bootstrap message.
@@ -559,109 +538,39 @@ class ReactContextUsageService:
             reply=draft_message,
             task=task,
         )
-        if after_compaction:
-            plan_value: str | list[dict[str, Any]] = self._build_current_plan_payload(
-                context
-            )
-        else:
-            plan_value = self._build_plan_status_line(context)
+        return build_recursion_user_payload(
+            task,
+            context,
+            effective_action_result,
+            after_compaction=after_compaction,
+        )
 
-        payload: dict[str, Any] = {
-            "iteration": task.iteration + 1,
-            "user_intent": task.user_intent,
-            "current_plan": plan_value,
-        }
-        if effective_action_result is not None:
-            payload["action_result"] = effective_action_result
-        return payload
-
-    @staticmethod
-    def _build_plan_status_line(context: ReactContext) -> str:
-        """Build a one-line plan status summary for pre-compaction recursions."""
-        steps: list[dict[str, Any]] = [
-            s
-            for s in context.context.get("plan", [])
-            if isinstance(s, dict) and isinstance(s.get("step_id"), str)
-        ]
-        if not steps:
-            return ""
-
-        done_ids: list[str] = []
-        in_progress_ids: list[str] = []
-        pending_ids: list[str] = []
-        for step in steps:
-            step_id = str(step.get("step_id", ""))
-            status = step.get("status", "pending")
-            if status == "done":
-                done_ids.append(step_id)
-            elif status == "in_progress":
-                in_progress_ids.append(step_id)
-            else:
-                pending_ids.append(step_id)
-
-        parts: list[str] = []
-        if done_ids:
-            parts.append(f"Steps {','.join(done_ids)} done")
-        if in_progress_ids:
-            parts.append(f"Step {','.join(in_progress_ids)} in_progress")
-        if pending_ids:
-            parts.append(f"Steps {','.join(pending_ids)} pending")
-
-        return ", ".join(parts) if parts else ""
-
-    def _build_current_plan_payload(
-        self,
-        context: ReactContext,
-    ) -> list[dict[str, Any]]:
-        """Serialize the active plan into the same compact prompt shape."""
-        current_plan: list[dict[str, Any]] = []
-        history_limit = max(get_settings().REACT_CURRENT_PLAN_HISTORY_LIMIT, 0)
-        for step in context.context.get("plan", []):
-            if not isinstance(step, dict):
-                continue
-            step_id = step.get("step_id")
-            if not isinstance(step_id, str):
-                continue
-            recursion_history: list[dict[str, Any]] = []
-            raw_history = step.get("recursion_history", [])
-            if isinstance(raw_history, list):
-                history_slice = (
-                    raw_history[-history_limit:] if history_limit > 0 else []
-                )
-                for history_entry in history_slice:
-                    if not isinstance(history_entry, dict):
-                        continue
-                    recursion_history.append(
-                        {
-                            "iteration": history_entry.get("iteration"),
-                            "message": history_entry.get("message", ""),
-                        }
-                    )
-            current_plan.append(
-                {
-                    "step_id": step_id,
-                    "general_goal": step.get("general_goal", ""),
-                    "specific_description": step.get("specific_description", ""),
-                    "completion_criteria": step.get("completion_criteria", ""),
-                    "status": step.get("status", "pending"),
-                    "recursion_history": recursion_history,
-                }
-            )
-        return current_plan
-
-    def _load_session_runtime_messages(
+    def _load_runtime_state(
         self,
         *,
         session_id: str | None,
-    ) -> list[dict[str, Any]]:
-        """Load persisted session runtime messages when a session exists."""
+    ) -> TaskRuntimeState:
+        """Load persisted session runtime state when a session exists."""
         if not session_id:
-            return []
+            return TaskRuntimeState(
+                messages=[],
+                compact_result=None,
+                pending_action_result=None,
+                previous_response_id=None,
+                exact_prompt_tokens=None,
+                exact_prompt_message_count=None,
+            )
         try:
-            runtime_state = self.runtime_service.load_session(session_id)
+            return self.runtime_service.load_session(session_id)
         except RuntimeError:
-            return []
-        return [dict(message) for message in runtime_state.messages]
+            return TaskRuntimeState(
+                messages=[],
+                compact_result=None,
+                pending_action_result=None,
+                previous_response_id=None,
+                exact_prompt_tokens=None,
+                exact_prompt_message_count=None,
+            )
 
     @staticmethod
     def _with_clarify_reply_preview(
@@ -694,11 +603,3 @@ class ReactContextUsageService:
                 }
             preview_results.append(preview_item)
         return preview_results
-
-    @staticmethod
-    def _to_percent(used_tokens: int, max_context_tokens: int) -> int:
-        """Convert token counts into a rounded usage percentage."""
-        if max_context_tokens <= 0:
-            return 0
-        raw_percent = round((used_tokens / max_context_tokens) * 100)
-        return max(min(int(raw_percent), 100), 0)

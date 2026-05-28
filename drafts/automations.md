@@ -690,3 +690,335 @@ All backend and core frontend pieces are implemented and passing lint/type check
 - `web/src/types/index.ts` — `AgentDelegation` interface updated with `callee_model_name`
 - `web/src/pages/chat/ChatContainer.tsx` — agent fetch for dialog, pass agents prop
 - `web/src/pages/chat/utils/actionHandlers.ts` — propose_automation handler registration
+
+---
+
+## Phase 4 — Channel Integration (2026-05-28)
+
+### Problem
+
+Automations currently execute in isolation — the result is only visible inside the Pivot web UI. Users who interact with agents through Channels (Work WeChat, Feishu, DingTalk, Telegram) have no way to receive automation results in their natural conversation window. This forces users to check Pivot manually, defeating the purpose of scheduled automation.
+
+### Core Design Decision: "This Session" Model
+
+Instead of adding a separate delivery configuration layer (e.g., "deliver to channel X, conversation Y"), the automation integrates with the Channel by **living inside the Channel Session**. When a user creates an automation from within a Channel conversation, that automation executes within the same session and delivers results back through the same conversation window.
+
+This means:
+
+- No separate `delivery_config` on Automation — delivery is implicit from the session context.
+- No `delivery_type` field — if the automation was created from a Channel, results go to that Channel. Period.
+- The Channel session is the automation's home. Execute here, communicate here.
+
+### Channel → Multiple Sessions
+
+A single Channel Binding (e.g., one Work WeChat Bot) can be present in multiple external conversations:
+
+```
+Work WeChat Bot "Pivot Assistant" (binding_id = 1)
+  ├── DM: User A      → ChannelSession 1 → Pivot Session 1
+  ├── DM: User B      → ChannelSession 2 → Pivot Session 2
+  └── Group: "Team"   → ChannelSession 3 → Pivot Session 3
+```
+
+An automation created in User A's DM binds to ChannelSession 1 → results push to User A's DM. An automation created in the group chat binds to ChannelSession 3 → results push to the group. The binding is at the ChannelSession level, not the Binding level, so there is no ambiguity.
+
+### Channel Session Permanence
+
+**Current behavior**: `ChannelSession.pivot_session_id` rotates when the underlying Pivot session has been idle for >15 minutes (`SESSION_IDLE_TIMEOUT`). This breaks conversation continuity and would break automation session binding.
+
+**New behavior**: Channel Sessions are permanently bound — `pivot_session_id` is assigned once on creation and never rotated. Context compaction (`react_compact_service.py`) handles long-running sessions. The idle timeout rotation is removed for all Channel sessions.
+
+This is consistent with user expectations in messaging platforms — a conversation with a bot should not "forget" after 15 minutes of silence.
+
+### Session Strategy: "this_session"
+
+A third session strategy is added alongside `"reuse"` and `"isolate"`:
+
+| Strategy | Behavior | Available When |
+|----------|----------|---------------|
+| `reuse` | All runs share one Automation-typed session | Web UI only |
+| `isolate` | Each run creates a fresh session | Web UI only |
+| `this_session` | Run executes within the Channel session where the automation was created | Channel only |
+
+When `session_strategy = "this_session"`:
+
+- The automation's ReactTask runs in the ChannelSession's Pivot session.
+- The agent has full conversation context (previous messages, previous automation runs).
+- Results are delivered back through the ChannelSession's external conversation.
+
+This strategy is **not user-selectable** — it is automatically set when the automation is created from a Channel context. The agent does not specify it; it is resolved by the backend.
+
+### `automation` Tool Redesign
+
+The existing `propose_automation` tool is renamed to `automation` and gains a `skip_confirm` parameter.
+
+```python
+@tool("automation")
+def automation_tool(
+    name: str,
+    prompt_template: str,
+    schedule: str,           # cron expression
+    timezone: str = "UTC",
+    skip_confirm: bool = False,
+) -> dict:
+```
+
+**`skip_confirm=False` (default) — Web UI flow**:
+
+- Returns a `pivot_action` envelope → frontend opens `AutomationCreateDialog` → user reviews and confirms.
+- `session_strategy` is chosen by the user in the dialog (`reuse` or `isolate`).
+- `channel_session_id` is not set — this is a non-Channel automation.
+
+**`skip_confirm=True` — Channel / auto-create flow**:
+
+- Directly creates the Automation in DB with `status="active"`.
+- `session_strategy` is forced to `"this_session"`.
+- `channel_session_id` is auto-resolved from the current session context (current session → lookup ChannelSession → bind).
+- The agent should use CLARIFY to confirm with the user before setting this flag.
+
+**Agent environment awareness**: The agent needs to know it's in a Channel context to decide whether to use `skip_confirm=True`. This is achieved through:
+
+1. System prompt context — injected when the agent is invoked from a Channel session.
+2. Tool description guidance — "In channel/messaging conversations where no dialog UI is available, set `skip_confirm=True`. Always confirm with the user first via a clarify message."
+
+**Hidden bindings**: `session_strategy` and `channel_session_id` are never exposed as tool parameters. They are resolved automatically:
+
+| Context | `session_strategy` | `channel_session_id` |
+|---------|-------------------|---------------------|
+| `skip_confirm=True` (Channel) | Forced `"this_session"` | Auto-resolved from current ChannelSession |
+| `skip_confirm=False` (Web UI) | User-selected in dialog | Not set |
+
+### SessionTaskQueue
+
+A new database-backed queue that decouples "who wants to execute on this session" from "when does execution happen". This replaces sleep-based waiting with a persistent, crash-safe mechanism.
+
+#### Data Model
+
+```python
+class SessionTaskQueue(SQLModel, table=True):
+    __tablename__ = "session_task_queue"
+
+    id: int | None = Field(default=None, primary_key=True)
+    queue_id: str = Field(default_factory=lambda: uuid4().hex, unique=True, index=True)
+    session_id: str = Field(index=True)       # Pivot session UUID
+    prompt: str                                # Prompt to execute
+    queue_type: str = Field(index=True)        # "wait_for_completion" | "immediate_insert"
+    source: str = Field(index=True)            # "automation" | "user_input"
+    source_ref_id: int | None = None           # e.g., automation_run.id
+    status: str = Field(default="pending", index=True)  # "pending" | "processing" | "completed" | "cancelled" | "failed"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+```
+
+#### Queue Types
+
+| Type | Behavior | Check Point |
+|------|----------|-------------|
+| `wait_for_completion` | Wait for the current ReactTask to finish, then execute the queued prompt as a new task | Scheduler scan (periodic) |
+| `immediate_insert` | Inject the prompt into the current running ReactTask's next iteration (future: user mid-task intervention) | Per-iteration hook in ReactTaskSupervisor |
+
+#### Ordering
+
+When multiple items are queued on the same session, processing order is:
+
+1. **Primary sort**: `source` — `user_input` items processed before `automation` items.
+2. **Secondary sort**: `created_at` (FIFO) — within the same source, earlier items first.
+
+Processing is **serial** — one task at a time per session. Current task finishes → pick highest-priority queue item → execute → pick next.
+
+```
+Session X queue (current task running):
+  1. Automation A (10:00, source=automation, type=wait_for_completion)
+  2. User message  (10:01, source=user_input,   type=wait_for_completion)
+  3. Automation B (10:02, source=automation, type=wait_for_completion)
+
+Processing order after current task finishes: 2 → 1 → 3
+```
+
+#### Automation Executor Flow (with Queue)
+
+```
+1. Scheduler finds due automation
+2. Executor claims run (INSERT AutomationRun, UNIQUE constraint)
+3. Resolve session:
+   - If session_strategy == "this_session" → use ChannelSession.pivot_session_id
+   - Else → use existing logic (reuse or create)
+4. Check for active ReactTask on session:
+   - No active task → proceed to start_task() directly
+   - Active task exists → INSERT SessionTaskQueue (type="wait_for_completion", source="automation")
+5. If direct execution:
+   a. Render prompt template
+   b. start_task() → wait for completion
+   c. Record result in AutomationRun
+   d. If channel_session_id is set → deliver result via Channel
+6. If queued:
+   a. Queue processor (scheduler scan) detects session is free
+   b. Claims queue item → starts task
+   c. Records result
+   d. Delivers to Channel if applicable
+```
+
+#### Queue Consumer
+
+The queue consumer runs as part of the existing `AutomationScheduler` background loop:
+
+```
+scheduler scan cycle:
+  1. Scan for due automations (existing logic)
+  2. Scan for pending SessionTaskQueue items
+     - Filter: status="pending"
+     - Group by session_id
+     - For each session, pick top item (priority + FIFO ordering)
+     - Check if session has no active ReactTask
+     - If free → claim item (status → "processing"), execute
+  3. Stale item recovery
+     - Find items with status="processing" and started_at > N seconds ago
+     - Mark as "failed"
+```
+
+This is k8s-safe because:
+
+- Queue items are claimed atomically (status transition pending → processing in a transaction).
+- UNIQUE-style claim: only one instance can successfully transition an item.
+- Crash recovery: stale items are detected and retried on the next scan.
+
+#### Edge Cases
+
+| Scenario | Handling |
+|----------|----------|
+| Automation paused while queue item is pending | Scheduler checks automation.status before executing queue item; if not `active` → cancel item, mark AutomationRun as `cancelled` |
+| ChannelSession's Binding deleted | Queue item cancelled, AutomationRun marked `delivery_status = "failed"` |
+| Same automation re-queues (previous item still pending) | Before insert, check for existing pending item with same source_ref; if found → skip (no duplicate) |
+| Queue item stuck in "processing" (instance crash) | Stale recovery: items in "processing" for > N seconds → mark `failed` |
+| Queue overflow (tasks too slow, backlog grows) | Cap per-session pending items (configurable); if exceeded, cancel oldest item |
+| `immediate_insert` arrives when no task is running | Degrade to `wait_for_completion`, execute immediately |
+
+### Channel Delivery
+
+After an automation run completes (whether executed directly or from the queue), if the automation has a `channel_session_id`:
+
+1. Look up the `ChannelSession` → get `channel_binding_id` and `external_conversation_id`.
+2. Look up the `AgentChannelBinding` → get `auth_config`, `runtime_config`, `channel_key`.
+3. Resolve the provider via `ProviderRegistryService`.
+4. Call `provider.send_text(auth_config, runtime_config, conversation_id=external_conversation_id, user_id=None, text=result)`.
+5. Update `AutomationRun.delivery_status` to `"sent"` or `"failed"`.
+
+Delivery status is tracked independently from run status on `AutomationRun`:
+
+```python
+# New fields on AutomationRun
+delivery_status: str | None = None       # None | "pending" | "sent" | "failed"
+delivery_error: str | None = None        # Error details if delivery failed
+```
+
+| Run Status | Delivery Status | Meaning |
+|-----------|----------------|---------|
+| `completed` | `sent` | Task succeeded, result delivered to Channel |
+| `completed` | `failed` | Task succeeded, but Channel delivery failed |
+| `failed` | `sent` | Task failed, error message delivered to Channel |
+| `failed` | `failed` | Task failed, delivery also failed |
+
+Delivery is attempted for both successful and failed runs — the user should know if their automation encountered an error.
+
+### Data Model Changes Summary
+
+**Automation (modified)**:
+```python
+# New field
+channel_session_id: int | None = Field(
+    default=None,
+    foreign_key="channel_session.id",
+    index=True,
+    description="Bound ChannelSession for this_session strategy automations",
+)
+```
+
+**AutomationRun (modified)**:
+```python
+# New fields
+delivery_status: str | None = Field(
+    default=None,
+    max_length=10,
+    description="None | pending | sent | failed",
+)
+delivery_error: str | None = Field(
+    default=None,
+    description="Error details if Channel delivery failed",
+)
+```
+
+**SessionTaskQueue (new)**:
+```python
+class SessionTaskQueue(SQLModel, table=True):
+    __tablename__ = "session_task_queue"
+
+    id: int | None = Field(default=None, primary_key=True)
+    queue_id: str = Field(default_factory=lambda: uuid4().hex, unique=True, index=True)
+    session_id: str = Field(index=True)
+    prompt: str
+    queue_type: str = Field(index=True)        # "wait_for_completion" | "immediate_insert"
+    source: str = Field(index=True)            # "automation" | "user_input"
+    source_ref_id: int | None = None
+    status: str = Field(default="pending", index=True)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+```
+
+### Implementation Phases
+
+#### Phase 4a — Foundation (~1 day)
+
+1. Remove Channel Session idle timeout rotation in `_get_or_create_channel_session`
+2. Add `channel_session_id` to Automation model
+3. Add `delivery_status`, `delivery_error` to AutomationRun model
+4. Create `SessionTaskQueue` model
+5. Create `session_task_queue_service.py` — CRUD + queue operations
+
+#### Phase 4b — Queue + Executor (~1 day)
+
+6. Add queue consumer logic to `AutomationScheduler` (pending item scan, priority ordering, claim)
+7. Modify `automation_executor.py` — detect active task → queue or execute directly
+8. Add stale queue item recovery to scheduler watchdog
+9. `automation_service.py` — support `this_session` strategy + ChannelSession resolution
+
+#### Phase 4c — Tool + Delivery (~1 day)
+
+10. Rename `propose_automation` → `automation` tool, add `skip_confirm` parameter
+11. Tool auto-resolves Channel context (session → ChannelSession → bind)
+12. Agent environment awareness (system prompt context injection)
+13. Channel delivery logic in executor (post-completion `send_text()` call)
+
+#### Phase 4d — Frontend + End-to-End (~1 day)
+
+14. Update `AutomationCreateDialog` — show `this_session` context info for Channel-created automations
+15. Update `ClientAutomationDetailView` — show delivery status
+16. Update automation schemas + API responses for new fields
+17. End-to-end testing via Chrome DevTools with a Channel provider
+
+### Key Files to Create/Modify
+
+#### New files
+
+| File | Purpose |
+|------|---------|
+| `server/app/models/session_task_queue.py` | SessionTaskQueue model |
+| `server/app/services/session_task_queue_service.py` | Queue CRUD + claim + consume operations |
+
+#### Modified files
+
+| File | Change |
+|------|--------|
+| `server/app/models/automation.py` | Add `channel_session_id` to Automation; `delivery_status`/`delivery_error` to AutomationRun |
+| `server/app/services/channel_service.py` | Remove idle timeout rotation in `_get_or_create_channel_session` |
+| `server/app/services/automation_service.py` | Support `this_session` strategy, ChannelSession resolution |
+| `server/app/services/automation_scheduler.py` | Add queue consumer scan + stale recovery |
+| `server/app/services/automation_executor.py` | Detect active task → queue; add Channel delivery post-completion |
+| `server/app/orchestration/tool/builtin/propose_automation.py` | Rename to `automation`, add `skip_confirm`, auto-resolve Channel context |
+| `server/app/schemas/automation.py` | Add new fields to request/response schemas |
+| `server/app/api/client_automations.py` | Update endpoints for new fields |
+| `web/src/components/AutomationCreateDialog.tsx` | Show `this_session` context, delivery config |
+| `web/src/client/ClientAutomationDetailView.tsx` | Show delivery status |
+| `web/src/client/api.ts` | Update types for new fields |
+| `web/src/pages/chat/utils/actionHandlers.ts` | Update handler for renamed tool |

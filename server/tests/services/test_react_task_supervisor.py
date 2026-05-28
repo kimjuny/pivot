@@ -1,6 +1,7 @@
 """Unit tests for clarify-resume behavior in the ReAct task supervisor."""
 
 import asyncio
+import contextlib
 import json
 import sys
 import unittest
@@ -81,6 +82,8 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         user = User(username="alice", password_hash="hash", role_id=1)
         self.session.add(user)
         self.session.commit()
+        self.session.refresh(user)
+        self.user = user
 
         release = AgentRelease(
             agent_id=agent.id or 0,
@@ -117,7 +120,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         workspace = Workspace(
             workspace_id="workspace-1",
             agent_id=agent.id or 0,
-            user="alice",
+            user_id=user.id or 0,
             scope="session_private",
             session_id="session-1",
         )
@@ -126,7 +129,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             session_id="session-1",
             agent_id=agent.id or 0,
             release_id=release.id or 0,
-            user="alice",
+            user_id=user.id or 0,
             workspace_id="workspace-1",
             chat_history=json.dumps({"version": 1, "messages": []}),
             react_llm_messages="[]",
@@ -135,18 +138,23 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
         self.session.add(session)
         self.session.commit()
         self.session.refresh(session)
-        self.get_engine_patch = patch.object(
+        self.managed_session_patch = patch.object(
             react_task_supervisor_module,
-            "get_engine",
-            return_value=self.engine,
+            "managed_session",
+            self._managed_session,
         )
-        self.get_engine_patch.start()
+        self.managed_session_patch.start()
         self.supervisor = ReactTaskSupervisor()
 
     def tearDown(self) -> None:
         """Release the in-memory database after each test."""
-        self.get_engine_patch.stop()
+        self.managed_session_patch.stop()
         self.session.close()
+
+    @contextlib.contextmanager
+    def _managed_session(self):
+        """Route supervisor session usage into the in-memory test database."""
+        yield self.session
 
     def test_prepare_task_updates_session_activity_for_new_turns(self) -> None:
         """Launching a fresh turn should let the backend own sidebar ordering."""
@@ -160,7 +168,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             launch=ReactTaskLaunchRequest(
                 agent_id=self.agent.id or 0,
                 message="Start fresh work",
-                username="alice",
+                user_id=self.user.id or 0,
                 session_id="session-1",
                 file_ids=[],
             ),
@@ -180,7 +188,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             task_id="task-release",
             session_id="session-1",
             agent_id=self.agent.id or 0,
-            user="alice",
+            user_id=self.user.id or 0,
             user_message="Run released config",
             user_intent="Run released config",
             status="pending",
@@ -203,6 +211,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                 self.cancelled = False
 
             async def run_task(self, **kwargs: object):
+                captured["run_task_kwargs"] = dict(kwargs)
                 if False:
                     yield kwargs
 
@@ -219,12 +228,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             ),
             patch.object(
                 react_task_supervisor_module,
-                "list_visible_skills",
-                return_value=[],
-            ),
-            patch.object(
-                react_task_supervisor_module,
-                "build_skill_mounts",
+                "list_allowed_visible_skills",
                 return_value=[],
             ),
             patch.object(
@@ -244,7 +248,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                     launch=ReactTaskLaunchRequest(
                         agent_id=self.agent.id or 0,
                         message="Run released config",
-                        username="alice",
+                        user_id=self.user.id or 0,
                         session_id="session-1",
                         file_ids=[],
                     ),
@@ -253,7 +257,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
 
         build_tool_manager.assert_called_once()
         build_tool_manager_kwargs = build_tool_manager.call_args.kwargs
-        self.assertEqual(build_tool_manager_kwargs["username"], "alice")
+        self.assertEqual(build_tool_manager_kwargs["user_id"], self.user.id or 0)
         self.assertEqual(build_tool_manager_kwargs["agent_id"], self.agent.id or 0)
         self.assertEqual(
             build_tool_manager_kwargs["raw_tool_ids"],
@@ -268,6 +272,16 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             cast("Any", tool_execution_context).sandbox_timeout_seconds,
             90,
         )
+        run_task_kwargs = captured["run_task_kwargs"]
+        self.assertIsInstance(run_task_kwargs, dict)
+        self.assertEqual(
+            cast("Any", run_task_kwargs)["max_context_tokens"],
+            9000,
+        )
+        self.assertEqual(
+            cast("Any", run_task_kwargs)["compact_threshold_percent"],
+            60,
+        )
 
     def test_prepare_task_rejects_text_reply_for_structured_pending_action(
         self,
@@ -277,19 +291,21 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             task_id="task-approval",
             session_id="session-1",
             agent_id=self.agent.id or 0,
-            user="alice",
+            user_id=self.user.id or 0,
             user_message="Build a skill",
             user_intent="Build a skill",
             status="waiting_input",
             iteration=1,
             pending_user_action_json=json.dumps(
                 {
-                    "kind": "skill_change_approval",
-                    "approval_request": {
-                        "submission_id": 42,
-                        "skill_name": "planning-kit",
-                        "change_type": "create",
-                        "question": "Approve?",
+                    "type": "skill_change_approval",
+                    "payload": {
+                        "approval_request": {
+                            "submission_id": 42,
+                            "skill_name": "planning-kit",
+                            "change_type": "create",
+                            "question": "Approve?",
+                        },
                     },
                 }
             ),
@@ -303,7 +319,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
                 launch=ReactTaskLaunchRequest(
                     agent_id=self.agent.id or 0,
                     message="Approve it",
-                    username="alice",
+                    user_id=self.user.id or 0,
                     session_id="session-1",
                     file_ids=[],
                     task_id="task-approval",
@@ -318,19 +334,21 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             task_id="task-approval",
             session_id="session-1",
             agent_id=self.agent.id or 0,
-            user="alice",
+            user_id=self.user.id or 0,
             user_message="Build a skill",
             user_intent="Build a skill",
             status="waiting_input",
             iteration=1,
             pending_user_action_json=json.dumps(
                 {
-                    "kind": "skill_change_approval",
-                    "approval_request": {
-                        "submission_id": 42,
-                        "skill_name": "planning-kit",
-                        "change_type": "create",
-                        "question": "Approve?",
+                    "type": "skill_change_approval",
+                    "payload": {
+                        "approval_request": {
+                            "submission_id": 42,
+                            "skill_name": "planning-kit",
+                            "change_type": "create",
+                            "question": "Approve?",
+                        },
                     },
                 }
             ),
@@ -358,7 +376,7 @@ class ReactTaskSupervisorTestCase(unittest.TestCase):
             launch_result = asyncio.run(
                 self.supervisor.submit_pending_user_action(
                     task_id="task-approval",
-                    username="alice",
+                    user_id=self.user.id or 0,
                     decision="approve",
                 )
             )

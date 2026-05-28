@@ -23,6 +23,7 @@ from .abstract_llm import (
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
 from .multimodal import to_openai_response_content
+from .openrouter_attribution import build_openrouter_attribution_headers
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 logger = get_logger("llm.openai_response")
@@ -324,6 +325,14 @@ class OpenAIResponseLLM(AbstractLLM):
             usage=usage,
         )
 
+    def _build_headers(self) -> dict[str, str]:
+        """Build HTTP headers for Responses API requests."""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **build_openrouter_attribution_headers(self.endpoint),
+        }
+
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """Process a conversation with the Responses API."""
         try:
@@ -333,10 +342,7 @@ class OpenAIResponseLLM(AbstractLLM):
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             input_messages = self._build_input_messages(messages)
             url = f"{self.endpoint.rstrip('/')}/responses"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = self._build_headers()
             payload = {
                 "model": self.model,
                 "input": input_messages,
@@ -389,10 +395,7 @@ class OpenAIResponseLLM(AbstractLLM):
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
             input_messages = self._build_input_messages(messages)
             url = f"{self.endpoint.rstrip('/')}/responses"
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            }
+            headers = self._build_headers()
             payload = {
                 "model": self.model,
                 "input": input_messages,

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     WORK_WECHAT_WS_HEARTBEAT_SECONDS: int = 30
     WORK_WECHAT_WS_REQUEST_TIMEOUT_SECONDS: int = 10
     SYSTEM_TIME_ZONE: str = "Asia/Shanghai"
+    OPENROUTER_APP_URL: str = "http://pivot-ai.org"
+    OPENROUTER_APP_TITLE: str = "pivot"
+    OPENROUTER_APP_CATEGORIES: str = "general-agent"
 
     # Automation scheduler
     AUTOMATION_SCHEDULER_ENABLED: bool = True

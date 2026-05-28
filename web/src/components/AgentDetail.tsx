@@ -860,6 +860,7 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
           agentToolIds={effectiveAgent?.tool_ids}
           primaryLlmId={effectiveAgent?.llm_id}
           sessionIdleTimeoutMinutes={effectiveAgent?.session_idle_timeout_minutes}
+          compactThresholdPercent={effectiveAgent?.compact_threshold_percent}
           agentClientState={effectiveAgent?.client_state}
         />
       </DraggableDialog>

@@ -593,11 +593,14 @@ class ReactTaskSupervisor:
                 if task is None:
                     logger.warning("Background task %s vanished before start", task_id)
                     return
+                running_task = task
 
-                agent = db.get(Agent, task.agent_id)
+                agent = db.get(Agent, running_task.agent_id)
                 if agent is None:
-                    raise ValueError(f"Agent {task.agent_id} not found")
-                runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(task)
+                    raise ValueError(f"Agent {running_task.agent_id} not found")
+                runtime_config = AgentReleaseRuntimeService(db).resolve_for_task(
+                    running_task
+                )
                 hook_service = ExtensionHookService(
                     runtime_config.extension_bundle,
                     execution_service=ExtensionHookExecutionService(db),
@@ -608,8 +611,8 @@ class ReactTaskSupervisor:
                         f"Agent {runtime_config.agent_name} has no LLM configured"
                     )
                 session_row = (
-                    SessionService(db).get_session(task.session_id)
-                    if task.session_id is not None
+                    SessionService(db).get_session(running_task.session_id)
+                    if running_task.session_id is not None
                     else None
                 )
                 if session_row is None or session_row.workspace_id is None:
@@ -629,6 +632,7 @@ class ReactTaskSupervisor:
                         f"LLM configuration with ID {runtime_config.llm_id} not found"
                     )
                 llm = create_llm_from_config(llm_config)
+                max_context_tokens = max(int(llm_config.max_context or 0), 0)
 
                 turn_files = []
                 turn_attachments = []
@@ -637,11 +641,14 @@ class ReactTaskSupervisor:
                     attached_files = file_service.attach_files_to_task(
                         file_ids=launch.file_ids,
                         user_id=launch.user_id,
-                        session_id=task.session_id,
-                        task_id=task.task_id,
+                        session_id=running_task.session_id,
+                        task_id=running_task.task_id,
                     )
-                    turn_files = file_service.build_history_items([task.task_id]).get(
-                        task.task_id, []
+                    turn_files = file_service.build_history_items(
+                        [running_task.task_id]
+                    ).get(
+                        running_task.task_id,
+                        [],
                     )
                     turn_attachments = [
                         {
@@ -725,7 +732,7 @@ class ReactTaskSupervisor:
                     tool_execution_context=ToolExecutionContext(
                         user_id=launch.user_id,
                         agent_id=agent.id or 0,
-                        session_id=task.session_id,
+                        session_id=running_task.session_id,
                         workspace_id=workspace.workspace_id,
                         workspace_backend_path=workspace_backend_path,
                         sandbox_timeout_seconds=runtime_config.sandbox_timeout_seconds,
@@ -745,10 +752,10 @@ class ReactTaskSupervisor:
 
                 before_start_effects = await self._run_task_hooks(
                     db=db,
-                    session_id=task.session_id,
+                    session_id=running_task.session_id,
                     hook_service=hook_service,
                     hook_effect_service=hook_effect_service,
-                    task=task,
+                    task=running_task,
                     runtime_config=runtime_config,
                     event_name="task.before_start",
                     event_payload={"message": launch.message},
@@ -757,8 +764,29 @@ class ReactTaskSupervisor:
                 async with self._lock:
                     self._active_engines[task_id] = engine
 
+                async def publish_engine_event(event_data: dict[str, Any]) -> None:
+                    await self._publish_event(
+                        db=db,
+                        session_id=running_task.session_id,
+                        event_data=event_data,
+                    )
+                    await self._run_iteration_hooks_for_event(
+                        db=db,
+                        session_id=running_task.session_id,
+                        hook_service=hook_service,
+                        hook_effect_service=hook_effect_service,
+                        task=running_task,
+                        runtime_config=runtime_config,
+                        event_data=event_data,
+                    )
+
                 async for event_data in engine.run_task(
-                    task=task,
+                    task=running_task,
+                    max_context_tokens=max_context_tokens,
+                    compact_threshold_percent=(
+                        runtime_config.compact_threshold_percent
+                    ),
+                    emit_event=publish_engine_event,
                     skills_metadata_json=skills_metadata_json,
                     mandatory_skills_json=mandatory_skills_json,
                     workspace_guidance=workspace_guidance,
@@ -773,39 +801,26 @@ class ReactTaskSupervisor:
                     turn_attachments=turn_attachments,
                     delegation_agents=delegation_agents,
                 ):
-                    await self._publish_event(
-                        db=db,
-                        session_id=task.session_id,
-                        event_data=event_data,
-                    )
-                    await self._run_iteration_hooks_for_event(
-                        db=db,
-                        session_id=task.session_id,
-                        hook_service=hook_service,
-                        hook_effect_service=hook_effect_service,
-                        task=task,
-                        runtime_config=runtime_config,
-                        event_data=event_data,
-                    )
+                    await publish_engine_event(event_data)
 
-                if task.status == "completed":
+                if running_task.status == "completed":
                     await self._run_task_hooks(
                         db=db,
-                        session_id=task.session_id,
+                        session_id=running_task.session_id,
                         hook_service=hook_service,
                         hook_effect_service=hook_effect_service,
-                        task=task,
+                        task=running_task,
                         runtime_config=runtime_config,
                         event_name="task.completed",
                         event_payload={},
                     )
-                elif task.status == "waiting_input":
+                elif running_task.status == "waiting_input":
                     await self._run_task_hooks(
                         db=db,
-                        session_id=task.session_id,
+                        session_id=running_task.session_id,
                         hook_service=hook_service,
                         hook_effect_service=hook_effect_service,
-                        task=task,
+                        task=running_task,
                         runtime_config=runtime_config,
                         event_name="task.waiting_input",
                         event_payload={},

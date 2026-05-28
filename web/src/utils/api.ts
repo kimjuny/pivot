@@ -2885,6 +2885,8 @@ export interface ReactSessionRuntimeDebug {
   has_compact_result: boolean;
   compact_result: Record<string, unknown> | Array<unknown> | string | null;
   compact_result_raw: string | null;
+  exact_prompt_tokens: number | null;
+  exact_prompt_message_count: number | null;
   updated_at: string;
 }
 

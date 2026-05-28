@@ -211,6 +211,7 @@ class DelegationExecutor:
                 f"LLM configuration with ID {runtime_config.llm_id} not found"
             )
         llm = create_llm_from_config(llm_config)
+        max_context_tokens = max(int(llm_config.max_context or 0), 0)
 
         engine = ReactEngine(
             llm=llm,
@@ -229,6 +230,8 @@ class DelegationExecutor:
             delegation_session=delegation_session,
             callee_agent_name=callee_agent.name,
             turn_user_message=instruction,
+            max_context_tokens=max_context_tokens,
+            compact_threshold_percent=runtime_config.compact_threshold_percent,
             on_event=on_event,
         )
 
@@ -329,6 +332,7 @@ class DelegationExecutor:
                 f"LLM configuration with ID {runtime_config.llm_id} not found"
             )
         llm = create_llm_from_config(llm_config)
+        max_context_tokens = max(int(llm_config.max_context or 0), 0)
 
         # Patch the pending action_result to replace the CLARIFY placeholder
         # reply with the caller's actual response. The engine injects this
@@ -367,6 +371,8 @@ class DelegationExecutor:
             delegation_session=delegation_session,
             callee_agent_name=callee_agent.name,
             turn_user_message=response,
+            max_context_tokens=max_context_tokens,
+            compact_threshold_percent=runtime_config.compact_threshold_percent,
             on_event=on_event,
         )
 
@@ -389,6 +395,8 @@ class DelegationExecutor:
         delegation_session: Session,
         callee_agent_name: str,
         turn_user_message: str,
+        max_context_tokens: int,
+        compact_threshold_percent: int,
         on_event: Any | None = None,
     ) -> dict[str, Any]:
         """Run the sub-agent's ReAct loop and handle ANSWER / CLARIFY / error.
@@ -420,6 +428,8 @@ class DelegationExecutor:
             async for event_data in engine.run_task(
                 task=child_task,
                 turn_user_message=turn_user_message,
+                max_context_tokens=max_context_tokens,
+                compact_threshold_percent=compact_threshold_percent,
             ):
                 event_type = event_data.get("type")
 

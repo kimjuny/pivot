@@ -3,19 +3,13 @@ import { MessageSquare } from "lucide-react";
 
 import { parseUtcTimestamp } from "@/utils/timestamp";
 
-import type {
-  ChatMessage,
-  CompactTimelineItem,
-  SkillChangeApprovalRequest,
-} from "../types";
+import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import { getChatMessageRenderKey } from "../utils/chatData";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";
-import { CompactTimelineSeparator } from "./CompactTimelineSeparator";
 import { UserMessageBubble } from "./UserMessageBubble";
 
 interface ConversationViewProps {
   messages: ChatMessage[];
-  compactTimelineItems?: CompactTimelineItem[];
   agentName?: string;
   expandedRecursions: Record<string, boolean>;
   isStreaming: boolean;
@@ -36,7 +30,6 @@ interface ConversationViewProps {
  */
 export const ConversationView = memo(function ConversationView({
   messages,
-  compactTimelineItems = [],
   agentName,
   expandedRecursions,
   isStreaming,
@@ -45,33 +38,23 @@ export const ConversationView = memo(function ConversationView({
   onApproveSkillChange,
   onRejectSkillChange,
 }: ConversationViewProps) {
-  const timelineItems = [...messages, ...compactTimelineItems].sort((left, right) => {
-    const leftIsMessage = "role" in left;
-    const rightIsMessage = "role" in right;
-
-    // ChatMessages always come before CompactTimelineItems
-    if (leftIsMessage !== rightIsMessage) {
-      return leftIsMessage ? -1 : 1;
-    }
-
+  const timelineItems = [...messages].sort((left, right) => {
     const leftTimestamp = parseUtcTimestamp(left.timestamp).getTime();
     const rightTimestamp = parseUtcTimestamp(right.timestamp).getTime();
 
     // Same task: user before assistant — but only for the original exchange,
     // not clarify sub-dialogs where the assistant question precedes the reply.
-    if (leftIsMessage && rightIsMessage) {
-      if (
-        left.task_id &&
-        right.task_id &&
-        left.task_id === right.task_id &&
-        left.role !== right.role
-      ) {
-        const isClarifyReply =
-          left.id.includes("-clarify-reply-") ||
-          right.id.includes("-clarify-reply-");
-        if (!isClarifyReply) {
-          return left.role === "user" ? -1 : 1;
-        }
+    if (
+      left.task_id &&
+      right.task_id &&
+      left.task_id === right.task_id &&
+      left.role !== right.role
+    ) {
+      const isClarifyReply =
+        left.id.includes("-clarify-reply-") ||
+        right.id.includes("-clarify-reply-");
+      if (!isClarifyReply) {
+        return left.role === "user" ? -1 : 1;
       }
     }
 
@@ -80,7 +63,7 @@ export const ConversationView = memo(function ConversationView({
     }
 
     // Same timestamp, different tasks (or no task_id): user before assistant
-    if (leftIsMessage && rightIsMessage && left.role !== right.role) {
+    if (left.role !== right.role) {
       return left.role === "user" ? -1 : 1;
     }
 
@@ -109,31 +92,27 @@ export const ConversationView = memo(function ConversationView({
 
   return (
     <>
-      {timelineItems.map((item) => {
-        return "role" in item ? (
-          <div
-            key={getChatMessageRenderKey(item)}
-            data-message-id={item.id}
-            className="mb-6 space-y-2 last:mb-0"
-          >
-            {item.role === "user" ? (
-              <UserMessageBubble message={item} />
-            ) : (
-              <AssistantMessageBlock
-                message={item}
-                expandedRecursions={expandedRecursions}
-                isStreaming={isStreaming}
-                onToggleRecursion={onToggleRecursion}
-                onReplyTask={onReplyTask}
-                onApproveSkillChange={onApproveSkillChange}
-                onRejectSkillChange={onRejectSkillChange}
-              />
-            )}
-          </div>
-        ) : (
-          <CompactTimelineSeparator key={item.id} item={item} />
-        );
-      })}
+      {timelineItems.map((item) => (
+        <div
+          key={getChatMessageRenderKey(item)}
+          data-message-id={item.id}
+          className="mb-6 space-y-2 last:mb-0"
+        >
+          {item.role === "user" ? (
+            <UserMessageBubble message={item} />
+          ) : (
+            <AssistantMessageBlock
+              message={item}
+              expandedRecursions={expandedRecursions}
+              isStreaming={isStreaming}
+              onToggleRecursion={onToggleRecursion}
+              onReplyTask={onReplyTask}
+              onApproveSkillChange={onApproveSkillChange}
+              onRejectSkillChange={onRejectSkillChange}
+            />
+          )}
+        </div>
+      ))}
     </>
   );
 });

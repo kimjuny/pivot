@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+import logging
+from time import perf_counter
+from typing import TYPE_CHECKING, Any
 
 from app.llm.llm_factory import create_llm_from_config
 from app.llm.token_estimator import estimate_messages_tokens
@@ -14,7 +16,11 @@ from app.services.llm_service import LLMService
 from app.services.react_runtime_service import ReactRuntimeService
 from app.services.session_service import SessionService
 from fastapi.concurrency import run_in_threadpool
-from sqlmodel import Session as DBSession
+
+if TYPE_CHECKING:
+    from sqlmodel import Session as DBSession
+
+logger = logging.getLogger(__name__)
 
 
 class ReactCompactService:
@@ -102,28 +108,62 @@ class ReactCompactService:
                 "content": build_compact_prompt(user_instruction),
             }
         )
-        response = await run_in_threadpool(
-            llm.chat,
-            compact_messages,
-            _pivot_task_id=f"manual_compact:{session_id}",
-        )
-        compact_payload = safe_load_json(response.first().message.content or "{}")
-        compact_result = json.dumps(compact_payload, ensure_ascii=False)
-
-        updated_state = self.runtime_service.replace_session_runtime_messages(
+        compact_started_at = perf_counter()
+        logger.info(
+            "Manual context compact started session_id=%s used_percent=%s "
+            "used_tokens=%s max_context_tokens=%s source_messages=%s",
             session_id,
-            [
-                {"role": "system", "content": str(system_message.get("content", ""))},
-                {"role": "assistant", "content": compact_result},
-            ],
-            compact_result=compact_result,
-            preserve_pending_action_result=True,
-            preserve_cache_state=False,
+            usage_before.get("used_percent"),
+            usage_before.get("used_tokens"),
+            usage_before.get("max_context_tokens"),
+            len(source_messages),
         )
-        usage_after = self._build_usage_snapshot(
-            session_id=session_id,
-            messages=updated_state.messages,
-            max_context_tokens=max_context_tokens,
+
+        try:
+            response = await run_in_threadpool(
+                llm.chat,
+                compact_messages,
+                _pivot_task_id=f"manual_compact:{session_id}",
+            )
+            compact_payload = safe_load_json(response.first().message.content or "{}")
+            compact_result = json.dumps(compact_payload, ensure_ascii=False)
+
+            updated_state = self.runtime_service.replace_session_runtime_messages(
+                session_id,
+                [
+                    {
+                        "role": "system",
+                        "content": str(system_message.get("content", "")),
+                    },
+                    {"role": "assistant", "content": compact_result},
+                ],
+                compact_result=compact_result,
+                preserve_pending_action_result=True,
+                preserve_cache_state=False,
+            )
+            usage_after = self._build_usage_snapshot(
+                session_id=session_id,
+                messages=updated_state.messages,
+                max_context_tokens=max_context_tokens,
+            )
+        except Exception:
+            logger.exception(
+                "Manual context compact failed session_id=%s elapsed_ms=%s",
+                session_id,
+                round((perf_counter() - compact_started_at) * 1000),
+            )
+            raise
+
+        logger.info(
+            "Manual context compact completed session_id=%s elapsed_ms=%s "
+            "used_percent_before=%s used_percent_after=%s "
+            "used_tokens_before=%s used_tokens_after=%s",
+            session_id,
+            round((perf_counter() - compact_started_at) * 1000),
+            usage_before.get("used_percent"),
+            usage_after.get("used_percent"),
+            usage_before.get("used_tokens"),
+            usage_after.get("used_tokens"),
         )
         return {
             "session_id": session_id,

@@ -97,7 +97,6 @@ import type {
   ChatWebSearchProviderOption,
   ChatPageProps,
   ChatMessage,
-  CompactTimelineItem,
   MandatorySkillSelection,
   ChatReplyTarget,
   ChatSidebarProjectItem,
@@ -702,6 +701,7 @@ function ChatContainer({
   agentToolIds,
   primaryLlmId,
   sessionIdleTimeoutMinutes,
+  compactThresholdPercent,
   sidebarNavigationItems,
   sidebarTitleIcon,
   sidebarTitle,
@@ -788,9 +788,6 @@ function ChatContainer({
   const [compactStatusMessage, setCompactStatusMessage] = useState<string | null>(
     null,
   );
-  const [compactTimelineItems, setCompactTimelineItems] = useState<
-    CompactTimelineItem[]
-  >([]);
   const [sessionRuntimeDebug, setSessionRuntimeDebug] =
     useState<ReactSessionRuntimeDebug | null>(null);
   const [isRuntimeDebugLoading, setIsRuntimeDebugLoading] =
@@ -839,7 +836,6 @@ function ChatContainer({
   const contextUsageDebounceTimerRef = useRef<number | null>(null);
   const runtimeDebugRequestIdRef = useRef(0);
   const compactStatusStartedAtRef = useRef<number | null>(null);
-  const activeCompactTimelineIdRef = useRef<string | null>(null);
   const compactStatusClearTimerRef = useRef<number | null>(null);
   const dockTransitionTimerRef = useRef<number | null>(null);
   const dockOpenFrameRef = useRef<number | null>(null);
@@ -1084,50 +1080,6 @@ function ChatContainer({
     );
   }, [clearCompactStatusTimer]);
 
-  const resetCompactTimelineItems = useCallback(() => {
-    activeCompactTimelineIdRef.current = null;
-    setCompactTimelineItems([]);
-  }, []);
-
-  const startCompactTimelineItem = useCallback((timestamp?: string) => {
-    const startedAt = timestamp ?? new Date().toISOString();
-    const itemId = `compact-${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
-    activeCompactTimelineIdRef.current = itemId;
-    setCompactTimelineItems((previous) => [
-      ...previous,
-      {
-        id: itemId,
-        timestamp: startedAt,
-        status: "running",
-        label: "Compacting context. Please wait before stopping.",
-      },
-    ]);
-  }, []);
-
-  const finalizeCompactTimelineItem = useCallback(
-    (status: "completed" | "failed", timestamp?: string) => {
-      const activeItemId = activeCompactTimelineIdRef.current;
-      if (!activeItemId) {
-        return;
-      }
-      const finishedAt = timestamp ?? new Date().toISOString();
-      setCompactTimelineItems((previous) =>
-        previous.map((item) =>
-          item.id !== activeItemId
-            ? item
-            : {
-                ...item,
-                status,
-                label: status === "completed" ? "Compacted" : "Compaction failed",
-                finishedAt,
-              },
-        ),
-      );
-      activeCompactTimelineIdRef.current = null;
-    },
-    [],
-  );
-
   /**
    * Loads the latest session runtime debug payload for the floating compact inspector.
    */
@@ -1303,10 +1255,9 @@ function ChatContainer({
             message.role === "assistant" && message.status === "running",
         ),
       );
-      resetCompactTimelineItems();
       commitMessages(nextMessages);
     },
-    [commitMessages, resetCompactTimelineItems, syncLiveRefsFromMessages],
+    [commitMessages, syncLiveRefsFromMessages],
   );
 
   /**
@@ -1384,7 +1335,6 @@ function ChatContainer({
 
       if (event.type === "compact_start") {
         showCompactStatus("Compacting context. Please wait before stopping.");
-        startCompactTimelineItem(event.timestamp);
         return;
       }
 
@@ -1397,13 +1347,11 @@ function ChatContainer({
           setContextUsage(compactData.usage_after);
         }
         void loadSessionRuntimeDebug(currentSessionIdRef.current);
-        finalizeCompactTimelineItem("completed", event.timestamp);
         clearCompactStatusWithMinimumDelay();
         return;
       }
 
       if (event.type === "compact_failed") {
-        finalizeCompactTimelineItem("failed", event.timestamp);
         clearCompactStatusWithMinimumDelay();
         return;
       }
@@ -1655,7 +1603,7 @@ function ChatContainer({
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
-          clearCompactStatusImmediately();
+          clearCompactStatusWithMinimumDelay();
           setReplyTaskId(approvalRequest ? null : event.task_id);
           liveTaskIdRef.current = event.task_id;
           liveRecursionRef.current = finalizedRecursion;
@@ -1667,7 +1615,7 @@ function ChatContainer({
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
-          clearCompactStatusImmediately();
+          clearCompactStatusWithMinimumDelay();
           setReplyTaskId((previousTaskId) =>
             previousTaskId === event.task_id ? null : previousTaskId,
           );
@@ -1954,15 +1902,12 @@ function ChatContainer({
       );
     },
     [
-      clearCompactStatusImmediately,
       clearCompactStatusWithMinimumDelay,
       applyHistoryMessages,
       currentSessionId,
-      finalizeCompactTimelineItem,
       loadSessionRuntimeDebug,
       refreshSidebarData,
       showCompactStatus,
-      startCompactTimelineItem,
       updateMessages,
     ],
   );
@@ -2152,7 +2097,6 @@ function ChatContainer({
               );
             }
           } else {
-            resetCompactTimelineItems();
             commitMessages([]);
             setIsStreaming(false);
           }
@@ -2195,7 +2139,6 @@ function ChatContainer({
             setActiveContextTaskId(null);
             setActiveContextIteration(null);
             syncLiveRefsFromMessages([]);
-            resetCompactTimelineItems();
             commitMessages([]);
             setIsStreaming(false);
             stopSessionStream();
@@ -2220,7 +2163,6 @@ function ChatContainer({
     initialProjects,
     isLoadingSession,
     refreshSidebarData,
-    resetCompactTimelineItems,
     sessionIdleTimeoutMs,
     openSessionStream,
     stopSessionStream,
@@ -2367,10 +2309,14 @@ function ChatContainer({
               ? "error"
               : "ready",
       runtimeDebug: sessionRuntimeDebug,
+      contextUsage,
+      compactThresholdPercent: compactThresholdPercent ?? null,
       error: runtimeDebugError,
     });
   }, [
+    compactThresholdPercent,
     compactStatusMessage,
+    contextUsage,
     currentSessionId,
     isRuntimeDebugLoading,
     onRuntimeDebugChange,
@@ -2665,7 +2611,6 @@ function ChatContainer({
       setCurrentProjectId(nextProjectId);
       setCurrentSessionId(null);
       currentSessionIdRef.current = null;
-      resetCompactTimelineItems();
       commitMessages([]);
       setReplyTaskId(null);
       setSelectedMandatorySkills([]);
@@ -2818,7 +2763,6 @@ function ChatContainer({
     } catch (historyError) {
       console.error("Failed to load session history:", historyError);
       syncLiveRefsFromMessages([]);
-      resetCompactTimelineItems();
       commitMessages([]);
       setIsStreaming(false);
     } finally {
@@ -3095,7 +3039,6 @@ function ChatContainer({
           }
           setError(null);
           showCompactStatus("Compacting context. Please wait before stopping.");
-          startCompactTimelineItem();
           setIsManualCompacting(true);
           try {
             let compactResult;
@@ -3116,7 +3059,6 @@ function ChatContainer({
               }
               throw compactError;
             }
-            finalizeCompactTimelineItem("completed");
             draftMessageRef.current = "";
             setComposerResetSignal((previous) => previous + 1);
             setSelectedMandatorySkills([]);
@@ -3130,9 +3072,6 @@ function ChatContainer({
               );
             });
             return;
-          } catch (compactError) {
-            finalizeCompactTimelineItem("failed");
-            throw compactError;
           } finally {
             setIsManualCompacting(false);
           }
@@ -3305,8 +3244,6 @@ function ChatContainer({
       showCompactStatus,
       testSnapshot,
       updateMessages,
-      finalizeCompactTimelineItem,
-      startCompactTimelineItem,
     ],
   );
 
@@ -3930,7 +3867,6 @@ function ChatContainer({
           ) : (
             <ConversationView
               messages={messages}
-              compactTimelineItems={compactTimelineItems}
               agentName={agentName}
               expandedRecursions={expandedRecursions}
               isStreaming={isStreaming}

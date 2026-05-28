@@ -260,6 +260,8 @@ describe("ChatContainer session rollover", () => {
       has_compact_result: false,
       compact_result: null,
       compact_result_raw: null,
+      exact_prompt_tokens: null,
+      exact_prompt_message_count: null,
       updated_at: "2026-03-19T00:00:00.000Z",
     });
     vi.mocked(getFullSessionHistory).mockResolvedValue({
@@ -1318,6 +1320,93 @@ describe("ChatContainer session rollover", () => {
     expect(screen.getAllByText("Planning the sections").length).toBeGreaterThan(
       0,
     );
+  });
+
+  it("shows the existing compact status pill for automatic compact events", async () => {
+    const sessionId = "auto-compact-session";
+    const updatedAt = new Date().toISOString();
+    vi.mocked(listSessions).mockResolvedValue({
+      sessions: [
+        {
+          session_id: sessionId,
+          agent_id: 7,
+          status: "active",
+          title: "Auto compact thread",
+          is_pinned: false,
+          created_at: updatedAt,
+          updated_at: updatedAt,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(getFullSessionHistory).mockResolvedValue({
+      session_id: sessionId,
+      last_event_id: 0,
+      resume_from_event_id: 0,
+      tasks: [],
+    });
+
+    const encoder = new TextEncoder();
+    vi.mocked(httpClient).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            [
+              {
+                event_id: 1,
+                type: "compact_start",
+                task_id: "task-auto-compact",
+                iteration: 1,
+                timestamp: "2026-05-28T10:00:00.000Z",
+              },
+              {
+                event_id: 2,
+                type: "compact_complete",
+                task_id: "task-auto-compact",
+                iteration: 1,
+                timestamp: "2026-05-28T10:00:01.000Z",
+                data: { usage_after: buildContextUsage(sessionId) },
+              },
+              {
+                event_id: 3,
+                type: "task_complete",
+                task_id: "task-auto-compact",
+                iteration: 1,
+                timestamp: "2026-05-28T10:00:01.100Z",
+              },
+            ].forEach((event) => {
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+              );
+            });
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
+    );
+
+    render(
+      <ChatContainer
+        agentId={7}
+        agentName="Pivot Agent"
+        primaryLlmId={1}
+        sessionIdleTimeoutMinutes={15}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        "Compacting context. Please wait before stopping.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Compacted")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText("Compacting context. Please wait before stopping."),
+    ).toHaveLength(1);
   });
 
   it("auto-enters reply mode when a clarify event arrives", async () => {

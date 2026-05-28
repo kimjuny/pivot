@@ -1,5 +1,6 @@
 """Unit tests for ReAct prompt-context estimation service."""
 
+import json
 import sys
 import unittest
 from importlib import import_module
@@ -17,6 +18,7 @@ LLM = import_module("app.models.llm").LLM
 Agent = import_module("app.models.agent").Agent
 ReactTask = import_module("app.models.react").ReactTask
 SessionModel = import_module("app.models.session").Session
+User = import_module("app.models.user").User
 ReactRuntimeService = import_module(
     "app.services.react_runtime_service"
 ).ReactRuntimeService
@@ -64,6 +66,12 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         self.session.refresh(agent)
         self.agent = agent
 
+        user = User(username="alice", password_hash="hash", role_id=1)
+        self.session.add(user)
+        self.session.commit()
+        self.session.refresh(user)
+        self.user = user
+
         release = AgentRelease(
             agent_id=agent.id or 0,
             version=1,
@@ -91,7 +99,7 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
             session_id="session-1",
             agent_id=agent.id or 0,
             release_id=release.id or 0,
-            user="alice",
+            user_id=user.id or 0,
             status="active",
             chat_history='{"version": 1, "messages": []}',
             react_llm_messages="[]",
@@ -113,7 +121,7 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         """Preview mode should count both the system prompt and draft payload."""
         result = self.service.estimate(
             agent_id=self.agent.id or 0,
-            username="alice",
+            user_id=self.user.id or 0,
             session_id=self.session_row.session_id,
             draft_message="Explain how this project works.",
         )
@@ -137,7 +145,7 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
             task_id="task-1",
             agent_id=self.agent.id or 0,
             session_id=self.session_row.session_id,
-            user="alice",
+            user_id=self.user.id or 0,
             user_message="Need help",
             user_intent="Need help",
             status="waiting_input",
@@ -169,7 +177,7 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
 
         result = self.service.estimate(
             agent_id=self.agent.id or 0,
-            username="alice",
+            user_id=self.user.id or 0,
             task_id=task.task_id,
             draft_message="Look at ReactChatInterface.tsx.",
         )
@@ -180,11 +188,74 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         self.assertGreater(result.draft_tokens, 0)
         self.assertGreater(result.conversation_tokens, result.draft_tokens)
 
+    def test_estimate_uses_exact_prompt_baseline_plus_runtime_and_preview_delta(
+        self,
+    ) -> None:
+        """Composer usage should start from the last exact prompt baseline."""
+        task = ReactTask(
+            task_id="task-baseline",
+            agent_id=self.agent.id or 0,
+            session_id=self.session_row.session_id,
+            user_id=self.user.id or 0,
+            user_message="Need help",
+            user_intent="Need help",
+            status="done",
+            iteration=1,
+            max_iteration=8,
+        )
+        self.session.add(task)
+        self.session.commit()
+        self.session.refresh(task)
+
+        self.runtime_service.replace_runtime_messages(
+            task,
+            [
+                {"role": "system", "content": "system prompt"},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "iteration": 1,
+                            "user_intent": "Need help",
+                            "current_plan": [],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            compact_result=None,
+            preserve_cache_state=True,
+        )
+        baseline_state = self.runtime_service.load(task)
+        self.runtime_service.set_exact_prompt_usage_baseline(
+            task,
+            prompt_tokens=123,
+            message_count=len(baseline_state.messages),
+        )
+        self.runtime_service.append_assistant_message(
+            task,
+            '{"answer":{"message":"Here is the current result."}}',
+        )
+
+        result = self.service.estimate(
+            agent_id=self.agent.id or 0,
+            user_id=self.user.id or 0,
+            session_id=self.session_row.session_id,
+            draft_message="Continue with one more step.",
+        )
+
+        self.assertEqual(result.estimation_mode, "next_turn_preview")
+        self.assertEqual(result.session_tokens + result.preview_tokens, result.used_tokens)
+        self.assertGreater(result.session_tokens, 123)
+        self.assertGreater(result.preview_tokens, 0)
+        self.assertEqual(result.session_message_count, 3)
+        self.assertEqual(result.max_context_tokens, self.release_llm.max_context)
+
     def test_estimate_studio_test_preview_uses_working_copy_snapshot(self) -> None:
         """Studio previews should use the unsaved working-copy runtime config."""
         result = self.service.estimate(
             agent_id=self.agent.id or 0,
-            username="alice",
+            user_id=self.user.id or 0,
             session_type="studio_test",
             test_snapshot={
                 "schema_version": 1,

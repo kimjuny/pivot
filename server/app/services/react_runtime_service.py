@@ -32,6 +32,8 @@ class TaskRuntimeState:
     compact_result: str | None
     pending_action_result: list[dict[str, Any]] | None
     previous_response_id: str | None
+    exact_prompt_tokens: int | None
+    exact_prompt_message_count: int | None
 
 
 class ReactRuntimeService:
@@ -65,6 +67,8 @@ class ReactRuntimeService:
             compact_result=self._load_compact_result(session),
             pending_action_result=self._load_pending_action_result(session),
             previous_response_id=self._load_previous_response_id(session),
+            exact_prompt_tokens=self._load_exact_prompt_tokens(session),
+            exact_prompt_message_count=self._load_exact_prompt_message_count(session),
         )
 
     def load_session(self, session_id: str) -> TaskRuntimeState:
@@ -85,6 +89,8 @@ class ReactRuntimeService:
             compact_result=self._load_compact_result(session),
             pending_action_result=self._load_pending_action_result(session),
             previous_response_id=self._load_previous_response_id(session),
+            exact_prompt_tokens=self._load_exact_prompt_tokens(session),
+            exact_prompt_message_count=self._load_exact_prompt_message_count(session),
         )
 
     def initialize(
@@ -233,6 +239,30 @@ class ReactRuntimeService:
         self._persist_state(session, state)
         return state
 
+    def set_exact_prompt_usage_baseline(
+        self,
+        task: ReactTask,
+        *,
+        prompt_tokens: int | None,
+        message_count: int | None,
+    ) -> TaskRuntimeState:
+        """Persist the latest exact full-request prompt baseline for a session."""
+        state = self.load(task)
+        if (
+            isinstance(prompt_tokens, int)
+            and prompt_tokens > 0
+            and isinstance(message_count, int)
+            and message_count >= 0
+        ):
+            state.exact_prompt_tokens = prompt_tokens
+            state.exact_prompt_message_count = message_count
+        else:
+            state.exact_prompt_tokens = None
+            state.exact_prompt_message_count = None
+        session = self._get_session_or_raise(task)
+        self._persist_state(session, state)
+        return state
+
     def clear_task_state(
         self,
         task: ReactTask,
@@ -296,6 +326,7 @@ class ReactRuntimeService:
         compact_result: str | None,
         preserve_pending_action_result: bool = True,
         preserve_cache_state: bool = False,
+        preserve_exact_prompt_usage_baseline: bool = False,
     ) -> TaskRuntimeState:
         """Replace the persisted runtime window after a compact cycle.
 
@@ -318,6 +349,9 @@ class ReactRuntimeService:
             state.pending_action_result = None
         if not preserve_cache_state:
             state.previous_response_id = None
+        if not preserve_exact_prompt_usage_baseline:
+            state.exact_prompt_tokens = None
+            state.exact_prompt_message_count = None
         session = self._get_session_or_raise(task)
         self._persist_state(session, state)
         return state
@@ -330,6 +364,7 @@ class ReactRuntimeService:
         compact_result: str | None,
         preserve_pending_action_result: bool = True,
         preserve_cache_state: bool = False,
+        preserve_exact_prompt_usage_baseline: bool = False,
     ) -> TaskRuntimeState:
         """Replace persisted runtime messages directly on a session row.
 
@@ -353,6 +388,9 @@ class ReactRuntimeService:
             state.pending_action_result = None
         if not preserve_cache_state:
             state.previous_response_id = None
+        if not preserve_exact_prompt_usage_baseline:
+            state.exact_prompt_tokens = None
+            state.exact_prompt_message_count = None
         self._persist_state(session, state)
         return state
 
@@ -436,6 +474,10 @@ class ReactRuntimeService:
             "has_compact_result": compact_result_raw is not None,
             "compact_result": compact_result,
             "compact_result_raw": compact_result_raw,
+            "exact_prompt_tokens": self._load_exact_prompt_tokens(session),
+            "exact_prompt_message_count": self._load_exact_prompt_message_count(
+                session
+            ),
             "updated_at": session.updated_at.replace(tzinfo=UTC).isoformat(),
         }
 
@@ -453,12 +495,21 @@ class ReactRuntimeService:
             if state.pending_action_result is not None
             else None
         )
+        cache_state_payload: dict[str, Any] = {}
+        if state.previous_response_id:
+            cache_state_payload["previous_response_id"] = state.previous_response_id
+        if (
+            isinstance(state.exact_prompt_tokens, int)
+            and state.exact_prompt_tokens > 0
+            and isinstance(state.exact_prompt_message_count, int)
+            and state.exact_prompt_message_count >= 0
+        ):
+            cache_state_payload["exact_prompt_usage_baseline"] = {
+                "prompt_tokens": state.exact_prompt_tokens,
+                "message_count": state.exact_prompt_message_count,
+            }
         session.react_llm_cache_state = json.dumps(
-            (
-                {"previous_response_id": state.previous_response_id}
-                if state.previous_response_id
-                else {}
-            ),
+            cache_state_payload,
             ensure_ascii=False,
         )
         session.updated_at = datetime.now(UTC)
@@ -555,6 +606,48 @@ class ReactRuntimeService:
         Returns:
             The normalized previous response ID, or `None`.
         """
+        payload = self._load_cache_state_payload(session)
+        if payload is None:
+            return None
+
+        previous_response_id = payload.get("previous_response_id")
+        if isinstance(previous_response_id, str) and previous_response_id.strip():
+            return previous_response_id.strip()
+        return None
+
+    def _load_exact_prompt_tokens(self, session: Session) -> int | None:
+        """Load the exact prompt baseline token count from cache metadata."""
+        baseline = self._load_exact_prompt_usage_baseline(session)
+        if baseline is None:
+            return None
+        prompt_tokens = baseline.get("prompt_tokens")
+        if isinstance(prompt_tokens, int) and prompt_tokens > 0:
+            return prompt_tokens
+        return None
+
+    def _load_exact_prompt_message_count(self, session: Session) -> int | None:
+        """Load the exact prompt baseline message count from cache metadata."""
+        baseline = self._load_exact_prompt_usage_baseline(session)
+        if baseline is None:
+            return None
+        message_count = baseline.get("message_count")
+        if isinstance(message_count, int) and message_count >= 0:
+            return message_count
+        return None
+
+    def _load_exact_prompt_usage_baseline(
+        self,
+        session: Session,
+    ) -> dict[str, Any] | None:
+        """Load the persisted exact prompt baseline structure when available."""
+        cache_state_payload = self._load_cache_state_payload(session)
+        if cache_state_payload is None:
+            return None
+        baseline = cache_state_payload.get("exact_prompt_usage_baseline")
+        return baseline if isinstance(baseline, dict) else None
+
+    def _load_cache_state_payload(self, session: Session) -> dict[str, Any] | None:
+        """Parse the runtime cache-state JSON into a dictionary."""
         if not session.react_llm_cache_state:
             return None
 
@@ -567,13 +660,7 @@ class ReactRuntimeService:
             )
             return None
 
-        if not isinstance(payload, dict):
-            return None
-
-        previous_response_id = payload.get("previous_response_id")
-        if isinstance(previous_response_id, str) and previous_response_id.strip():
-            return previous_response_id.strip()
-        return None
+        return payload if isinstance(payload, dict) else None
 
     @staticmethod
     def _normalize_messages(raw_messages: Any) -> list[dict[str, Any]]:

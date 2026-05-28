@@ -255,6 +255,20 @@ class ReactSessionRuntimeDebugResponse(AppBaseModel):
         default=None,
         description="Raw serialized compact result as stored in the session row",
     )
+    exact_prompt_tokens: int | None = Field(
+        default=None,
+        description=(
+            "Latest exact full-request prompt token baseline persisted for this "
+            "session, when available"
+        ),
+    )
+    exact_prompt_message_count: int | None = Field(
+        default=None,
+        description=(
+            "Runtime message count captured when the latest exact prompt token "
+            "baseline was recorded"
+        ),
+    )
     updated_at: str = Field(
         ...,
         description="Session row update timestamp in ISO 8601 UTC format",
