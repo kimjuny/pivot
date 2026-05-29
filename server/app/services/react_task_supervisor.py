@@ -725,6 +725,8 @@ class ReactTaskSupervisor:
                     workspace_host_path
                 )
 
+                channel_context = _resolve_channel_context(db, running_task.session_id)
+
                 engine = ReactEngine(
                     llm=llm,
                     tool_manager=request_tool_manager,
@@ -800,6 +802,7 @@ class ReactTaskSupervisor:
                     turn_files=turn_files,
                     turn_attachments=turn_attachments,
                     delegation_agents=delegation_agents,
+                    channel_context=channel_context,
                 ):
                     await publish_engine_event(event_data)
 
@@ -1203,6 +1206,35 @@ class ReactTaskSupervisor:
 
 
 _SUPERVISOR: ReactTaskSupervisor | None = None
+
+
+def _resolve_channel_context(db: Any, session_id: str | None) -> str:
+    """Build a channel-awareness section if the session is bound to a ChannelSession."""
+    if not session_id:
+        return ""
+    from app.models.channel import AgentChannelBinding, ChannelSession
+    from sqlmodel import select
+
+    cs = db.exec(
+        select(ChannelSession).where(ChannelSession.pivot_session_id == session_id)
+    ).first()
+    if cs is None:
+        return ""
+
+    binding = db.get(AgentChannelBinding, cs.channel_binding_id)
+    if binding is None:
+        return ""
+
+    channel_name = binding.name or binding.channel_key
+    return (
+        "## Channel Context\n\n"
+        f"You are operating within a **{channel_name}** channel conversation. "
+        "The user is interacting with you through an external messaging platform.\n"
+        "- You can use the `automation` tool with `skip_confirm=True` to directly "
+        "create scheduled automations in this channel session.\n"
+        "- Results will be delivered back to the channel conversation automatically.\n"
+        "- Always confirm with the user (via CLARIFY) before creating an automation."
+    )
 
 
 def get_react_task_supervisor() -> ReactTaskSupervisor:

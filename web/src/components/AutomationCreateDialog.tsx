@@ -39,7 +39,7 @@ export interface AutomationProposal {
   promptTemplate: string;
   cron: string;
   timezone?: string;
-  sessionStrategy?: "reuse" | "isolate";
+  sessionStrategy?: "reuse" | "isolate" | "this_session";
 }
 
 interface AutomationDialogProps {
@@ -66,7 +66,7 @@ interface FormData {
   timeHour: string;
   timeMinute: string;
   timezone: string;
-  sessionStrategy: "reuse" | "isolate";
+  sessionStrategy: "reuse" | "isolate" | "this_session";
 }
 
 function buildDefaultFormData(): FormData {
@@ -497,6 +497,32 @@ export function AutomationCreateDialog({
                   </p>
                 </div>
               </label>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <label className="flex items-start gap-2 cursor-not-allowed opacity-50">
+                      <input
+                        type="radio"
+                        name="sessionStrategy"
+                        checked={formData.sessionStrategy === "this_session"}
+                        onChange={() => updateField("sessionStrategy", "this_session")}
+                        className="mt-1"
+                        disabled
+                      />
+                      <div>
+                        <p className="text-sm font-medium">Channel Session</p>
+                        <p className="text-xs text-muted-foreground">
+                          Run within the current channel conversation. Results are
+                          delivered back to the channel.
+                        </p>
+                      </div>
+                    </label>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Only available when created from a channel conversation
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           </Field>
         </div>

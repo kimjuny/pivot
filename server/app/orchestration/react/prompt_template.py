@@ -40,6 +40,7 @@ def build_runtime_system_prompt(
     tool_manager: ToolManager | None = None,
     skills: str = "[]",
     delegation_agents: str = "",
+    channel_context: str = "",
 ) -> str:
     """Build the stable system prompt used once for an entire session.
 
@@ -52,6 +53,7 @@ def build_runtime_system_prompt(
         tool_manager: Optional tool manager to describe available tools.
         skills: Runtime-visible skill metadata JSON for prompt injection.
         delegation_agents: Markdown section listing delegatable agents.
+        channel_context: Markdown section for channel environment awareness.
 
     Returns:
         Rendered system prompt text with tool catalog and skills embedded.
@@ -73,6 +75,12 @@ def build_runtime_system_prompt(
         )
     else:
         rendered = rendered.replace(delegation_section, "")
+
+    # Inject or strip channel context section
+    if channel_context:
+        rendered = rendered.replace("{{channel_context}}", channel_context)
+    else:
+        rendered = rendered.replace("\n{{channel_context}}", "")
 
     return rendered
 

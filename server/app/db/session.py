@@ -35,6 +35,9 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "reacttask",
     "reacttaskevent",
     "resourceaccess",
+    "automation",
+    "automation_run",
+    "sessiontaskqueue",
     "rolepermission",
     "session",
     "skill",
@@ -143,6 +146,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_skill_schema_compatibility()
     ensure_extension_schema_compatibility()
     ensure_delegation_schema_compatibility()
+    ensure_automation_schema_compatibility()
 
     from app.services.permission_service import PermissionService
     from app.services.skill_service import sync_skill_registry
@@ -591,3 +595,31 @@ def ensure_delegation_schema_compatibility() -> None:
             conn.execute(
                 text("ALTER TABLE agent ADD COLUMN delegation_description VARCHAR")
             )
+
+
+def ensure_automation_schema_compatibility() -> None:
+    """Apply additive schema updates for automation and session-task-queue tables."""
+    engine = get_engine()
+    inspector = inspect(engine)
+
+    if inspector.has_table("automation"):
+        columns = {column["name"] for column in inspector.get_columns("automation")}
+        with engine.begin() as conn:
+            if "channel_session_id" not in columns:
+                conn.execute(
+                    text("ALTER TABLE automation ADD COLUMN channel_session_id INTEGER")
+                )
+
+    if inspector.has_table("automation_run"):
+        columns = {column["name"] for column in inspector.get_columns("automation_run")}
+        with engine.begin() as conn:
+            if "delivery_status" not in columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE automation_run ADD COLUMN delivery_status VARCHAR(20)"
+                    )
+                )
+            if "delivery_error" not in columns:
+                conn.execute(
+                    text("ALTER TABLE automation_run ADD COLUMN delivery_error VARCHAR")
+                )

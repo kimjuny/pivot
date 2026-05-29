@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 _VALID_STATUSES = {"active", "paused", "disabled"}
-_VALID_SESSION_STRATEGIES = {"reuse", "isolate"}
+_VALID_SESSION_STRATEGIES = {"reuse", "isolate", "this_session"}
 
 
 class AutomationService:
@@ -103,6 +103,7 @@ class AutomationService:
         timeout_seconds: int = 300,
         notify_on_completion: bool = False,
         notify_on_failure: bool = True,
+        channel_session_id: int | None = None,
     ) -> Automation:
         """Create a new automation.
 
@@ -112,11 +113,12 @@ class AutomationService:
             name: Human-readable name.
             prompt_template: Message template with optional {{variables}}.
             trigger_config: JSON trigger configuration.
-            session_strategy: "reuse" or "isolate".
+            session_strategy: "reuse", "isolate", or "this_session".
             max_iterations: Optional override for agent max_iteration.
             timeout_seconds: Per-run timeout.
             notify_on_completion: Notify user on success.
             notify_on_failure: Notify user on failure.
+            channel_session_id: Bound ChannelSession for "this_session" strategy.
 
         Returns:
             The created automation row.
@@ -126,6 +128,8 @@ class AutomationService:
         """
         if session_strategy not in _VALID_SESSION_STRATEGIES:
             raise ValueError(f"Invalid session_strategy: {session_strategy}")
+        if session_strategy == "this_session" and channel_session_id is None:
+            raise ValueError("channel_session_id is required for this_session strategy")
         _validate_trigger_config(trigger_config)
 
         agent = AgentService(self.db).require_session_creation_ready(agent_id)
@@ -148,6 +152,7 @@ class AutomationService:
             timeout_seconds=timeout_seconds,
             notify_on_completion=notify_on_completion,
             notify_on_failure=notify_on_failure,
+            channel_session_id=channel_session_id,
             next_run_at=next_run_at,
         )
         self.db.add(automation)
@@ -416,7 +421,12 @@ class AutomationService:
 
         For "reuse" strategy, finds the existing session for this automation.
         For "isolate" strategy, always creates a new one.
+        For "this_session" strategy, returns the bound ChannelSession's
+        Pivot session.
         """
+        if automation.session_strategy == "this_session":
+            return self._resolve_channel_session(automation)
+
         if automation.session_strategy == "reuse":
             existing = list(
                 self.db.exec(
@@ -433,6 +443,27 @@ class AutomationService:
                 return existing[0]
 
         return self._create_automation_session(automation)
+
+    def _resolve_channel_session(self, automation: Automation) -> Session:
+        """Return the Pivot session backing the bound ChannelSession."""
+        from app.models.channel import ChannelSession as ChannelSessionModel
+
+        if automation.channel_session_id is None:
+            raise ValueError("this_session strategy requires channel_session_id")
+        cs = self.db.get(ChannelSessionModel, automation.channel_session_id)
+        if cs is None:
+            raise ValueError(
+                f"ChannelSession {automation.channel_session_id} not found"
+            )
+        session = self.db.exec(
+            select(Session).where(Session.session_id == cs.pivot_session_id)
+        ).first()
+        if session is None:
+            raise ValueError(
+                f"Pivot session {cs.pivot_session_id} behind ChannelSession "
+                f"{cs.id} not found"
+            )
+        return session
 
     def _create_automation_session(self, automation: Automation) -> Session:
         """Create a new session for an automation run."""

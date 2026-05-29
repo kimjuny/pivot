@@ -42,6 +42,7 @@ from app.models.react import (
     ReactTaskEvent,
 )
 from app.models.session import Session
+from app.models.session_task_queue import SessionTaskQueue
 from app.models.skill import Skill
 from app.models.skill_change_submission import SkillChangeSubmission
 from app.models.task_attachment import TaskAttachment
@@ -88,6 +89,7 @@ __all__ = [
     "Role",
     "RolePermission",
     "Session",
+    "SessionTaskQueue",
     "Skill",
     "SkillChangeSubmission",
     "TaskAttachment",

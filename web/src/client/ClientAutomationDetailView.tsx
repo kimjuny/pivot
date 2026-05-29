@@ -22,6 +22,12 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Table,
   TableBody,
   TableCell,
@@ -324,7 +330,11 @@ export function ClientAutomationDetailView({
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Context Strategy</p>
               <div className="text-sm">
-                {automation.session_strategy === "reuse" ? "Continuous" : "Independent"}
+                {automation.session_strategy === "reuse"
+                  ? "Continuous"
+                  : automation.session_strategy === "this_session"
+                    ? "Channel Session"
+                    : "Independent"}
               </div>
             </div>
             <div className="space-y-1">
@@ -339,6 +349,14 @@ export function ClientAutomationDetailView({
               <p className="text-xs font-medium text-muted-foreground">Next Run</p>
               <div className="text-sm">{formatTime(automation.next_run_at)}</div>
             </div>
+            {automation.channel_session_id != null && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">Channel</p>
+                <div className="text-sm">
+                  <Badge variant="outline">Connected</Badge>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -383,6 +401,7 @@ export function ClientAutomationDetailView({
                   <TableHead>Duration</TableHead>
                   <TableHead className="w-20">Tokens</TableHead>
                   <TableHead>Error</TableHead>
+                  <TableHead className="w-24">Delivery</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -433,6 +452,28 @@ export function ClientAutomationDetailView({
                       <TableCell>{tokenCount}</TableCell>
                       <TableCell className="max-w-[200px] truncate text-destructive">
                         {run.error_message || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {run.delivery_status === null ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : run.delivery_status === "delivered" ? (
+                          <span className="text-emerald-600">Delivered</span>
+                        ) : run.delivery_status === "pending" ? (
+                          <span className="text-muted-foreground">Pending</span>
+                        ) : (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <span className="text-destructive">Failed</span>
+                              </TooltipTrigger>
+                              {run.delivery_error && (
+                                <TooltipContent className="max-w-xs">
+                                  {run.delivery_error}
+                                </TooltipContent>
+                              )}
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

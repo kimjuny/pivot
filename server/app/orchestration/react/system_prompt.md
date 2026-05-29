@@ -152,3 +152,5 @@ Available skills with metadata (`name`, `description`, `path`). If you need a sk
 ## Delegation Agents
 
 {{delegation_agents}}
+
+{{channel_context}}

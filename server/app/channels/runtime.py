@@ -27,11 +27,16 @@ def _load_json_object(raw_value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _build_binding_fingerprint(binding: AgentChannelBinding) -> str:
-    """Build a restart fingerprint from user-controlled binding config only.
+def _build_binding_fingerprint(
+    binding: AgentChannelBinding,
+    provider_version: str | None = None,
+) -> str:
+    """Build a restart fingerprint from binding config and provider version.
 
     Why: runtime health updates must not look like credential changes, otherwise
     the supervisor will continuously restart healthy websocket bindings.
+    Including ``provider_version`` ensures the runtime is restarted when the
+    backing extension is upgraded, so the new module code takes effect.
     """
     return json.dumps(
         {
@@ -39,6 +44,7 @@ def _build_binding_fingerprint(binding: AgentChannelBinding) -> str:
             "enabled": binding.enabled,
             "auth": _load_json_object(binding.auth_config),
             "runtime": _load_json_object(binding.runtime_config),
+            "provider_version": provider_version,
         },
         sort_keys=True,
         ensure_ascii=False,
@@ -120,7 +126,10 @@ class ChannelRuntimeManager:
             binding_id = row.id
             if binding_id is None:
                 continue
-            fingerprint = _build_binding_fingerprint(row)
+            fingerprint = _build_binding_fingerprint(
+                row,
+                provider_version=provider.manifest.extension_version,
+            )
             desired_bindings[binding_id] = fingerprint
 
             existing_task = self._binding_tasks.get(binding_id)

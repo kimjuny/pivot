@@ -605,13 +605,7 @@ class ChannelService:
                 raise ValueError("Linked Pivot user not found.")
 
             pivot_session = session_service.get_session(existing.pivot_session_id)
-            if (
-                pivot_session is None
-                or session_service.has_session_exceeded_idle_timeout(
-                    pivot_session,
-                    now=now,
-                )
-            ):
+            if pivot_session is None:
                 if user.id is None:
                     msg = "User must be persisted before creating a session"
                     raise ValueError(msg)

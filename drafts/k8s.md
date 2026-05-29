@@ -168,3 +168,51 @@ At the infrastructure level:
 
 This keeps local development simple while preserving a clean path to
 multi-node, production-grade deployment.
+
+## WebSocket Channel Binding Leader Election
+
+### Problem
+
+Channel extensions that use WebSocket long connections (Work WeChat, and
+potentially Feishu, DingTalk, or any future `TransportMode="websocket"`
+provider) maintain a persistent inbound socket per binding. When multiple
+Pivot instances run behind a load balancer, each instance may try to
+establish its own WebSocket connection for the same binding credentials.
+
+Most upstream platforms enforce **at most one active connection per
+credential set** — a new connection silently kicks the previous one
+(`disconnected_event` in Work WeChat). Without coordination, N pods will
+fight in a reconnect loop, causing:
+
+- Flapping connections and dropped inbound events
+- Duplicate outbound sends if multiple instances share a client registry
+- Wasted resources maintaining doomed connections
+
+### Direction
+
+Introduce binding-level leader election so that exactly one Pivot instance
+owns the WebSocket runtime for a given `AgentChannelBinding` at any time.
+
+Sketch:
+
+1. `AgentChannelBinding` table gains a `runtime_owner` column (instance
+   identifier, e.g. `hostname:pid`) and a `runtime_lease_expires_at`
+   timestamp.
+2. `ChannelRuntimeManager._start_binding()` performs a CAS update:
+   claim the binding only if `runtime_owner IS NULL OR
+   runtime_lease_expires_at < now()`.
+3. The winning instance starts the runtime and periodically renews the
+   lease (via the existing `_reconcile_bindings()` loop).
+4. Losing instances skip the binding and check again on next reconcile.
+5. If the leader dies, its lease expires and another instance claims it.
+
+This is a general problem for **all WebSocket-based channel providers**, not
+just Work WeChat. The election mechanism should live in the core
+`ChannelRuntimeManager` and be transparent to individual provider
+implementations.
+
+### Out of Scope (for now)
+
+Single-instance deployments do not need election. The mechanism should be
+gated behind a config flag or detected by instance count so it does not add
+latency or complexity in dev/local setups.

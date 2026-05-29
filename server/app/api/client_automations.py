@@ -45,6 +45,7 @@ def _serialize_automation(automation: Automation) -> dict[str, Any]:
         "timeout_seconds": automation.timeout_seconds,
         "notify_on_completion": automation.notify_on_completion,
         "notify_on_failure": automation.notify_on_failure,
+        "channel_session_id": automation.channel_session_id,
         "last_run_at": (
             automation.last_run_at.replace(tzinfo=UTC).isoformat()
             if automation.last_run_at
@@ -86,6 +87,8 @@ def _serialize_run(
         "result_summary": run.result_summary,
         "error_message": run.error_message,
         "token_usage": run.token_usage,
+        "delivery_status": run.delivery_status,
+        "delivery_error": run.delivery_error,
     }
 
 
@@ -188,6 +191,7 @@ async def create_automation(
             timeout_seconds=request.timeout_seconds,
             notify_on_completion=request.notify_on_completion,
             notify_on_failure=request.notify_on_failure,
+            channel_session_id=request.channel_session_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -232,6 +236,7 @@ async def update_automation(
     automation = svc.get_automation_by_uuid(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
+    assert automation.id is not None  # persisted via get_automation_by_uuid
     try:
         updated = svc.update_automation(
             automation.id,
@@ -256,6 +261,7 @@ async def delete_automation(
     automation = svc.get_automation_by_uuid(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
+    assert automation.id is not None  # persisted via get_automation_by_uuid
     try:
         svc.delete_automation(automation.id, user_id=current_user.id)
     except ValueError as exc:
@@ -281,6 +287,7 @@ async def list_automation_runs(
     automation = svc.get_automation_by_uuid(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
+    assert automation.id is not None  # persisted via get_automation_by_uuid
     runs, total = svc.list_runs(
         automation.id,
         user_id=current_user.id,
@@ -290,7 +297,10 @@ async def list_automation_runs(
     session_ids = [r.session_id for r in runs if r.session_id]
     uuid_map = _build_session_uuid_map(db, session_ids)
     return AutomationRunListResponse(
-        runs=[AutomationRunResponse(**_serialize_run(r, session_uuid_map=uuid_map)) for r in runs],
+        runs=[
+            AutomationRunResponse(**_serialize_run(r, session_uuid_map=uuid_map))
+            for r in runs
+        ],
         total=total,
     )
 
@@ -312,6 +322,7 @@ async def get_automation_run(
     automation = svc.get_automation_by_uuid(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
+    assert automation.id is not None  # persisted via get_automation_by_uuid
     if automation.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     run = svc.get_run_by_uuid(run_id)
@@ -337,6 +348,7 @@ async def trigger_automation(
     automation = svc.get_automation_by_uuid(automation_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="Automation not found")
+    assert automation.id is not None  # persisted via get_automation_by_uuid
     if automation.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
     if automation.status != "active":
@@ -355,6 +367,7 @@ async def trigger_automation(
 
     from app.services.automation_executor import execute_automation_run
 
+    assert run.id is not None  # persisted via claim_run
     _bg_task = asyncio.create_task(execute_automation_run(run.id))  # noqa: RUF006
 
     return AutomationRunResponse(**_serialize_run(run))

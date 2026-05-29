@@ -245,7 +245,9 @@ class ReactContextUsageServiceTestCase(unittest.TestCase):
         )
 
         self.assertEqual(result.estimation_mode, "next_turn_preview")
-        self.assertEqual(result.session_tokens + result.preview_tokens, result.used_tokens)
+        self.assertEqual(
+            result.session_tokens + result.preview_tokens, result.used_tokens
+        )
         self.assertGreater(result.session_tokens, 123)
         self.assertGreater(result.preview_tokens, 0)
         self.assertEqual(result.session_message_count, 3)

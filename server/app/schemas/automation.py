@@ -15,11 +15,15 @@ class AutomationCreateRequest(AppBaseModel):
     trigger_config: str = Field(
         description='JSON: {"cron": "0 9 * * 1-5", "timezone": "Asia/Shanghai"}',
     )
-    session_strategy: str = Field(default="reuse", pattern="^(reuse|isolate)$")
+    session_strategy: str = Field(
+        default="reuse",
+        pattern=r"^(reuse|isolate|this_session)$",
+    )
     max_iterations: int | None = Field(default=None)
     timeout_seconds: int = Field(default=300)
     notify_on_completion: bool = Field(default=False)
     notify_on_failure: bool = Field(default=True)
+    channel_session_id: int | None = Field(default=None)
 
 
 class AutomationUpdateRequest(AppBaseModel):
@@ -31,8 +35,11 @@ class AutomationUpdateRequest(AppBaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     prompt_template: str | None = Field(default=None, min_length=1)
     trigger_config: str | None = Field(default=None)
-    session_strategy: str | None = Field(default=None, pattern="^(reuse|isolate)$")
-    status: str | None = Field(default=None, pattern="^(active|paused|disabled)$")
+    session_strategy: str | None = Field(
+        default=None,
+        pattern=r"^(reuse|isolate|this_session)$",
+    )
+    status: str | None = Field(default=None, pattern=r"^(active|paused|disabled)$")
     max_iterations: int | None = Field(default=None)
     timeout_seconds: int | None = Field(default=None)
     notify_on_completion: bool | None = Field(default=None)
@@ -56,6 +63,7 @@ class AutomationResponse(AppBaseModel):
     timeout_seconds: int
     notify_on_completion: bool
     notify_on_failure: bool
+    channel_session_id: int | None
     last_run_at: str | None
     next_run_at: str | None
     created_at: str
@@ -78,3 +86,5 @@ class AutomationRunResponse(AppBaseModel):
     result_summary: str | None
     error_message: str | None
     token_usage: str | None
+    delivery_status: str | None
+    delivery_error: str | None

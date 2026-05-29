@@ -1804,7 +1804,8 @@ class ReactEngine:
                 eager_state.result_by_call_id[tool_call.id] for tool_call in batch_calls
             ]
             if self._extract_pivot_action_from_tool_results(
-                batch_results, category_filter="approval",
+                batch_results,
+                category_filter="approval",
             ):
                 await self._skip_unstarted_eager_tool_calls(
                     eager_state,
@@ -2054,7 +2055,8 @@ class ReactEngine:
                         ]
                         pending_user_action = (
                             self._extract_pivot_action_from_tool_results(
-                                tool_results, category_filter="approval",
+                                tool_results,
+                                category_filter="approval",
                             )
                         )
                         tokens_data = self.state_service.finalize_partial_tool_error(
@@ -2192,7 +2194,8 @@ class ReactEngine:
                             result_by_call_id[tool_call.id] for tool_call in batch_calls
                         ]
                         if self._extract_pivot_action_from_tool_results(
-                            batch_results, category_filter="approval",
+                            batch_results,
+                            category_filter="approval",
                         ):
                             break
                         continue
@@ -2240,7 +2243,8 @@ class ReactEngine:
                         if tool_call.id in result_by_call_id
                     ]
                     if self._extract_pivot_action_from_tool_results(
-                        batch_results, category_filter="approval",
+                        batch_results,
+                        category_filter="approval",
                     ):
                         should_stop_after_batch = True
                     if should_stop_after_batch:
@@ -2279,7 +2283,8 @@ class ReactEngine:
                 item.to_dict() for item in action.step_status_update
             ]
             pending_user_action = self._extract_pivot_action_from_tool_results(
-                tool_results, category_filter="approval",
+                tool_results,
+                category_filter="approval",
             )
             self.state_service.finalize_success(
                 task=task,
@@ -2368,6 +2373,7 @@ class ReactEngine:
         turn_files: list[FileAssetListItem] | None = None,
         turn_attachments: list[dict[str, Any]] | None = None,
         delegation_agents: str = "",
+        channel_context: str = "",
     ) -> AsyncIterator[dict[str, Any]]:
         """
         Execute complete ReAct task with streaming events.
@@ -2394,6 +2400,8 @@ class ReactEngine:
             turn_user_message: User input of the current turn (used for chat history).
             turn_files: Uploaded file summaries for chat history and prompting.
             turn_attachments: Attachment path hints for the first iteration payload.
+            delegation_agents: Markdown section listing delegatable agents.
+            channel_context: Markdown section for channel environment awareness.
 
         Yields:
             Stream events for each recursion cycle
@@ -2407,6 +2415,7 @@ class ReactEngine:
             tool_manager=self.tool_manager,
             skills=skills_metadata_json,
             delegation_agents=delegation_agents,
+            channel_context=channel_context,
         )
         self._delegation_agents = delegation_agents
 
@@ -2711,9 +2720,7 @@ class ReactEngine:
                                 "delta": preview_message,
                                 "timestamp": preview_timestamp,
                                 "data": {
-                                    "current_plan": build_current_plan_payload(
-                                        context
-                                    ),
+                                    "current_plan": build_current_plan_payload(context),
                                     "session_title": "",
                                 },
                             }
@@ -2931,9 +2938,8 @@ class ReactEngine:
                         )
                 else:
                     token_usage = event_data.get("tokens")
-                    if (
-                        not used_incremental_request_messages
-                        and isinstance(token_usage, dict)
+                    if not used_incremental_request_messages and isinstance(
+                        token_usage, dict
                     ):
                         prompt_tokens = token_usage.get("prompt_tokens")
                         if isinstance(prompt_tokens, int) and prompt_tokens > 0:

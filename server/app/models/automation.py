@@ -61,8 +61,15 @@ class Automation(SQLModel, table=True):
     # Session strategy
     session_strategy: str = Field(
         default="reuse",
-        max_length=10,
-        description='"reuse" shares one session; "isolate" creates new per run',
+        max_length=15,
+        description='"reuse" shares one session; "isolate" creates new per run; "this_session" runs in the bound ChannelSession',
+    )
+
+    # Channel binding (set when session_strategy == "this_session")
+    channel_session_id: int | None = Field(
+        default=None,
+        foreign_key="channelsession.id",
+        index=True,
     )
 
     # Status
@@ -152,6 +159,14 @@ class AutomationRun(SQLModel, table=True):
         default=None,
         description='JSON: {"prompt": x, "completion": y}',
     )
+
+    # Channel delivery tracking
+    delivery_status: str | None = Field(
+        default=None,
+        max_length=20,
+        description="None | pending | delivered | failed",
+    )
+    delivery_error: str | None = Field(default=None)
 
     # Relations
     automation: Automation | None = Relationship(back_populates="runs")

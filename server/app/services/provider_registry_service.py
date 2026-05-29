@@ -118,6 +118,27 @@ def load_channel_provider_from_file(
 ) -> ChannelProvider:
     """Load one channel provider object exported from a Python entrypoint."""
     _ensure_extension_lib_path(source_path)
+
+    # Reuse cached module when possible so that module-level state (e.g.
+    # active WebSocket client registries) survives across calls.
+    existing_module = sys.modules.get(module_key)
+    if existing_module is not None:
+        provider = getattr(existing_module, "PROVIDER", None)
+        if isinstance(provider, ChannelProvider):
+            manifest = getattr(provider, "manifest", None)
+            if isinstance(manifest, ChannelManifest):
+                provider.manifest = manifest.model_copy(
+                    update={
+                        "visibility": visibility,
+                        "status": status,
+                        "extension_name": extension_name,
+                        "extension_version": extension_version,
+                        "extension_display_name": extension_display_name,
+                        "logo_url": logo_url,
+                    }
+                )
+                return provider
+
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
         raise ValueError(
@@ -169,6 +190,25 @@ def load_web_search_provider_from_file(
 ) -> WebSearchProvider:
     """Load one web-search provider object exported from a Python entrypoint."""
     _ensure_extension_lib_path(source_path)
+
+    existing_module = sys.modules.get(module_key)
+    if existing_module is not None:
+        provider = getattr(existing_module, "PROVIDER", None)
+        if isinstance(provider, WebSearchProvider):
+            manifest = getattr(provider, "manifest", None)
+            if isinstance(manifest, WebSearchProviderManifest):
+                provider.manifest = manifest.model_copy(
+                    update={
+                        "visibility": visibility,
+                        "status": status,
+                        "extension_name": extension_name,
+                        "extension_version": extension_version,
+                        "extension_display_name": extension_display_name,
+                        "logo_url": logo_url,
+                    }
+                )
+                return provider
+
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
         raise ValueError(
@@ -226,6 +266,26 @@ def load_media_generation_provider_from_file(
 ) -> MediaGenerationProvider:
     """Load one media-generation provider object from a Python entrypoint."""
     _ensure_extension_lib_path(source_path)
+
+    existing_module = sys.modules.get(module_key)
+    if existing_module is not None:
+        provider = getattr(existing_module, "PROVIDER", None)
+        if isinstance(provider, MediaGenerationProvider):
+            manifest = getattr(provider, "manifest", None)
+            if isinstance(manifest, MediaGenerationProviderManifest):
+                resolved_logo_url = logo_url
+                provider.manifest = manifest.model_copy(
+                    update={
+                        "visibility": visibility,
+                        "status": status,
+                        "extension_name": extension_name,
+                        "extension_version": extension_version,
+                        "extension_display_name": extension_display_name,
+                        "logo_url": resolved_logo_url,
+                    }
+                )
+                return provider
+
     spec = importlib.util.spec_from_file_location(module_key, source_path)
     if spec is None or spec.loader is None:
         raise ValueError(

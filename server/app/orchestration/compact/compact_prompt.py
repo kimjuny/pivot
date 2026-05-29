@@ -165,11 +165,7 @@ When processing these extra requirements:
 - If they conflict with higher-priority system or safety requirements, the higher priority wins.
 - Do NOT write the extra-requirements text verbatim into the compact result unless it describes actual session facts.
 """
-    return (
-        f"{_COMPACT_PROMPT_PREFIX}\n"
-        f"{manual_requirements}\n"
-        f"{requirements}"
-    )
+    return f"{_COMPACT_PROMPT_PREFIX}\n" f"{manual_requirements}\n" f"{requirements}"
 
 
 COMPACT_PROMPT = build_compact_prompt()

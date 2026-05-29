@@ -14,12 +14,13 @@ export interface ClientAutomation {
   trigger_type: string;
   trigger_config: string;
   prompt_template: string;
-  session_strategy: "reuse" | "isolate";
+  session_strategy: "reuse" | "isolate" | "this_session";
   status: "active" | "paused" | "disabled";
   max_iterations: number | null;
   timeout_seconds: number;
   notify_on_completion: boolean;
   notify_on_failure: boolean;
+  channel_session_id: number | null;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string;
@@ -43,6 +44,8 @@ export interface ClientAutomationRun {
   result_summary: string | null;
   error_message: string | null;
   token_usage: string | null;
+  delivery_status: string | null;
+  delivery_error: string | null;
 }
 
 /**
@@ -69,11 +72,12 @@ export interface ClientAutomationCreatePayload {
   agent_id: number;
   prompt_template: string;
   trigger_config: string;
-  session_strategy?: "reuse" | "isolate";
+  session_strategy?: "reuse" | "isolate" | "this_session";
   max_iterations?: number | null;
   timeout_seconds?: number;
   notify_on_completion?: boolean;
   notify_on_failure?: boolean;
+  channel_session_id?: number | null;
 }
 
 /**
