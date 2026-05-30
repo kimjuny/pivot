@@ -453,6 +453,58 @@ class FileService:
                 created_at=now,
                 updated_at=now,
             )
+        elif upload_kind == "raw":
+            extension = self._extract_extension(normalized_name) or "bin"
+            size_bytes = len(file_bytes)
+            if size_bytes == 0:
+                raise ValueError("Uploaded file is empty.")
+            max_file_size = int(self.settings.MAX_FILE_SIZE)
+            if size_bytes > max_file_size:
+                raise ValueError(
+                    f"File exceeds the {max_file_size // (1024 * 1024)}MB upload limit."
+                )
+            mime_type = "application/octet-stream"
+            stored_name = f"{file_id}.{extension}"
+            object_key = self.build_upload_object_key(
+                user_id=user_id,
+                file_id=file_id,
+                stored_name=stored_name,
+            )
+            try:
+                stored_original = object_storage.put_bytes(
+                    object_key,
+                    file_bytes,
+                    content_type=mime_type,
+                )
+            except OSError as err:
+                object_storage.delete(object_key)
+                raise ValueError("Failed to persist uploaded file.") from err
+
+            file_asset = FileAsset(
+                file_id=file_id,
+                user_id=user_id,
+                source=source,
+                original_name=normalized_name,
+                stored_name=stored_name,
+                storage_backend=stored_original.storage_backend,
+                object_key=stored_original.object_key,
+                kind="raw",
+                mime_type=mime_type,
+                format=extension.upper(),
+                extension=extension,
+                size_bytes=size_bytes,
+                width=0,
+                height=0,
+                page_count=None,
+                markdown_object_key=None,
+                can_extract_text=False,
+                suspected_scanned=False,
+                text_encoding=None,
+                expires_at=now
+                + timedelta(minutes=int(self.settings.FILE_EXPIRE_MINUTES)),
+                created_at=now,
+                updated_at=now,
+            )
         else:
             verified_image = self.verify_image_upload(normalized_name, file_bytes)
             stored_name = f"{file_id}.{verified_image.extension}"
@@ -998,14 +1050,18 @@ class FileService:
 
     @staticmethod
     def _infer_upload_kind(filename: str) -> str:
-        """Infer whether the upload should be processed as image or document."""
+        """Infer whether the upload should be processed as image, document, or raw."""
         extension = FileService._extract_extension(filename)
         if (
             extension in _ALLOWED_DOCUMENT_TYPES
             or extension in _LEGACY_OFFICE_REPLACEMENTS
         ):
             return "document"
-        return "image"
+        if extension in {
+            ext for exts in _ALLOWED_IMAGE_FORMATS.values() for ext in [exts[0]]
+        }:
+            return "image"
+        return "raw"
 
     @staticmethod
     def _detect_text_encoding(file_bytes: bytes, extension: str) -> str | None:

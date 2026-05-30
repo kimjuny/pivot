@@ -97,6 +97,8 @@ class SessionListItem(AppBaseModel):
     runtime_status: str = "idle"
     title: str | None = None
     is_pinned: bool = False
+    channel_key: str | None = None
+    channel_logo_url: str | None = None
     created_at: str
     updated_at: str
 

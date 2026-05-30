@@ -7,6 +7,7 @@ from datetime import UTC
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from app.api.permissions import permissions
+from app.api.session import enrich_sessions_with_channel_info
 from app.crud.llm import llm as llm_crud
 from app.models.access import AccessLevel
 from app.schemas.extension import (
@@ -263,6 +264,11 @@ async def get_chat_bootstrap(
                     updated_at=s.updated_at.replace(tzinfo=UTC).isoformat(),
                 )
             )
+        enrich_sessions_with_channel_info(
+            db,
+            [s.session_id for s in raw_sessions],
+            sessions_data,
+        )
 
     project_svc = ProjectService(db)
     projects_data: list[ProjectResponse] = []

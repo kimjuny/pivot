@@ -663,7 +663,6 @@ export function ChatComposer({
           <input
             ref={documentInputRef}
             type="file"
-            accept=".pdf,.docx,.pptx,.xlsx,.md,.markdown"
             multiple
             className="hidden"
             onChange={onDocumentInputChange}

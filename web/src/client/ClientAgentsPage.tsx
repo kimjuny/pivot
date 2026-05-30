@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, Clock, Loader2 } from "lucide-react";
+import { Bot, Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,14 @@ import ClientUserMenu from "@/client/ClientUserMenu";
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import type { Agent } from "@/types";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
+import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 function sortClientSessions(
   sessions: ClientSessionListItem[],
@@ -210,18 +218,25 @@ function ClientAgentsPage() {
 
           <div className="flex-1">
             {isLoading ? (
-              <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                <span>Loading agents…</span>
-              </div>
+              <CenteredLoadingIndicator label="Loading agents..." className="min-h-[50vh]" />
             ) : error ? (
               <div className="py-12 text-sm text-destructive">{error}</div>
             ) : filteredAgents.length === 0 ? (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                {agents.length === 0
-                  ? "No agents available yet."
-                  : "No agents match your search."}
-              </div>
+              <Empty>
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Bot className="size-6" />
+                  </EmptyMedia>
+                  <EmptyTitle>
+                    {agents.length === 0 ? "No agents yet" : "No results"}
+                  </EmptyTitle>
+                  <EmptyDescription>
+                    {agents.length === 0
+                      ? "No agents are available to chat with."
+                      : "No agents match your search. Try a different keyword."}
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <div className="flex flex-col">
                 {filteredAgents.map((agent) => (

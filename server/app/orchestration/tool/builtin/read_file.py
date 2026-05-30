@@ -350,9 +350,9 @@ def _read_image(path: str) -> dict[str, object]:
 @tool(
     description=(
         "Read a file under /workspace. Auto-selects reading strategy by extension: "
-        "text/code files get line-numbered output, documents (pdf/docx/pptx/xlsx) "
-        "get Docling-converted markdown, images (png/jpg/jpeg/webp) are made visible "
-        "to the model."
+        "text/code files (and any unknown extension) get line-numbered output, "
+        "documents (pdf/docx/pptx/xlsx) get Docling-converted markdown, "
+        "images (png/jpg/jpeg/webp) are made visible to the model."
     ),
 )
 def read_file(
@@ -374,8 +374,8 @@ def read_file(
     """Read a file under ``/workspace``. Automatically selects the appropriate
     reading strategy based on file extension:
 
-    - **Text/code files** (.py, .js, .json, .yaml, .md, etc.): Returns
-      line-numbered content with pagination hints.
+    - **Text/code files** (.py, .js, .json, .yaml, .md, .csv, .txt, etc.) and
+      any unknown extension: Returns line-numbered content with pagination hints.
     - **Documents** (.pdf, .docx, .pptx, .xlsx): Returns Docling-converted
       markdown content.
     - **Images** (.png, .jpg, .jpeg, .webp): Makes the image visible to the
@@ -395,7 +395,7 @@ def read_file(
     """
     file_type = _classify_extension(path)
 
-    if file_type == "text":
+    if file_type == "text" or file_type == "unknown":
         if start_line < 1:
             raise ValueError("start_line must be greater than or equal to 1.")
         if max_lines < 1:
@@ -410,8 +410,4 @@ def read_file(
     if file_type == "image":
         return _read_image(path)
 
-    raise ValueError(
-        f"Unsupported file type: {path!r}. "
-        f"Supported: text/code, documents (pdf/docx/pptx/xlsx), "
-        f"images (png/jpg/jpeg/webp)."
-    )
+    raise AssertionError(f"Unhandled file type: {file_type}")

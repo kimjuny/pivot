@@ -8,6 +8,7 @@ import {
   Folder,
   FolderUp,
   Loader2,
+  MessageSquare,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -412,7 +413,7 @@ export function SessionSidebar({
               }}
               className={`h-9 gap-0 rounded-xl px-2.5 pr-8 text-[13px] ${SIDEBAR_ITEM_HOVER_CLASS}`}
             >
-              <span
+              <div
                 data-testid={`session-running-indicator-${session.session_id}`}
                 aria-hidden={!isRunning}
                 className={`flex shrink-0 items-center justify-center overflow-hidden transition-[width,margin,opacity] duration-200 ease-out ${
@@ -425,7 +426,21 @@ export function SessionSidebar({
                     aria-hidden="true"
                   />
                 ) : null}
-              </span>
+              </div>
+              {session.channel_key ? (
+                <span className="mr-1.5 flex shrink-0 items-center justify-center">
+                  {session.channel_logo_url ? (
+                    <img
+                      src={session.channel_logo_url}
+                      alt=""
+                      className="h-3.5 w-3.5 rounded-sm"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <MessageSquare className="h-3.5 w-3.5 text-sidebar-foreground/45" />
+                  )}
+                </span>
+              ) : null}
               <span className="min-w-0 flex-1 truncate transition-[transform] duration-200 ease-out">
                 {getSessionTitle(session)}
               </span>

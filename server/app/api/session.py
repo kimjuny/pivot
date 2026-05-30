@@ -6,6 +6,7 @@ from typing import Literal, cast
 from app.api.auth import get_current_user
 from app.api.dependencies import get_db
 from app.models.access import AccessLevel
+from app.models.channel import AgentChannelBinding, ChannelSession
 from app.models.session import Session
 from app.models.user import User
 from app.schemas.session import (
@@ -28,14 +29,66 @@ from app.services.access_service import AccessService
 from app.services.agent_service import AgentService
 from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.permission_service import PermissionService
+from app.services.provider_registry_service import ProviderRegistryService
 from app.services.session_service import (
     SESSION_METADATA_UNSET,
     SessionService,
 )
 from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session as DBSession
+from sqlmodel import Session as DBSession, col, select
 
 router = APIRouter()
+
+
+def enrich_sessions_with_channel_info(
+    db: DBSession,
+    session_ids: list[str],
+    session_items: list[SessionListItem],
+) -> None:
+    """Batch-enrich SessionListItem objects with channel_key and channel_logo_url."""
+    if not session_ids:
+        return
+    channel_session_rows = list(
+        db.exec(
+            select(ChannelSession).where(
+                col(ChannelSession.pivot_session_id).in_(session_ids)
+            )
+        ).all()
+    )
+    if not channel_session_rows:
+        return
+    binding_ids = list({cs.channel_binding_id for cs in channel_session_rows})
+    bindings = list(
+        db.exec(
+            select(AgentChannelBinding).where(
+                col(AgentChannelBinding.id).in_(binding_ids)
+            )
+        ).all()
+    )
+    binding_map = {b.id: b for b in bindings}
+
+    # Resolve logo_url per unique channel_key (one provider-registry call, not N).
+    unique_keys = {b.channel_key for b in bindings}
+    logo_url_map: dict[str, str | None] = {}
+    registry = ProviderRegistryService(db)
+    providers = registry.list_channel_providers()
+    for provider in providers:
+        if provider.manifest.key in unique_keys:
+            logo_url_map[provider.manifest.key] = provider.manifest.logo_url
+
+    session_channel_map: dict[str, tuple[str, str | None]] = {}
+    for cs in channel_session_rows:
+        binding = binding_map.get(cs.channel_binding_id)
+        if binding:
+            session_channel_map[cs.pivot_session_id] = (
+                binding.channel_key,
+                logo_url_map.get(binding.channel_key),
+            )
+    for item in session_items:
+        ch = session_channel_map.get(item.session_id)
+        if ch:
+            item.channel_key = ch[0]
+            item.channel_logo_url = ch[1]
 
 
 def _session_access_level(
@@ -262,6 +315,13 @@ async def list_sessions(
                 updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
             )
         )
+
+    # Batch-enrich sessions with channel info (ChannelSession → AgentChannelBinding → manifest)
+    enrich_sessions_with_channel_info(
+        db,
+        [s.session_id for s in visible_sessions],
+        session_items,
+    )
 
     return SessionListResponse(
         sessions=session_items,
