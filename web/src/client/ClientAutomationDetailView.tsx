@@ -36,6 +36,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
   type ClientAutomation,
   type ClientAutomationRun,
   getClientAutomationRuns,
@@ -117,11 +125,15 @@ export function ClientAutomationDetailView({
   onUpdated,
   onNavigateToSession,
 }: ClientAutomationDetailViewProps) {
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
   const [runs, setRuns] = useState<ClientAutomationRun[]>([]);
   const [totalRuns, setTotalRuns] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isTriggering, setIsTriggering] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+
+  const totalPages = Math.max(1, Math.ceil(totalRuns / PAGE_SIZE));
 
   const agentName =
     agents.find((a) => a.id === automation.agent_id)?.name ?? "Unknown";
@@ -130,10 +142,11 @@ export function ClientAutomationDetailView({
 
   const scheduleLabel = cronToLabel(automation.trigger_config);
 
-  const fetchRuns = useCallback(async () => {
+  const fetchRuns = useCallback(async (targetPage: number) => {
     setIsLoading(true);
     try {
-      const res = await getClientAutomationRuns(automation.automation_id, 50, 0);
+      const offset = (targetPage - 1) * PAGE_SIZE;
+      const res = await getClientAutomationRuns(automation.automation_id, PAGE_SIZE, offset);
       setRuns(res.runs);
       setTotalRuns(res.total);
     } catch {
@@ -144,8 +157,8 @@ export function ClientAutomationDetailView({
   }, [automation.automation_id]);
 
   useEffect(() => {
-    void fetchRuns();
-  }, [fetchRuns]);
+    void fetchRuns(page);
+  }, [page, fetchRuns]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -157,7 +170,7 @@ export function ClientAutomationDetailView({
       pollRef.current = setInterval(() => {
         void (async () => {
         try {
-          const res = await getClientAutomationRuns(automation.automation_id, 50, 0);
+          const res = await getClientAutomationRuns(automation.automation_id, PAGE_SIZE, 0);
           const run = res.runs.find((r) => r.run_id === runId);
           if (!run) return;
 
@@ -166,7 +179,7 @@ export function ClientAutomationDetailView({
               clearInterval(pollRef.current);
               pollRef.current = null;
             }
-            await fetchRuns();
+            await fetchRuns(page);
 
             const duration = formatDuration(run.started_at, run.finished_at);
             const isSuccess = run.status === "completed";
@@ -219,7 +232,7 @@ export function ClientAutomationDetailView({
         })();
       }, 3000);
     },
-    [automation.automation_id, automation.agent_id, automation.name, agent?.model_name, fetchRuns, onNavigateToSession],
+    [automation.automation_id, automation.agent_id, automation.name, agent?.model_name, fetchRuns, onNavigateToSession, page],
   );
 
   useEffect(() => {
@@ -234,7 +247,8 @@ export function ClientAutomationDetailView({
       const run = await triggerClientAutomation(automation.automation_id);
       toast.success("Automation triggered");
       onTriggered();
-      await fetchRuns();
+      setPage(1);
+      await fetchRuns(1);
       startPollingForRun(run.run_id);
     } catch (err) {
       toast.error(
@@ -246,7 +260,7 @@ export function ClientAutomationDetailView({
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 pb-8">
       {/* Header row: back + actions */}
       <div
         className="staggered-fade-in-card flex items-center justify-between"
@@ -392,94 +406,132 @@ export function ClientAutomationDetailView({
               No runs yet
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead className="w-28">Status</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead className="w-20">Tokens</TableHead>
-                  <TableHead>Error</TableHead>
-                  <TableHead className="w-24">Delivery</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {runs.map((run, i) => {
-                  let tokenCount = "—";
-                  if (run.token_usage) {
-                    try {
-                      const usage = JSON.parse(run.token_usage) as {
-                        prompt?: number;
-                        completion?: number;
-                      };
-                      const total =
-                        (usage.prompt ?? 0) + (usage.completion ?? 0);
-                      tokenCount = total.toLocaleString();
-                    } catch {
-                      // keep "—"
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead className="w-28">Status</TableHead>
+                    <TableHead>Started</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead className="w-20">Tokens</TableHead>
+                    <TableHead>Error</TableHead>
+                    <TableHead className="w-24">Delivery</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {runs.map((run, i) => {
+                    let tokenCount = "—";
+                    if (run.token_usage) {
+                      try {
+                        const usage = JSON.parse(run.token_usage) as {
+                          prompt?: number;
+                          completion?: number;
+                        };
+                        const total =
+                          (usage.prompt ?? 0) + (usage.completion ?? 0);
+                        tokenCount = total.toLocaleString();
+                      } catch {
+                        // keep "—"
+                      }
                     }
-                  }
 
-                  const canViewChat =
-                    !!run.session_uuid && !!onNavigateToSession;
+                    const canViewChat =
+                      !!run.session_uuid && !!onNavigateToSession;
+                    const rowNumber = totalRuns - ((page - 1) * PAGE_SIZE) - i;
 
-                  return (
-                    <TableRow
-                      key={run.run_id}
-                      className={canViewChat ? "cursor-pointer hover:bg-accent/50" : undefined}
-                      onClick={() => {
-                        if (canViewChat && run.session_uuid) {
-                          onNavigateToSession(automation.agent_id, run.session_uuid);
-                        }
-                      }}
-                    >
-                      <TableCell className="text-muted-foreground">
-                        {totalRuns - i}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={statusVariant(run.status)}>
-                          {run.status === "running" && (
-                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    return (
+                      <TableRow
+                        key={run.run_id}
+                        className={canViewChat ? "cursor-pointer hover:bg-accent/50" : undefined}
+                        onClick={() => {
+                          if (canViewChat && run.session_uuid) {
+                            onNavigateToSession(automation.agent_id, run.session_uuid);
+                          }
+                        }}
+                      >
+                        <TableCell className="text-muted-foreground">
+                          {rowNumber}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={statusVariant(run.status)}>
+                            {run.status === "running" && (
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            )}
+                            {run.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>{formatTime(run.started_at)}</TableCell>
+                        <TableCell>
+                          {formatDuration(run.started_at, run.finished_at)}
+                        </TableCell>
+                        <TableCell>{tokenCount}</TableCell>
+                        <TableCell className="max-w-[200px] truncate text-destructive">
+                          {run.error_message || "—"}
+                        </TableCell>
+                        <TableCell>
+                          {run.delivery_status === null ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : run.delivery_status === "delivered" ? (
+                            <span className="text-emerald-600">Delivered</span>
+                          ) : run.delivery_status === "pending" ? (
+                            <span className="text-muted-foreground">Pending</span>
+                          ) : (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger>
+                                  <span className="text-destructive">Failed</span>
+                                </TooltipTrigger>
+                                {run.delivery_error && (
+                                  <TooltipContent className="max-w-xs">
+                                    {run.delivery_error}
+                                  </TooltipContent>
+                                )}
+                              </Tooltip>
+                            </TooltipProvider>
                           )}
-                          {run.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{formatTime(run.started_at)}</TableCell>
-                      <TableCell>
-                        {formatDuration(run.started_at, run.finished_at)}
-                      </TableCell>
-                      <TableCell>{tokenCount}</TableCell>
-                      <TableCell className="max-w-[200px] truncate text-destructive">
-                        {run.error_message || "—"}
-                      </TableCell>
-                      <TableCell>
-                        {run.delivery_status === null ? (
-                          <span className="text-muted-foreground">—</span>
-                        ) : run.delivery_status === "delivered" ? (
-                          <span className="text-emerald-600">Delivered</span>
-                        ) : run.delivery_status === "pending" ? (
-                          <span className="text-muted-foreground">Pending</span>
-                        ) : (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <span className="text-destructive">Failed</span>
-                              </TooltipTrigger>
-                              {run.delivery_error && (
-                                <TooltipContent className="max-w-xs">
-                                  {run.delivery_error}
-                                </TooltipContent>
-                              )}
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              {totalPages > 1 && (
+                <Pagination className="mt-4">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        className={page <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                    {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+                      .filter((p) => {
+                        if (totalPages <= 5) return true;
+                        if (p === 1 || p === totalPages) return true;
+                        return Math.abs(p - page) <= 1;
+                      })
+                      .map((p) => (
+                        <PaginationItem key={p}>
+                          <PaginationLink
+                            isActive={p === page}
+                            onClick={() => setPage(p)}
+                            className="cursor-pointer"
+                          >
+                            {p}
+                          </PaginationLink>
+                        </PaginationItem>
+                      ))}
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        className={page >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

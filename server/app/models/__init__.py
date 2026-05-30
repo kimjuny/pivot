@@ -45,6 +45,7 @@ from app.models.session import Session
 from app.models.session_task_queue import SessionTaskQueue
 from app.models.skill import Skill
 from app.models.skill_change_submission import SkillChangeSubmission
+from app.models.system_settings import SystemSettings
 from app.models.task_attachment import TaskAttachment
 from app.models.tool import ToolResource
 from app.models.user import User, UserLogin, UserResponse
@@ -92,6 +93,7 @@ __all__ = [
     "SessionTaskQueue",
     "Skill",
     "SkillChangeSubmission",
+    "SystemSettings",
     "TaskAttachment",
     "ToolResource",
     "User",

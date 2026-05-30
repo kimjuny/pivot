@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Info, Loader2 } from 'lucide-react';
 import { useAuth, isTokenValid, saveAuthSession, type User } from '../contexts/auth-core';
@@ -22,6 +22,19 @@ import {
 } from '@/components/ui/tooltip';
 
 /**
+ * Detect the user's current IANA timezone via the Intl API.
+ * Falls back to "UTC" when unavailable.
+ */
+function detectBrowserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+/**
  * First-time setup page for creating the initial admin account.
  *
  * Only accessible when no users exist in the database. After creating the
@@ -36,8 +49,20 @@ function SetupPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [email, setEmail] = useState('');
+  const [timeZone, setTimeZone] = useState(detectBrowserTimezone);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+
+  const timeZones = useMemo(
+    () => {
+      try {
+        return Intl.supportedValuesOf('timeZone');
+      } catch {
+        return ['UTC'];
+      }
+    },
+    [],
+  );
 
   /** Redirect to login if setup is already completed. */
   useEffect(() => {
@@ -91,6 +116,8 @@ function SetupPage() {
             username: username.trim(),
             password,
             email: email.trim() || null,
+            time_zone: timeZone,
+            language: 'en-US',
           }),
         });
 
@@ -233,6 +260,21 @@ function SetupPage() {
                   autoComplete="email"
                   disabled={isLoading}
                 />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="timezone">Timezone</Label>
+                <select
+                  id="timezone"
+                  value={timeZone}
+                  onChange={(e) => { setTimeZone(e.target.value); clearError(); }}
+                  disabled={isLoading}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {timeZones.map((tz) => (
+                    <option key={tz} value={tz}>{tz}</option>
+                  ))}
+                </select>
               </div>
 
               {errorMessage && (

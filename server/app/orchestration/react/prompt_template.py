@@ -112,6 +112,8 @@ def build_runtime_user_prompt(
     workspace_guidance: str = "",
     prefix_blocks: list[str] | None = None,
     suffix_blocks: list[str] | None = None,
+    *,
+    timezone_name: str | None = None,
 ) -> str:
     """Build the task bootstrap user prompt injected once per task.
 
@@ -133,6 +135,8 @@ def build_runtime_user_prompt(
             bootstrap template body.
         suffix_blocks: Additional prompt blocks inserted after the standard
             bootstrap template body.
+        timezone_name: IANA timezone name to use for displaying the current
+            time. When ``None``, falls back to the ``SYSTEM_TIME_ZONE`` env var.
 
     Returns:
         Rendered task prompt text with conditional sections injected.
@@ -140,7 +144,7 @@ def build_runtime_user_prompt(
     sections: list[str] = []
 
     base = _REACT_TASK_PROMPT.replace(
-        "{{system_time}}", _format_task_start_time()
+        "{{system_time}}", _format_task_start_time(timezone_name=timezone_name)
     ).strip()
     sections.append(base)
 

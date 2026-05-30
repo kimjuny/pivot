@@ -26,6 +26,7 @@ class Permission(StrEnum):
     MEDIA_GENERATION_MANAGE = "media_generation.manage"
     WEB_SEARCH_MANAGE = "web_search.manage"
     STORAGE_VIEW = "storage.view"
+    SETTINGS_MANAGE = "settings.manage"
 
 
 PERMISSION_METADATA: dict[Permission, dict[str, str]] = {
@@ -103,6 +104,11 @@ PERMISSION_METADATA: dict[Permission, dict[str, str]] = {
         "name": "View storage",
         "category": "System",
         "description": "View storage backend status.",
+    },
+    Permission.SETTINGS_MANAGE: {
+        "name": "Manage settings",
+        "category": "System",
+        "description": "Configure system-wide settings like timezone and language.",
     },
 }
 

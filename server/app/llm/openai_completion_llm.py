@@ -9,7 +9,7 @@ import logging
 import time
 import uuid
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, ClassVar
 
 import requests
 
@@ -45,7 +45,7 @@ class OpenAICompletionLLM(AbstractLLM):
     """
 
     DEFAULT_TIMEOUT = 120  # Request timeout in seconds
-    MAX_RETRIES = 3  # Maximum number of retry attempts
+    MAX_RETRIES: ClassVar[int] = 3  # Maximum retry attempts for transient HTTP errors
     QWEN_MAX_CACHE_MARKERS = 4
 
     def __init__(
@@ -288,6 +288,18 @@ class OpenAICompletionLLM(AbstractLLM):
         return normalized_kwargs
 
     @staticmethod
+    def _is_retryable_status(status_code: int, body_text: str) -> bool:
+        """Decide whether an HTTP error is transient enough to retry.
+
+        Retryable: 5xx, standard retryable 4xx (408/409/429), and any 4xx
+        whose body is empty (indicates server-side glitch, not client error).
+        """
+        if status_code in {500, 502, 503, 504, 408, 409, 429}:
+            return True
+        # 4xx with empty body — provider hiccup, not a bad payload.
+        return 400 <= status_code < 500 and not body_text.strip()
+
+    @staticmethod
     def _http_error_detail(response: requests.Response | None) -> str:
         """Build a concise provider-facing diagnostic string for failed responses."""
         if response is None:
@@ -358,6 +370,9 @@ class OpenAICompletionLLM(AbstractLLM):
     def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> Response:
         """Process a conversation with the LLM.
 
+        Retries transient HTTP errors (5xx, 429, 408, 409, and 4xx with
+        empty body) up to ``MAX_RETRIES`` times before giving up.
+
         Args:
             messages: List of message dictionaries with 'role' and 'content'
             **kwargs: Additional arguments for the chat completion
@@ -367,74 +382,116 @@ class OpenAICompletionLLM(AbstractLLM):
             Response: The structured response from the LLM
 
         Raises:
-            RuntimeError: If the API request fails
+            RuntimeError: If the API request fails after all retries
         """
-        try:
-            pivot_task_id = kwargs.pop("_pivot_task_id", "")
-            # Merge extra_config with kwargs (kwargs takes precedence)
-            merged_kwargs = {**self.extra_config, **kwargs}
-            normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
+        pivot_task_id = kwargs.pop("_pivot_task_id", "")
+        merged_kwargs = {**self.extra_config, **kwargs}
+        normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
 
-            url = f"{self.endpoint.rstrip('/')}/chat/completions"
-            headers = self._build_headers()
+        url = f"{self.endpoint.rstrip('/')}/chat/completions"
+        headers = self._build_headers()
 
-            request_messages: list[dict[str, Any]] = [
-                {
-                    **message,
-                    "content": to_openai_completion_content(message.get("content", "")),
-                }
-                for message in messages
-            ]
-            if self.cache_policy == "qwen-completion-block-cache":
-                request_messages = self._messages_with_qwen_cache_markers(
-                    request_messages
-                )
-
-            payload: dict[str, Any] = {
-                "model": self.model,
-                "messages": request_messages,
-                **normalized_kwargs,
+        request_messages: list[dict[str, Any]] = [
+            {
+                **message,
+                "content": to_openai_completion_content(message.get("content", "")),
             }
-            if (
-                self.cache_policy == "kimi-completion-prompt-cache-key"
-                and isinstance(pivot_task_id, str)
-                and pivot_task_id
-            ):
-                payload["prompt_cache_key"] = pivot_task_id
+            for message in messages
+        ]
+        if self.cache_policy == "qwen-completion-block-cache":
+            request_messages = self._messages_with_qwen_cache_markers(request_messages)
 
-            response = requests.post(
-                url, headers=headers, json=payload, timeout=self.timeout
-            )
-            response.raise_for_status()
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": request_messages,
+            **normalized_kwargs,
+        }
+        if (
+            self.cache_policy == "kimi-completion-prompt-cache-key"
+            and isinstance(pivot_task_id, str)
+            and pivot_task_id
+        ):
+            payload["prompt_cache_key"] = pivot_task_id
 
-            # print(f"response: \n{json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+        last_error: Exception | None = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                response = requests.post(
+                    url, headers=headers, json=payload, timeout=self.timeout
+                )
+                response.raise_for_status()
+                return self._parse_dict_response(response.json(), self.model)
 
-            return self._parse_dict_response(response.json(), self.model)
+            except requests.exceptions.HTTPError as e:
+                resp = getattr(e, "response", None)
+                status = resp.status_code if resp is not None else 0
+                body_text = ""
+                if resp is not None:
+                    with contextlib.suppress(Exception):
+                        body_text = (resp.text or "").strip()
+                detail = self._http_error_detail(resp)
 
-        except requests.exceptions.HTTPError as e:
-            response = getattr(e, "response", None)
-            text = self._http_error_detail(response)
-            logger.error(
-                "Chat Completions request failed endpoint=%s model=%s status=%s detail=%s",
-                self.endpoint,
-                self.model,
-                response.status_code if response is not None else "unknown",
-                text,
-            )
-            raise RuntimeError(
-                "OpenAI completion API request failed for "
-                f"{self.endpoint}: HTTP "
-                f"{response.status_code if response is not None else 'Unknown'} - {text}"
-            ) from e
-        except Exception as e:
-            raise RuntimeError(
-                f"OpenAI completion API request failed for {self.endpoint}: {e!s}"
-            ) from e
+                if (
+                    self._is_retryable_status(status, body_text)
+                    and attempt < self.MAX_RETRIES
+                ):
+                    logger.warning(
+                        "Chat Completions attempt %d/%d failed "
+                        "(transient HTTP %s). Retrying... endpoint=%s model=%s detail=%s",
+                        attempt,
+                        self.MAX_RETRIES,
+                        status,
+                        self.endpoint,
+                        self.model,
+                        detail,
+                    )
+                    last_error = e
+                    continue
+
+                logger.error(
+                    "Chat Completions request failed endpoint=%s model=%s status=%s detail=%s",
+                    self.endpoint,
+                    self.model,
+                    status,
+                    detail,
+                )
+                raise RuntimeError(
+                    "OpenAI completion API request failed for "
+                    f"{self.endpoint}: HTTP {status} - {detail}"
+                ) from e
+
+            except Exception as e:
+                if attempt < self.MAX_RETRIES:
+                    logger.warning(
+                        "Chat Completions attempt %d/%d failed "
+                        "(%s: %s). Retrying... endpoint=%s model=%s",
+                        attempt,
+                        self.MAX_RETRIES,
+                        type(e).__name__,
+                        e,
+                        self.endpoint,
+                        self.model,
+                    )
+                    last_error = e
+                    continue
+
+                raise RuntimeError(
+                    f"OpenAI completion API request failed for {self.endpoint}: {e!s}"
+                ) from e
+
+        # All retries exhausted.
+        raise RuntimeError(
+            f"OpenAI completion API request failed for {self.endpoint} "
+            f"after {self.MAX_RETRIES} attempts"
+        ) from last_error
 
     def chat_stream(
         self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> Iterator[Response]:
         """Process a conversation with the LLM in streaming mode.
+
+        Retries transient HTTP errors (5xx, 429, 408, 409, and 4xx with
+        empty body) up to ``MAX_RETRIES`` times before giving up.
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
@@ -445,79 +502,131 @@ class OpenAICompletionLLM(AbstractLLM):
             Response: A chunk of the structured response from the LLM
 
         Raises:
-            RuntimeError: If the API request fails
+            RuntimeError: If the API request fails after all retries
         """
-        try:
-            pivot_task_id = kwargs.pop("_pivot_task_id", "")
-            # Merge extra_config with kwargs (kwargs takes precedence)
-            merged_kwargs = {**self.extra_config, **kwargs}
-            normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
-            if self.cache_policy == "qwen-completion-block-cache":
-                normalized_kwargs = self._with_stream_usage_enabled(normalized_kwargs)
+        pivot_task_id = kwargs.pop("_pivot_task_id", "")
+        merged_kwargs = {**self.extra_config, **kwargs}
+        normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
+        if self.cache_policy == "qwen-completion-block-cache":
+            normalized_kwargs = self._with_stream_usage_enabled(normalized_kwargs)
 
-            url = f"{self.endpoint.rstrip('/')}/chat/completions"
-            headers = self._build_headers()
+        url = f"{self.endpoint.rstrip('/')}/chat/completions"
+        headers = self._build_headers()
 
-            request_messages: list[dict[str, Any]] = [
-                {
-                    **message,
-                    "content": to_openai_completion_content(message.get("content", "")),
-                }
-                for message in messages
-            ]
-            if self.cache_policy == "qwen-completion-block-cache":
-                request_messages = self._messages_with_qwen_cache_markers(
-                    request_messages
-                )
-
-            payload: dict[str, Any] = {
-                "model": self.model,
-                "messages": request_messages,
-                "stream": True,
-                **normalized_kwargs,
+        request_messages: list[dict[str, Any]] = [
+            {
+                **message,
+                "content": to_openai_completion_content(message.get("content", "")),
             }
-            if (
-                self.cache_policy == "kimi-completion-prompt-cache-key"
-                and isinstance(pivot_task_id, str)
-                and pivot_task_id
-            ):
-                payload["prompt_cache_key"] = pivot_task_id
+            for message in messages
+        ]
+        if self.cache_policy == "qwen-completion-block-cache":
+            request_messages = self._messages_with_qwen_cache_markers(request_messages)
 
-            with requests.post(
-                url, headers=headers, json=payload, timeout=self.timeout, stream=True
-            ) as response:
-                response.raise_for_status()
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": request_messages,
+            "stream": True,
+            **normalized_kwargs,
+        }
+        if (
+            self.cache_policy == "kimi-completion-prompt-cache-key"
+            and isinstance(pivot_task_id, str)
+            and pivot_task_id
+        ):
+            payload["prompt_cache_key"] = pivot_task_id
 
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode("utf-8")
-                        if line.startswith("data: "):
-                            data_str = line[len("data: ") :].strip()
-                            if data_str == "[DONE]":
-                                break
+        last_error: Exception | None = None
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            try:
+                with requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                    stream=True,
+                ) as response:
+                    response.raise_for_status()
 
-                            try:
-                                data_dict = json.loads(data_str)
-                                yield self._parse_dict_response(data_dict, self.model)
-                            except json.JSONDecodeError:
-                                continue
+                    for line in response.iter_lines():
+                        if line:
+                            line = line.decode("utf-8")
+                            if line.startswith("data: "):
+                                data_str = line[len("data: ") :].strip()
+                                if data_str == "[DONE]":
+                                    break
 
-        except requests.exceptions.HTTPError as e:
-            response = getattr(e, "response", None)
-            text = self._http_error_detail(response)
-            logger.error(
-                "Chat Completions streaming request failed endpoint=%s model=%s status=%s detail=%s",
-                self.endpoint,
-                self.model,
-                response.status_code if response is not None else "unknown",
-                text,
-            )
-            raise RuntimeError(
-                "OpenAI completion streaming failed for "
-                f"{self.endpoint}: HTTP "
-                f"{response.status_code if response is not None else 'Unknown'} - {text}"
-            ) from e
-        except Exception as e:
-            raise RuntimeError(
-                f"OpenAI completion streaming failed for {self.endpoint}: {e!s}"
-            ) from e
+                                try:
+                                    data_dict = json.loads(data_str)
+                                    yield self._parse_dict_response(
+                                        data_dict, self.model
+                                    )
+                                except json.JSONDecodeError:
+                                    continue
+                # Stream completed successfully — reset error state.
+                last_error = None
+                return
+
+            except requests.exceptions.HTTPError as e:
+                resp = getattr(e, "response", None)
+                status = resp.status_code if resp is not None else 0
+                body_text = ""
+                if resp is not None:
+                    with contextlib.suppress(Exception):
+                        body_text = (resp.text or "").strip()
+                detail = self._http_error_detail(resp)
+
+                if (
+                    self._is_retryable_status(status, body_text)
+                    and attempt < self.MAX_RETRIES
+                ):
+                    logger.warning(
+                        "Chat Completions streaming attempt %d/%d failed "
+                        "(transient HTTP %s). Retrying... endpoint=%s model=%s detail=%s",
+                        attempt,
+                        self.MAX_RETRIES,
+                        status,
+                        self.endpoint,
+                        self.model,
+                        detail,
+                    )
+                    last_error = e
+                    continue
+
+                logger.error(
+                    "Chat Completions streaming request failed endpoint=%s model=%s status=%s detail=%s",
+                    self.endpoint,
+                    self.model,
+                    status,
+                    detail,
+                )
+                raise RuntimeError(
+                    "OpenAI completion streaming failed for "
+                    f"{self.endpoint}: HTTP {status} - {detail}"
+                ) from e
+
+            except Exception as e:
+                # Non-HTTP errors (connection, timeout) are always retryable.
+                if attempt < self.MAX_RETRIES:
+                    logger.warning(
+                        "Chat Completions streaming attempt %d/%d failed "
+                        "(%s: %s). Retrying... endpoint=%s model=%s",
+                        attempt,
+                        self.MAX_RETRIES,
+                        type(e).__name__,
+                        e,
+                        self.endpoint,
+                        self.model,
+                    )
+                    last_error = e
+                    continue
+
+                raise RuntimeError(
+                    f"OpenAI completion streaming failed for {self.endpoint}: {e!s}"
+                ) from e
+
+        # All retries exhausted.
+        raise RuntimeError(
+            f"OpenAI completion streaming failed for {self.endpoint} "
+            f"after {self.MAX_RETRIES} attempts"
+        ) from last_error

@@ -38,6 +38,7 @@ _REQUIRED_TABLES: Final[set[str]] = {
     "automation",
     "automation_run",
     "sessiontaskqueue",
+    "system_settings",
     "rolepermission",
     "session",
     "skill",
@@ -147,6 +148,9 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_extension_schema_compatibility()
     ensure_delegation_schema_compatibility()
     ensure_automation_schema_compatibility()
+
+    # Seed the single system-settings row if the table is empty.
+    _seed_system_settings_defaults(engine)
 
     from app.services.permission_service import PermissionService
     from app.services.skill_service import sync_skill_registry
@@ -623,3 +627,20 @@ def ensure_automation_schema_compatibility() -> None:
                 conn.execute(
                     text("ALTER TABLE automation_run ADD COLUMN delivery_error VARCHAR")
                 )
+
+
+def _seed_system_settings_defaults(engine: Engine) -> None:
+    """Ensure the single ``system_settings`` row exists with defaults."""
+    inspector = inspect(engine)
+    if not inspector.has_table("system_settings"):
+        return
+
+    with engine.begin() as conn:
+        row_count = conn.execute(text("SELECT COUNT(*) FROM system_settings")).scalar()
+        if row_count == 0:
+            conn.execute(
+                text(
+                    "INSERT INTO system_settings (id, time_zone, language, updated_at) "
+                    "VALUES (1, 'Asia/Shanghai', 'en-US', CURRENT_TIMESTAMP)"
+                )
+            )

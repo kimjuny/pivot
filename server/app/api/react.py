@@ -216,7 +216,7 @@ async def _stream_supervisor_events(
                 event_id = payload.get("event_id")
                 if isinstance(event_id, int):
                     cursor = max(cursor, event_id)
-                yield f"data: {ReactStreamEvent(**payload).json()}\n\n"
+                yield f"data: {ReactStreamEvent(**payload).model_dump_json()}\n\n"
 
             while True:
                 if await raw_request.is_disconnected():
@@ -235,7 +235,7 @@ async def _stream_supervisor_events(
                     continue
                 if isinstance(event_id, int):
                     cursor = event_id
-                yield f"data: {ReactStreamEvent(**payload).json()}\n\n"
+                yield f"data: {ReactStreamEvent(**payload).model_dump_json()}\n\n"
         finally:
             await supervisor.unsubscribe(session_id=session_id, subscriber=subscriber)
 

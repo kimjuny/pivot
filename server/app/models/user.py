@@ -75,6 +75,8 @@ class SetupRequest(SQLModel):
     username: str
     password: str
     email: str | None = None
+    time_zone: str | None = None
+    language: str | None = None
 
 
 class SetupStatusResponse(SQLModel):

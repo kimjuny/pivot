@@ -382,6 +382,18 @@ async def initial_setup(
 
     access_token = create_access_token(data={"sub": str(user.id)})
 
+    # Persist initial system settings (timezone / language) if provided.
+    tz = setup_data.time_zone
+    lang = setup_data.language
+    if tz or lang:
+        from app.services.system_settings_service import SystemSettingsService
+
+        SystemSettingsService(session).update_settings(
+            time_zone=tz,
+            language=lang,
+            user_id=user.id,
+        )
+
     return UserResponse(
         id=user.id,
         username=user.username,

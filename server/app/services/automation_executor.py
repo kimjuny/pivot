@@ -18,29 +18,28 @@ from app.utils.logging_config import get_logger
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from zoneinfo import ZoneInfo
 
 logger = get_logger("automation.executor")
 
-_VARIABLE_RESOLVERS: dict[str, Callable[[], str]] = {}
+
+def _resolve_date(tz: ZoneInfo) -> str:
+    return datetime.now(tz).strftime("%Y-%m-%d")
 
 
-def _resolve_date() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%d")
+def _resolve_time(tz: ZoneInfo) -> str:
+    return datetime.now(tz).strftime("%H:%M")
 
 
-def _resolve_time() -> str:
-    return datetime.now(UTC).strftime("%H:%M")
+def _resolve_datetime(tz: ZoneInfo) -> str:
+    return datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _resolve_datetime() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+def _resolve_weekday(tz: ZoneInfo) -> str:
+    return datetime.now(tz).strftime("%A")
 
 
-def _resolve_weekday() -> str:
-    return datetime.now(UTC).strftime("%A")
-
-
-_VARIABLE_RESOLVERS = {
+_VARIABLE_RESOLVERS: dict[str, Callable[[ZoneInfo], str]] = {
     "date": _resolve_date,
     "time": _resolve_time,
     "datetime": _resolve_datetime,
@@ -49,12 +48,26 @@ _VARIABLE_RESOLVERS = {
 
 
 def render_prompt_template(
-    template: str, extra_vars: dict[str, str] | None = None
+    template: str,
+    extra_vars: dict[str, str] | None = None,
+    *,
+    timezone_name: str | None = None,
 ) -> str:
-    """Replace ``{{variable}}`` placeholders in a prompt template string."""
+    """Replace ``{{variable}}`` placeholders in a prompt template string.
+
+    Args:
+        template: The prompt template with ``{{variable}}`` placeholders.
+        extra_vars: Additional variable key-value pairs to substitute.
+        timezone_name: IANA timezone name for date/time variables. Falls
+            back to UTC when ``None``.
+    """
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(timezone_name) if timezone_name else ZoneInfo("UTC")
+
     variables: dict[str, str] = {}
     for key, resolver in _VARIABLE_RESOLVERS.items():
-        variables[key] = resolver()
+        variables[key] = resolver(tz)
     if extra_vars:
         variables.update(extra_vars)
 
@@ -110,6 +123,10 @@ async def execute_automation_run(run_id: int) -> None:
             )
             return
 
+        from app.services.system_settings_service import SystemSettingsService
+
+        _system_tz = SystemSettingsService(db).get_time_zone()
+
         if automation.status != "active":
             logger.info(
                 "Automation %d is no longer active, skipping run %d",
@@ -147,7 +164,9 @@ async def execute_automation_run(run_id: int) -> None:
 
             # Render the prompt now so the queue item is self-contained.
             extra_vars = _resolve_template_vars(agent_id, automation_id)
-            rendered = render_prompt_template(prompt_template, extra_vars=extra_vars)
+            rendered = render_prompt_template(
+                prompt_template, extra_vars=extra_vars, timezone_name=_system_tz
+            )
             q_svc = SessionTaskQueueService(db)
             q_svc.enqueue(
                 session_id=session_id_str,
@@ -174,7 +193,9 @@ async def execute_automation_run(run_id: int) -> None:
     extra_vars = _resolve_template_vars(agent_id, automation_id)
 
     # Render prompt template.
-    rendered_prompt = render_prompt_template(prompt_template, extra_vars=extra_vars)
+    rendered_prompt = render_prompt_template(
+        prompt_template, extra_vars=extra_vars, timezone_name=_system_tz
+    )
 
     # Launch task via supervisor.
     launch = ReactTaskLaunchRequest(

@@ -926,18 +926,35 @@ class ReactEngine:
         """Whether an exception is a deterministic LLM request/configuration error.
 
         Why: transport/configuration 4xx errors should fail fast instead of
-        consuming the whole iteration budget with identical retries.
+        consuming the whole iteration budget with identical retries.  However,
+        a 4xx with an empty response body usually signals a transient
+        server-side glitch (the provider opened an SSE stream but crashed
+        before sending any data), so we treat it as retryable.
         """
         current: BaseException | None = exc
         while current is not None:
-            status_code = getattr(
-                getattr(current, "response", None), "status_code", None
-            )
+            response = getattr(current, "response", None)
+            status_code = getattr(response, "status_code", None)
+
             if (
                 isinstance(status_code, int)
                 and 400 <= status_code < 500
                 and status_code not in {408, 409, 429}
             ):
+                # An empty body on a 4xx is almost certainly a transient
+                # server-side issue rather than a client-side mistake.
+                body_text = ""
+                if response is not None:
+                    with contextlib.suppress(Exception):
+                        body_text = (response.text or "").strip()
+                if not body_text:
+                    logger.warning(
+                        "LLM returned HTTP %s with empty body — treating as "
+                        "transient (retryable) rather than non-retryable. "
+                        "This often indicates provider-side instability.",
+                        status_code,
+                    )
+                    return False
                 return True
 
             message = str(current)
@@ -2435,6 +2452,11 @@ class ReactEngine:
 
         self.state_service.mark_running(task)
 
+        # Resolve system timezone from DB settings for prompt rendering.
+        from app.services.system_settings_service import SystemSettingsService
+
+        _system_tz = SystemSettingsService(self.db).get_time_zone()
+
         runtime_state = self.runtime_service.initialize(
             task,
             system_prompt,
@@ -2449,6 +2471,7 @@ class ReactEngine:
                     workspace_guidance=workspace_guidance,
                     prefix_blocks=task_bootstrap_prefix_blocks,
                     suffix_blocks=task_bootstrap_suffix_blocks,
+                    timezone_name=_system_tz,
                 )
             )
             runtime_state, compact_events = await self._maybe_compact_runtime_window(
@@ -2484,6 +2507,7 @@ class ReactEngine:
                 build_runtime_user_prompt(
                     mandatory_skills=mandatory_skills_json,
                     workspace_guidance=workspace_guidance,
+                    timezone_name=_system_tz,
                 ),
             )
             self._log_messages_pretty(
