@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type RefObject,
@@ -15,6 +16,8 @@ interface RoundAnchorProps {
   scrollContainerRef: RefObject<HTMLElement | null>;
 }
 
+/** Maximum visible anchor items at once. */
+const WINDOW_SIZE = 5;
 /** Each row height in px — matches sidebar list-item density. */
 const ROW_H = 28;
 /** Gap between rows — visual separation between items. */
@@ -80,22 +83,105 @@ function useActiveRoundIndex(
   return activeIndex;
 }
 
+/** Clamp windowStart so it stays within [0, total - WINDOW_SIZE]. */
+function clampStart(start: number, total: number): number {
+  if (total <= WINDOW_SIZE) return 0;
+  return Math.max(0, Math.min(total - WINDOW_SIZE, start));
+}
+
 /**
- * Compact anchor dots on the right edge of the chat pane.
- * Dots are always visible outside the card. Hovering reveals a Card with
- * text labels to the left of the dots. The active dot tracks scroll position.
+ * Compact anchor dots on the right edge of the chat pane with a sliding
+ * window of at most WINDOW_SIZE items. Clicking the topmost visible item
+ * shifts the window up so it lands at position 3; clicking the bottommost
+ * shifts it down so it lands at position 1.
  */
 export function RoundAnchor({
   rounds,
   onNavigateToRound,
   scrollContainerRef,
 }: RoundAnchorProps) {
+  const total = rounds.length;
+  const [windowStart, setWindowStart] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
-  const lastIndex = rounds.length - 1;
   const activeIndex = useActiveRoundIndex(rounds, scrollContainerRef);
+  const pagingTargetRef = useRef<number | null>(null);
+  const pendingNavRef = useRef<number | null>(null);
+
+  // Cleanup pending navigation timeout on unmount.
+  useEffect(() => {
+    return () => {
+      if (pendingNavRef.current !== null) {
+        clearTimeout(pendingNavRef.current);
+      }
+    };
+  }, []);
+
+  // Auto-follow: keep active item inside the visible window.
+  // Suppressed while a page navigation is in progress.
+  useEffect(() => {
+    if (pagingTargetRef.current !== null) return;
+    setWindowStart((prev) => {
+      const clamped = clampStart(prev, total);
+      if (activeIndex < clamped) return clampStart(activeIndex, total);
+      if (activeIndex >= clamped + WINDOW_SIZE) {
+        return clampStart(activeIndex - WINDOW_SIZE + 1, total);
+      }
+      return clamped;
+    });
+  }, [activeIndex, total]);
+
+  const windowRounds = useMemo(
+    () => rounds.slice(windowStart, windowStart + WINDOW_SIZE),
+    [rounds, windowStart],
+  );
+  const hasMoreAbove = windowStart > 0;
+  const hasMoreBelow = windowStart + WINDOW_SIZE < total;
+
+  const navigate = useCallback(
+    (globalIndex: number) => {
+      const localIndex = globalIndex - windowStart;
+      const maxLocal = windowRounds.length - 1;
+      const isPageUp = localIndex === 0 && hasMoreAbove;
+      const isPageDown = localIndex === maxLocal && hasMoreBelow;
+
+      if (isPageUp) {
+        // Shift up: clicked item moves to position 3.
+        const shift = Math.min(3, globalIndex);
+        setWindowStart(clampStart(globalIndex - shift, total));
+      } else if (isPageDown) {
+        // Shift down: clicked item moves to position 1.
+        setWindowStart(clampStart(globalIndex - 1, total));
+      }
+
+      if (isPageUp || isPageDown) {
+        // Lock auto-follow, delay scroll so the anchor window settles first.
+        pagingTargetRef.current = globalIndex;
+        if (pendingNavRef.current !== null) {
+          clearTimeout(pendingNavRef.current);
+        }
+        pendingNavRef.current = window.setTimeout(() => {
+          pendingNavRef.current = null;
+          onNavigateToRound(rounds[globalIndex].userMessageId);
+        }, 200);
+      } else {
+        onNavigateToRound(rounds[globalIndex].userMessageId);
+      }
+    },
+    [windowStart, windowRounds.length, hasMoreAbove, hasMoreBelow, rounds, total, onNavigateToRound],
+  );
+
+  // Release paging lock once scroll reaches the target.
+  useEffect(() => {
+    if (
+      pagingTargetRef.current !== null &&
+      activeIndex === pagingTargetRef.current
+    ) {
+      pagingTargetRef.current = null;
+    }
+  }, [activeIndex]);
 
   const scheduleHide = useCallback(() => {
     if (hideTimerRef.current !== null) return;
@@ -113,7 +199,7 @@ export function RoundAnchor({
     }
   }, []);
 
-  if (rounds.length < 2) return null;
+  if (total < 2) return null;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
@@ -139,8 +225,9 @@ export function RoundAnchor({
             style={{ width: CARD_W, padding: PAD, marginRight: CARD_DOT_GAP }}
           >
             <div className="flex flex-col" style={{ gap: ROW_GAP }}>
-              {rounds.map((round, index) => {
-                const isItemHovered = hoveredIndex === index;
+              {windowRounds.map((round, localIdx) => {
+                const globalIdx = windowStart + localIdx;
+                const isItemHovered = hoveredIndex === globalIdx;
 
                 return (
                   <button
@@ -151,11 +238,11 @@ export function RoundAnchor({
                     }`}
                     style={{ height: ROW_H, paddingLeft: 4, paddingRight: 4 }}
                     onClick={() => {
-                      onNavigateToRound(round.userMessageId);
+                      navigate(globalIdx);
                     }}
                     onMouseEnter={() => {
                       cancelHide();
-                      setHoveredIndex(index);
+                      setHoveredIndex(globalIdx);
                     }}
                     onMouseLeave={() => setHoveredIndex(null)}
                   >
@@ -163,7 +250,7 @@ export function RoundAnchor({
                       className={`min-w-0 flex-1 truncate text-left text-xs ${
                         isItemHovered
                           ? "text-accent-foreground"
-                          : index === activeIndex
+                          : globalIdx === activeIndex
                             ? "font-medium text-popover-foreground"
                             : "text-muted-foreground"
                       }`}
@@ -178,10 +265,16 @@ export function RoundAnchor({
         )}
 
         {/* Dots — always visible, positioned to the right of the card */}
-        <div className="flex flex-col" style={{ gap: ROW_GAP }}>
-          {rounds.map((round, index) => {
-            const isActive = index === activeIndex;
-            const isItemHovered = hoveredIndex === index;
+        <div className="flex flex-col items-end" style={{ gap: ROW_GAP }}>
+          {/* "More above" indicator — always rendered to keep layout stable. */}
+          <span
+            className={`block h-2 w-1 rounded-full transition-opacity ${hasMoreAbove ? "bg-foreground/20 opacity-100" : "opacity-0"}`}
+          />
+
+          {windowRounds.map((round, localIdx) => {
+            const globalIdx = windowStart + localIdx;
+            const isActive = globalIdx === activeIndex;
+            const isItemHovered = hoveredIndex === globalIdx;
 
             return (
               <button
@@ -196,11 +289,11 @@ export function RoundAnchor({
                   paddingRight: 1,
                 }}
                 onClick={() => {
-                  onNavigateToRound(round.userMessageId);
+                  navigate(globalIdx);
                 }}
                 onMouseEnter={() => {
                   cancelHide();
-                  setHoveredIndex(index);
+                  setHoveredIndex(globalIdx);
                 }}
                 onMouseLeave={() => setHoveredIndex(null)}
                 aria-label={`Go to round ${round.roundNumber}`}
@@ -216,6 +309,11 @@ export function RoundAnchor({
               </button>
             );
           })}
+
+          {/* "More below" indicator — always rendered to keep layout stable. */}
+          <span
+            className={`block h-2 w-1 rounded-full transition-opacity ${hasMoreBelow ? "bg-foreground/20 opacity-100" : "opacity-0"}`}
+          />
         </div>
       </div>
     </div>
