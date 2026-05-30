@@ -88,6 +88,7 @@ def build_recursion_user_payload(
     *,
     attachments: list[dict[str, Any]] | None = None,
     after_compaction: bool = False,
+    user_intent_override: str | None = None,
 ) -> dict[str, Any]:
     """Build the next recursion payload appended as a user message."""
     if after_compaction:
@@ -101,6 +102,8 @@ def build_recursion_user_payload(
     }
     if task.iteration == 0:
         payload["user_intent"] = task.user_intent
+    elif user_intent_override is not None:
+        payload["user_intent"] = user_intent_override
     if pending_action_result is not None:
         payload["action_result"] = pending_action_result
     if attachments:

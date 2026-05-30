@@ -103,15 +103,23 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
     <div className="space-y-2">
       {message.recursions && message.recursions.length > 0 && (
         <div className="space-y-2">
-          {message.recursions.map((recursion) => (
-            <RecursionCard
-              key={`${message.id}-${recursion.uid}`}
-              messageId={message.id}
-              recursion={recursion}
-              taskId={message.task_id}
-              isExpanded={expandedRecursions[`${message.id}-${recursion.uid}`] ?? false}
-              onToggle={onToggleRecursion}
-            />
+          {message.recursions.map((recursion, index) => (
+            <div key={`${message.id}-${recursion.uid}`}>
+              <RecursionCard
+                messageId={message.id}
+                recursion={recursion}
+                taskId={message.task_id}
+                isExpanded={expandedRecursions[`${message.id}-${recursion.uid}`] ?? false}
+                onToggle={onToggleRecursion}
+              />
+              {message.midTaskInputs?.[index] && (
+                <div className="mt-2 flex justify-end">
+                  <div className="max-w-[85%] rounded-2xl rounded-br-none bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-sm">
+                    {message.midTaskInputs[index].message}
+                  </div>
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}

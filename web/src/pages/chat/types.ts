@@ -165,7 +165,9 @@ export type ReactStreamEventType =
   | "delegation_start"
   | "delegation_result"
   | "delegation_clarify"
-  | "delegation_error";
+  | "delegation_error"
+  | "user_input"
+  | "user_input_discarded";
 
 /**
  * Token accounting metadata surfaced by task and recursion events.
@@ -375,6 +377,8 @@ export interface ChatMessage {
   /** Latest current-plan snapshot attached to this task, when available. */
   currentPlan?: PlanStepData[];
   recursions?: RecursionRecord[];
+  /** Mid-task user inputs injected between iterations (sparse: index maps to recursion index). */
+  midTaskInputs?: ({ message: string; timestamp: string } | undefined)[];
   pendingUserAction?: ChatPendingUserAction;
   status?:
     | "running"

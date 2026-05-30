@@ -301,6 +301,8 @@ class ReactStreamEventType(str, Enum):
     DELEGATION_RESULT = "delegation_result"
     DELEGATION_CLARIFY = "delegation_clarify"
     DELEGATION_ERROR = "delegation_error"
+    USER_INPUT = "user_input"
+    USER_INPUT_DISCARDED = "user_input_discarded"
 
 
 class ReactStreamEvent(AppBaseModel):
@@ -415,3 +417,20 @@ class ReactPlanStepResponse(AppBaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class ReactMidTaskInputRequest(AppBaseModel):
+    """Request schema for injecting user input into a running task."""
+
+    message: str = Field(
+        ...,
+        min_length=1,
+        description="User message to inject into the next iteration of the running task",
+    )
+
+
+class ReactMidTaskInputResponse(AppBaseModel):
+    """Response schema acknowledging a mid-task user input was enqueued."""
+
+    queue_id: str = Field(..., description="UUID of the enqueued queue item")
+    status: str = Field(..., description="Status of the queue item")

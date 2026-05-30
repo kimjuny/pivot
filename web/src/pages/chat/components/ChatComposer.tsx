@@ -84,6 +84,7 @@ interface ChatComposerProps {
   inputMessage?: string;
   error: string | null;
   compactStatusMessage: string | null;
+  pendingMidTaskInput: string | null;
   replyTarget: ChatReplyTarget | null;
   pendingFiles: PendingUploadItem[];
   canSendMessage?: boolean;
@@ -164,6 +165,8 @@ export function ChatComposer({
   sessionId,
   inputMessage,
   error,
+  compactStatusMessage,
+  pendingMidTaskInput,
   replyTarget,
   pendingFiles,
   canSendMessage,
@@ -237,12 +240,13 @@ export function ChatComposer({
     useState<string | null>(null);
   const computedCanSendMessage =
     canSendMessage ??
-    (!isStreaming &&
-      !isInputDisabled &&
+    (!isInputDisabled &&
       !hasUploadingFiles &&
-      (isCompactMode ||
-        draftMessage.trim().length > 0 ||
-        pendingFiles.length > 0));
+      (isStreaming
+        ? draftMessage.trim().length > 0
+        : isCompactMode ||
+          draftMessage.trim().length > 0 ||
+          pendingFiles.length > 0));
   const replyPreview = replyTarget?.question.replace(/\s+/g, " ").trim() ?? "";
   const activeMandatorySkillMention = useMemo(
     () =>
@@ -701,6 +705,21 @@ export function ChatComposer({
               </InputGroupAddon>
             )}
 
+            {pendingMidTaskInput && (
+              <InputGroupAddon
+                align="block-start"
+                className="gap-1.5 bg-primary/5 px-3 pb-1.5 pt-2"
+              >
+                <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />
+                <InputGroupText className="shrink-0 text-[11px] font-medium text-primary/70">
+                  Injecting
+                </InputGroupText>
+                <p className="min-w-0 flex-1 truncate text-[12px] text-foreground/65">
+                  {pendingMidTaskInput}
+                </p>
+              </InputGroupAddon>
+            )}
+
             {selectedMandatorySkills.length > 0 && (
               <InputGroupAddon
                 align="block-start"
@@ -769,7 +788,7 @@ export function ChatComposer({
                         : "Ask anything"
                   }
                   className="min-h-[60px] max-h-80 overflow-y-auto !border-0 px-4 !shadow-none focus:!border-0 focus-visible:!border-0 [field-sizing:content]"
-                  disabled={isStreaming || isInputDisabled}
+                  disabled={isInputDisabled}
                 />
               </PopoverAnchor>
               <PopoverContent
@@ -1063,7 +1082,7 @@ export function ChatComposer({
                   isLoading={isContextUsageLoading}
                   isCompacting={isCompacting}
                 />
-                {isStreaming ? (
+                {isStreaming && !draftMessage.trim() ? (
                   <InputGroupButton
                     type="button"
                     onClick={onStop}
@@ -1082,7 +1101,7 @@ export function ChatComposer({
                     disabled={!computedCanSendMessage}
                     size="icon-sm"
                     className="rounded-full"
-                    title="Send message"
+                    title={isStreaming ? "Send mid-task input" : "Send message"}
                   >
                     <ArrowUp className="h-4 w-4" />
                     <span className="sr-only">Send</span>

@@ -2527,12 +2527,34 @@ class ReactEngine:
             while task.iteration < task.max_iteration:
                 runtime_state = self.runtime_service.load(task)
                 context = self.state_service.load_context(task)
+
+                # Dequeue mid-task user input if available.
+                user_intent_override: str | None = None
+                if task.session_id and task.iteration > 0:
+                    from app.services.session_task_queue_service import (
+                        SessionTaskQueueService,
+                    )
+
+                    queue_svc = SessionTaskQueueService(self.db)
+                    queue_item = queue_svc.dequeue_next(task.session_id)
+                    if queue_item is not None and queue_item.source == "user_input":
+                        user_intent_override = queue_item.prompt
+                        queue_svc.mark_completed(queue_item)
+                        yield {
+                            "type": "user_input",
+                            "task_id": task.task_id,
+                            "iteration": task.iteration,
+                            "data": {"message": user_intent_override},
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+
                 preview_payload = build_recursion_user_payload(
                     task,
                     context,
                     runtime_state.pending_action_result,
                     attachments=pending_turn_attachments,
                     after_compaction=runtime_state.compact_result is not None,
+                    user_intent_override=user_intent_override,
                 )
                 preview_content_blocks = (
                     list(self._pending_multimodal_blocks)
@@ -2567,6 +2589,7 @@ class ReactEngine:
                         runtime_state.pending_action_result,
                         attachments=pending_turn_attachments,
                         after_compaction=runtime_state.compact_result is not None,
+                        user_intent_override=user_intent_override,
                     )
 
                 trace_id = str(uuid.uuid4())
@@ -3291,6 +3314,26 @@ class ReactEngine:
                 # Update iteration count
                 self.state_service.advance_iteration(task)
 
+            # Clean up stale user_input queue items now that the task is terminal.
+            if task.session_id:
+                from app.services.session_task_queue_service import (
+                    SessionTaskQueueService,
+                )
+
+                _queue_svc = SessionTaskQueueService(self.db)
+                for _stale in _queue_svc.get_pending_for_session(task.session_id):
+                    if _stale.source == "user_input":
+                        _queue_svc.mark_failed(
+                            _stale, "Task completed before user_input was consumed"
+                        )
+                        yield {
+                            "type": "user_input_discarded",
+                            "task_id": task.task_id,
+                            "iteration": task.iteration,
+                            "data": {"message": _stale.prompt},
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
+
             # Max iteration reached
             if (
                 task.iteration >= task.max_iteration
@@ -3333,6 +3376,19 @@ class ReactEngine:
                 rollback_last_user_message=True,
             )
             error_message = str(e) or repr(e)
+
+            # Clean up stale user_input queue items on unexpected failure.
+            if task.session_id:
+                from app.services.session_task_queue_service import (
+                    SessionTaskQueueService,
+                )
+
+                _queue_svc = SessionTaskQueueService(self.db)
+                for _stale in _queue_svc.get_pending_for_session(task.session_id):
+                    if _stale.source == "user_input":
+                        _queue_svc.mark_failed(
+                            _stale, "Task failed before user_input was consumed"
+                        )
 
             yield {
                 "type": "error",

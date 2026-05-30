@@ -19,6 +19,7 @@ function buildComposerProps(
     inputMessage: "",
     error: null,
     compactStatusMessage: null,
+    pendingMidTaskInput: null,
     replyTarget: null,
     pendingFiles: [],
     canSendMessage: false,

@@ -33,6 +33,7 @@ import {
   listSessions,
   migrateSession,
   startReactTask,
+  submitMidTaskInput,
   submitReactUserAction,
   updateProject,
   updateSession,
@@ -718,6 +719,7 @@ function ChatContainer({
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [pendingMidTaskInput, setPendingMidTaskInput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedRecursions, setExpandedRecursions] = useState<
     Record<string, boolean>
@@ -1353,6 +1355,43 @@ function ChatContainer({
 
       if (event.type === "compact_failed") {
         clearCompactStatusWithMinimumDelay();
+        return;
+      }
+
+      // Mid-task user input was consumed by the engine.
+      if (event.type === "user_input") {
+        const msg = (event.data as { message?: string })?.message ?? "";
+        setPendingMidTaskInput(null);
+        if (msg) {
+          // The input was dequeued at the start of iteration N (event.iteration),
+          // but the bubble should appear after recursion N-1 (the one that just finished).
+          const targetIdx = Math.max(0, event.iteration - 1);
+          updateMessages((prev) =>
+            prev.map((m) => {
+              if (m.role !== "assistant" || m.task_id !== event.task_id) {
+                return m;
+              }
+              const base = m.midTaskInputs ?? [];
+              const len = Math.max(base.length, m.recursions?.length ?? 0, targetIdx + 1);
+              const inputs: ({ message: string; timestamp: string } | undefined)[] = Array.from(
+                { length: len },
+                (_, idx) => base[idx] ?? undefined,
+              );
+              inputs[targetIdx] = { message: msg, timestamp: event.timestamp };
+              return {
+                ...m,
+                midTaskInputs: inputs,
+              };
+            }),
+          );
+        }
+        return;
+      }
+
+      // Mid-task user input was discarded (task ended before consumption).
+      if (event.type === "user_input_discarded") {
+        setPendingMidTaskInput(null);
+        setComposerFocusSignal((prev) => prev + 1);
         return;
       }
 
@@ -3340,7 +3379,21 @@ function ChatContainer({
    */
   const handleSubmitMessage = useCallback(
     (message: string) => {
-      if (isStreaming || hasUploadingFiles) {
+      if (hasUploadingFiles) {
+        return;
+      }
+      // Mid-task input: inject user message into the running task.
+      if (isStreaming && liveTaskIdRef.current) {
+        setPendingMidTaskInput(message);
+        void submitMidTaskInput(liveTaskIdRef.current, message).then(() => {
+          setComposerResetSignal((prev) => prev + 1);
+          draftMessageRef.current = "";
+        }).catch(() => {
+          setPendingMidTaskInput(null);
+        });
+        return;
+      }
+      if (isStreaming) {
         return;
       }
       if (
@@ -3893,6 +3946,7 @@ function ChatContainer({
         sessionId={currentSessionId}
         error={error}
         compactStatusMessage={compactStatusMessage}
+        pendingMidTaskInput={pendingMidTaskInput}
         replyTarget={replyTarget}
         pendingFiles={pendingFiles}
         isStreaming={isStreaming}

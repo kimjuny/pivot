@@ -2967,6 +2967,16 @@ export const submitReactUserAction = async (
   }) as Promise<ReactPendingUserActionResponse>;
 };
 
+export const submitMidTaskInput = async (
+  taskId: string,
+  message: string,
+): Promise<{ queue_id: string; status: string }> => {
+  return apiRequest(`/react/tasks/${taskId}/mid-task-input`, {
+    method: 'POST',
+    body: JSON.stringify({ message }),
+  }) as Promise<{ queue_id: string; status: string }>;
+};
+
 /**
  * Estimate the current ReAct prompt-window usage for the chat composer.
  *

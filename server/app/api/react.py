@@ -14,6 +14,8 @@ from app.schemas.react import (
     ReactChatRequest,
     ReactContextUsageRequest,
     ReactContextUsageResponse,
+    ReactMidTaskInputRequest,
+    ReactMidTaskInputResponse,
     ReactPendingUserActionRequest,
     ReactRuntimeSkillItem,
     ReactRuntimeSkillsRequest,
@@ -360,6 +362,46 @@ async def cancel_react_task(
         status=refreshed_task.status,
         cancel_requested=cancel_requested
         or refreshed_task.cancel_requested_at is not None,
+    )
+
+
+@router.post(
+    "/react/tasks/{task_id}/mid-task-input",
+    response_model=ReactMidTaskInputResponse,
+)
+async def submit_mid_task_input(
+    task_id: str,
+    request: ReactMidTaskInputRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ReactMidTaskInputResponse:
+    """Inject a user message into the next iteration of a running task."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+    if task.status != "running":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is not running (status={task.status})",
+        )
+    if not task.session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Task has no session to enqueue input into",
+        )
+
+    from app.services.session_task_queue_service import SessionTaskQueueService
+
+    queue_svc = SessionTaskQueueService(db)
+    item = queue_svc.enqueue(
+        session_id=task.session_id,
+        queue_type="immediate_insert",
+        source="user_input",
+        prompt=request.message,
+    )
+    return ReactMidTaskInputResponse(
+        queue_id=item.queue_id,
+        status=item.status,
     )
 
 

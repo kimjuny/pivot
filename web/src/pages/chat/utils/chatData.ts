@@ -509,6 +509,49 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       };
     });
 
+    // Extract mid-task user inputs from recursion payloads (iteration > 0).
+    // user_intent lives on the recursion that CONSUMED it (e.g. iteration 3),
+    // but the bubble should appear BEFORE that recursion (after iteration 2).
+    const midTaskInputs: ({ message: string; timestamp: string } | undefined)[] =
+      Array.from<undefined>({ length: task.recursions.length }).fill(undefined);
+    for (let i = 0; i < task.recursions.length; i++) {
+      const recursion = task.recursions[i];
+      if (recursion.iteration === 0 || !recursion.input_message_json) {
+        continue;
+      }
+      const inputMsg = asRecord(parseJson(recursion.input_message_json));
+      let contentStr: string | null = null;
+      if (inputMsg) {
+        const raw = inputMsg.content;
+        if (typeof raw === "string") {
+          contentStr = raw;
+        } else if (Array.isArray(raw)) {
+          for (const block of raw) {
+            if (
+              typeof block === "object" && block !== null &&
+              (block as Record<string, unknown>).type === "text" &&
+              typeof (block as Record<string, unknown>).text === "string"
+            ) {
+              contentStr = (block as Record<string, unknown>).text as string;
+              break;
+            }
+          }
+        }
+      }
+      if (contentStr) {
+        const payload = asRecord(parseJson(contentStr));
+        if (payload && typeof payload.user_intent === "string") {
+          // Place the bubble after the PREVIOUS recursion (i-1).
+          const targetIndex = Math.max(0, i - 1);
+          midTaskInputs[targetIndex] = {
+            message: payload.user_intent,
+            timestamp: recursion.created_at,
+          };
+        }
+      }
+    }
+    const hasMidTaskInputs = midTaskInputs.some((v) => v !== undefined);
+
     const clarifySegments = task.recursions
       .map((recursion, index) => ({
         index,
@@ -537,6 +580,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
         pendingUserAction,
         currentPlan: task.current_plan,
         recursions,
+        midTaskInputs: hasMidTaskInputs ? midTaskInputs : undefined,
         status: getTaskAssistantStatus(task),
         totalTokens: {
           ...aggregatedTaskTokens,
