@@ -78,6 +78,7 @@ import type {
 import { AttachmentList } from "./AttachmentList";
 import { ComposerTaskPlan } from "./ComposerTaskPlan";
 import { ContextUsageRing } from "./ContextUsageRing";
+import { Spinner } from "@/components/ui/spinner";
 
 interface ChatComposerProps {
   sessionId?: string | null;
@@ -710,7 +711,7 @@ export function ChatComposer({
                 align="block-start"
                 className="gap-1.5 bg-primary/5 px-3 pb-1.5 pt-2"
               >
-                <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary/70" />
+                <Spinner size={14} className="shrink-0" />
                 <InputGroupText className="shrink-0 text-[11px] font-medium text-primary/70">
                   Injecting
                 </InputGroupText>

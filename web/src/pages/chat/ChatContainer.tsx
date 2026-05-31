@@ -6,9 +6,11 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { Info, Loader2 } from "lucide-react";
+import { Info } from "lucide-react";
 import { resolveIcon } from "@/lib/icon-resolver";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
+
+import { Spinner } from "@/components/ui/spinner";
 
 import {
   ApiError,
@@ -681,8 +683,9 @@ function SessionLoadingOverlay({ isActive }: { isActive: boolean }) {
         }}
         data-testid="session-loading-mask"
       />
-      <Loader2
-        className="relative z-10 h-5 w-5 animate-spin text-foreground"
+      <Spinner
+        size={20}
+        className="relative z-10"
         data-testid="session-loading-spinner"
       />
     </div>
@@ -2414,6 +2417,18 @@ function ChatContainer({
 
   useEffect(() => {
     if (initialChatSurfaces) {
+      setInstalledChatSurfaces(
+        initialChatSurfaces.map((s) => ({
+          installationId: s.installation_id,
+          packageId: s.package_id,
+          surfaceKey: s.surface_key,
+          displayName: s.display_name,
+          logoUrl: s.logo_url,
+          description: s.description ?? "",
+          minWidth: s.min_width,
+          icon: s.icon,
+        })),
+      );
       return;
     }
 
@@ -2465,6 +2480,13 @@ function ChatContainer({
     }
 
     if (initialWebSearchProviders) {
+      setWebSearchProviders(
+        initialWebSearchProviders.map((p) => ({
+          key: p.provider_key,
+          name: p.name,
+          logoUrl: p.logo_url,
+        })),
+      );
       return;
     }
 

@@ -4,10 +4,11 @@ import {
   Maximize2,
   Minimize2,
   ListTodo,
-  Loader2,
   XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+
+import { Spinner } from "@/components/ui/spinner";
 
 import type { TaskPlanSnapshot } from "../types";
 
@@ -149,7 +150,7 @@ export function ComposerTaskPlan({ taskPlan }: ComposerTaskPlanProps) {
                 {taskPlan.steps.map((step, index) => {
                   const icon =
                     step.status === "running" ? (
-                      <Loader2 className="h-[14px] w-[14px] animate-spin text-foreground/85" />
+                      <Spinner size={14} />
                     ) : step.status === "done" ? (
                       <span className="flex h-[14px] w-[14px] items-center justify-center rounded-full border border-muted-foreground/80 text-muted-foreground">
                         <Check className="h-[10px] w-[10px]" />

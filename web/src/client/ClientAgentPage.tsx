@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Bot, Clock } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { CenteredLoadingIndicator } from "@/components/CenteredLoadingIndicator";
 import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import ReactChatInterface from "@/components/ReactChatInterface";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,45 +19,41 @@ function ClientAgentPage() {
   const [bootstrap, setBootstrap] = useState<ChatBootstrapResponse | null>(
     null,
   );
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialSessionId = searchParams.get("session");
 
+  const parsedAgentId = Number(agentId);
+
   useEffect(() => {
-    const parsedAgentId = Number(agentId);
     if (!Number.isInteger(parsedAgentId) || parsedAgentId <= 0) {
       setError("Invalid agent identifier.");
-      setIsLoading(false);
       return;
     }
 
+    let cancelled = false;
     void (async () => {
       try {
-        setIsLoading(true);
         setError(null);
-        setBootstrap(await getChatBootstrap(parsedAgentId));
+        const data = await getChatBootstrap(parsedAgentId);
+        if (!cancelled) {
+          setBootstrap(data);
+        }
       } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load the client agent.",
-        );
-      } finally {
-        setIsLoading(false);
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load the client agent.",
+          );
+        }
       }
     })();
-  }, [agentId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [parsedAgentId]);
 
-  if (isLoading) {
-    return (
-      <CenteredLoadingIndicator
-        className="h-screen"
-        label="Loading agent workspace"
-      />
-    );
-  }
-
-  if (error || !bootstrap) {
+  if (!Number.isInteger(parsedAgentId) || parsedAgentId <= 0 || error) {
     return (
       <Card className="m-6">
         <CardContent className="space-y-4 pt-6">
@@ -77,34 +72,37 @@ function ClientAgentPage() {
     );
   }
 
-  const { agent, llm } = bootstrap;
+  const agent = bootstrap?.agent;
+  const llm = bootstrap?.llm;
 
   return (
     <div className="h-screen bg-background">
       <ReactChatInterface
-        key={`${agent.id}:${initialSessionId ?? "draft"}`}
-        agentId={agent.id}
+        key={`${parsedAgentId}:${initialSessionId ?? "draft"}`}
+        agentId={parsedAgentId}
         initialSessionId={initialSessionId}
-        agentName={agent.name}
-        agentToolIds={agent.tool_ids}
-        primaryLlmId={agent.llm_id}
-        sessionIdleTimeoutMinutes={agent.session_idle_timeout_minutes}
-        compactThresholdPercent={agent.compact_threshold_percent}
+        agentName={agent?.name}
+        agentToolIds={agent?.tool_ids}
+        primaryLlmId={agent?.llm_id}
+        sessionIdleTimeoutMinutes={agent?.session_idle_timeout_minutes}
+        compactThresholdPercent={agent?.compact_threshold_percent}
         showCompactDebug={false}
         initialLlm={llm}
-        initialSessions={bootstrap.sessions}
-        initialProjects={bootstrap.projects}
-        initialChatSurfaces={bootstrap.chat_surfaces}
-        initialWebSearchProviders={bootstrap.web_search_providers}
+        initialSessions={bootstrap?.sessions}
+        initialProjects={bootstrap?.projects}
+        initialChatSurfaces={bootstrap?.chat_surfaces}
+        initialWebSearchProviders={bootstrap?.web_search_providers}
         sidebarTitleIcon={
-          <LLMBrandAvatar
-            model={agent.model_name}
-            containerClassName="flex size-4 items-center justify-center"
-            imageClassName="size-4"
-            fallback={<Bot className="size-4" aria-hidden="true" />}
-          />
+          agent ? (
+            <LLMBrandAvatar
+              model={agent.model_name}
+              containerClassName="flex size-4 items-center justify-center"
+              imageClassName="size-4"
+              fallback={<Bot className="size-4" aria-hidden="true" />}
+            />
+          ) : undefined
         }
-        sidebarTitle={agent.name}
+        sidebarTitle={agent?.name}
         sidebarNavigationItems={[
           {
             key: "agents",

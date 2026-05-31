@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+
+import { Spinner } from "@/components/ui/spinner";
 
 interface CompactStatusPillProps {
   message: string | null;
@@ -32,7 +33,7 @@ export function CompactStatusPill({ message }: CompactStatusPillProps) {
       aria-live="polite"
     >
       <div className="pointer-events-auto flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border border-border/60 bg-background/70 px-3 py-2 text-sm text-foreground shadow-lg backdrop-blur-md">
-        <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+        <Spinner size={16} className="shrink-0" />
         <span className="truncate">{message}</span>
       </div>
     </div>

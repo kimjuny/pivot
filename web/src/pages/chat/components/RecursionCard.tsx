@@ -7,11 +7,12 @@ import {
   CheckCircle2,
   ChevronRight,
   Copy,
-  Loader2,
   Square,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import { Spinner } from "@/components/ui/spinner";
 
 import type { RecursionRecord } from "../types";
 import {
@@ -863,9 +864,10 @@ function StatusIcon({
 }) {
   if (status === "running") {
     return (
-      <Loader2
+      <Spinner
         key={`${iconKey}-running`}
-        className={`relative h-3.5 w-3.5 flex-shrink-0 animate-spin text-sidebar-foreground/60 ${runningOffsetClassName}`}
+        size={14}
+        className={`relative flex-shrink-0 ${runningOffsetClassName}`}
       />
     );
   }

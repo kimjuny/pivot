@@ -7,7 +7,6 @@ import {
   CircleFadingArrowUp,
   Folder,
   FolderUp,
-  Loader2,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -29,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Sidebar,
   SidebarContent,
@@ -240,7 +240,7 @@ export function SessionSidebar({
   const renameSessionInputRef = useRef<HTMLInputElement | null>(null);
   const renameProjectInputRef = useRef<HTMLInputElement | null>(null);
   const isCollapsed = state === "collapsed";
-  const isSessionListPending = isLoadingSession || !hasInitializedSessions;
+  const isSessionListPending = !hasInitializedSessions;
 
   useEffect(() => {
     if (editingSessionId) {
@@ -421,8 +421,8 @@ export function SessionSidebar({
                 }`}
               >
                 {isRunning ? (
-                  <Loader2
-                    className="h-3.5 w-3.5 animate-spin text-sidebar-foreground/60"
+                  <Spinner
+                    size={14}
                     aria-hidden="true"
                   />
                 ) : null}
@@ -524,20 +524,26 @@ export function SessionSidebar({
       className="border-r border-sidebar-border/70 bg-sidebar/95"
     >
       <SidebarHeader className="session-sidebar-header gap-2 px-3 pb-2 pt-3 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-2">
-        {!isCollapsed && sidebarTitle ? (
+        {!isCollapsed ? (
           <div className="pb-1">
-            <div className="flex items-center gap-2 rounded-xl px-2 py-1.5">
+            <div className="flex items-center gap-2 rounded-xl px-2.5 py-1.5">
               {sidebarTitleIcon ? (
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sidebar-accent/70 text-sidebar-foreground">
                   {sidebarTitleIcon}
                 </div>
-              ) : (
+              ) : sidebarTitle ? (
                 <span className="h-2.5 w-2.5 rounded-full bg-primary/80" />
+              ) : (
+                <Skeleton className="h-8 w-8 rounded-lg bg-sidebar-accent" />
               )}
               <div className="min-w-0">
-                <div className="truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
-                  {sidebarTitle}
-                </div>
+                {sidebarTitle ? (
+                  <div className="truncate text-[15px] font-semibold tracking-tight text-sidebar-foreground">
+                    {sidebarTitle}
+                  </div>
+                ) : (
+                  <Skeleton className="h-4 w-24 rounded-full bg-sidebar-accent" />
+                )}
               </div>
             </div>
           </div>
