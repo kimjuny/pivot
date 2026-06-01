@@ -70,11 +70,17 @@ def write_file(
 
     ctx = get_current_tool_execution_context()
     if ctx is not None and ctx.session_id and ctx.db_session_factory:
-        from ._file_read_tracker import load_tracker, record_read, save_tracker
+        from app.services.file_read_tracker_service import FileReadTrackerService
 
-        tracker = load_tracker(ctx.session_id, ctx.db_session_factory) or {}
-        record_read(tracker, relative_path, content_hash, total_lines, 1, total_lines)
-        save_tracker(ctx.session_id, ctx.db_session_factory, tracker)
+        with ctx.db_session_factory() as db:
+            FileReadTrackerService(db).record_read(
+                session_id=ctx.session_id,
+                path=relative_path,
+                content_hash=content_hash,
+                total_lines=total_lines,
+                start_line=1,
+                end_line=total_lines,
+            )
 
     return {
         "message": f"Wrote file: {relative_path}",

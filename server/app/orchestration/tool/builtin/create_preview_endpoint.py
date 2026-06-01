@@ -130,10 +130,6 @@ def create_preview_endpoint(
             user_id=context.user_id,
             timeout_seconds=context.sandbox_timeout_seconds,
         )
-        preview_records = service.list_preview_endpoints(
-            user_id=context.user_id,
-            session_id=context.session_id,
-        )
         workspace = WorkspaceService(db).get_workspace(record.workspace_id)
         workspace_logical_root = (
             WorkspaceService(db).get_workspace_logical_root(workspace)
@@ -145,19 +141,13 @@ def create_preview_endpoint(
             workspace_logical_root=workspace_logical_root,
             service=service,
         )
-        serialized_previews = [
-            _serialize_preview_record(
-                record=preview_record,
-                workspace_logical_root=workspace_logical_root,
-                service=service,
-            )
-            for preview_record in preview_records
-        ]
 
     return {
-        **serialized_preview,
-        "available_previews": serialized_previews,
-        "active_preview_id": record.preview_id,
+        "preview_id": serialized_preview["preview_id"],
+        "title": serialized_preview["title"],
+        "port": serialized_preview["port"],
+        "path": serialized_preview["path"],
+        "proxy_url": serialized_preview["proxy_url"],
         "pivot_action": {
             "type": "open_workspace_web_preview",
             "category": "notify",
@@ -165,7 +155,6 @@ def create_preview_endpoint(
                 "surface_key": "workspace-editor",
                 "view": "web",
                 "preview": serialized_preview,
-                "available_previews": serialized_previews,
                 "active_preview_id": record.preview_id,
             },
         },

@@ -12,6 +12,7 @@ from app.orchestration.react.prompt_template import (
     build_runtime_payload_message,
     build_runtime_task_bootstrap_message,
 )
+from app.services.file_read_tracker_service import FileReadTrackerService
 from sqlmodel import Session as DBSession, select
 
 logger = logging.getLogger(__name__)
@@ -354,7 +355,10 @@ class ReactRuntimeService:
             state.exact_prompt_message_count = None
         session = self._get_session_or_raise(task)
         if compact_result is not None:
-            session.react_file_read_tracker = "{}"
+            FileReadTrackerService(self.db).clear_tracker(
+                session.session_id,
+                commit=False,
+            )
         self._persist_state(session, state)
         return state
 
@@ -394,7 +398,10 @@ class ReactRuntimeService:
             state.exact_prompt_tokens = None
             state.exact_prompt_message_count = None
         if compact_result is not None:
-            session.react_file_read_tracker = "{}"
+            FileReadTrackerService(self.db).clear_tracker(
+                session.session_id,
+                commit=False,
+            )
         self._persist_state(session, state)
         return state
 
@@ -469,12 +476,7 @@ class ReactRuntimeService:
             except json.JSONDecodeError:
                 compact_result = compact_result_raw
 
-        file_read_tracker: Any | None = None
-        if session.react_file_read_tracker:
-            try:
-                file_read_tracker = json.loads(session.react_file_read_tracker)
-            except json.JSONDecodeError:
-                file_read_tracker = None
+        file_read_tracker = FileReadTrackerService(self.db).get_tracker(session_id)
 
         return {
             "session_id": session.session_id,

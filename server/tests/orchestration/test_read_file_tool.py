@@ -9,12 +9,18 @@ import tempfile
 import unittest
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
+
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
+import_module("app.models")
+SessionModel = import_module("app.models.session").Session
 read_file_module = import_module("app.orchestration.tool.builtin.read_file")
 
 
@@ -122,3 +128,130 @@ class ReadFileToolTestCase(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "less than or equal to 800"):
             module.read_file(path="src/app.py", max_lines=801)
+
+    def test_read_file_dedups_repeated_same_range(self) -> None:
+        """Repeated text reads should return a short summary after tracking."""
+        module = cast("Any", read_file_module)
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as db:
+            db.add(
+                SessionModel(
+                    session_id="session-1",
+                    agent_id=1,
+                    user_id=1,
+                    status="active",
+                    chat_history='{"version": 1, "messages": []}',
+                    react_llm_messages="[]",
+                    react_llm_cache_state="{}",
+                )
+            )
+            db.commit()
+
+        context = SimpleNamespace(
+            session_id="session-1",
+            db_session_factory=lambda: Session(engine),
+        )
+        payload = {
+            "path": "src/app.py",
+            "total_lines": 3,
+            "start_line": 1,
+            "end_line": 3,
+            "returned_line_count": 3,
+            "has_more_before": False,
+            "has_more_after": False,
+            "truncated": False,
+            "next_start_line": None,
+            "previous_start_line": None,
+            "content": "1 | a\n2 | b\n3 | c\n",
+            "content_hash": "hash-a",
+        }
+        original_context = module.get_current_tool_execution_context
+        original_read = module._read_text_in_sandbox
+        module.get_current_tool_execution_context = lambda: context
+        module._read_text_in_sandbox = lambda *_args: dict(payload)
+        try:
+            first = module.read_file(path="src/app.py")
+            second = module.read_file(path="src/app.py")
+        finally:
+            module.get_current_tool_execution_context = original_context
+            module._read_text_in_sandbox = original_read
+
+        self.assertEqual(first["content"], payload["content"])
+        self.assertTrue(second["deduped"])
+        self.assertEqual(second["returned_line_count"], 0)
+
+    def test_read_file_overlapping_range_with_new_content_is_not_deduped(self) -> None:
+        """Partially overlapping reads should return content when new lines exist."""
+        module = cast("Any", read_file_module)
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as db:
+            db.add(
+                SessionModel(
+                    session_id="session-2",
+                    agent_id=1,
+                    user_id=1,
+                    status="active",
+                    chat_history='{"version": 1, "messages": []}',
+                    react_llm_messages="[]",
+                    react_llm_cache_state="{}",
+                )
+            )
+            db.commit()
+
+        context = SimpleNamespace(
+            session_id="session-2",
+            db_session_factory=lambda: Session(engine),
+        )
+        responses = [
+            {
+                "path": "src/app.py",
+                "total_lines": 8,
+                "start_line": 1,
+                "end_line": 5,
+                "returned_line_count": 5,
+                "has_more_before": False,
+                "has_more_after": True,
+                "truncated": True,
+                "next_start_line": 6,
+                "previous_start_line": None,
+                "content": "first chunk",
+                "content_hash": "hash-a",
+            },
+            {
+                "path": "src/app.py",
+                "total_lines": 8,
+                "start_line": 4,
+                "end_line": 8,
+                "returned_line_count": 5,
+                "has_more_before": True,
+                "has_more_after": False,
+                "truncated": False,
+                "next_start_line": None,
+                "previous_start_line": 1,
+                "content": "second chunk",
+                "content_hash": "hash-a",
+            },
+        ]
+        original_context = module.get_current_tool_execution_context
+        original_read = module._read_text_in_sandbox
+        module.get_current_tool_execution_context = lambda: context
+        module._read_text_in_sandbox = lambda *_args: responses.pop(0)
+        try:
+            module.read_file(path="src/app.py", start_line=1, max_lines=5)
+            second = module.read_file(path="src/app.py", start_line=4, max_lines=5)
+        finally:
+            module.get_current_tool_execution_context = original_context
+            module._read_text_in_sandbox = original_read
+
+        self.assertEqual(second["content"], "second chunk")
+        self.assertNotIn("deduped", second)

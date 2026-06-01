@@ -39,12 +39,12 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
             path="/",
             start_server="bash /workspace/.pivot/previews/landing-page.sh",
             cwd="/workspace/apps/landing-page",
+            run_in_background=True,
             created_at=SimpleNamespace(isoformat=lambda: "2026-04-18T00:00:00+00:00"),
         )
         service = MagicMock()
         service.create_preview_endpoint.return_value = record
         service.connect_preview_endpoint.return_value = record
-        service.list_preview_endpoints.return_value = [record]
         service.build_proxy_url.return_value = "/api/chat-previews/preview-1/proxy/"
         workspace_service = MagicMock()
         workspace_service.get_workspace.return_value = object()
@@ -81,14 +81,49 @@ class CreatePreviewEndpointToolTestCase(unittest.TestCase):
             cwd="apps/landing-page",
             start_server="bash /workspace/.pivot/previews/landing-page.sh",
             skills=context.allowed_skills,
+            run_in_background=True,
         )
         service.connect_preview_endpoint.assert_called_once_with(
             preview_id="preview-1",
             user_id=42,
             timeout_seconds=90,
         )
-        self.assertTrue(result["has_launch_recipe"])
-        self.assertEqual(result["active_preview_id"], "preview-1")
+        service.list_preview_endpoints.assert_not_called()
+        self.assertEqual(
+            result,
+            {
+                "preview_id": "preview-1",
+                "title": "Landing Page",
+                "port": 3000,
+                "path": "/",
+                "proxy_url": "/api/chat-previews/preview-1/proxy/",
+                "pivot_action": {
+                    "type": "open_workspace_web_preview",
+                    "category": "notify",
+                    "payload": {
+                        "surface_key": "workspace-editor",
+                        "view": "web",
+                        "preview": {
+                            "preview_id": "preview-1",
+                            "session_id": "session-1",
+                            "workspace_id": "workspace-1",
+                            "workspace_logical_root": (
+                                "users/alice/agents/7/sessions/session-1/workspace"
+                            ),
+                            "title": "Landing Page",
+                            "port": 3000,
+                            "path": "/",
+                            "has_launch_recipe": True,
+                            "proxy_url": "/api/chat-previews/preview-1/proxy/",
+                            "created_at": "2026-04-18T00:00:00+00:00",
+                            "detached": True,
+                            "log_file": "/workspace/.tmp/preview-preview-1.log",
+                        },
+                        "active_preview_id": "preview-1",
+                    },
+                },
+            },
+        )
 
     def test_tool_rejects_blank_preview_name(self) -> None:
         """The tool should fail fast on empty preview labels."""

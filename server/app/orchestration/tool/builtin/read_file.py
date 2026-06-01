@@ -446,17 +446,10 @@ def read_file(
         result = _read_text_in_sandbox(path, start_line, max_lines)
 
         ctx = get_current_tool_execution_context()
-        can_track = (
-            ctx is not None
-            and ctx.session_id
-            and ctx.db_session_factory
-        )
+        can_track = ctx is not None and ctx.session_id and ctx.db_session_factory
         if can_track:
-            from ._file_read_tracker import (
-                check_dedup,
-                load_tracker,
-                record_read,
-                save_tracker,
+            from app.services.file_read_tracker_service import (
+                FileReadTrackerService,
             )
 
             content_hash = str(result.get("content_hash", ""))
@@ -469,22 +462,17 @@ def read_file(
             assert ctx.session_id is not None
             assert ctx.db_session_factory is not None
 
-            tracker = load_tracker(ctx.session_id, ctx.db_session_factory) or {}
-
-            if check_dedup(
-                tracker, relative_path, content_hash, actual_start, actual_end
-            ):
+            with ctx.db_session_factory() as db:
+                deduped = FileReadTrackerService(db).check_and_record_read(
+                    session_id=ctx.session_id,
+                    path=relative_path,
+                    content_hash=content_hash,
+                    total_lines=total_lines,
+                    start_line=actual_start,
+                    end_line=actual_end,
+                )
+            if deduped:
                 return _build_dedup_summary(relative_path, result, content_hash)
-
-            record_read(
-                tracker,
-                relative_path,
-                content_hash,
-                total_lines,
-                actual_start,
-                actual_end,
-            )
-            save_tracker(ctx.session_id, ctx.db_session_factory, tracker)
 
         return result
 

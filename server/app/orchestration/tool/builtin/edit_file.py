@@ -414,19 +414,16 @@ def edit_file(
         raise RuntimeError("Sandbox edit_file returned an invalid payload.")
 
     ctx = get_current_tool_execution_context()
-    if (
-        ctx is not None
-        and ctx.session_id
-        and ctx.db_session_factory
-    ):
-        from ._file_read_tracker import load_tracker, save_tracker
+    if ctx is not None and ctx.session_id and ctx.db_session_factory:
+        from app.services.file_read_tracker_service import FileReadTrackerService
 
-        tracker = load_tracker(ctx.session_id, ctx.db_session_factory)
-        if tracker:
-            relative_path = (
-                payload.get("path", target.removeprefix("/workspace/") or ".")
+        relative_path = str(
+            payload.get("path", target.removeprefix("/workspace/") or ".")
+        )
+        with ctx.db_session_factory() as db:
+            FileReadTrackerService(db).invalidate_file(
+                session_id=ctx.session_id,
+                path=relative_path,
             )
-            tracker.pop(relative_path, None)
-            save_tracker(ctx.session_id, ctx.db_session_factory, tracker)
 
     return payload
