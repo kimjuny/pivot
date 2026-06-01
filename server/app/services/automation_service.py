@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from app.models.automation import Automation, AutomationRun
 from app.models.session import Session
 from app.services.agent_service import AgentService
+from app.services.provider_registry_service import ProviderRegistryService
 from app.utils.logging_config import get_logger
 from croniter import croniter
 from sqlmodel import col, select
@@ -76,6 +77,56 @@ class AutomationService:
         if automation is None:
             raise ValueError(f"Automation {automation_id} not found")
         return automation
+
+    def get_channel_info_by_session_ids(
+        self,
+        channel_session_ids: list[int],
+    ) -> dict[int, dict[str, str | None]]:
+        """Return channel display metadata keyed by ChannelSession id."""
+        if not channel_session_ids:
+            return {}
+
+        from app.models.channel import AgentChannelBinding, ChannelSession
+
+        channel_sessions = list(
+            self.db.exec(
+                select(ChannelSession).where(
+                    col(ChannelSession.id).in_(channel_session_ids)
+                )
+            ).all()
+        )
+        if not channel_sessions:
+            return {}
+
+        binding_ids = list({row.channel_binding_id for row in channel_sessions})
+        bindings = list(
+            self.db.exec(
+                select(AgentChannelBinding).where(
+                    col(AgentChannelBinding.id).in_(binding_ids)
+                )
+            ).all()
+        )
+        binding_map = {binding.id: binding for binding in bindings}
+
+        provider_map = {
+            provider.manifest.key: provider.manifest
+            for provider in ProviderRegistryService(self.db).list_channel_providers()
+        }
+
+        result: dict[int, dict[str, str | None]] = {}
+        for channel_session in channel_sessions:
+            if channel_session.id is None:
+                continue
+            binding = binding_map.get(channel_session.channel_binding_id)
+            if binding is None:
+                continue
+            manifest = provider_map.get(binding.channel_key)
+            result[channel_session.id] = {
+                "channel_key": binding.channel_key,
+                "channel_name": manifest.name if manifest else binding.name,
+                "channel_logo_url": manifest.logo_url if manifest else None,
+            }
+        return result
 
     def require_automation_ownership(
         self, automation_id: int, user_id: int

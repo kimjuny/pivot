@@ -64,6 +64,9 @@ class AutomationResponse(AppBaseModel):
     notify_on_completion: bool
     notify_on_failure: bool
     channel_session_id: int | None
+    channel_key: str | None = None
+    channel_name: str | None = None
+    channel_logo_url: str | None = None
     last_run_at: str | None
     next_run_at: str | None
     created_at: str

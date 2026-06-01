@@ -14,12 +14,10 @@ import {
 } from "@/utils/api";
 import { SessionSidebar } from "@/pages/chat/components/SessionSidebar";
 import {
-  getClientAgents,
   getClientSessions,
   type ClientSessionListItem,
 } from "@/client/api";
 import ClientUserMenu from "@/client/ClientUserMenu";
-import type { Agent } from "@/types";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
 import { ClientAutomationsView } from "@/client/ClientAutomationsView";
 
@@ -37,18 +35,13 @@ function sortClientSessions(
 /** Browse and manage scheduled automations. */
 function ClientAutomationsPage() {
   const navigate = useNavigate();
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [sessions, setSessions] = useState<ClientSessionListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [nextAgents, sessionResponse] = await Promise.all([
-          getClientAgents(),
-          getClientSessions(30),
-        ]);
-        setAgents(nextAgents);
+        const sessionResponse = await getClientSessions(30);
         setSessions(sessionResponse.sessions);
       } catch {
         // Automations view handles its own error state
@@ -64,10 +57,7 @@ function ClientAutomationsPage() {
       navigate(`/app/agents/${latestSession.agent_id}`);
       return;
     }
-    const firstAgent = agents[0];
-    if (firstAgent) {
-      navigate(`/app/agents/${firstAgent.id}`);
-    }
+    navigate("/app/agents");
   };
 
   useNewSessionShortcut(handleNewSession);
@@ -167,7 +157,6 @@ function ClientAutomationsPage() {
         </div>
         <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-6">
           <ClientAutomationsView
-            agents={agents}
             onNavigateToSession={handleNavigateToSession}
           />
         </div>

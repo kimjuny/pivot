@@ -28,7 +28,11 @@ if TYPE_CHECKING:
 router = APIRouter()
 
 
-def _serialize_automation(automation: Automation) -> dict[str, Any]:
+def _serialize_automation(
+    automation: Automation,
+    *,
+    channel_info: dict[str, str | None] | None = None,
+) -> dict[str, Any]:
     """Serialize an Automation row into the API response shape."""
     return {
         "id": automation.id,
@@ -46,6 +50,11 @@ def _serialize_automation(automation: Automation) -> dict[str, Any]:
         "notify_on_completion": automation.notify_on_completion,
         "notify_on_failure": automation.notify_on_failure,
         "channel_session_id": automation.channel_session_id,
+        "channel_key": channel_info["channel_key"] if channel_info else None,
+        "channel_name": channel_info["channel_name"] if channel_info else None,
+        "channel_logo_url": (
+            channel_info["channel_logo_url"] if channel_info else None
+        ),
         "last_run_at": (
             automation.last_run_at.replace(tzinfo=UTC).isoformat()
             if automation.last_run_at
@@ -161,9 +170,24 @@ async def list_automations(
         raise HTTPException(status_code=401, detail="Not authenticated")
     svc = AutomationService(db)
     automations = svc.list_automations(current_user.id, status=status)
+    channel_info_map = svc.get_channel_info_by_session_ids(
+        [
+            automation.channel_session_id
+            for automation in automations
+            if automation.channel_session_id is not None
+        ],
+    )
     return AutomationListResponse(
         automations=[
-            AutomationResponse(**_serialize_automation(a)) for a in automations
+            AutomationResponse(
+                **_serialize_automation(
+                    automation,
+                    channel_info=channel_info_map.get(automation.channel_session_id)
+                    if automation.channel_session_id is not None
+                    else None,
+                )
+            )
+            for automation in automations
         ],
         total=len(automations),
     )
@@ -195,7 +219,19 @@ async def create_automation(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return AutomationResponse(**_serialize_automation(automation))
+    channel_info_map = svc.get_channel_info_by_session_ids(
+        [automation.channel_session_id]
+        if automation.channel_session_id is not None
+        else [],
+    )
+    return AutomationResponse(
+        **_serialize_automation(
+            automation,
+            channel_info=channel_info_map.get(automation.channel_session_id)
+            if automation.channel_session_id is not None
+            else None,
+        )
+    )
 
 
 @router.get(
@@ -216,7 +252,19 @@ async def get_automation(
         raise HTTPException(status_code=404, detail="Automation not found")
     if automation.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    return AutomationResponse(**_serialize_automation(automation))
+    channel_info_map = svc.get_channel_info_by_session_ids(
+        [automation.channel_session_id]
+        if automation.channel_session_id is not None
+        else [],
+    )
+    return AutomationResponse(
+        **_serialize_automation(
+            automation,
+            channel_info=channel_info_map.get(automation.channel_session_id)
+            if automation.channel_session_id is not None
+            else None,
+        )
+    )
 
 
 @router.put(
@@ -245,7 +293,17 @@ async def update_automation(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return AutomationResponse(**_serialize_automation(updated))
+    channel_info_map = svc.get_channel_info_by_session_ids(
+        [updated.channel_session_id] if updated.channel_session_id is not None else [],
+    )
+    return AutomationResponse(
+        **_serialize_automation(
+            updated,
+            channel_info=channel_info_map.get(updated.channel_session_id)
+            if updated.channel_session_id is not None
+            else None,
+        )
+    )
 
 
 @router.delete("/client/automations/{automation_id}")

@@ -21,6 +21,9 @@ export interface ClientAutomation {
   notify_on_completion: boolean;
   notify_on_failure: boolean;
   channel_session_id: number | null;
+  channel_key: string | null;
+  channel_name: string | null;
+  channel_logo_url: string | null;
   last_run_at: string | null;
   next_run_at: string | null;
   created_at: string;

@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -49,9 +48,8 @@ import {
   getClientAutomationRuns,
   triggerClientAutomation,
 } from "@/client/api";
-import type { Agent } from "@/types";
 import { AutomationCreateDialog } from "@/components/AutomationCreateDialog";
-import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
+import { ChannelProviderBadge } from "@/components/ChannelProviderBadge";
 import { MarkdownRenderer } from "@/pages/chat/components/MarkdownRenderer";
 
 /** Format an ISO timestamp into a short local string. */
@@ -105,9 +103,14 @@ function cronToLabel(triggerConfig: string): string {
   }
 }
 
+function automationStatusLabel(status: ClientAutomation["status"]): string {
+  if (status === "active") return "Active";
+  if (status === "paused") return "Pause";
+  return "Disabled";
+}
+
 interface ClientAutomationDetailViewProps {
   automation: ClientAutomation;
-  agents: Agent[];
   onBack: () => void;
   onTriggered: () => void;
   /** Called when automation data is updated (edit save). */
@@ -119,7 +122,6 @@ interface ClientAutomationDetailViewProps {
 /** Detail view for a single automation with run history table. */
 export function ClientAutomationDetailView({
   automation,
-  agents,
   onBack,
   onTriggered,
   onUpdated,
@@ -134,11 +136,6 @@ export function ClientAutomationDetailView({
   const [isEditOpen, setIsEditOpen] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(totalRuns / PAGE_SIZE));
-
-  const agentName =
-    agents.find((a) => a.id === automation.agent_id)?.name ?? "Unknown";
-
-  const agent = agents.find((a) => a.id === automation.agent_id);
 
   const scheduleLabel = cronToLabel(automation.trigger_config);
 
@@ -191,12 +188,9 @@ export function ClientAutomationDetailView({
                 role="alert"
               >
                 <div className="shrink-0">
-                  <LLMBrandAvatar
-                    model={agent?.model_name}
-                    containerClassName="flex size-9 items-center justify-center rounded-lg bg-primary/10"
-                    imageClassName="size-4"
-                    fallback={<Bot className="size-4 text-primary" aria-hidden="true" />}
-                  />
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10">
+                    <Bot className="size-4 text-primary" aria-hidden="true" />
+                  </div>
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
@@ -232,7 +226,7 @@ export function ClientAutomationDetailView({
         })();
       }, 3000);
     },
-    [automation.automation_id, automation.agent_id, automation.name, agent?.model_name, fetchRuns, onNavigateToSession, page],
+    [automation.automation_id, automation.agent_id, automation.name, fetchRuns, onNavigateToSession, page],
   );
 
   useEffect(() => {
@@ -300,17 +294,11 @@ export function ClientAutomationDetailView({
       >
         <CardHeader className="space-y-4">
           <div className="flex items-start gap-4">
-            <LLMBrandAvatar
-              model={agent?.model_name}
-              containerClassName="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10"
-              imageClassName="size-6"
-              fallback={<Bot className="size-5 text-primary" aria-hidden="true" />}
-            />
+            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <Bot className="size-5 text-primary" aria-hidden="true" />
+            </div>
             <div className="min-w-0 flex-1 space-y-1.5">
               <CardTitle className="min-w-0 text-xl">{automation.name}</CardTitle>
-              <CardDescription className="text-sm">
-                {agentName}
-              </CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -322,11 +310,7 @@ export function ClientAutomationDetailView({
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Status</p>
               <div className="text-sm">
-                <Badge
-                  variant={automation.status === "active" ? "default" : "secondary"}
-                >
-                  {automation.status}
-                </Badge>
+                {automationStatusLabel(automation.status)}
               </div>
             </div>
             <div className="space-y-1">
@@ -364,7 +348,11 @@ export function ClientAutomationDetailView({
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">Channel</p>
                 <div className="text-sm">
-                  <Badge variant="outline">Connected</Badge>
+                  <ChannelProviderBadge
+                    channelKey={automation.channel_key ?? "channel"}
+                    name={automation.channel_name ?? "Channel"}
+                    logoUrl={automation.channel_logo_url}
+                  />
                 </div>
               </div>
             )}
@@ -537,7 +525,7 @@ export function ClientAutomationDetailView({
       <AutomationCreateDialog
         open={isEditOpen}
         automation={automation}
-        agents={agents}
+        agents={[]}
         onClose={() => setIsEditOpen(false)}
         onUpdated={() => {
           setIsEditOpen(false);

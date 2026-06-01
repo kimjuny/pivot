@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Clock,
+  CircleCheck,
+  CircleOff,
+  CirclePause,
   CirclePlay,
   Pause,
   Play,
@@ -9,7 +12,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -37,6 +39,7 @@ import {
 import {
   type ClientAutomation,
   deleteClientAutomation,
+  getClientAgents,
   getClientAutomations,
   triggerClientAutomation,
   updateClientAutomation,
@@ -112,14 +115,15 @@ function buildPageList(current: number, total: number): (number | "ellipsis")[] 
 }
 
 interface ClientAutomationsViewProps {
-  agents: Agent[];
   defaultAgentId?: number;
   onNavigateToSession?: (agentId: number, sessionUuid: string) => void;
 }
 
-export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSession }: ClientAutomationsViewProps) {
+export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: ClientAutomationsViewProps) {
   const [automations, setAutomations] = useState<ClientAutomation[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -154,7 +158,25 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
     [automations, safePage],
   );
 
-  const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
+  const ensureAgentsLoaded = useCallback(async () => {
+    if (agents.length > 0) return true;
+    try {
+      setIsLoadingAgents(true);
+      setAgents(await getClientAgents());
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load agents");
+      return false;
+    } finally {
+      setIsLoadingAgents(false);
+    }
+  }, [agents.length]);
+
+  const handleOpenCreate = async () => {
+    if (await ensureAgentsLoaded()) {
+      setIsCreateOpen(true);
+    }
+  };
 
   const handlePauseResume = async (automation: ClientAutomation) => {
     const newStatus = automation.status === "active" ? "paused" : "active";
@@ -197,7 +219,6 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
       {selectedAutomation ? (
         <ClientAutomationDetailView
           automation={selectedAutomation}
-          agents={agents}
           onNavigateToSession={onNavigateToSession}
           onBack={() => {
             void fetchAutomations();
@@ -225,7 +246,7 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
           </div>
 
           <div className="flex items-center gap-3">
-            <Button size="sm" onClick={() => setIsCreateOpen(true)}>
+            <Button size="sm" onClick={() => void handleOpenCreate()} disabled={isLoadingAgents}>
               <Plus className="mr-1 h-4 w-4" />
               New
             </Button>
@@ -248,7 +269,7 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
               </EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
-              <Button size="sm" variant="outline" onClick={() => setIsCreateOpen(true)}>
+              <Button size="sm" variant="outline" onClick={() => void handleOpenCreate()} disabled={isLoadingAgents}>
                 <Plus className="mr-1 h-4 w-4" />
                 Create Automation
               </Button>
@@ -259,49 +280,49 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
             <Table>
               <TableBody>
                 {pagedAutomations.map((automation) => {
-                  const agent = agentMap.get(automation.agent_id);
+                  const StatusIcon =
+                    automation.status === "active"
+                      ? CircleCheck
+                      : automation.status === "paused"
+                        ? CirclePause
+                        : CircleOff;
+                  const statusIconClassName =
+                    automation.status === "disabled"
+                      ? "text-destructive"
+                      : "text-muted-foreground";
                   return (
                     <TableRow
                       key={automation.id}
                       className="group cursor-pointer hover:bg-muted"
                       onClick={() => setSelectedAutomation(automation)}
                     >
-                      {/* Name + Agent */}
-                      <TableCell className="min-w-0 flex-1 py-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
+                      {/* Name */}
+                      <TableCell className="min-w-0 py-2.5">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <StatusIcon
+                            className={`size-3.5 shrink-0 ${statusIconClassName}`}
+                            aria-label={automation.status}
+                          />
+                          <span className="min-w-0 truncate text-sm font-medium">
                             {automation.name}
-                          </p>
-                          {agent && (
-                            <p className="truncate text-xs text-muted-foreground">
-                              {agent.name}
-                            </p>
-                          )}
+                          </span>
                         </div>
                       </TableCell>
 
                       {/* Status / Schedule / Last Run — visible by default, hidden on hover */}
-                      <TableCell className="py-3">
-                        <div className="relative flex items-center justify-end gap-3">
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground transition-opacity duration-[180ms] group-hover:opacity-0">
-                            <Badge
-                              variant={
-                                automation.status === "active"
-                                  ? "default"
-                                  : automation.status === "paused"
-                                    ? "secondary"
-                                    : "outline"
-                              }
-                              className="text-[10px]"
-                            >
-                              {automation.status}
-                            </Badge>
-                            <span>{cronToLabel(automation.trigger_config)}</span>
-                            <span>{formatScheduleTime(automation.last_run_at)}</span>
+                      <TableCell className="w-[300px] py-2.5">
+                        <div className="relative flex min-h-7 items-center justify-end">
+                          <div className="flex items-center justify-end gap-3 whitespace-nowrap text-xs text-muted-foreground transition-opacity duration-[180ms] group-hover:opacity-0 group-focus-within:opacity-0">
+                            <span className="max-w-[120px] truncate">
+                              {cronToLabel(automation.trigger_config)}
+                            </span>
+                            <span className="shrink-0">
+                              {formatScheduleTime(automation.last_run_at)}
+                            </span>
                           </div>
 
                           {/* Action buttons — hidden by default, visible on hover */}
-                          <div className="absolute right-0 flex items-center gap-0.5 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100">
+                          <div className="absolute right-0 flex items-center gap-0.5 opacity-0 transition-opacity duration-[180ms] group-hover:opacity-100 group-focus-within:opacity-100">
                             <Button
                               variant="ghost"
                               size="icon"
