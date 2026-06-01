@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from app.orchestration.tool import Param, tool
+from app.orchestration.tool import Param, get_current_tool_execution_context, tool
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
@@ -357,6 +357,9 @@ for hunk in hunks:
 
 with path.open("w", encoding="utf-8", newline="") as target_file:
     target_file.write("".join(updated_lines))
+final_text = "".join(updated_lines)
+import hashlib
+content_hash = hashlib.md5(final_text.encode("utf-8"), usedforsecurity=False).hexdigest()
 payload = {
     "message": "Applied patch successfully.",
     "path": expected_path,
@@ -364,6 +367,8 @@ payload = {
     "added_lines": sum(int(hunk["added_line_count"]) for hunk in hunks),
     "removed_lines": sum(int(hunk["removed_line_count"]) for hunk in hunks),
     "warnings": warnings,
+    "content_hash": content_hash,
+    "total_lines": len(updated_lines),
 }
 print(json.dumps(payload, ensure_ascii=False))
 """.strip()
@@ -407,4 +412,21 @@ def edit_file(
     payload = json.loads(output)
     if not isinstance(payload, dict):
         raise RuntimeError("Sandbox edit_file returned an invalid payload.")
+
+    ctx = get_current_tool_execution_context()
+    if (
+        ctx is not None
+        and ctx.session_id
+        and ctx.db_session_factory
+    ):
+        from ._file_read_tracker import load_tracker, save_tracker
+
+        tracker = load_tracker(ctx.session_id, ctx.db_session_factory)
+        if tracker:
+            relative_path = (
+                payload.get("path", target.removeprefix("/workspace/") or ".")
+            )
+            tracker.pop(relative_path, None)
+            save_tracker(ctx.session_id, ctx.db_session_factory, tracker)
+
     return payload

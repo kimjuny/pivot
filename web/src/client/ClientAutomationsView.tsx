@@ -233,7 +233,7 @@ export function ClientAutomationsView({ agents, defaultAgentId, onNavigateToSess
         </div>
 
         {isLoading ? (
-          <CenteredLoadingIndicator label="Loading automations..." className="min-h-[50vh]" />
+          <CenteredLoadingIndicator label="Loading automations..." className="min-h-[70vh]" />
         ) : error ? (
           <div className="py-12 text-sm text-destructive">{error}</div>
         ) : automations.length === 0 ? (

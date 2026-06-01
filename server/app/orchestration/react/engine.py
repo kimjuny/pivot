@@ -1191,7 +1191,18 @@ class ReactEngine:
             return {k: v for k, v in raw_result.items() if k != "ok"}
 
         if tool_name == "edit_file":
-            return {k: v for k, v in raw_result.items() if k != "message"}
+            return {
+                k: v
+                for k, v in raw_result.items()
+                if k not in {"message", "content_hash"}
+            }
+
+        if tool_name in ("read_file", "write_file"):
+            return {
+                k: v
+                for k, v in raw_result.items()
+                if k not in {"content_hash", "deduped"}
+            }
 
         # Generic: strip the unified pivot_action envelope from any tool.
         if "pivot_action" in raw_result:

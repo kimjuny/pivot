@@ -158,32 +158,31 @@ async def list_client_sessions(
     )
 
     session_service = SessionService(db)
-    return ClientSessionListResponse(
-        sessions=[
-            ClientSessionListItem(
-                session_id=session.session_id,
-                agent_id=session.agent_id,
-                type=cast("Literal['client', 'studio_test']", session.type),
-                agent_name=visible_agent.name,
-                agent_description=visible_agent.description,
-                release_id=session.release_id,
-                latest_release_id=visible_agent.active_release_id,
-                is_stale=session_service.is_session_stale(
-                    session, visible_agent.active_release_id
-                ),
-                migrated_to_session_id=session.migrated_to_session_id,
-                status=session.status,
-                runtime_status=session.runtime_status,
-                title=session.title,
-                is_pinned=session.is_pinned,
-                created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
-                updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
-            )
-            for session in sessions
-            if (visible_agent := visible_agents.get(session.agent_id)) is not None
-        ],
-        total=len(sessions),
-    )
+    items = [
+        ClientSessionListItem(
+            session_id=session.session_id,
+            agent_id=session.agent_id,
+            type=cast("Literal['client', 'studio_test']", session.type),
+            agent_name=visible_agent.name,
+            agent_description=visible_agent.description,
+            release_id=session.release_id,
+            latest_release_id=visible_agent.active_release_id,
+            is_stale=session_service.is_session_stale(
+                session, visible_agent.active_release_id
+            ),
+            migrated_to_session_id=session.migrated_to_session_id,
+            status=session.status,
+            runtime_status=session.runtime_status,
+            title=session.title,
+            is_pinned=session.is_pinned,
+            created_at=session.created_at.replace(tzinfo=UTC).isoformat(),
+            updated_at=session.updated_at.replace(tzinfo=UTC).isoformat(),
+        )
+        for session in sessions
+        if (visible_agent := visible_agents.get(session.agent_id)) is not None
+    ]
+    enrich_sessions_with_channel_info(db, [item.session_id for item in items], items)
+    return ClientSessionListResponse(sessions=items, total=len(sessions))
 
 
 class ChatBootstrapResponse(BaseModel):

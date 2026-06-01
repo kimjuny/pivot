@@ -273,6 +273,13 @@ class ReactSessionRuntimeDebugResponse(AppBaseModel):
         ...,
         description="Session row update timestamp in ISO 8601 UTC format",
     )
+    file_read_tracker: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Parsed file-read tracker dict. Keys are workspace-relative paths, "
+            "values are {hash, total_lines, read_ranges}."
+        ),
+    )
 
 
 class ReactStreamEventType(str, Enum):

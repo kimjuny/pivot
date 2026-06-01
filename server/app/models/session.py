@@ -158,6 +158,14 @@ class Session(SQLModel, table=True):
             "(e.g. previous_response_id chaining)."
         ),
     )
+    react_file_read_tracker: str | None = Field(
+        default=None,
+        description=(
+            "JSON dict tracking file content hashes and read ranges for dedup. "
+            "Key: workspace-relative path, value: {hash, total_lines, read_ranges}. "
+            "Cleared on context compaction."
+        ),
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

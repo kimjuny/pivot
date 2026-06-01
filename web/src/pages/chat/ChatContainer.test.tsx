@@ -263,6 +263,7 @@ describe("ChatContainer session rollover", () => {
       exact_prompt_tokens: null,
       exact_prompt_message_count: null,
       updated_at: "2026-03-19T00:00:00.000Z",
+      file_read_tracker: null,
     });
     vi.mocked(getFullSessionHistory).mockResolvedValue({
       session_id: "session-1",

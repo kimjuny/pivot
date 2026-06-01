@@ -95,6 +95,7 @@ _IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "webp"})
 _READ_FILE_SCRIPT = """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -114,6 +115,7 @@ if path.is_dir():
 text = path.read_text(encoding="utf-8", errors="replace")
 lines = text.splitlines(keepends=True)
 total_lines = len(lines)
+content_hash = hashlib.md5(text.encode("utf-8", errors="replace"), usedforsecurity=False).hexdigest()
 
 if total_lines == 0:
     payload = {
@@ -128,6 +130,7 @@ if total_lines == 0:
         "next_start_line": None,
         "previous_start_line": None,
         "content": "",
+        "content_hash": content_hash,
     }
     print(json.dumps(payload, ensure_ascii=False))
     raise SystemExit(0)
@@ -157,6 +160,7 @@ payload = {
     "next_start_line": actual_end_line + 1 if actual_end_line < total_lines else None,
     "previous_start_line": max(1, start_line - max_lines) if start_line > 1 else None,
     "content": numbered_chunk,
+    "content_hash": content_hash,
 }
 print(json.dumps(payload, ensure_ascii=False))
 """.strip()
@@ -278,6 +282,41 @@ def _read_document(path: str) -> dict[str, object]:
         }
 
 
+def _build_dedup_summary(
+    path: str,
+    result: dict[str, object],
+    content_hash: str,
+) -> dict[str, object]:
+    start = int(result["start_line"])  # type: ignore[arg-type]
+    end = int(result["end_line"])  # type: ignore[arg-type]
+    total = int(result["total_lines"])  # type: ignore[arg-type]
+    range_desc = (
+        f"{total} lines (full file)"
+        if start == 1 and end == total
+        else f"lines {start}-{end}"
+    )
+    return {
+        "path": path,
+        "total_lines": total,
+        "start_line": start,
+        "end_line": end,
+        "returned_line_count": 0,
+        "has_more_before": False,
+        "has_more_after": False,
+        "truncated": False,
+        "next_start_line": None,
+        "previous_start_line": None,
+        "content": (
+            f"[File unchanged since last read — content already in context]\n"
+            f"Path: {path}\n"
+            f"Range: {range_desc}\n"
+            f"Hash: {content_hash[:8]}..."
+        ),
+        "deduped": True,
+        "content_hash": content_hash,
+    }
+
+
 def _read_image(path: str) -> dict[str, object]:
     """Read an image file from the sandbox and return multimodal blocks."""
 
@@ -352,7 +391,13 @@ def _read_image(path: str) -> dict[str, object]:
         "Read a file under /workspace. Auto-selects reading strategy by extension: "
         "text/code files (and any unknown extension) get line-numbered output, "
         "documents (pdf/docx/pptx/xlsx) get Docling-converted markdown, "
-        "images (png/jpg/jpeg/webp) are made visible to the model."
+        "images (png/jpg/jpeg/webp) are made visible to the model. "
+        "IMPORTANT: Always prefer read_file over bash tools (cat, head, tail, etc.) "
+        "for reading files. Only fall back to bash if read_file explicitly reports "
+        "that the file type is not supported. "
+        "If you have already read the same range of a text file in this session "
+        "and the content has not changed, the system returns a short summary "
+        "instead of the full content to save context space."
     ),
 )
 def read_file(
@@ -381,11 +426,6 @@ def read_file(
     - **Images** (.png, .jpg, .jpeg, .webp): Makes the image visible to the
       model in the next iteration.
 
-    Args:
-        path: Workspace file path.
-        start_line: 1-based starting line for text files.
-        max_lines: Maximum lines for text files.
-
     Returns:
         Structured dict with file content and metadata.
 
@@ -402,7 +442,51 @@ def read_file(
             raise ValueError("max_lines must be greater than or equal to 1.")
         if max_lines > 800:
             raise ValueError("max_lines must be less than or equal to 800.")
-        return _read_text_in_sandbox(path, start_line, max_lines)
+
+        result = _read_text_in_sandbox(path, start_line, max_lines)
+
+        ctx = get_current_tool_execution_context()
+        can_track = (
+            ctx is not None
+            and ctx.session_id
+            and ctx.db_session_factory
+        )
+        if can_track:
+            from ._file_read_tracker import (
+                check_dedup,
+                load_tracker,
+                record_read,
+                save_tracker,
+            )
+
+            content_hash = str(result.get("content_hash", ""))
+            relative_path = str(result.get("path", path))
+            actual_start = int(result["start_line"])  # type: ignore[arg-type]
+            actual_end = int(result["end_line"])  # type: ignore[arg-type]
+            total_lines = int(result["total_lines"])  # type: ignore[arg-type]
+
+            assert ctx is not None
+            assert ctx.session_id is not None
+            assert ctx.db_session_factory is not None
+
+            tracker = load_tracker(ctx.session_id, ctx.db_session_factory) or {}
+
+            if check_dedup(
+                tracker, relative_path, content_hash, actual_start, actual_end
+            ):
+                return _build_dedup_summary(relative_path, result, content_hash)
+
+            record_read(
+                tracker,
+                relative_path,
+                content_hash,
+                total_lines,
+                actual_start,
+                actual_end,
+            )
+            save_tracker(ctx.session_id, ctx.db_session_factory, tracker)
+
+        return result
 
     if file_type == "document":
         return _read_document(path)

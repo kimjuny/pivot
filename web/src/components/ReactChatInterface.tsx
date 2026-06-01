@@ -61,6 +61,66 @@ function formatCompactPayload(
   }
 }
 
+function formatReadRanges(ranges: number[][]): string {
+  if (!ranges || ranges.length === 0) return "—";
+  return ranges
+    .map(([s, e]) => (s === e ? `L${s}` : `L${s}-${e}`))
+    .join(", ");
+}
+
+function FileReadTrackerPanel({
+  tracker,
+}: {
+  tracker?: Record<
+    string,
+    { hash?: string; total_lines?: number; read_ranges?: number[][] }
+  > | null;
+}) {
+  if (!tracker || Object.keys(tracker).length === 0) {
+    return (
+      <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+        No files tracked yet. Files appear here after read_file or write_file
+        calls.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 text-xs">
+      <div className="text-muted-foreground">
+        {Object.keys(tracker).length} file(s) in context tracker
+      </div>
+      <div className="space-y-1.5">
+        {Object.entries(tracker).map(([filePath, entry]) => (
+          <div
+            key={filePath}
+            className="rounded-md border bg-muted/20 px-3 py-2"
+          >
+            <div className="truncate font-mono text-foreground">
+              {filePath}
+            </div>
+            <div className="mt-1 flex items-center gap-3 text-muted-foreground">
+              <span>
+                {entry.total_lines ?? "?"} lines
+              </span>
+              {entry.hash ? (
+                <span className="font-mono text-[10px]">
+                  {entry.hash.slice(0, 8)}…
+                </span>
+              ) : null}
+            </div>
+            {entry.read_ranges && entry.read_ranges.length > 0 ? (
+              <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                Read: {formatReadRanges(entry.read_ranges)}
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Floating runtime-debug affordance for compact-aware session inspection.
  */
@@ -79,7 +139,7 @@ function CompactDebugButton({
   closeSignal: number;
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"compact" | "surface">("compact");
+  const [activeTab, setActiveTab] = useState<"compact" | "surface" | "files">("compact");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const compactResultText = formatCompactPayload(
     debugState.runtimeDebug?.compact_result_raw,
@@ -135,12 +195,19 @@ function CompactDebugButton({
               <Tabs
                 value={activeTab}
                 onValueChange={(value) =>
-                  setActiveTab(value === "surface" ? "surface" : "compact")
+                  setActiveTab(
+                    value === "surface"
+                      ? "surface"
+                      : value === "files"
+                        ? "files"
+                        : "compact",
+                  )
                 }
                 className="px-4 pb-4 pt-3"
               >
-                <TabsList className="grid h-auto w-full grid-cols-2">
+                <TabsList className="grid h-auto w-full grid-cols-3">
                   <TabsTrigger value="compact">Compact</TabsTrigger>
+                  <TabsTrigger value="files">Files</TabsTrigger>
                   <TabsTrigger value="surface">Surface</TabsTrigger>
                 </TabsList>
 
@@ -250,6 +317,12 @@ function CompactDebugButton({
                   )}
                 </TabsContent>
 
+                <TabsContent value="files" className="space-y-3 pt-4">
+                  <FileReadTrackerPanel
+                    tracker={debugState.runtimeDebug?.file_read_tracker}
+                  />
+                </TabsContent>
+
                 <TabsContent value="surface" className="space-y-3 pt-4">
                   {debugSections.length > 0 ? (
                     debugSections.map((section) => (
@@ -319,6 +392,7 @@ function ReactChatInterfaceShell({
     <div className="relative h-full">
       <ChatPage
         {...props}
+        showCompactDebug={showCompactDebug}
         onRuntimeDebugChange={setDebugState}
         onSurfaceDevAttached={() => {
           setDebugPanelCloseSignal((current) => current + 1);

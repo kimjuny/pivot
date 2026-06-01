@@ -2890,6 +2890,14 @@ export interface ReactSessionRuntimeDebug {
   exact_prompt_tokens: number | null;
   exact_prompt_message_count: number | null;
   updated_at: string;
+  file_read_tracker: Record<
+    string,
+    {
+      hash?: string;
+      total_lines?: number;
+      read_ranges?: number[][];
+    }
+  > | null;
 }
 
 /**

@@ -218,7 +218,7 @@ function ClientAgentsPage() {
 
           <div className="flex-1">
             {isLoading ? (
-              <CenteredLoadingIndicator label="Loading agents..." className="min-h-[50vh]" />
+              <CenteredLoadingIndicator label="Loading agents..." className="min-h-[70vh]" />
             ) : error ? (
               <div className="py-12 text-sm text-destructive">{error}</div>
             ) : filteredAgents.length === 0 ? (

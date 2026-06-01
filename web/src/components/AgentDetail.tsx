@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { X, Wrench, Zap, BarChart3 } from "lucide-react";
+import { X, Wrench, Zap, BarChart3, Bot } from "lucide-react";
 import { useAgentWorkStore } from '../store/agentWorkStore';
 import { useAgentTabStore } from '../store/agentTabStore';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
@@ -36,6 +36,7 @@ import {
 } from '@/utils/agentTestSnapshot';
 import { deepCopyAgent } from '../utils/compare';
 import { toast } from 'sonner';
+import { LLMBrandAvatar } from '@/components/LLMBrandAvatar';
 import type { Agent } from '../types';
 import type { AgentTab } from '../store/agentTabStore';
 
@@ -862,6 +863,17 @@ function AgentDetail({ agent, agentId, onRefreshAgent }: AgentDetailProps) {
           sessionIdleTimeoutMinutes={effectiveAgent?.session_idle_timeout_minutes}
           compactThresholdPercent={effectiveAgent?.compact_threshold_percent}
           agentClientState={effectiveAgent?.client_state}
+          sidebarTitleIcon={
+            effectiveAgent ? (
+              <LLMBrandAvatar
+                model={effectiveAgent.model_name}
+                containerClassName="flex size-4 items-center justify-center"
+                imageClassName="size-4"
+                fallback={<Bot className="size-4" aria-hidden="true" />}
+              />
+            ) : undefined
+          }
+          sidebarTitle={effectiveAgent?.name}
         />
       </DraggableDialog>
 

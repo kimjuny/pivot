@@ -1,8 +1,13 @@
 """Built-in sandbox tool: write file content in agent workspace."""
 
+import hashlib
 from typing import Annotated
 
-from app.orchestration.tool import Param, tool
+from app.orchestration.tool import (
+    Param,
+    get_current_tool_execution_context,
+    tool,
+)
 
 from ._sandbox_common import exec_in_sandbox, workspace_path
 
@@ -23,7 +28,7 @@ def write_file(
         str,
         Param("UTF-8 text content to write. Expects a string, not a JSON object."),
     ],
-) -> str:
+) -> dict[str, object]:
     """Write UTF-8 text to a file under ``/workspace``.
 
     IMPORTANT: Prefer an absolute sandbox path that starts with ``/workspace/``,
@@ -34,7 +39,7 @@ def write_file(
         content: Text content to write.
 
     Returns:
-        Human-readable write confirmation.
+        Dict with write confirmation and content hash.
 
     Raises:
         ValueError: If path escapes ``/workspace``.
@@ -56,4 +61,24 @@ def write_file(
             content,
         ]
     )
-    return f"Wrote file: {target}"
+
+    content_hash = hashlib.md5(
+        content.encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
+    total_lines = content.count("\n") + (0 if content.endswith("\n") else 1)
+    relative_path = target.removeprefix("/workspace/") or "."
+
+    ctx = get_current_tool_execution_context()
+    if ctx is not None and ctx.session_id and ctx.db_session_factory:
+        from ._file_read_tracker import load_tracker, record_read, save_tracker
+
+        tracker = load_tracker(ctx.session_id, ctx.db_session_factory) or {}
+        record_read(tracker, relative_path, content_hash, total_lines, 1, total_lines)
+        save_tracker(ctx.session_id, ctx.db_session_factory, tracker)
+
+    return {
+        "message": f"Wrote file: {relative_path}",
+        "path": relative_path,
+        "content_hash": content_hash,
+        "total_lines": total_lines,
+    }

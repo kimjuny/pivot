@@ -261,11 +261,8 @@ export function ClientAutomationDetailView({
 
   return (
     <div className="flex flex-col gap-5 pb-8">
-      {/* Header row: back + actions */}
-      <div
-        className="staggered-fade-in-card flex items-center justify-between"
-        style={{ "--stagger-index": 0, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
-      >
+      {/* Header row: back + actions — no animation */}
+      <div className="flex items-center justify-between">
         <Button asChild variant="ghost" className="-ml-3 w-fit">
           <button type="button" onClick={onBack}>
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -299,7 +296,7 @@ export function ClientAutomationDetailView({
       {/* Hero card — avatar, title, info fields */}
       <Card
         className="staggered-fade-in-card"
-        style={{ "--stagger-index": 1, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
+        style={{ "--stagger-index": 0, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
       >
         <CardHeader className="space-y-4">
           <div className="flex items-start gap-4">
@@ -378,7 +375,7 @@ export function ClientAutomationDetailView({
       {/* Card 2 — Prompt Template */}
       <Card
         className="staggered-fade-in-card"
-        style={{ "--stagger-index": 2, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
+        style={{ "--stagger-index": 1, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
       >
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Prompt Template</CardTitle>
@@ -391,7 +388,7 @@ export function ClientAutomationDetailView({
       {/* Card 3 — Run History */}
       <Card
         className="staggered-fade-in-card"
-        style={{ "--stagger-index": 3, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
+        style={{ "--stagger-index": 2, "--list-card-stagger-step": "40ms", "--list-card-stagger-max-delay": "200ms" } as React.CSSProperties}
       >
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Run History ({totalRuns})</CardTitle>

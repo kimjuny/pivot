@@ -116,6 +116,8 @@ export interface ClientSessionListItem {
   runtime_status?: "idle" | "running" | "waiting_input";
   title: string | null;
   is_pinned: boolean;
+  channel_key?: string | null;
+  channel_logo_url?: string | null;
   created_at: string;
   updated_at: string;
 }

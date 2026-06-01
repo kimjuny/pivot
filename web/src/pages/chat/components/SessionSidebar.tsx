@@ -413,23 +413,14 @@ export function SessionSidebar({
               }}
               className={`h-9 gap-0 rounded-xl px-2.5 pr-8 text-[13px] ${SIDEBAR_ITEM_HOVER_CLASS}`}
             >
-              <div
-                data-testid={`session-running-indicator-${session.session_id}`}
-                aria-hidden={!isRunning}
-                className={`flex shrink-0 items-center justify-center overflow-hidden transition-[width,margin,opacity] duration-200 ease-out ${
-                  isRunning ? "mr-2 w-4 opacity-100" : "mr-0 w-0 opacity-0"
-                }`}
-              >
-                {isRunning ? (
-                  <Spinner
-                    size={14}
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </div>
               {session.channel_key ? (
-                <span className="mr-1.5 flex shrink-0 items-center justify-center">
-                  {session.channel_logo_url ? (
+                <span
+                  className="mr-1.5 flex shrink-0 items-center justify-center"
+                  data-testid={`session-running-indicator-${session.session_id}`}
+                >
+                  {isRunning ? (
+                    <Spinner size={14} aria-hidden="true" />
+                  ) : session.channel_logo_url ? (
                     <img
                       src={session.channel_logo_url}
                       alt=""
@@ -440,6 +431,14 @@ export function SessionSidebar({
                     <MessageSquare className="h-3.5 w-3.5 text-sidebar-foreground/45" />
                   )}
                 </span>
+              ) : isRunning ? (
+                <div
+                  data-testid={`session-running-indicator-${session.session_id}`}
+                  aria-hidden={!isRunning}
+                  className="mr-2 flex w-4 shrink-0 items-center justify-center"
+                >
+                  <Spinner size={14} aria-hidden="true" />
+                </div>
               ) : null}
               <span className="min-w-0 flex-1 truncate transition-[transform] duration-200 ease-out">
                 {getSessionTitle(session)}

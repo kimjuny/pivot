@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 
 /**
  * Props for the centered loading indicator.
@@ -29,23 +29,18 @@ export interface CenteredLoadingIndicatorProps {
 export function CenteredLoadingIndicator({
   label = "Loading",
   className,
-  spinnerClassName,
 }: CenteredLoadingIndicatorProps) {
   const containerClassName = cn(
     "flex items-center justify-center bg-background",
     className,
   );
-  const iconClassName = cn(
-    "h-6 w-6",
-    spinnerClassName,
-  );
 
   return (
     <div className={containerClassName} role="status" aria-live="polite">
       <span className="sr-only">{label}</span>
-      <Loader2
+      <Spinner
         aria-hidden="true"
-        className={cn(iconClassName, "animate-spin text-muted-foreground/70")}
+        size={20}
         data-testid="centered-loading-spinner"
       />
     </div>

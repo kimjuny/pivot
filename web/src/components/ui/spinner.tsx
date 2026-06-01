@@ -55,7 +55,7 @@ export function Spinner({ size = 40, color, className }: SpinnerProps) {
     const radius = 90 * scale;
     const lineWidth = Math.max(1, 10 * scale);
     const tailLength = 320;
-    const speed = 0.03;
+    const speed = 0.045;
     const maxAlpha = 0.55;
 
     let angle = 0;
@@ -81,7 +81,7 @@ export function Spinner({ size = 40, color, className }: SpinnerProps) {
 
       for (let i = 1; i < trailPoints.length; i++) {
         const t = i / trailPoints.length;
-        const alpha = Math.pow(t, 2.8) * maxAlpha;
+        const alpha = Math.pow(t, 4) * maxAlpha;
         ctx!.beginPath();
         ctx!.moveTo(trailPoints[i - 1].x, trailPoints[i - 1].y);
         ctx!.lineTo(trailPoints[i].x, trailPoints[i].y);

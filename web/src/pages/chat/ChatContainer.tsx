@@ -1336,6 +1336,12 @@ function ChatContainer({
           toolResults,
           actionHandlerContextRef.current,
         );
+
+        // Refresh debug panel after file-related tool results so the Files
+        // tab stays current during a running task.
+        if (showCompactDebug && currentSessionIdRef.current) {
+          void loadSessionRuntimeDebug(currentSessionIdRef.current);
+        }
       }
 
       if (event.type === "compact_start") {
@@ -1657,6 +1663,9 @@ function ChatContainer({
           setIsStreaming(false);
           setActiveContextTaskId(null);
           setActiveContextIteration(null);
+          if (showCompactDebug && currentSessionIdRef.current) {
+            void loadSessionRuntimeDebug(currentSessionIdRef.current);
+          }
           clearCompactStatusWithMinimumDelay();
           setReplyTaskId((previousTaskId) =>
             previousTaskId === event.task_id ? null : previousTaskId,
@@ -1949,6 +1958,7 @@ function ChatContainer({
       currentSessionId,
       loadSessionRuntimeDebug,
       refreshSidebarData,
+      showCompactDebug,
       showCompactStatus,
       updateMessages,
     ],

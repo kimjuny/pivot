@@ -353,6 +353,8 @@ class ReactRuntimeService:
             state.exact_prompt_tokens = None
             state.exact_prompt_message_count = None
         session = self._get_session_or_raise(task)
+        if compact_result is not None:
+            session.react_file_read_tracker = "{}"
         self._persist_state(session, state)
         return state
 
@@ -391,6 +393,8 @@ class ReactRuntimeService:
         if not preserve_exact_prompt_usage_baseline:
             state.exact_prompt_tokens = None
             state.exact_prompt_message_count = None
+        if compact_result is not None:
+            session.react_file_read_tracker = "{}"
         self._persist_state(session, state)
         return state
 
@@ -465,6 +469,13 @@ class ReactRuntimeService:
             except json.JSONDecodeError:
                 compact_result = compact_result_raw
 
+        file_read_tracker: Any | None = None
+        if session.react_file_read_tracker:
+            try:
+                file_read_tracker = json.loads(session.react_file_read_tracker)
+            except json.JSONDecodeError:
+                file_read_tracker = None
+
         return {
             "session_id": session.session_id,
             "runtime_message_count": len(messages),
@@ -479,6 +490,7 @@ class ReactRuntimeService:
                 session
             ),
             "updated_at": session.updated_at.replace(tzinfo=UTC).isoformat(),
+            "file_read_tracker": file_read_tracker,
         }
 
     def _persist_state(self, session: Session, state: TaskRuntimeState) -> None:
