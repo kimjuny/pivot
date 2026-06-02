@@ -63,6 +63,11 @@ class ChannelBindingResponse(AppBaseModel):
     last_health_status: str | None
     last_health_message: str | None
     last_health_check_at: str | None
+    last_connected_at: str | None = None
+    last_disconnected_at: str | None = None
+    consecutive_failure_count: int = 0
+    next_retry_at: str | None = None
+    last_error_fingerprint: str | None = None
     created_at: str
     updated_at: str
 

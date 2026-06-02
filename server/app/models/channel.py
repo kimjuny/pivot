@@ -21,6 +21,11 @@ class AgentChannelBinding(SQLModel, table=True):
         last_health_status: Latest health check outcome.
         last_health_message: Human-readable health details.
         last_health_check_at: UTC timestamp of the most recent health check.
+        last_connected_at: UTC timestamp of the most recent successful runtime connection.
+        last_disconnected_at: UTC timestamp of the most recent runtime disconnect.
+        consecutive_failure_count: Number of consecutive runtime health failures.
+        next_retry_at: UTC timestamp before which the runtime supervisor should not retry.
+        last_error_fingerprint: Stable text fingerprint of the latest runtime error.
         created_at: UTC timestamp when the binding was created.
         updated_at: UTC timestamp when the binding was last updated.
     """
@@ -35,6 +40,11 @@ class AgentChannelBinding(SQLModel, table=True):
     last_health_status: str | None = Field(default=None, max_length=32)
     last_health_message: str | None = Field(default=None, max_length=500)
     last_health_check_at: datetime | None = Field(default=None)
+    last_connected_at: datetime | None = Field(default=None)
+    last_disconnected_at: datetime | None = Field(default=None)
+    consecutive_failure_count: int = Field(default=0)
+    next_retry_at: datetime | None = Field(default=None)
+    last_error_fingerprint: str | None = Field(default=None, max_length=500)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

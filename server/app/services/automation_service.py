@@ -128,6 +128,47 @@ class AutomationService:
             }
         return result
 
+    def get_agent_info_by_ids(
+        self, agent_ids: list[int]
+    ) -> dict[int, dict[str, str | None]]:
+        """Return agent display metadata keyed by Agent id."""
+        if not agent_ids:
+            return {}
+
+        from app.models.agent import Agent
+        from app.models.llm import LLM
+
+        agents = list(
+            self.db.exec(select(Agent).where(col(Agent.id).in_(agent_ids))).all()
+        )
+        llm_ids = [agent.llm_id for agent in agents if agent.llm_id is not None]
+        llms = (
+            {
+                llm.id: llm
+                for llm in self.db.exec(
+                    select(LLM).where(col(LLM.id).in_(llm_ids))
+                ).all()
+                if llm.id is not None
+            }
+            if llm_ids
+            else {}
+        )
+        result: dict[int, dict[str, str | None]] = {}
+        for agent in agents:
+            if agent.id is None:
+                continue
+            model_display = agent.model_name
+            if agent.llm_id is not None:
+                llm = llms.get(agent.llm_id)
+                if llm is not None:
+                    model_display = f"{llm.name} ({llm.model})"
+            result[agent.id] = {
+                "agent_name": agent.name,
+                "agent_description": agent.description,
+                "agent_model_name": model_display,
+            }
+        return result
+
     def require_automation_ownership(
         self, automation_id: int, user_id: int
     ) -> Automation:

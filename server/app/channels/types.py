@@ -71,6 +71,17 @@ class ChannelTestResult(AppBaseModel):
     endpoint_infos: list[ChannelEndpointInfo] = Field(default_factory=list)
 
 
+class ChannelHealthCheckResult(AppBaseModel):
+    """Runtime health result returned by a provider-specific check."""
+
+    ok: bool
+    status: str
+    message: str
+    error_kind: str = "unknown"
+    retryable: bool = True
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+
+
 class ChannelInboundEvent(AppBaseModel):
     """Provider-neutral inbound text event produced by an adapter."""
 
@@ -160,6 +171,15 @@ class ChannelProvider(Protocol):
         binding_id: int,
     ) -> ChannelTestResult:
         """Execute a setup or connectivity validation for a binding."""
+        ...
+
+    def check_health(
+        self,
+        auth_config: dict[str, Any],
+        runtime_config: dict[str, Any],
+        binding_id: int,
+    ) -> ChannelHealthCheckResult:
+        """Run a provider-specific runtime health check."""
         ...
 
     def handle_webhook(

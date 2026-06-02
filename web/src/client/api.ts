@@ -10,6 +10,9 @@ export interface ClientAutomation {
   automation_id: string;
   name: string;
   agent_id: number;
+  agent_name: string | null;
+  agent_description: string | null;
+  agent_model_name: string | null;
   release_id: number;
   trigger_type: string;
   trigger_config: string;

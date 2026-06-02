@@ -32,6 +32,7 @@ def _serialize_automation(
     automation: Automation,
     *,
     channel_info: dict[str, str | None] | None = None,
+    agent_info: dict[str, str | None] | None = None,
 ) -> dict[str, Any]:
     """Serialize an Automation row into the API response shape."""
     return {
@@ -39,6 +40,9 @@ def _serialize_automation(
         "automation_id": automation.automation_id,
         "name": automation.name,
         "agent_id": automation.agent_id,
+        "agent_name": agent_info["agent_name"] if agent_info else None,
+        "agent_description": agent_info["agent_description"] if agent_info else None,
+        "agent_model_name": agent_info["agent_model_name"] if agent_info else None,
         "release_id": automation.release_id,
         "trigger_type": automation.trigger_type,
         "trigger_config": automation.trigger_config,
@@ -177,6 +181,9 @@ async def list_automations(
             if automation.channel_session_id is not None
         ],
     )
+    agent_info_map = svc.get_agent_info_by_ids(
+        list({automation.agent_id for automation in automations}),
+    )
     return AutomationListResponse(
         automations=[
             AutomationResponse(
@@ -185,6 +192,7 @@ async def list_automations(
                     channel_info=channel_info_map.get(automation.channel_session_id)
                     if automation.channel_session_id is not None
                     else None,
+                    agent_info=agent_info_map.get(automation.agent_id),
                 )
             )
             for automation in automations
@@ -224,12 +232,14 @@ async def create_automation(
         if automation.channel_session_id is not None
         else [],
     )
+    agent_info_map = svc.get_agent_info_by_ids([automation.agent_id])
     return AutomationResponse(
         **_serialize_automation(
             automation,
             channel_info=channel_info_map.get(automation.channel_session_id)
             if automation.channel_session_id is not None
             else None,
+            agent_info=agent_info_map.get(automation.agent_id),
         )
     )
 
@@ -257,12 +267,14 @@ async def get_automation(
         if automation.channel_session_id is not None
         else [],
     )
+    agent_info_map = svc.get_agent_info_by_ids([automation.agent_id])
     return AutomationResponse(
         **_serialize_automation(
             automation,
             channel_info=channel_info_map.get(automation.channel_session_id)
             if automation.channel_session_id is not None
             else None,
+            agent_info=agent_info_map.get(automation.agent_id),
         )
     )
 
@@ -296,12 +308,14 @@ async def update_automation(
     channel_info_map = svc.get_channel_info_by_session_ids(
         [updated.channel_session_id] if updated.channel_session_id is not None else [],
     )
+    agent_info_map = svc.get_agent_info_by_ids([updated.agent_id])
     return AutomationResponse(
         **_serialize_automation(
             updated,
             channel_info=channel_info_map.get(updated.channel_session_id)
             if updated.channel_session_id is not None
             else None,
+            agent_info=agent_info_map.get(updated.agent_id),
         )
     )
 

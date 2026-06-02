@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from app.api.dependencies import get_db
@@ -27,7 +26,6 @@ from app.services.agent_snapshot_service import AgentSnapshotService
 from app.services.channel_service import ChannelService
 from app.services.provider_registry_service import ProviderRegistryService
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 router = APIRouter()
@@ -196,22 +194,12 @@ async def test_agent_channel(
     current_user=Depends(permissions(Permission.CHANNELS_MANAGE)),
 ) -> dict[str, object]:
     """Run one provider-specific connection test."""
-    binding = _require_channel_binding_edit(db, binding_id, current_user)
+    _require_channel_binding_edit(db, binding_id, current_user)
 
-    provider = ProviderRegistryService(db).get_channel_provider(binding.channel_key)
-    result = await run_in_threadpool(
-        provider.test_connection,
-        json.loads(binding.auth_config or "{}"),
-        json.loads(binding.runtime_config or "{}"),
-        binding_id,
-    )
-    binding.last_health_status = result.status
-    binding.last_health_message = result.message
-    binding.last_health_check_at = datetime.now(UTC)
-    binding.updated_at = binding.last_health_check_at
-    db.add(binding)
-    db.commit()
-    return {"result": result.model_dump()}
+    try:
+        return ChannelService(db).test_binding(binding_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/channels/{channel_key}/test", response_model=ChannelTestResponse)

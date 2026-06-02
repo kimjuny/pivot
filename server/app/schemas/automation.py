@@ -53,6 +53,9 @@ class AutomationResponse(AppBaseModel):
     automation_id: str
     name: str
     agent_id: int
+    agent_name: str | None = None
+    agent_description: str | None = None
+    agent_model_name: str | None = None
     release_id: int
     trigger_type: str
     trigger_config: str

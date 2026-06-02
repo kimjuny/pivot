@@ -29,6 +29,7 @@ from app.schemas.channel import (
     ChannelLinkTokenStatusResponse,
 )
 from app.services.agent_release_runtime_service import AgentReleaseRuntimeService
+from app.services.channel_runtime_health_service import ChannelRuntimeHealthService
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.provider_registry_service import ProviderRegistryService
@@ -77,6 +78,25 @@ def _dump_json_object(payload: dict[str, Any]) -> str:
 def _ensure_utc(value: datetime) -> datetime:
     """Normalize a possibly naive datetime to explicit UTC."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _serialize_datetime(value: datetime | None) -> str | None:
+    """Serialize an optional datetime as UTC ISO text."""
+    return _ensure_utc(value).isoformat() if value is not None else None
+
+
+def _run_provider_health_check(
+    provider: ChannelProvider,
+    *,
+    auth_config: dict[str, Any],
+    runtime_config: dict[str, Any],
+    binding_id: int,
+) -> Any:
+    """Run provider-specific health_check when available, else test_connection."""
+    checker = getattr(provider, "check_health", None)
+    if callable(checker):
+        return checker(auth_config, runtime_config, binding_id)
+    return provider.test_connection(auth_config, runtime_config, binding_id)
 
 
 class ChannelService:
@@ -179,11 +199,12 @@ class ChannelService:
             ],
             last_health_status=binding.last_health_status,
             last_health_message=binding.last_health_message,
-            last_health_check_at=(
-                binding.last_health_check_at.replace(tzinfo=UTC).isoformat()
-                if binding.last_health_check_at is not None
-                else None
-            ),
+            last_health_check_at=_serialize_datetime(binding.last_health_check_at),
+            last_connected_at=_serialize_datetime(binding.last_connected_at),
+            last_disconnected_at=_serialize_datetime(binding.last_disconnected_at),
+            consecutive_failure_count=binding.consecutive_failure_count,
+            next_retry_at=_serialize_datetime(binding.next_retry_at),
+            last_error_fingerprint=binding.last_error_fingerprint,
             created_at=binding.created_at.replace(tzinfo=UTC).isoformat(),
             updated_at=binding.updated_at.replace(tzinfo=UTC).isoformat(),
         )
@@ -275,6 +296,7 @@ class ChannelService:
         binding.updated_at = datetime.now(UTC)
         self.db.add(binding)
         self.db.commit()
+        ChannelRuntimeHealthService(self.db).clear_retry(binding_id)
         self.db.refresh(binding)
         return self._serialize_binding(binding)
 
@@ -317,17 +339,21 @@ class ChannelService:
         if binding is None:
             raise ValueError("Channel binding not found.")
         provider = self._get_channel_provider(binding.channel_key)
-        result = provider.test_connection(
-            _load_json_object(binding.auth_config),
-            _load_json_object(binding.runtime_config),
-            binding_id,
+        result = _run_provider_health_check(
+            provider,
+            auth_config=_load_json_object(binding.auth_config),
+            runtime_config=_load_json_object(binding.runtime_config),
+            binding_id=binding_id,
         )
-        binding.last_health_status = result.status
-        binding.last_health_message = result.message
-        binding.last_health_check_at = datetime.now(UTC)
-        binding.updated_at = datetime.now(UTC)
-        self.db.add(binding)
-        self.db.commit()
+        health_service = ChannelRuntimeHealthService(self.db)
+        if result.ok:
+            health_service.mark_healthy(binding_id, result.message)
+        else:
+            health_service.record_failure(
+                binding_id,
+                message=result.message,
+                error_kind=getattr(result, "error_kind", "unknown"),
+            )
         return {"result": result.model_dump()}
 
     def test_binding_draft(
@@ -347,10 +373,11 @@ class ChannelService:
         if not self.is_provider_usable_by_user(user=user, provider=provider):
             raise ValueError("Channel provider is not available to the caller.")
         provider.validate_config(auth_config, runtime_config)
-        result = provider.test_connection(
-            auth_config,
-            runtime_config,
-            0,
+        result = _run_provider_health_check(
+            provider,
+            auth_config=auth_config,
+            runtime_config=runtime_config,
+            binding_id=0,
         )
         return {"result": result.model_dump()}
 

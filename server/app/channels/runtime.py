@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from app.config import get_settings
 from app.db.session import managed_session
 from app.models.channel import AgentChannelBinding
+from app.services.channel_runtime_health_service import ChannelRuntimeHealthService
 from app.services.channel_service import ChannelService
 from app.utils.logging_config import get_logger
 from sqlmodel import select
@@ -62,6 +64,22 @@ def _get_runtime_factory(provider: Any) -> Any | None:
     return factory if callable(factory) else None
 
 
+def _classify_runtime_error(provider: Any, exc: BaseException) -> str:
+    """Return a provider-specific or generic runtime error kind."""
+    classifier = getattr(provider, "classify_runtime_error", None)
+    if callable(classifier):
+        try:
+            result = classifier(exc)
+            if isinstance(result, str) and result:
+                return result
+        except Exception:
+            logger.exception(
+                "Channel provider %s failed to classify runtime error.",
+                getattr(getattr(provider, "manifest", None), "key", "unknown"),
+            )
+    return ChannelRuntimeHealthService.classify_exception(exc)
+
+
 class ChannelRuntimeManager:
     """Supervise background runtimes for enabled channel bindings."""
 
@@ -71,6 +89,7 @@ class ChannelRuntimeManager:
         self._binding_tasks: dict[int, asyncio.Task[None]] = {}
         self._binding_stop_events: dict[int, asyncio.Event] = {}
         self._binding_fingerprints: dict[int, str] = {}
+        self._binding_providers: dict[int, Any] = {}
 
     async def start(self) -> None:
         """Start the background supervisor if it is not already running."""
@@ -132,6 +151,9 @@ class ChannelRuntimeManager:
             )
             desired_bindings[binding_id] = fingerprint
 
+            if self._is_retry_deferred(row):
+                continue
+
             existing_task = self._binding_tasks.get(binding_id)
             previous_fingerprint = self._binding_fingerprints.get(binding_id)
             if (
@@ -171,12 +193,69 @@ class ChannelRuntimeManager:
             provider.manifest.name,
             binding_id,
         )
+        with managed_session() as session:
+            ChannelRuntimeHealthService(session).mark_starting(
+                binding_id,
+                f"Starting {provider.manifest.name} runtime.",
+            )
         stop_event = asyncio.Event()
         runtime = factory(binding_id)
         task = asyncio.create_task(runtime.run(stop_event))
+        task.add_done_callback(
+            lambda completed_task, completed_binding_id=binding_id: (
+                self._log_binding_task_result(completed_binding_id, completed_task)
+            )
+        )
         self._binding_tasks[binding_id] = task
         self._binding_stop_events[binding_id] = stop_event
         self._binding_fingerprints[binding_id] = fingerprint
+        self._binding_providers[binding_id] = provider
+
+    def _log_binding_task_result(
+        self,
+        binding_id: int,
+        task: asyncio.Task[None],
+    ) -> None:
+        """Log unexpected runtime task failures for post-mortem debugging."""
+        if task.cancelled():
+            return
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None:
+            logger.error(
+                "Channel runtime task for binding %s stopped unexpectedly.",
+                binding_id,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+            provider = self._binding_providers.get(binding_id)
+            with managed_session() as session:
+                binding = session.get(AgentChannelBinding, binding_id)
+                if binding is None or not binding.enabled:
+                    return
+                error_kind = (
+                    _classify_runtime_error(provider, exc)
+                    if provider is not None
+                    else ChannelRuntimeHealthService.classify_exception(exc)
+                )
+                ChannelRuntimeHealthService(session).record_failure(
+                    binding_id,
+                    message=f"Runtime stopped unexpectedly: {exc!s}",
+                    error_kind=error_kind,
+                    error=exc,
+                )
+            return
+
+        with managed_session() as session:
+            binding = session.get(AgentChannelBinding, binding_id)
+            if binding is None or not binding.enabled:
+                return
+            ChannelRuntimeHealthService(session).record_failure(
+                binding_id,
+                message="Runtime stopped unexpectedly.",
+                error_kind="unknown",
+            )
 
     async def _stop_binding(self, binding_id: int) -> None:
         """Stop and forget one binding runtime."""
@@ -190,6 +269,23 @@ class ChannelRuntimeManager:
             await asyncio.gather(task, return_exceptions=True)
 
         self._binding_fingerprints.pop(binding_id, None)
+        self._binding_providers.pop(binding_id, None)
+
+    @staticmethod
+    def _is_retry_deferred(binding: AgentChannelBinding) -> bool:
+        """Return whether a failed binding is still inside its retry window."""
+        if (
+            binding.last_health_status == "error"
+            and (binding.consecutive_failure_count or 0) > 0
+            and binding.next_retry_at is None
+        ):
+            return True
+        if binding.next_retry_at is None:
+            return False
+        retry_at = binding.next_retry_at
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        return retry_at > datetime.now(UTC)
 
 
 channel_runtime_manager = ChannelRuntimeManager()

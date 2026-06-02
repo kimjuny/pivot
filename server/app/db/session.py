@@ -148,6 +148,7 @@ def ensure_database_ready(engine: Engine | None = None) -> None:
     ensure_extension_schema_compatibility()
     ensure_delegation_schema_compatibility()
     ensure_automation_schema_compatibility()
+    ensure_channel_schema_compatibility()
 
     # Seed the single system-settings row if the table is empty.
     _seed_system_settings_defaults(engine)
@@ -326,6 +327,60 @@ def ensure_session_schema_compatibility() -> None:
                 "UPDATE session "
                 "SET runtime_status = 'idle' "
                 "WHERE runtime_status IS NULL"
+            )
+        )
+
+
+def ensure_channel_schema_compatibility() -> None:
+    """Apply additive schema updates for channel runtime health state."""
+    engine = get_engine()
+    inspector = inspect(engine)
+    if not inspector.has_table("agentchannelbinding"):
+        return
+
+    columns = {
+        column["name"] for column in inspector.get_columns("agentchannelbinding")
+    }
+    with engine.begin() as conn:
+        if "last_connected_at" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agentchannelbinding "
+                    "ADD COLUMN last_connected_at DATETIME"
+                )
+            )
+        if "last_disconnected_at" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agentchannelbinding "
+                    "ADD COLUMN last_disconnected_at DATETIME"
+                )
+            )
+        if "consecutive_failure_count" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agentchannelbinding "
+                    "ADD COLUMN consecutive_failure_count INTEGER DEFAULT 0"
+                )
+            )
+        if "next_retry_at" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agentchannelbinding ADD COLUMN next_retry_at DATETIME"
+                )
+            )
+        if "last_error_fingerprint" not in columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE agentchannelbinding "
+                    "ADD COLUMN last_error_fingerprint VARCHAR"
+                )
+            )
+        conn.execute(
+            text(
+                "UPDATE agentchannelbinding "
+                "SET consecutive_failure_count = 0 "
+                "WHERE consecutive_failure_count IS NULL"
             )
         )
 

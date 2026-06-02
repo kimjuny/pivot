@@ -50,6 +50,7 @@ import {
 } from "@/client/api";
 import { AutomationCreateDialog } from "@/components/AutomationCreateDialog";
 import { ChannelProviderBadge } from "@/components/ChannelProviderBadge";
+import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import { MarkdownRenderer } from "@/pages/chat/components/MarkdownRenderer";
 
 /** Format an ISO timestamp into a short local string. */
@@ -294,11 +295,19 @@ export function ClientAutomationDetailView({
       >
         <CardHeader className="space-y-4">
           <div className="flex items-start gap-4">
-            <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-              <Bot className="size-5 text-primary" aria-hidden="true" />
-            </div>
+            <LLMBrandAvatar
+              model={automation.agent_model_name}
+              containerClassName="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10"
+              imageClassName="size-5"
+              fallback={<Bot className="size-5 text-primary" aria-hidden="true" />}
+            />
             <div className="min-w-0 flex-1 space-y-1.5">
               <CardTitle className="min-w-0 text-xl">{automation.name}</CardTitle>
+              {automation.agent_name && (
+                <p className="truncate text-sm text-muted-foreground">
+                  {automation.agent_name}
+                </p>
+              )}
             </div>
           </div>
         </CardHeader>
