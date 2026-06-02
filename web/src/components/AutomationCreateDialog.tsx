@@ -1,5 +1,15 @@
-import { useEffect, useState } from "react";
-import { Bot, Info, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Bot,
+  ChevronRight,
+  CircleAlert,
+  Clock,
+  Info,
+  Loader2,
+  MessageCircle,
+  Timer,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -7,25 +17,29 @@ import { LLMBrandAvatar } from "@/components/LLMBrandAvatar";
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   type ClientAutomation,
   type ClientAutomationCreatePayload,
@@ -57,6 +71,8 @@ interface AutomationDialogProps {
   onUpdated?: () => void;
 }
 
+type SessionStrategy = "reuse" | "isolate" | "this_session";
+
 interface FormData {
   name: string;
   agentId: string;
@@ -66,7 +82,8 @@ interface FormData {
   timeHour: string;
   timeMinute: string;
   timezone: string;
-  sessionStrategy: "reuse" | "isolate" | "this_session";
+  sessionStrategy: SessionStrategy;
+  timeoutSeconds: string;
 }
 
 function buildDefaultFormData(): FormData {
@@ -78,9 +95,14 @@ function buildDefaultFormData(): FormData {
     customCron: "",
     timeHour: "9",
     timeMinute: "0",
-    timezone: "UTC",
+    timezone: getSystemTimeZone(),
     sessionStrategy: "reuse",
+    timeoutSeconds: "300",
   };
+}
+
+function getSystemTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
 function buildCronExpression(data: FormData): string {
@@ -195,13 +217,147 @@ function isValidCronField(field: string, min: number, max: number): boolean {
 }
 
 const FREQUENCY_OPTIONS = [
-  { value: "hourly", label: "Every hour" },
-  { value: "daily", label: "Every day" },
+  { value: "hourly", label: "Hourly" },
+  { value: "daily", label: "Daily" },
   { value: "weekdays", label: "Weekdays" },
-  { value: "weekly", label: "Every week" },
-  { value: "monthly", label: "Every month" },
-  { value: "custom", label: "Custom cron" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "custom", label: "Custom" },
 ];
+
+const SESSION_STRATEGY_OPTIONS: Array<{
+  value: SessionStrategy;
+  label: string;
+  disabled: boolean;
+}> = [
+  { value: "reuse", label: "Continuous", disabled: false },
+  { value: "isolate", label: "Independent", disabled: false },
+  { value: "this_session", label: "Channel session", disabled: true },
+] as const;
+
+function getFrequencyLabel(value: string): string {
+  return FREQUENCY_OPTIONS.find((option) => option.value === value)?.label ?? "Custom cron";
+}
+
+const MENU_ITEM_CLASS = "my-0.5 flex min-h-8 items-center px-2 py-0.5";
+const SELECTED_MENU_ITEM_CLASS = `${MENU_ITEM_CLASS} bg-accent font-medium`;
+const MENU_CONTENT_CLASS = "w-auto px-2 py-1";
+const MENU_HEADER_CLASS = "flex h-6 items-center justify-between gap-3 px-0 py-0 text-xs leading-none";
+const MENU_SEPARATOR_CLASS = "-mx-2 my-0";
+
+function MenuHeader({
+  label,
+  description,
+}: {
+  label: string;
+  description: string;
+}) {
+  return (
+    <DropdownMenuLabel className={MENU_HEADER_CLASS}>
+      <span>{label}</span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className="flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <CircleAlert className="size-3.5" aria-hidden="true" />
+            <span className="sr-only">{label} help</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" align="start" className="max-w-56 text-xs">
+          {description}
+        </TooltipContent>
+      </Tooltip>
+    </DropdownMenuLabel>
+  );
+}
+
+function getScheduleLabel(data: FormData): string {
+  if (data.frequency === "custom") return data.customCron.trim() || "Custom";
+  if (data.frequency === "hourly") {
+    return `Hourly at :${data.timeMinute.padStart(2, "0")}`;
+  }
+  return `${getFrequencyLabel(data.frequency)} at ${data.timeHour.padStart(2, "0")}:${data.timeMinute.padStart(2, "0")}`;
+}
+
+function getSessionStrategyLabel(value: FormData["sessionStrategy"]): string {
+  return SESSION_STRATEGY_OPTIONS.find((option) => option.value === value)?.label ?? "Continuous";
+}
+
+function normalizeTimePart(value: string, max: number): string {
+  const digits = value.replace(/\D/g, "").slice(0, 2);
+  if (!digits) return "";
+  const numericValue = Number(digits);
+  if (Number.isNaN(numericValue)) return "";
+  return String(Math.min(numericValue, max)).padStart(2, "0");
+}
+
+interface TimeSlotInputProps {
+  hour: string;
+  minute: string;
+  disabledHour?: boolean;
+  onChange: (next: { hour: string; minute: string }) => void;
+}
+
+function TimeSlotInput({
+  hour,
+  minute,
+  disabledHour = false,
+  onChange,
+}: TimeSlotInputProps) {
+  const refs = useRef<Array<HTMLInputElement | null>>([]);
+  const digits = `${normalizeTimePart(hour || "0", 23)}${normalizeTimePart(minute || "0", 59)}`.padEnd(4, "0");
+
+  const updateDigit = (index: number, value: string) => {
+    const nextChar = value.replace(/\D/g, "").slice(-1);
+    if (!nextChar) return;
+    const nextDigits = digits.split("");
+    nextDigits[index] = nextChar;
+    onChange({
+      hour: normalizeTimePart(nextDigits.slice(0, 2).join(""), 23),
+      minute: normalizeTimePart(nextDigits.slice(2, 4).join(""), 59),
+    });
+    refs.current[index + 1]?.focus();
+  };
+
+  return (
+    <div className="flex h-10 items-center justify-center gap-0.5">
+      {[0, 1].map((index) => (
+        <input
+          key={index}
+          ref={(element) => {
+            refs.current[index] = element;
+          }}
+          value={digits[index]}
+          disabled={disabledHour}
+          inputMode="numeric"
+          maxLength={1}
+          onChange={(event) => updateDigit(index, event.target.value)}
+          className="flex size-7 rounded-md border border-input bg-background text-center text-xs shadow-sm outline-none transition-colors focus:border-ring disabled:cursor-not-allowed disabled:opacity-45"
+        />
+      ))}
+      <span className="px-0.5 text-xs text-muted-foreground">:</span>
+      {[2, 3].map((index) => (
+        <input
+          key={index}
+          ref={(element) => {
+            refs.current[index] = element;
+          }}
+          value={digits[index]}
+          inputMode="numeric"
+          maxLength={1}
+          onChange={(event) => updateDigit(index, event.target.value)}
+          className="flex size-7 rounded-md border border-input bg-background text-center text-xs shadow-sm outline-none transition-colors focus:border-ring"
+        />
+      ))}
+    </div>
+  );
+}
 
 /**
  * Dialog for creating or editing an automation.
@@ -253,6 +409,10 @@ export function AutomationCreateDialog({
     if (!formData.name.trim()) errors.name = "Name is required";
     if (!isEdit && !formData.agentId) errors.agentId = "Agent is required";
     if (!formData.promptTemplate.trim()) errors.promptTemplate = "Prompt template is required";
+    const timeoutSeconds = Number(formData.timeoutSeconds);
+    if (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1) {
+      errors.timeoutSeconds = "Timeout must be a positive whole number";
+    }
 
     const cron = buildCronExpression(formData);
     if (formData.frequency === "custom") {
@@ -275,6 +435,7 @@ export function AutomationCreateDialog({
           prompt_template: formData.promptTemplate.trim(),
           trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
           session_strategy: formData.sessionStrategy,
+          timeout_seconds: timeoutSeconds,
         });
         toast.success("Automation updated");
         onUpdated?.();
@@ -285,6 +446,7 @@ export function AutomationCreateDialog({
           prompt_template: formData.promptTemplate.trim(),
           trigger_config: JSON.stringify({ cron, timezone: formData.timezone }),
           session_strategy: formData.sessionStrategy,
+          timeout_seconds: timeoutSeconds,
         };
         await createClientAutomation(payload);
         toast.success("Automation created");
@@ -298,246 +460,308 @@ export function AutomationCreateDialog({
     }
   };
 
+  const selectedAgent = agents.find((agent) => String(agent.id) === formData.agentId);
+  const agentLabel = isEdit
+    ? automation?.agent_name ?? selectedAgent?.name ?? "Agent"
+    : selectedAgent?.name ?? "Agent";
+  const submitTimeoutSeconds = Number(formData.timeoutSeconds);
+  const canSubmit =
+    formData.name.trim().length > 0 &&
+    formData.promptTemplate.trim().length > 0 &&
+    (isEdit || formData.agentId.length > 0) &&
+    Number.isInteger(submitTimeoutSeconds) &&
+    submitTimeoutSeconds > 0 &&
+    (formData.frequency !== "custom" ||
+      (formData.customCron.trim().length > 0 &&
+        validateCron(formData.customCron) === null));
+
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
-      <DialogContent className="max-w-[640px] max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Automation" : "New Automation"}</DialogTitle>
+    <TooltipProvider delayDuration={200}>
+      <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="flex max-h-[86vh] w-[min(860px,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden rounded-2xl border bg-card p-0 shadow-2xl sm:max-w-[860px] sm:rounded-3xl">
+        <DialogHeader className="sr-only">
+          <DialogTitle>{isEdit ? "Edit automation" : "New automation"}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-5 py-2">
-          {/* Name */}
-          <Field data-invalid={validationErrors.name ? "" : undefined}>
-            <FieldLabel htmlFor="auto-name">Name<span className="text-destructive ml-0.5">*</span></FieldLabel>
-            <Input
-              id="auto-name"
-              placeholder="Daily Report"
-              aria-invalid={validationErrors.name ? true : undefined}
-              value={formData.name}
-              onChange={(e) => updateField("name", e.target.value)}
-            />
-            {validationErrors.name && <FieldError>{validationErrors.name}</FieldError>}
-          </Field>
+        <div className="flex min-h-[360px] flex-1 flex-col px-7 pb-4 pt-7">
+          <div className="flex items-start gap-3">
+            <div className="min-w-0 flex-1 space-y-3">
+              <Input
+                id="auto-name"
+                placeholder="Automation title"
+                aria-invalid={validationErrors.name ? true : undefined}
+                value={formData.name}
+                onChange={(e) => updateField("name", e.target.value)}
+                className="h-auto border-0 bg-transparent px-0 py-0 text-base font-medium shadow-none outline-none placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:ring-offset-0 aria-[invalid=true]:text-destructive md:text-base"
+              />
+              {validationErrors.name && (
+                <p className="text-xs text-destructive">{validationErrors.name}</p>
+              )}
+            </div>
 
-          {/* Agent — only shown when creating */}
-          {!isEdit && (
-            <Field data-invalid={validationErrors.agentId ? "" : undefined}>
-              <FieldLabel>Agent<span className="text-destructive ml-0.5">*</span></FieldLabel>
-              <Select
-                value={formData.agentId}
-                onValueChange={(val) => updateField("agentId", val)}
-              >
-                <SelectTrigger aria-invalid={validationErrors.agentId ? true : undefined}>
-                  <SelectValue placeholder="Select an agent" />
-                </SelectTrigger>
-                <SelectContent>
-                  {agents.map((agent) => (
-                    <SelectItem key={agent.id} value={String(agent.id)}>
-                      <div className="flex items-center gap-2">
-                        <LLMBrandAvatar
-                          model={agent.model_name}
-                          fallback={<Bot className="size-3.5" aria-hidden="true" />}
-                          containerClassName="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10"
-                          imageClassName="size-3.5"
-                        />
-                        <span>{agent.name}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {validationErrors.agentId && <FieldError>{validationErrors.agentId}</FieldError>}
-            </Field>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="h-9 rounded-xl px-3">
+                  <Info className="mr-2 size-4" aria-hidden="true" />
+                  Variables
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto min-w-56 max-w-64">
+                <DropdownMenuLabel>Template variables</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {[
+                  ["{{date}}", "Current date"],
+                  ["{{time}}", "Current time"],
+                  ["{{datetime}}", "Current date and time"],
+                  ["{{weekday}}", "Day of the week"],
+                  ["{{agent_name}}", "Agent name"],
+                  ["{{run_number}}", "Run sequence number"],
+                ].map(([token, description]) => (
+                  <DropdownMenuItem
+                    key={token}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      updateField("promptTemplate", `${formData.promptTemplate}${token}`);
+                    }}
+                  >
+                    <code className="rounded bg-foreground/10 px-1 py-0.5 font-mono text-xs">
+                      {token}
+                    </code>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {description}
+                    </span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <textarea
+            id="auto-prompt"
+            className="mt-5 min-h-[96px] max-h-72 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm leading-6 outline-none placeholder:text-muted-foreground/50 focus-visible:outline-none aria-[invalid=true]:placeholder:text-destructive/70 [field-sizing:content]"
+            placeholder="Add prompt e.g. look for crashes in $sentry"
+            aria-invalid={validationErrors.promptTemplate ? true : undefined}
+            value={formData.promptTemplate}
+            onChange={(e) => updateField("promptTemplate", e.target.value)}
+          />
+          {validationErrors.promptTemplate && (
+            <p className="mt-2 text-xs text-destructive">
+              {validationErrors.promptTemplate}
+            </p>
           )}
 
-          {/* Schedule */}
-          <Field data-invalid={validationErrors.schedule ? "" : undefined}>
-            <FieldLabel>Schedule<span className="text-destructive ml-0.5">*</span></FieldLabel>
-            {formData.frequency === "custom" ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <Select
-                    value={formData.frequency}
-                    onValueChange={(val) => updateField("frequency", val)}
+          <div className="mt-auto flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-1 overflow-hidden sm:flex-1 sm:flex-nowrap">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild disabled={isEdit}>
+                  <Button
+                    variant="ghost"
+                    className="group h-8 max-w-[145px] rounded-full px-2.5 text-xs"
+                    aria-invalid={validationErrors.agentId ? true : undefined}
                   >
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FREQUENCY_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    placeholder="0 9 * * 1-5"
-                    className="flex-1"
-                    aria-invalid={validationErrors.schedule ? true : undefined}
-                    value={formData.customCron}
-                    onChange={(e) => updateField("customCron", e.target.value)}
-                  />
-                </div>
-                {validationErrors.schedule && <FieldError>{validationErrors.schedule}</FieldError>}
-              </>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Select
-                  value={formData.frequency}
-                  onValueChange={(val) => updateField("frequency", val)}
+                    <UserRound className="mr-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{agentLabel}</span>
+                    {!isEdit && (
+                      <ChevronRight className="ml-0.5 size-3.5 shrink-0 transition-transform duration-150 ease-out group-data-[state=open]:rotate-90" aria-hidden="true" />
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className={`${MENU_CONTENT_CLASS} min-w-44 max-w-64`}
                 >
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {FREQUENCY_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {formData.frequency !== "hourly" ? (
-                  <>
-                    <span className="text-sm text-muted-foreground">at</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="23"
-                      className="w-16"
-                      value={formData.timeHour}
-                      onChange={(e) => updateField("timeHour", e.target.value)}
-                    />
-                    <span className="text-sm text-muted-foreground">:</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      max="59"
-                      className="w-16"
-                      value={formData.timeMinute}
-                      onChange={(e) => updateField("timeMinute", e.target.value)}
-                    />
-                  </>
-                ) : (
-                  <span className="text-sm text-muted-foreground">
-                    at :{formData.timeMinute || "0"}
-                  </span>
-                )}
-              </div>
-            )}
-          </Field>
-
-          {/* Prompt Template */}
-          <Field data-invalid={validationErrors.promptTemplate ? "" : undefined}>
-            <FieldLabel htmlFor="auto-prompt" className="flex items-center gap-1">
-              Prompt Template<span className="text-destructive ml-0.5">*</span>
-              <TooltipProvider delayDuration={200}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Info className="h-3 w-3 cursor-help text-muted-foreground/60" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-72 text-xs leading-relaxed">
-                    <p className="font-medium mb-1.5">Available template variables:</p>
-                    <ul className="space-y-1">
-                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{date}}`}</code> — Current date</li>
-                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{time}}`}</code> — Current time</li>
-                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{datetime}}`}</code> — Current date and time</li>
-                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{weekday}}`}</code> — Day of the week</li>
-                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{agent_name}}`}</code> — Agent name</li>
-                      <li><code className="rounded bg-foreground/10 px-1 py-0.5 font-mono">{`{{run_number}}`}</code> — Run sequence number</li>
-                    </ul>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </FieldLabel>
-            <textarea
-              id="auto-prompt"
-              className="flex min-h-[100px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:ring-destructive"
-              placeholder="Summarize workspace files changed today. Use {{date}} for the current date."
-              aria-invalid={validationErrors.promptTemplate ? true : undefined}
-              value={formData.promptTemplate}
-              onChange={(e) => updateField("promptTemplate", e.target.value)}
-            />
-            {validationErrors.promptTemplate && <FieldError>{validationErrors.promptTemplate}</FieldError>}
-          </Field>
-
-          {/* Session Strategy */}
-          <Field>
-            <FieldLabel>Context Strategy</FieldLabel>
-            <div className="flex flex-col gap-2 rounded-md border p-3">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="sessionStrategy"
-                  checked={formData.sessionStrategy === "reuse"}
-                  onChange={() => updateField("sessionStrategy", "reuse")}
-                  className="mt-1"
-                />
-                <div>
-                  <p className="text-sm font-medium">Continuous</p>
-                  <p className="text-xs text-muted-foreground">
-                    Agent remembers previous runs, can compare and track changes.
-                  </p>
-                </div>
-              </label>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="sessionStrategy"
-                  checked={formData.sessionStrategy === "isolate"}
-                  onChange={() => updateField("sessionStrategy", "isolate")}
-                  className="mt-1"
-                />
-                <div>
-                  <p className="text-sm font-medium">Independent</p>
-                  <p className="text-xs text-muted-foreground">
-                    Each run starts fresh, no memory of previous executions.
-                  </p>
-                </div>
-              </label>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <label className="flex items-start gap-2 cursor-not-allowed opacity-50">
-                      <input
-                        type="radio"
-                        name="sessionStrategy"
-                        checked={formData.sessionStrategy === "this_session"}
-                        onChange={() => updateField("sessionStrategy", "this_session")}
-                        className="mt-1"
-                        disabled
+                  <MenuHeader
+                    label="Agent"
+                    description="Choose which agent runs this automation."
+                  />
+                  <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
+                  {agents.map((agent) => (
+                    <DropdownMenuItem
+                      key={agent.id}
+                      className={MENU_ITEM_CLASS}
+                      onSelect={() => updateField("agentId", String(agent.id))}
+                    >
+                      <LLMBrandAvatar
+                        model={agent.model_name}
+                        fallback={<Bot className="size-3.5" aria-hidden="true" />}
+                        containerClassName="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary/10"
+                        imageClassName="size-3.5"
                       />
-                      <div>
-                        <p className="text-sm font-medium">Channel Session</p>
-                        <p className="text-xs text-muted-foreground">
-                          Run within the current channel conversation. Results are
-                          delivered back to the channel.
-                        </p>
-                      </div>
-                    </label>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Only available when created from a channel conversation
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </Field>
-        </div>
+                      <span className="truncate">{agent.name}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {isEdit ? "Save" : "Create"}
-          </Button>
-        </DialogFooter>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="group h-8 max-w-[185px] rounded-full px-2.5 text-xs"
+                    aria-invalid={validationErrors.schedule ? true : undefined}
+                  >
+                    <Clock className="mr-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{getScheduleLabel(formData)}</span>
+                    <ChevronRight className="ml-0.5 size-3.5 shrink-0 transition-transform duration-150 ease-out group-data-[state=open]:rotate-90" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className={`${MENU_CONTENT_CLASS} min-w-36`}
+                >
+                  <MenuHeader
+                    label="Schedule"
+                    description="Set when this automation runs. Times use your system timezone."
+                  />
+                  <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
+                  {FREQUENCY_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      className={
+                        formData.frequency === option.value
+                          ? SELECTED_MENU_ITEM_CLASS
+                          : MENU_ITEM_CLASS
+                      }
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        updateField("frequency", option.value);
+                      }}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
+                  {formData.frequency === "custom" ? (
+                    <div className="flex h-11 items-center">
+                      <Input
+                        placeholder="0 9 * * 1-5"
+                        className="h-8 text-xs md:text-xs"
+                        value={formData.customCron}
+                        aria-invalid={validationErrors.schedule ? true : undefined}
+                        onChange={(e) => updateField("customCron", e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <TimeSlotInput
+                      hour={formData.timeHour}
+                      minute={formData.timeMinute}
+                      disabledHour={formData.frequency === "hourly"}
+                      onChange={({ hour, minute }) => {
+                        updateField("timeHour", hour);
+                        updateField("timeMinute", minute);
+                      }}
+                    />
+                  )}
+                  {validationErrors.schedule && (
+                    <p className="mt-2 text-xs text-destructive">
+                      {validationErrors.schedule}
+                    </p>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="group h-8 max-w-[155px] rounded-full px-2.5 text-xs"
+                  >
+                    <MessageCircle className="mr-0.5 size-3.5" aria-hidden="true" />
+                    <span className="truncate">
+                      {getSessionStrategyLabel(formData.sessionStrategy)}
+                    </span>
+                    <ChevronRight className="ml-0.5 size-3.5 transition-transform duration-150 ease-out group-data-[state=open]:rotate-90" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className={`${MENU_CONTENT_CLASS} min-w-40`}
+                >
+                  <MenuHeader
+                    label="Context"
+                    description="Choose whether runs continue the same conversation context or start fresh."
+                  />
+                  <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
+                  {SESSION_STRATEGY_OPTIONS.map((option) => (
+                    <DropdownMenuItem
+                      key={option.value}
+                      disabled={option.disabled}
+                      className={
+                        formData.sessionStrategy === option.value
+                          ? SELECTED_MENU_ITEM_CLASS
+                          : MENU_ITEM_CLASS
+                      }
+                      onSelect={() => updateField("sessionStrategy", option.value)}
+                    >
+                      {option.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="group h-8 rounded-full px-2.5 text-xs"
+                    aria-invalid={validationErrors.timeoutSeconds ? true : undefined}
+                  >
+                    <Timer className="mr-0.5 size-3.5" aria-hidden="true" />
+                    {formData.timeoutSeconds || "300"}s
+                    <ChevronRight className="ml-0.5 size-3.5 transition-transform duration-150 ease-out group-data-[state=open]:rotate-90" aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className={`${MENU_CONTENT_CLASS} min-w-36`}
+                >
+                  <MenuHeader
+                    label="Timeout"
+                    description="Maximum time each automation run can spend before it stops."
+                  />
+                  <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
+                  <div className="flex h-11 items-center">
+                    <InputGroup className="h-8 w-40">
+                      <InputGroupInput
+                        type="number"
+                        min="1"
+                        className="h-8 text-xs md:text-xs"
+                        value={formData.timeoutSeconds}
+                        aria-invalid={validationErrors.timeoutSeconds ? true : undefined}
+                        onChange={(e) => updateField("timeoutSeconds", e.target.value)}
+                      />
+                      <InputGroupAddon align="inline-end" className="pr-2 text-xs">
+                        seconds
+                      </InputGroupAddon>
+                    </InputGroup>
+                  </div>
+                  {validationErrors.timeoutSeconds && (
+                    <p className="mt-2 text-xs text-destructive">
+                      {validationErrors.timeoutSeconds}
+                    </p>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="ghost" onClick={onClose} disabled={isSubmitting}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleSubmit()}
+                disabled={isSubmitting || !canSubmit}
+              >
+                {isSubmitting && <Loader2 className="mr-2 size-4 animate-spin" />}
+                {isEdit ? "Save" : "Create"}
+              </Button>
+            </div>
+          </div>
+        </div>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+    </TooltipProvider>
   );
 }
 
@@ -545,7 +769,7 @@ export function AutomationCreateDialog({
 function applyProposal(data: FormData, proposal: AutomationProposal): void {
   data.name = proposal.name;
   data.promptTemplate = proposal.promptTemplate;
-  data.timezone = proposal.timezone ?? "UTC";
+  data.timezone = proposal.timezone ?? getSystemTimeZone();
   data.sessionStrategy = proposal.sessionStrategy ?? "reuse";
 
   const parsed = parseCronForForm(proposal.cron);
@@ -568,8 +792,9 @@ function buildEditFormData(automation: ClientAutomation): FormData {
       customCron: parsed.customCron,
       timeHour: parsed.timeHour,
       timeMinute: parsed.timeMinute,
-      timezone: config.timezone ?? "UTC",
+      timezone: config.timezone ?? getSystemTimeZone(),
       sessionStrategy: automation.session_strategy,
+      timeoutSeconds: String(automation.timeout_seconds),
     };
   } catch {
     return {
@@ -580,8 +805,9 @@ function buildEditFormData(automation: ClientAutomation): FormData {
       customCron: "",
       timeHour: "9",
       timeMinute: "0",
-      timezone: "UTC",
+      timezone: getSystemTimeZone(),
       sessionStrategy: automation.session_strategy,
+      timeoutSeconds: String(automation.timeout_seconds),
     };
   }
 }

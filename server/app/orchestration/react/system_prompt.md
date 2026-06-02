@@ -16,8 +16,8 @@ Output a bare JSON object (no markdown fences, no comments, no trailing commas).
 
 {
   "iteration": 3,
-  "message": "note to the user about current progress",
-  "thinking_next_turn": false,
+  "message": "A note to the user about what you are doing, what you found, or what happens next. Every recursion must include this",
+  "thinking_next_turn": false,       // Set `true` only when the next recursion involves RE_PLAN, a high-cost/irreversible action, or resolving a critical ambiguity. Default `false`.
   "action": {
     "action_type": "CALL_TOOL | RE_PLAN | REFLECT | CLARIFY | ANSWER",
     "output": {},
@@ -27,9 +27,6 @@ Output a bare JSON object (no markdown fences, no comments, no trailing commas).
     ]
   }
 }
-
-- `message`: A note to the user about what you are doing, what you found, or what happens next. Every recursion must include this.
-- `thinking_next_turn`: Set `true` only when the next recursion involves RE_PLAN, a high-cost/irreversible action, or resolving a critical ambiguity. Default `false`.
 
 ### CALL_TOOL
 
