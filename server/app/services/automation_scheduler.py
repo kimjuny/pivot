@@ -140,21 +140,26 @@ class AutomationScheduler:
         self._run_tasks[run_id] = task
 
     async def _reap_stale_runs(self) -> None:
-        """Mark runs stuck in ``running`` beyond the timeout as ``timeout``."""
+        """Mark runs stuck in ``running`` or ``pending`` beyond thresholds."""
         settings = get_settings()
-        timeout_seconds = settings.AUTOMATION_RUN_TIMEOUT_SECONDS
-        cutoff = datetime.now(UTC).timestamp() - timeout_seconds * 2
+        run_timeout = settings.AUTOMATION_RUN_TIMEOUT_SECONDS
+
+        # ── Running runs: reap after 2x the per-run timeout ──
+        running_cutoff = datetime.now(UTC).timestamp() - run_timeout * 2
 
         with managed_session() as db:
-            statement = select(AutomationRun).where(
-                AutomationRun.status == "running",
+            running_runs = list(
+                db.exec(
+                    select(AutomationRun).where(
+                        AutomationRun.status == "running",
+                    )
+                ).all()
             )
-            runs = list(db.exec(statement).all())
 
-        for run in runs:
+        for run in running_runs:
             if run.started_at is None:
                 continue
-            if run.started_at.timestamp() < cutoff:
+            if run.started_at.timestamp() < running_cutoff:
                 logger.warning(
                     "Reaping stale run %d (started %s)",
                     run.id,
@@ -162,13 +167,49 @@ class AutomationScheduler:
                 )
                 with managed_session() as db:
                     svc = AutomationService(db)
-                    assert run.id is not None  # persisted object
+                    assert run.id is not None
                     stale_run = svc.get_run(run.id)
                     if stale_run is not None and stale_run.status == "running":
                         svc.update_run_result(
                             stale_run,
                             status="timeout",
                             error_message="Reaped by stale-run watchdog",
+                        )
+                        svc.advance_stuck_automation(stale_run.automation_id)
+
+        # ── Pending runs: reap if scheduled_at is far in the past ──
+        # These are runs that were claimed but never dispatched (e.g. scheduler
+        # crashed between claim and dispatch).
+        pending_cutoff = (
+            datetime.now(UTC).timestamp()
+            - settings.AUTOMATION_SCHEDULER_SCAN_INTERVAL_SECONDS * 3
+        )
+
+        with managed_session() as db:
+            pending_runs = list(
+                db.exec(
+                    select(AutomationRun).where(
+                        AutomationRun.status == "pending",
+                    )
+                ).all()
+            )
+
+        for run in pending_runs:
+            if run.scheduled_at.timestamp() < pending_cutoff:
+                logger.warning(
+                    "Reaping stale pending run %d (scheduled %s)",
+                    run.id,
+                    run.scheduled_at.isoformat(),
+                )
+                with managed_session() as db:
+                    svc = AutomationService(db)
+                    assert run.id is not None
+                    stale_run = svc.get_run(run.id)
+                    if stale_run is not None and stale_run.status == "pending":
+                        svc.update_run_result(
+                            stale_run,
+                            status="timeout",
+                            error_message="Reaped: pending run never dispatched",
                         )
                         svc.advance_stuck_automation(stale_run.automation_id)
 

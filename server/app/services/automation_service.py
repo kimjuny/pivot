@@ -457,7 +457,6 @@ class AutomationService:
         try:
             self.db.commit()
             self.db.refresh(run)
-            return run
         except Exception:
             self.db.rollback()
             logger.warning(
@@ -466,6 +465,19 @@ class AutomationService:
                 scheduled_at.isoformat(),
             )
             return None
+
+        # Advance next_run_at immediately so the UI reflects the next
+        # scheduled time and the scheduler stops re-scanning this automation.
+        automation = self.db.get(Automation, automation_id)
+        if automation is not None and automation.status == "active":
+            automation.next_run_at = _compute_next_run(automation.trigger_config)
+            automation.updated_at = datetime.now(UTC)
+            self.db.add(automation)
+            self.db.commit()
+
+        # Refresh run so its attributes survive session closure in the caller.
+        self.db.refresh(run)
+        return run
 
     def get_due_automations(self) -> list[Automation]:
         """Return active automations whose next_run_at has passed."""

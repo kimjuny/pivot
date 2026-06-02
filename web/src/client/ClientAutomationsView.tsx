@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import {
   Clock,
   CircleCheck,
@@ -102,6 +102,12 @@ function cronToLabel(triggerConfig: string): string {
 
 const PAGE_SIZE = 10;
 
+type StaggeredRowStyle = CSSProperties & {
+  "--stagger-index": number;
+  "--list-card-stagger-step": string;
+  "--list-card-stagger-max-delay": string;
+};
+
 function buildPageList(current: number, total: number): (number | "ellipsis")[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages: (number | "ellipsis")[] = [1];
@@ -157,6 +163,7 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
     () => automations.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
     [automations, safePage],
   );
+  const isInitialLoading = isLoading && automations.length === 0;
 
   const ensureAgentsLoaded = useCallback(async () => {
     if (agents.length > 0) return true;
@@ -253,12 +260,12 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
           </div>
         </div>
 
-        {isLoading ? (
+        {isInitialLoading ? (
           <CenteredLoadingIndicator label="Loading automations..." className="min-h-[70vh]" />
         ) : error ? (
           <div className="py-12 text-sm text-destructive">{error}</div>
         ) : automations.length === 0 ? (
-          <Empty>
+          <Empty className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <Clock className="size-6" />
@@ -279,7 +286,7 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
           <>
             <Table>
               <TableBody>
-                {pagedAutomations.map((automation) => {
+                {pagedAutomations.map((automation, index) => {
                   const StatusIcon =
                     automation.status === "active"
                       ? CircleCheck
@@ -290,10 +297,16 @@ export function ClientAutomationsView({ defaultAgentId, onNavigateToSession }: C
                     automation.status === "disabled"
                       ? "text-destructive"
                       : "text-muted-foreground";
+                  const rowStyle: StaggeredRowStyle = {
+                    "--stagger-index": index,
+                    "--list-card-stagger-step": "35ms",
+                    "--list-card-stagger-max-delay": "160ms",
+                  };
                   return (
                     <TableRow
                       key={automation.id}
-                      className="group cursor-pointer hover:bg-muted"
+                      className="staggered-fade-in-card group cursor-pointer hover:bg-muted"
+                      style={rowStyle}
                       onClick={() => setSelectedAutomation(automation)}
                     >
                       {/* Name */}
