@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { ChatMessage } from "../types";
 
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 96;
+const PINNED_USER_TOP_BAND_PX = 140;
 
 /**
  * Keeps the timeline pinned to the newest activity until the user intentionally scrolls up.
@@ -52,17 +53,77 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     scrollContainer.scrollTo({ top: targetTop, behavior });
   }, []);
 
+  const getLatestUserMessageElement = useCallback(
+    (scrollContainer: HTMLElement): HTMLElement | null => {
+      const userMessages = scrollContainer.querySelectorAll<HTMLElement>(
+        '[data-role="user"][data-message-id]',
+      );
+      return userMessages.item(userMessages.length - 1) ?? null;
+    },
+    [],
+  );
+
+  const getPinnedUserMessageElement = useCallback(
+    (scrollContainer: HTMLElement): HTMLElement | null => {
+      const pinnedMessageId = scrolledToUserMessageRef.current;
+      const pinnedElement = pinnedMessageId
+        ? scrollContainer.querySelector<HTMLElement>(
+            `[data-message-id="${pinnedMessageId}"]`,
+          )
+        : null;
+      if (pinnedElement) return pinnedElement;
+
+      const latestUserElement = getLatestUserMessageElement(scrollContainer);
+      if (latestUserElement?.dataset.messageId) {
+        scrolledToUserMessageRef.current = latestUserElement.dataset.messageId;
+      }
+      return latestUserElement;
+    },
+    [getLatestUserMessageElement],
+  );
+
+  const isPinnedUserMessageInTopBand = useCallback(
+    (scrollContainer: HTMLElement): boolean => {
+      if (!scrolledToUserMessageRef.current) return false;
+
+      const element = getPinnedUserMessageElement(scrollContainer);
+      if (!element) return false;
+
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      const topOffset = elementRect.top - containerRect.top;
+      return (
+        elementRect.bottom > containerRect.top &&
+        topOffset <= PINNED_USER_TOP_BAND_PX
+      );
+    },
+    [getPinnedUserMessageElement],
+  );
+
   /** Scrolls so the given message element sits at the top of the viewport. */
   const scrollToMessageTop = useCallback(
-    (messageId: string, behavior: ScrollBehavior) => {
+    (
+      messageId: string,
+      behavior: ScrollBehavior,
+      options: { fallbackToLatestUser?: boolean } = {},
+    ) => {
       const scrollContainer = scrollContainerRef.current;
       if (!scrollContainer) {
         return;
       }
 
-      const element = scrollContainer.querySelector(
+      let element = scrollContainer.querySelector<HTMLElement>(
         `[data-message-id="${messageId}"]`,
       );
+      if (!element) {
+        if (options.fallbackToLatestUser) {
+          element = getLatestUserMessageElement(scrollContainer);
+          if (element?.dataset.messageId) {
+            scrolledToUserMessageRef.current = element.dataset.messageId;
+          }
+        }
+      }
+
       if (!element) {
         scrollToBottom(behavior);
         return;
@@ -93,7 +154,7 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
       programmaticScrollUntilRef.current = Date.now() + 450;
       scrollContainer.scrollTo({ top: targetTop, behavior });
     },
-    [scrollToBottom],
+    [getLatestUserMessageElement, scrollToBottom],
   );
 
   const isNearBottom = useCallback((): boolean => {
@@ -128,6 +189,11 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
       autoScrollEnabledRef.current = false;
       forceAutoScrollNextRef.current = false;
     } else if (nearBottom) {
+      if (isPinnedUserMessageInTopBand(scrollContainer)) {
+        lastScrollTopRef.current = currentTop;
+        return;
+      }
+
       autoScrollEnabledRef.current = true;
       // Resume normal auto-scroll and clean up the extra padding
       if (scrolledToUserMessageRef.current) {
@@ -137,7 +203,7 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     }
 
     lastScrollTopRef.current = currentTop;
-  }, [isNearBottom, clearUserMessagePadding]);
+  }, [isNearBottom, clearUserMessagePadding, isPinnedUserMessageInTopBand]);
 
   const prepareForProgrammaticScroll = useCallback(() => {
     autoScrollEnabledRef.current = true;
@@ -168,7 +234,9 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
         previousMessageCountRef.current = messages.length;
 
         requestAnimationFrame(() => {
-          scrollToMessageTop(lastUserMsg.id, "smooth");
+          scrollToMessageTop(lastUserMsg.id, "smooth", {
+            fallbackToLatestUser: true,
+          });
         });
         return;
       }

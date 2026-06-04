@@ -4132,10 +4132,7 @@ function ChatContainer({
         viewportRef={scrollContainerRef}
         className="flex-1"
       >
-        <div
-          className="mx-auto max-w-3xl px-4 pb-2 pt-4"
-          style={{ overflowAnchor: "none" }}
-        >
+        <div className="mx-auto max-w-3xl px-4 pb-2 pt-4 [overflow-anchor:none]">
           {selectedProject && currentSessionId === null && messages.length === 0 ? (
             <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">
               <div className="space-y-2">
