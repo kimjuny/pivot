@@ -5,20 +5,18 @@ interface UseScrollUpPaginationOptions {
   messages: unknown[];
   hasMoreOlderRef: React.RefObject<boolean>;
   isLoadingOlderRef: React.RefObject<boolean>;
-  loadOlderTasks: (limit: number) => Promise<void>;
+  loadOlderTasks: (
+    limit: number,
+    options?: { preserveScroll?: boolean },
+  ) => Promise<string[]>;
+  isTaskLoaded: (taskId: string) => boolean;
   batchSize?: number;
 }
 
 /**
- * Triggers pre-loading of older tasks when the user scrolls up and the
- * 5th user message from the top enters the viewport.
- *
- * Uses IntersectionObserver on the 5th user message element (located via
- * `data-role="user"`). When it intersects the scroll container, calls
- * `loadOlderTasks(batchSize)` while respecting the `isLoadingOlder` lock.
- *
- * After a successful load, the observer is disconnected and reconnected on
- * the new 5th element so it tracks the updated DOM.
+ * Preloads older tasks when the top of the rendered timeline approaches the
+ * viewport. The hook only decides when to ask for more data; the parent owns
+ * the scroll-position preservation.
  */
 export function useScrollUpPagination({
   scrollContainerRef,
@@ -26,27 +24,24 @@ export function useScrollUpPagination({
   hasMoreOlderRef,
   isLoadingOlderRef,
   loadOlderTasks,
+  isTaskLoaded,
   batchSize = 10,
 }: UseScrollUpPaginationOptions) {
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const triggeredRef = useRef(false);
 
-  // Re-observe the 5th user message whenever messages change.
+  // Re-observe the first rendered message whenever the loaded window changes.
   useEffect(() => {
     const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!container || typeof IntersectionObserver === "undefined") return;
 
-    // Disconnect previous observer.
     observerRef.current?.disconnect();
 
-    // Only observe if there could be more data above.
     if (!hasMoreOlderRef.current) return;
 
-    const userMessages = container.querySelectorAll('[data-role="user"]');
-    if (userMessages.length < 5) return;
-
-    const sentinel = userMessages[4]; // 5th user message (0-indexed)
+    const sentinel = container.querySelector("[data-message-id]");
+    if (!sentinel) return;
 
     triggeredRef.current = false;
 
@@ -66,7 +61,7 @@ export function useScrollUpPagination({
           });
         }
       },
-      { root: container, threshold: 0 },
+      { root: container, rootMargin: "480px 0px 0px 0px", threshold: 0 },
     );
 
     observer.observe(sentinel);
@@ -85,34 +80,27 @@ export function useScrollUpPagination({
   /** Loads batches until the target task ID is found or no more history. */
   const loadUntilTask = useCallback(
     async (targetTaskId: string): Promise<boolean> => {
-      let found = false;
       const maxBatches = 20; // Safety limit
+
+      if (isTaskLoaded(targetTaskId)) {
+        return true;
+      }
 
       for (let i = 0; i < maxBatches; i++) {
         if (isLoadingOlderRef.current || !hasMoreOlderRef.current) break;
 
         setIsLoadingOlder(true);
-        await loadOlderTasks(batchSize);
+        await loadOlderTasks(batchSize, { preserveScroll: false });
         setIsLoadingOlder(false);
 
-        // loadOlderTasks updates loadedTaskIds in the parent.
-        // We check via the DOM — if the target user message element exists,
-        // the task is loaded.
-        const container = scrollContainerRef.current;
-        if (container) {
-          const el = container.querySelector(
-            `[data-message-id="user-${targetTaskId}"]`,
-          );
-          if (el) {
-            found = true;
-            break;
-          }
+        if (isTaskLoaded(targetTaskId)) {
+          return true;
         }
       }
 
-      return found;
+      return false;
     },
-    [scrollContainerRef, isLoadingOlderRef, hasMoreOlderRef, loadOlderTasks, batchSize],
+    [isTaskLoaded, isLoadingOlderRef, hasMoreOlderRef, loadOlderTasks, batchSize],
   );
 
   return { isLoadingOlder, loadUntilTask };

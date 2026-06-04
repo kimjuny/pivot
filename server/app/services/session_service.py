@@ -951,13 +951,6 @@ class SessionService:
             [task.task_id for task in tasks]
         )
         current_plan_by_task = self._load_current_plan_by_task(tasks)
-        file_history = FileService(self.db).build_history_items(
-            [task.task_id for task in tasks]
-        )
-        attachment_history = TaskAttachmentService(self.db).list_by_task_ids(
-            [task.task_id for task in tasks]
-        )
-        current_plan_by_task = self._load_current_plan_by_task(tasks)
 
         result = []
         for task in tasks:

@@ -240,16 +240,11 @@ export function useChatAutoScroll(messages: ChatMessage[]) {
     forceAutoScrollNextRef.current = false;
   }, []);
 
-  const isProgrammaticScrolling = useCallback((): boolean => {
-    return Date.now() < programmaticScrollUntilRef.current;
-  }, []);
-
   return {
     scrollContainerRef,
     handleScroll,
     prepareForProgrammaticScroll,
     scrollToMessage,
     pauseAutoScroll,
-    isProgrammaticScrolling,
   };
 }

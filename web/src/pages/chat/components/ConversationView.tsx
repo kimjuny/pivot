@@ -1,8 +1,6 @@
 import { memo } from "react";
 import { MessageSquare } from "lucide-react";
 
-import { parseUtcTimestamp } from "@/utils/timestamp";
-
 import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import { getChatMessageRenderKey } from "../utils/chatData";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";
@@ -38,38 +36,7 @@ export const ConversationView = memo(function ConversationView({
   onApproveSkillChange,
   onRejectSkillChange,
 }: ConversationViewProps) {
-  const timelineItems = [...messages].sort((left, right) => {
-    const leftTimestamp = parseUtcTimestamp(left.timestamp).getTime();
-    const rightTimestamp = parseUtcTimestamp(right.timestamp).getTime();
-
-    // Same task: user before assistant — but only for the original exchange,
-    // not clarify sub-dialogs where the assistant question precedes the reply.
-    if (
-      left.task_id &&
-      right.task_id &&
-      left.task_id === right.task_id &&
-      left.role !== right.role
-    ) {
-      const isClarifyReply =
-        left.id.includes("-clarify-reply-") ||
-        right.id.includes("-clarify-reply-");
-      if (!isClarifyReply) {
-        return left.role === "user" ? -1 : 1;
-      }
-    }
-
-    if (leftTimestamp !== rightTimestamp) {
-      return leftTimestamp - rightTimestamp;
-    }
-
-    // Same timestamp, different tasks (or no task_id): user before assistant
-    if (left.role !== right.role) {
-      return left.role === "user" ? -1 : 1;
-    }
-
-    return 0;
-  });
-  const isConversationEmpty = timelineItems.length === 0;
+  const isConversationEmpty = messages.length === 0;
   const normalizedAgentName = agentName?.trim() || "ReAct Agent";
 
   if (isConversationEmpty) {
@@ -92,7 +59,7 @@ export const ConversationView = memo(function ConversationView({
 
   return (
     <>
-      {timelineItems.map((item) => (
+      {messages.map((item) => (
         <div
           key={getChatMessageRenderKey(item)}
           data-message-id={item.id}

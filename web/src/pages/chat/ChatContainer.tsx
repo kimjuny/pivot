@@ -727,6 +727,7 @@ function ChatContainer({
   // Pagination state
   const [taskSummaries, setTaskSummaries] = useState<TaskSummary[]>([]);
   const [loadedTaskIds, setLoadedTaskIds] = useState<Set<string>>(new Set());
+  const loadedTaskIdsRef = useRef<Set<string>>(new Set());
   const oldestLoadedTaskIdRef = useRef<string | null>(null);
   const hasMoreOlderRef = useRef(false);
   const isLoadingOlderRef = useRef(false);
@@ -927,7 +928,6 @@ function ChatContainer({
     prepareForProgrammaticScroll,
     scrollToMessage,
     pauseAutoScroll,
-    isProgrammaticScrolling,
   } = useChatAutoScroll(messages);
 
   // Attach auto-scroll handler to the Viewport (the actual scrolling element).
@@ -1284,6 +1284,56 @@ function ChatContainer({
     [commitMessages, syncLiveRefsFromMessages],
   );
 
+  const isTaskLoaded = useCallback((taskId: string) => {
+    return loadedTaskIdsRef.current.has(taskId);
+  }, []);
+
+  const captureFirstVisibleMessageAnchor = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return null;
+
+    const containerRect = container.getBoundingClientRect();
+    const messageElements = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-message-id]"),
+    );
+
+    for (const element of messageElements) {
+      const rect = element.getBoundingClientRect();
+      if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        return {
+          messageId: element.dataset.messageId ?? "",
+          topOffset: rect.top - containerRect.top,
+        };
+      }
+    }
+
+    return null;
+  }, [scrollContainerRef]);
+
+  const restoreVisibleMessageAnchor = useCallback(
+    (anchor: { messageId: string; topOffset: number } | null) => {
+      if (!anchor || anchor.messageId.length === 0) return;
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const container = scrollContainerRef.current;
+          if (!container) return;
+
+          const element = container.querySelector<HTMLElement>(
+            `[data-message-id="${anchor.messageId}"]`,
+          );
+          if (!element) return;
+
+          const containerRect = container.getBoundingClientRect();
+          const rect = element.getBoundingClientRect();
+          const nextTopOffset = rect.top - containerRect.top;
+          container.scrollTop += nextTopOffset - anchor.topOffset;
+        });
+      });
+    },
+    [scrollContainerRef],
+  );
+
   /**
    * Hydrates pagination state from a full-history API response and renders
    * the returned tasks as messages.  Used by every code-path that calls
@@ -1299,6 +1349,7 @@ function ChatContainer({
       setLoadedTaskIds((prev) => {
         const next = isInitialLoad ? new Set(taskIds) : new Set(prev);
         if (!isInitialLoad) taskIds.forEach((id) => next.add(id));
+        loadedTaskIdsRef.current = next;
         return next;
       });
       if (history.tasks.length > 0) {
@@ -1321,16 +1372,24 @@ function ChatContainer({
    * stays visually stable.
    */
   const loadOlderTasks = useCallback(
-    async (limit: number) => {
+    async (
+      limit: number,
+      options: { preserveScroll?: boolean } = {},
+    ) => {
       const sessionId = currentSessionIdRef.current;
-      if (!sessionId || isLoadingOlderRef.current || !hasMoreOlderRef.current) return;
+      if (!sessionId || isLoadingOlderRef.current || !hasMoreOlderRef.current) {
+        return [];
+      }
 
       const cursor = oldestLoadedTaskIdRef.current;
-      if (!cursor) return;
+      if (!cursor) return [];
 
+      const shouldPreserveScroll = options.preserveScroll ?? true;
       isLoadingOlderRef.current = true;
-      const container = scrollContainerRef.current;
-      const oldScrollHeight = container?.scrollHeight ?? 0;
+      pauseAutoScroll();
+      const visibleAnchor = shouldPreserveScroll
+        ? captureFirstVisibleMessageAnchor()
+        : null;
 
       try {
         const history = await getFullSessionHistory(sessionId, {
@@ -1338,27 +1397,33 @@ function ChatContainer({
           beforeTaskId: cursor,
         });
         if (history.tasks.length === 0) {
-          return;
+          return [];
         }
 
         const olderMsgs = loadHistoryResponse(history, false);
+        const loadedTaskIds = history.tasks.map((task) => task.task_id);
 
         // Prepend older messages before current ones.
         updateMessages((prev) => [...olderMsgs, ...prev]);
 
-        // Compensate scroll position after React flushes the new content.
-        requestAnimationFrame(() => {
-          if (container) {
-            container.scrollTop += container.scrollHeight - oldScrollHeight;
-          }
-        });
+        if (shouldPreserveScroll) {
+          restoreVisibleMessageAnchor(visibleAnchor);
+        }
+        return loadedTaskIds;
       } catch (err) {
         console.error("Failed to load older tasks:", err);
+        return [];
       } finally {
         isLoadingOlderRef.current = false;
       }
     },
-    [loadHistoryResponse, scrollContainerRef, updateMessages],
+    [
+      captureFirstVisibleMessageAnchor,
+      loadHistoryResponse,
+      pauseAutoScroll,
+      restoreVisibleMessageAnchor,
+      updateMessages,
+    ],
   );
 
   const { isLoadingOlder, loadUntilTask } = useScrollUpPagination({
@@ -1367,6 +1432,7 @@ function ChatContainer({
     hasMoreOlderRef,
     isLoadingOlderRef,
     loadOlderTasks,
+    isTaskLoaded,
   });
 
   /**
@@ -2939,6 +3005,7 @@ function ChatContainer({
     setSelectedMandatorySkills([]);
     setTaskSummaries([]);
     setLoadedTaskIds(new Set());
+    loadedTaskIdsRef.current = new Set();
     oldestLoadedTaskIdRef.current = null;
     hasMoreOlderRef.current = false;
     isLoadingOlderRef.current = false;
@@ -3385,7 +3452,12 @@ function ChatContainer({
               created_at: new Date().toISOString(),
             },
           ]);
-          setLoadedTaskIds((prev) => new Set(prev).add(launchResult.task_id));
+          setLoadedTaskIds((prev) => {
+            const next = new Set(prev);
+            next.add(launchResult.task_id);
+            loadedTaskIdsRef.current = next;
+            return next;
+          });
         }
         void refreshSidebarData().catch((refreshError) => {
           console.error(
@@ -4045,12 +4117,6 @@ function ChatContainer({
         viewportRef={scrollContainerRef}
         className="flex-1"
       >
-        {isLoadingOlder && (
-          <div className="flex items-center justify-center py-3">
-            <Spinner size={16} className="text-muted-foreground" />
-            <span className="ml-2 text-xs text-muted-foreground">Loading...</span>
-          </div>
-        )}
         <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
           {selectedProject && currentSessionId === null && messages.length === 0 ? (
             <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">
@@ -4104,6 +4170,12 @@ function ChatContainer({
           <div className="h-1" />
         </div>
       </ScrollArea>
+      {isLoadingOlder && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center rounded-full border border-border/70 bg-background/95 px-3 py-1.5 shadow-sm backdrop-blur">
+          <Spinner size={14} className="text-muted-foreground" />
+          <span className="ml-2 text-xs text-muted-foreground">Loading...</span>
+        </div>
+      )}
 
       <CompactStatusPill message={compactStatusMessage} />
 
