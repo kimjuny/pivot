@@ -96,6 +96,7 @@ export const ConversationView = memo(function ConversationView({
         <div
           key={getChatMessageRenderKey(item)}
           data-message-id={item.id}
+          data-role={item.role}
           className="mb-6 space-y-2 last:mb-0"
         >
           {item.role === "user" ? (

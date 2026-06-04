@@ -174,11 +174,11 @@ class SessionServiceTestCase(unittest.TestCase):
 
         history = self.service.get_full_session_history("session-1")
 
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0]["current_plan"][0]["status"], "done")
-        self.assertEqual(history[0]["current_plan"][1]["status"], "running")
+        self.assertEqual(len(history["tasks"]), 1)
+        self.assertEqual(history["tasks"][0]["current_plan"][0]["status"], "done")
+        self.assertEqual(history["tasks"][0]["current_plan"][1]["status"], "running")
         self.assertEqual(
-            history[0]["current_plan"][0]["recursion_history"][0]["message"],
+            history["tasks"][0]["current_plan"][0]["recursion_history"][0]["message"],
             "Repository inspection is complete",
         )
 
@@ -212,10 +212,10 @@ class SessionServiceTestCase(unittest.TestCase):
 
         history = self.service.get_full_session_history("session-1")
 
-        self.assertEqual(len(history), 1)
-        self.assertEqual(history[0]["current_plan"][0]["step_id"], "1")
-        self.assertEqual(history[0]["current_plan"][0]["status"], "pending")
-        self.assertEqual(history[0]["current_plan"][0]["recursion_history"], [])
+        self.assertEqual(len(history["tasks"]), 1)
+        self.assertEqual(history["tasks"][0]["current_plan"][0]["step_id"], "1")
+        self.assertEqual(history["tasks"][0]["current_plan"][0]["status"], "pending")
+        self.assertEqual(history["tasks"][0]["current_plan"][0]["recursion_history"], [])
 
     def test_operations_diagnostics_summarize_attention_and_latest_error(self) -> None:
         """Operations diagnostics should surface task pressure and newest errors."""
@@ -472,9 +472,9 @@ class SessionServiceTestCase(unittest.TestCase):
 
         history = self.service.get_full_session_history("session-1")
 
-        self.assertEqual(len(history), 1)
+        self.assertEqual(len(history["tasks"]), 1)
         self.assertEqual(
-            history[0]["assistant_attachments"][0].display_name,
+            history["tasks"][0]["assistant_attachments"][0].display_name,
             "report.md",
         )
 

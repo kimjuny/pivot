@@ -232,10 +232,22 @@ class TaskMessage(AppBaseModel):
     updated_at: str
 
 
+class TaskSummary(AppBaseModel):
+    """Lightweight task summary for anchor navigation without heavy data."""
+
+    task_id: str
+    preview: str
+    status: str
+    created_at: str
+
+
 class FullSessionHistoryResponse(AppBaseModel):
     """Response schema for full session history with recursion details."""
 
     session_id: str
+    total_task_count: int = 0
+    has_more_older: bool = False
+    task_summaries: list[TaskSummary] = Field(default_factory=list)
+    tasks: list[TaskMessage] = Field(default_factory=list)
     last_event_id: int = 0
     resume_from_event_id: int = 0
-    tasks: list[TaskMessage]

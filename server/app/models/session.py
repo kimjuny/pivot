@@ -161,7 +161,7 @@ class Session(SQLModel, table=True):
     react_file_read_tracker: str | None = Field(
         default=None,
         description=(
-            "JSON dict tracking file content hashes and read ranges for dedup. "
+            "JSON dict tracking file content hashes and read ranges for stale guards. "
             "Key: workspace-relative path, value: {hash, total_lines, read_ranges}. "
             "Cleared on context compaction."
         ),

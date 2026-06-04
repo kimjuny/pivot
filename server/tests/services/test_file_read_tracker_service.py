@@ -47,10 +47,10 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         self.db.close()
 
-    def test_repeated_same_range_is_deduped(self) -> None:
+    def test_repeated_same_range_keeps_recorded_range(self) -> None:
         service = FileReadTrackerService(self.db)
 
-        first = service.check_and_record_read(
+        service.record_read(
             session_id="session-1",
             path="app.py",
             content_hash="hash-a",
@@ -58,7 +58,7 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
             start_line=1,
             end_line=5,
         )
-        second = service.check_and_record_read(
+        service.record_read(
             session_id="session-1",
             path="app.py",
             content_hash="hash-a",
@@ -67,8 +67,8 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
             end_line=5,
         )
 
-        self.assertFalse(first)
-        self.assertTrue(second)
+        tracker = service.get_tracker("session-1") or {}
+        self.assertEqual(tracker["app.py"]["read_ranges"], [[1, 5]])
 
     def test_overlapping_range_with_new_lines_records_full_merged_range(self) -> None:
         service = FileReadTrackerService(self.db)
@@ -81,7 +81,7 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
             end_line=5,
         )
 
-        deduped = service.check_and_record_read(
+        service.record_read(
             session_id="session-1",
             path="app.py",
             content_hash="hash-a",
@@ -91,7 +91,6 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
         )
 
         tracker = service.get_tracker("session-1") or {}
-        self.assertFalse(deduped)
         self.assertEqual(tracker["app.py"]["read_ranges"], [[1, 8]])
 
     def test_hash_change_resets_previous_ranges(self) -> None:
@@ -118,10 +117,10 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
         self.assertEqual(tracker["app.py"]["hash"], "hash-b")
         self.assertEqual(tracker["app.py"]["read_ranges"], [[6, 8]])
 
-    def test_empty_file_can_be_deduped_by_hash(self) -> None:
+    def test_empty_file_can_be_recorded_by_hash(self) -> None:
         service = FileReadTrackerService(self.db)
 
-        first = service.check_and_record_read(
+        service.record_read(
             session_id="session-1",
             path="empty.txt",
             content_hash="empty-hash",
@@ -129,7 +128,7 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
             start_line=1,
             end_line=0,
         )
-        second = service.check_and_record_read(
+        service.record_read(
             session_id="session-1",
             path="empty.txt",
             content_hash="empty-hash",
@@ -138,8 +137,10 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
             end_line=0,
         )
 
-        self.assertFalse(first)
-        self.assertTrue(second)
+        self.assertEqual(
+            service.require_full_read_hash(session_id="session-1", path="empty.txt"),
+            "empty-hash",
+        )
 
     def test_invalidate_file_removes_tracker_entry(self) -> None:
         service = FileReadTrackerService(self.db)
@@ -170,3 +171,48 @@ class FileReadTrackerServiceTestCase(unittest.TestCase):
         service.clear_tracker("session-1")
 
         self.assertEqual(service.get_tracker("session-1"), {})
+
+    def test_require_full_read_hash_returns_hash_for_complete_range(self) -> None:
+        service = FileReadTrackerService(self.db)
+        service.record_read(
+            session_id="session-1",
+            path="app.py",
+            content_hash="hash-a",
+            total_lines=3,
+            start_line=1,
+            end_line=3,
+        )
+
+        self.assertEqual(
+            service.require_full_read_hash(session_id="session-1", path="app.py"),
+            "hash-a",
+        )
+
+    def test_require_full_read_hash_rejects_partial_range(self) -> None:
+        service = FileReadTrackerService(self.db)
+        service.record_read(
+            session_id="session-1",
+            path="app.py",
+            content_hash="hash-a",
+            total_lines=3,
+            start_line=1,
+            end_line=2,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Read the full file"):
+            service.require_full_read_hash(session_id="session-1", path="app.py")
+
+    def test_record_full_file_state_records_empty_file(self) -> None:
+        service = FileReadTrackerService(self.db)
+
+        service.record_full_file_state(
+            session_id="session-1",
+            path="empty.txt",
+            content_hash="empty-hash",
+            total_lines=0,
+        )
+
+        self.assertEqual(
+            service.require_full_read_hash(session_id="session-1", path="empty.txt"),
+            "empty-hash",
+        )

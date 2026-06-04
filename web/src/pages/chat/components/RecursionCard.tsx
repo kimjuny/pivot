@@ -192,6 +192,20 @@ function getRawStringArgument(
   return typeof value === "string" ? value : null;
 }
 
+function getRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getStringField(
+  value: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  const field = value?.[key];
+  return typeof field === "string" ? field : null;
+}
+
 function getPathBasename(path: string): string {
   const normalizedPath = path.replace(/\\/g, "/").replace(/\/+$/, "");
   return normalizedPath.split("/").filter(Boolean).pop() || path;
@@ -222,6 +236,43 @@ function countDiffLines(value: string): { additions: number; deletions: number }
   return { additions, deletions };
 }
 
+function splitDiffLines(value: string): string[] {
+  if (value.length === 0) {
+    return [];
+  }
+  const lines = value.split(/\r\n|\r|\n/);
+  return lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines;
+}
+
+function countReplacementDiffLines(
+  oldValue: string,
+  newValue: string,
+): { additions: number; deletions: number } {
+  const oldLines = splitDiffLines(oldValue);
+  const newLines = splitDiffLines(newValue);
+  const previousRow: number[] = Array.from({ length: newLines.length + 1 }, () => 0);
+  const currentRow: number[] = Array.from({ length: newLines.length + 1 }, () => 0);
+
+  for (const oldLine of oldLines) {
+    for (let newIndex = 0; newIndex < newLines.length; newIndex += 1) {
+      currentRow[newIndex + 1] =
+        oldLine === newLines[newIndex]
+          ? previousRow[newIndex] + 1
+          : Math.max(previousRow[newIndex + 1], currentRow[newIndex]);
+    }
+    for (let i = 0; i < currentRow.length; i += 1) {
+      previousRow[i] = currentRow[i];
+      currentRow[i] = 0;
+    }
+  }
+
+  const unchangedLines = previousRow[newLines.length];
+  return {
+    additions: newLines.length - unchangedLines,
+    deletions: oldLines.length - unchangedLines,
+  };
+}
+
 function getLiveOrResolvedStringArgument(
   args: Record<string, unknown> | null,
   livePayload: LiveToolPayloadSnapshot | undefined,
@@ -248,6 +299,7 @@ function normalizeToolPath(path: string): string {
 function getToolExecutionSummaryParts(
   call: ToolCallSnapshot,
   livePayload?: LiveToolPayloadSnapshot,
+  result?: ToolResultSnapshot,
 ): ToolExecutionSummaryPart[] {
   const args = getToolArgumentRecord(call.arguments);
   const rawPath = getLiveOrResolvedStringArgument(args, livePayload, "path");
@@ -257,6 +309,10 @@ function getToolExecutionSummaryParts(
   const query = getStringArgument(args, "query");
   const content = getLiveOrResolvedStringArgument(args, livePayload, "content");
   const diff = getLiveOrResolvedStringArgument(args, livePayload, "diff");
+  const oldString = getLiveOrResolvedStringArgument(args, livePayload, "old_string");
+  const newString = getLiveOrResolvedStringArgument(args, livePayload, "new_string");
+  const resultRecord = getRecord(result?.result);
+  const resultDiff = getStringField(resultRecord, "diff");
   const agentAlias = getStringArgument(args, "agent");
   const delegationInstruction = getStringArgument(args, "instruction");
 
@@ -330,8 +386,17 @@ function getToolExecutionSummaryParts(
         isCount: true,
       });
     }
-    if (call.name === "edit_file" && diff !== null) {
-      const diffCounts = countDiffLines(diff);
+    if (call.name === "edit_file") {
+      const diffText = resultDiff ?? diff;
+      const diffCounts =
+        diffText !== null
+          ? countDiffLines(diffText)
+          : oldString !== null && newString !== null
+            ? countReplacementDiffLines(oldString, newString)
+            : null;
+      if (diffCounts === null) {
+        return parts;
+      }
       parts.push(
         {
           key: "additions",
@@ -647,6 +712,40 @@ function ToolDiffPreview({ value }: { value: string }) {
   );
 }
 
+function ToolReplacementPreview({
+  oldString,
+  newString,
+}: {
+  oldString: string | null;
+  newString: string | null;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>Replacement:</span>
+      </div>
+      <div className="space-y-2 overflow-x-auto rounded border border-zinc-800 bg-zinc-950/80 p-3">
+        <div>
+          <div className="mb-1 text-[11px] uppercase tracking-wide text-red-300">
+            old_string
+          </div>
+          <pre className="max-h-40 overflow-auto whitespace-pre text-red-100">
+            {oldString ?? "Waiting for old_string..."}
+          </pre>
+        </div>
+        <div>
+          <div className="mb-1 text-[11px] uppercase tracking-wide text-emerald-300">
+            new_string
+          </div>
+          <pre className="max-h-40 overflow-auto whitespace-pre text-emerald-100">
+            {newString ?? "Waiting for new_string..."}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToolExecutionItem({
   call,
   result,
@@ -671,16 +770,26 @@ function ToolExecutionItem({
   const resultText =
     resultPayload === null ? "Waiting for tool result..." : formatToolValue(resultPayload);
   const args = getToolArgumentRecord(call.arguments);
+  const resultRecord = getRecord(result?.result);
   const writeContent =
     call.name === "write_file"
       ? getLiveOrResolvedStringArgument(args, livePayload, "content")
       : null;
   const editDiff =
     call.name === "edit_file"
-      ? getLiveOrResolvedStringArgument(args, livePayload, "diff")
+      ? (getStringField(resultRecord, "diff") ??
+        getLiveOrResolvedStringArgument(args, livePayload, "diff"))
+      : null;
+  const editOldString =
+    call.name === "edit_file"
+      ? getLiveOrResolvedStringArgument(args, livePayload, "old_string")
+      : null;
+  const editNewString =
+    call.name === "edit_file"
+      ? getLiveOrResolvedStringArgument(args, livePayload, "new_string")
       : null;
   const usesSpecialPreview = call.name === "write_file" || call.name === "edit_file";
-  const summaryParts = getToolExecutionSummaryParts(call, livePayload);
+  const summaryParts = getToolExecutionSummaryParts(call, livePayload, result);
   const shimmerSummaryParts = summaryParts.filter((part) => !part.isCount);
   const countSummaryParts = summaryParts.filter((part) => part.isCount);
 
@@ -752,7 +861,14 @@ function ToolExecutionItem({
                       emptyLabel="Waiting for file content..."
                     />
                   ) : (
-                    <ToolDiffPreview value={editDiff ?? ""} />
+                    editDiff !== null ? (
+                      <ToolDiffPreview value={editDiff} />
+                    ) : (
+                      <ToolReplacementPreview
+                        oldString={editOldString}
+                        newString={editNewString}
+                      />
+                    )
                   )
                 ) : (
                   <ToolPayloadSection label="Arguments" value={argumentText} />

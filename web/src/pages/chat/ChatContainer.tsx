@@ -10,8 +10,6 @@ import { Info } from "lucide-react";
 import { resolveIcon } from "@/lib/icon-resolver";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
 
-import { Spinner } from "@/components/ui/spinner";
-
 import {
   ApiError,
   cancelReactTask,
@@ -42,6 +40,8 @@ import {
   type ProjectResponse,
   type DevSurfaceSessionResponse,
   type ReactContextUsageSummary,
+  type TaskSummary,
+  type FullSessionHistoryResponse,
   type ReactSessionRuntimeDebug,
   type InstalledSurfaceSessionResponse,
   type PreviewEndpointResponse,
@@ -94,8 +94,10 @@ import ProjectAccessDialog from "./components/ProjectAccessDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
 import StaleSessionDialog from "@/components/StaleSessionDialog";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
-import { useConversationRounds } from "./hooks/useConversationRounds";
+import { useConversationRounds, type ConversationRound } from "./hooks/useConversationRounds";
 import { useChatUploads } from "./hooks/useChatUploads";
+import { useScrollUpPagination } from "./hooks/useScrollUpPagination";
+import { Spinner } from "@/components/ui/spinner";
 import type {
   ChatWebSearchProviderOption,
   ChatPageProps,
@@ -721,6 +723,13 @@ function ChatContainer({
   initialWebSearchProviders,
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // Pagination state
+  const [taskSummaries, setTaskSummaries] = useState<TaskSummary[]>([]);
+  const [loadedTaskIds, setLoadedTaskIds] = useState<Set<string>>(new Set());
+  const oldestLoadedTaskIdRef = useRef<string | null>(null);
+  const hasMoreOlderRef = useRef(false);
+  const isLoadingOlderRef = useRef(false);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [pendingMidTaskInput, setPendingMidTaskInput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -918,7 +927,17 @@ function ChatContainer({
     prepareForProgrammaticScroll,
     scrollToMessage,
     pauseAutoScroll,
+    isProgrammaticScrolling,
   } = useChatAutoScroll(messages);
+
+  // Attach auto-scroll handler to the Viewport (the actual scrolling element).
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.addEventListener("scroll", handleScroll, { passive: true });
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [handleScroll, scrollContainerRef]);
+
   const sessionIdleTimeoutMs = resolveSessionIdleTimeoutMs(
     sessionIdleTimeoutMinutes,
   );
@@ -1266,6 +1285,109 @@ function ChatContainer({
   );
 
   /**
+   * Hydrates pagination state from a full-history API response and renders
+   * the returned tasks as messages.  Used by every code-path that calls
+   * getFullSessionHistory.
+   */
+  const loadHistoryResponse = useCallback(
+    (history: FullSessionHistoryResponse, isInitialLoad: boolean) => {
+      if (isInitialLoad) {
+        setTaskSummaries(history.task_summaries);
+        prepareForProgrammaticScroll();
+      }
+      const taskIds = history.tasks.map((t) => t.task_id);
+      setLoadedTaskIds((prev) => {
+        const next = isInitialLoad ? new Set(taskIds) : new Set(prev);
+        if (!isInitialLoad) taskIds.forEach((id) => next.add(id));
+        return next;
+      });
+      if (history.tasks.length > 0) {
+        oldestLoadedTaskIdRef.current = history.tasks[0].task_id;
+      }
+      hasMoreOlderRef.current = history.has_more_older;
+
+      const nextMessages = buildMessagesFromHistory(history.tasks);
+      if (isInitialLoad) {
+        applyHistoryMessages(nextMessages);
+      }
+      return nextMessages;
+    },
+    [applyHistoryMessages, prepareForProgrammaticScroll],
+  );
+
+  /**
+   * Loads older tasks when the user scrolls near the top. Prepends the
+   * returned messages and compensates scroll position so the viewport
+   * stays visually stable.
+   */
+  const loadOlderTasks = useCallback(
+    async (limit: number) => {
+      const sessionId = currentSessionIdRef.current;
+      if (!sessionId || isLoadingOlderRef.current || !hasMoreOlderRef.current) return;
+
+      const cursor = oldestLoadedTaskIdRef.current;
+      if (!cursor) return;
+
+      isLoadingOlderRef.current = true;
+      const container = scrollContainerRef.current;
+      const oldScrollHeight = container?.scrollHeight ?? 0;
+
+      try {
+        const history = await getFullSessionHistory(sessionId, {
+          limit,
+          beforeTaskId: cursor,
+        });
+        if (history.tasks.length === 0) {
+          return;
+        }
+
+        const olderMsgs = loadHistoryResponse(history, false);
+
+        // Prepend older messages before current ones.
+        updateMessages((prev) => [...olderMsgs, ...prev]);
+
+        // Compensate scroll position after React flushes the new content.
+        requestAnimationFrame(() => {
+          if (container) {
+            container.scrollTop += container.scrollHeight - oldScrollHeight;
+          }
+        });
+      } catch (err) {
+        console.error("Failed to load older tasks:", err);
+      } finally {
+        isLoadingOlderRef.current = false;
+      }
+    },
+    [loadHistoryResponse, scrollContainerRef, updateMessages],
+  );
+
+  const { isLoadingOlder, loadUntilTask } = useScrollUpPagination({
+    scrollContainerRef,
+    messages,
+    hasMoreOlderRef,
+    isLoadingOlderRef,
+    loadOlderTasks,
+  });
+
+  /**
+   * Handles anchor-dot navigation. For loaded rounds, scrolls directly.
+   * For unloaded rounds, loads batches until the target is found, then scrolls.
+   */
+  const handleNavigateToRound = useCallback(
+    async (round: ConversationRound) => {
+      if (round.isLoaded) {
+        scrollToMessage(round.userMessageId);
+        return;
+      }
+      const found = await loadUntilTask(round.taskId);
+      if (found) {
+        requestAnimationFrame(() => scrollToMessage(round.userMessageId));
+      }
+    },
+    [scrollToMessage, loadUntilTask],
+  );
+
+  /**
    * Applies a local stopped state immediately so the chat surface acknowledges
    * the user's stop request before the backend finishes unwinding the iteration.
    */
@@ -1434,10 +1556,9 @@ function ChatContainer({
           event.task_id.length > 0
         ) {
           historyReloadInFlightRef.current = true;
-          void getFullSessionHistory(currentSessionId)
+          void getFullSessionHistory(currentSessionId, { limit: 10 })
             .then((history) => {
-              const nextMessages = buildMessagesFromHistory(history.tasks);
-              applyHistoryMessages(nextMessages);
+              loadHistoryResponse(history, true);
               sessionEventCursorRef.current = Math.max(
                 sessionEventCursorRef.current,
                 history.last_event_id,
@@ -1954,7 +2075,7 @@ function ChatContainer({
     },
     [
       clearCompactStatusWithMinimumDelay,
-      applyHistoryMessages,
+      loadHistoryResponse,
       currentSessionId,
       loadSessionRuntimeDebug,
       refreshSidebarData,
@@ -2135,9 +2256,8 @@ function ChatContainer({
 
           if (autoSelectedSessionId) {
             try {
-              const history = await getFullSessionHistory(autoSelectedSessionId);
-              const nextMessages = buildMessagesFromHistory(history.tasks);
-              applyHistoryMessages(nextMessages);
+              const history = await getFullSessionHistory(autoSelectedSessionId, { limit: 10 });
+              loadHistoryResponse(history, true);
               openSessionStream(
                 autoSelectedSessionId,
                 history.resume_from_event_id,
@@ -2170,9 +2290,8 @@ function ChatContainer({
             setActiveContextIteration(null);
 
             try {
-              const history = await getFullSessionHistory(fallbackSessionId);
-              const nextMessages = buildMessagesFromHistory(history.tasks);
-              applyHistoryMessages(nextMessages);
+              const history = await getFullSessionHistory(fallbackSessionId, { limit: 10 });
+              loadHistoryResponse(history, true);
               openSessionStream(
                 fallbackSessionId,
                 history.resume_from_event_id,
@@ -2214,11 +2333,11 @@ function ChatContainer({
     initialSessions,
     initialProjects,
     isLoadingSession,
+    loadHistoryResponse,
     refreshSidebarData,
     sessionIdleTimeoutMs,
     openSessionStream,
     stopSessionStream,
-    applyHistoryMessages,
     commitMessages,
     sessionType,
     sessions,
@@ -2818,6 +2937,11 @@ function ChatContainer({
     setIsLoadingSession(true);
     setReplyTaskId(null);
     setSelectedMandatorySkills([]);
+    setTaskSummaries([]);
+    setLoadedTaskIds(new Set());
+    oldestLoadedTaskIdRef.current = null;
+    hasMoreOlderRef.current = false;
+    isLoadingOlderRef.current = false;
     setActiveContextTaskId(null);
     setActiveContextIteration(null);
     setContextUsage(null);
@@ -2827,9 +2951,8 @@ function ChatContainer({
     stopSessionStream();
 
     try {
-      const history = await getFullSessionHistory(sessionId);
-      const nextMessages = buildMessagesFromHistory(history.tasks);
-      applyHistoryMessages(nextMessages);
+      const history = await getFullSessionHistory(sessionId, { limit: 10 });
+      loadHistoryResponse(history, true);
       openSessionStream(sessionId, history.resume_from_event_id);
     } catch (historyError) {
       console.error("Failed to load session history:", historyError);
@@ -3003,10 +3126,9 @@ function ChatContainer({
         stoppedTaskIdsRef.current.delete(activeTaskId);
         setError("Failed to stop execution");
         if (currentSessionIdRef.current) {
-          void getFullSessionHistory(currentSessionIdRef.current)
+          void getFullSessionHistory(currentSessionIdRef.current, { limit: 10 })
             .then((history) => {
-              const nextMessages = buildMessagesFromHistory(history.tasks);
-              applyHistoryMessages(nextMessages);
+              loadHistoryResponse(history, true);
             })
             .catch((historyError) => {
               console.error(
@@ -3016,7 +3138,7 @@ function ChatContainer({
             });
         }
       });
-  }, [applyHistoryMessages, markTaskStopped, refreshSidebarData]);
+  }, [loadHistoryResponse, markTaskStopped, refreshSidebarData]);
 
   /**
    * Sends the current composer state and incrementally applies streamed backend updates.
@@ -3252,6 +3374,19 @@ function ChatContainer({
         );
         liveAssistantMessageIdRef.current = canonicalAssistantId;
         liveTaskIdRef.current = launchResult.task_id;
+        // Register the new task in pagination state for the anchor.
+        if (!isClarifyReply) {
+          setTaskSummaries((prev) => [
+            ...prev,
+            {
+              task_id: launchResult.task_id,
+              preview: pendingMessage.trim().slice(0, 100),
+              status: "running",
+              created_at: new Date().toISOString(),
+            },
+          ]);
+          setLoadedTaskIds((prev) => new Set(prev).add(launchResult.task_id));
+        }
         void refreshSidebarData().catch((refreshError) => {
           console.error(
             "Failed to refresh session list after task launch:",
@@ -3362,10 +3497,9 @@ function ChatContainer({
         setIsStreaming(false);
         setError("Failed to submit approval decision");
         if (currentSessionIdRef.current) {
-          void getFullSessionHistory(currentSessionIdRef.current)
+          void getFullSessionHistory(currentSessionIdRef.current, { limit: 10 })
             .then((history) => {
-              const nextMessages = buildMessagesFromHistory(history.tasks);
-              applyHistoryMessages(nextMessages);
+              loadHistoryResponse(history, true);
             })
             .catch((historyError) => {
               console.error(
@@ -3376,7 +3510,7 @@ function ChatContainer({
         }
       });
   }, [
-    applyHistoryMessages,
+    loadHistoryResponse,
     clearCompactStatusImmediately,
     refreshSidebarData,
     updateMessages,
@@ -3872,7 +4006,8 @@ function ChatContainer({
     isExtensionDockOpen,
   ]);
 
-  const conversationRounds = useConversationRounds(messages);
+  const conversationRounds = useConversationRounds(taskSummaries, loadedTaskIds);
+
   const isConversationEmpty = messages.length === 0;
   const composerTaskPlan = useMemo(
     () => deriveComposerTaskPlan(messages),
@@ -3903,14 +4038,19 @@ function ChatContainer({
       <SessionLoadingOverlay isActive={isLoadingSession} />
       <RoundAnchor
         rounds={conversationRounds}
-        onNavigateToRound={scrollToMessage}
+        onNavigateToRound={(round) => { void handleNavigateToRound(round); }}
         scrollContainerRef={scrollContainerRef}
       />
       <ScrollArea
         viewportRef={scrollContainerRef}
         className="flex-1"
-        onScroll={handleScroll}
       >
+        {isLoadingOlder && (
+          <div className="flex items-center justify-center py-3">
+            <Spinner size={16} className="text-muted-foreground" />
+            <span className="ml-2 text-xs text-muted-foreground">Loading...</span>
+          </div>
+        )}
         <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
           {selectedProject && currentSessionId === null && messages.length === 0 ? (
             <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">

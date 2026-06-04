@@ -130,6 +130,7 @@ class ReactEngine:
         self._pending_multimodal_blocks: list[dict[str, Any]] = []
         self._delegation_agents: str = ""
         self._delegation_event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._write_tool_locks: dict[str, asyncio.Lock] = {}
 
     def _previous_recursion_failed(self, task: ReactTask) -> bool:
         """Return whether the latest persisted recursion ended in failure.
@@ -1194,14 +1195,12 @@ class ReactEngine:
             return {
                 k: v
                 for k, v in raw_result.items()
-                if k not in {"message", "content_hash"}
+                if k not in {"message", "content_hash", "diff"}
             }
 
         if tool_name in ("read_file", "write_file"):
             return {
-                k: v
-                for k, v in raw_result.items()
-                if k not in {"content_hash", "deduped"}
+                k: v for k, v in raw_result.items() if k not in {"content_hash", "diff"}
             }
 
         # Generic: strip the unified pivot_action envelope from any tool.
@@ -1252,6 +1251,53 @@ class ReactEngine:
         for tool_call in tool_calls:
             calls_by_batch.setdefault(tool_call.batch, []).append(tool_call)
         return sorted(calls_by_batch.items(), key=lambda item: item[0])
+
+    @staticmethod
+    def _write_tool_path(tool_call: ToolCallRequest) -> str | None:
+        """Return a normalized target path for tools that write one file."""
+        if tool_call.name not in {"edit_file", "write_file"}:
+            return None
+        raw_path = tool_call.arguments.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return None
+        normalized = raw_path.strip().replace("\\", "/")
+        if normalized.startswith("/workspace/"):
+            normalized = normalized.removeprefix("/workspace/")
+        return normalized.strip("/")
+
+    @classmethod
+    def _has_duplicate_write_paths(cls, tool_calls: list[ToolCallRequest]) -> bool:
+        """Return whether a batch contains multiple writes to the same file."""
+        seen: set[str] = set()
+        for tool_call in tool_calls:
+            path = cls._write_tool_path(tool_call)
+            if path is None:
+                continue
+            if path in seen:
+                return True
+            seen.add(path)
+        return False
+
+    @classmethod
+    def _has_unfinished_prior_write_to_same_path(
+        cls,
+        tool_call: ToolCallRequest,
+        batch_calls: list[ToolCallRequest],
+        completed_call_ids: set[str],
+    ) -> bool:
+        """Return whether an earlier same-file write in this batch is unfinished."""
+        path = cls._write_tool_path(tool_call)
+        if path is None:
+            return False
+        for prior_call in batch_calls:
+            if prior_call.id == tool_call.id:
+                return False
+            if (
+                cls._write_tool_path(prior_call) == path
+                and prior_call.id not in completed_call_ids
+            ):
+                return True
+        return False
 
     async def _emit_tool_result(
         self,
@@ -1479,6 +1525,18 @@ class ReactEngine:
         tool_call: ToolCallRequest,
     ) -> dict[str, Any]:
         """Execute one validated tool call and normalize its result payload."""
+        write_path = self._write_tool_path(tool_call)
+        if write_path is not None:
+            lock = self._write_tool_locks.setdefault(write_path, asyncio.Lock())
+            async with lock:
+                return await self._execute_tool_call_request_unlocked(tool_call)
+        return await self._execute_tool_call_request_unlocked(tool_call)
+
+    async def _execute_tool_call_request_unlocked(
+        self,
+        tool_call: ToolCallRequest,
+    ) -> dict[str, Any]:
+        """Execute one tool call after any required resource lock is held."""
         # Delegation is handled at the engine level (async sub-task),
         # not through the sync tool execution path.
         if tool_call.name == "delegate_to_agent":
@@ -1850,6 +1908,12 @@ class ReactEngine:
         started_any = False
         for tool_call in batch_calls:
             if tool_call.id in eager_state.started_call_ids:
+                continue
+            if self._has_unfinished_prior_write_to_same_path(
+                tool_call,
+                batch_calls,
+                set(eager_state.result_by_call_id),
+            ):
                 continue
             if not self._has_all_payloads_for_tool_call(
                 tool_call, eager_state.payloads
@@ -2237,12 +2301,13 @@ class ReactEngine:
                     await self._emit_tool_call(token_meter_queue, pending_batch_calls)
 
                     batch_results: list[dict[str, Any]] = []
-                    if len(pending_batch_calls) == 1:
-                        batch_results.append(
-                            await self._execute_tool_call_request(
-                                pending_batch_calls[0]
+                    if len(pending_batch_calls) == 1 or self._has_duplicate_write_paths(
+                        pending_batch_calls
+                    ):
+                        for tool_call in pending_batch_calls:
+                            batch_results.append(
+                                await self._execute_tool_call_request(tool_call)
                             )
-                        )
                     else:
                         execution_tasks = [
                             asyncio.create_task(

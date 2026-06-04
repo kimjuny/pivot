@@ -3,6 +3,7 @@
 import asyncio
 import sys
 import threading
+import time
 import unittest
 from importlib import import_module
 from pathlib import Path
@@ -21,6 +22,7 @@ Choice = import_module("app.llm.abstract_llm").Choice
 Response = import_module("app.llm.abstract_llm").Response
 ReactContext = import_module("app.orchestration.react.context").ReactContext
 ReactEngine = import_module("app.orchestration.react.engine").ReactEngine
+ToolCallRequest = import_module("app.orchestration.react.types").ToolCallRequest
 ReactTask = import_module("app.models.react").ReactTask
 
 
@@ -71,6 +73,43 @@ class _BatchToolManager:
 
     def list_tools(self) -> list[object]:
         return [SimpleNamespace(name="record_tool")]
+
+    def get_tool(self, name: str) -> object | None:
+        del name
+        return None
+
+
+class _WriteLockToolManager:
+    """Tool manager stub that records same-path write concurrency."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.active_by_path: dict[str, int] = {}
+        self.max_active_by_path: dict[str, int] = {}
+        self.active_total = 0
+        self.max_active_total = 0
+
+    def execute(self, name: str, *, context: object | None = None, path: str) -> str:
+        del name, context
+        with self._lock:
+            self.active_total += 1
+            self.max_active_total = max(self.max_active_total, self.active_total)
+            active = self.active_by_path.get(path, 0) + 1
+            self.active_by_path[path] = active
+            self.max_active_by_path[path] = max(
+                self.max_active_by_path.get(path, 0),
+                active,
+            )
+        try:
+            time.sleep(0.05)
+            return f"done-{path}"
+        finally:
+            with self._lock:
+                self.active_by_path[path] -= 1
+                self.active_total -= 1
+
+    def list_tools(self) -> list[object]:
+        return [SimpleNamespace(name="edit_file")]
 
     def get_tool(self, name: str) -> object | None:
         del name
@@ -141,6 +180,7 @@ class ReactEngineToolBatchTestCase(unittest.TestCase):
             task_id="task-batch",
             session_id="session-batch",
             agent_id=1,
+            user_id=1,
             user="alice",
             user_message="Run batched tools",
             user_intent="Run batched tools",
@@ -213,6 +253,38 @@ class ReactEngineToolBatchTestCase(unittest.TestCase):
             [item["id"] for item in tool_call_events[1]["tool_calls"]],
             ["call-c"],
         )
+
+    def test_same_path_write_tools_are_locked_at_execution_entry(self) -> None:
+        """Same-file writes cannot enter the tool wrapper concurrently."""
+        tool_manager = _WriteLockToolManager()
+        engine = ReactEngine(
+            llm=_LlmStub("{}"),
+            tool_manager=tool_manager,
+            db=self.session,
+            stream_llm_responses=False,
+        )
+        calls = [
+            ToolCallRequest(
+                id="call-1",
+                name="edit_file",
+                arguments={"path": "/workspace/app.py"},
+            ),
+            ToolCallRequest(
+                id="call-2",
+                name="edit_file",
+                arguments={"path": "app.py"},
+            ),
+        ]
+
+        async def run_calls() -> list[dict[str, Any]]:
+            return await asyncio.gather(
+                *(engine._execute_tool_call_request(call) for call in calls)
+            )
+
+        results = asyncio.run(run_calls())
+
+        self.assertTrue(all(item["success"] for item in results))
+        self.assertEqual(tool_manager.max_active_total, 1)
 
 
 if __name__ == "__main__":

@@ -223,12 +223,12 @@ async def get_operations_session_detail(
             release_version = release.version
 
     # Reuse the existing full-history serialization
-    tasks_data = service.get_full_session_history(session_id)
+    history_result = service.get_full_session_history(session_id)
     diagnostics = service.get_operations_session_diagnostics([session_id]).get(
         session_id
     )
     tasks = []
-    for task_data in tasks_data:
+    for task_data in history_result["tasks"]:
         recursions = [
             RecursionDetail(
                 iteration=r["iteration"],

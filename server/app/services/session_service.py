@@ -853,27 +853,104 @@ class SessionService:
             WorkspaceService(self.db).delete_workspace(workspace_id)
         return True
 
-    def get_full_session_history(self, session_id: str) -> list[dict[str, Any]]:
-        """Get full session history with recursion details.
-
-        This method fetches all ReactTasks for a session with their
-        recursion details for displaying complete conversation history.
+    def get_task_summaries(self, session_id: str) -> list[dict[str, Any]]:
+        """Get lightweight summaries of all tasks for anchor navigation.
 
         Args:
             session_id: UUID of the session.
 
         Returns:
-            List of task dictionaries with recursion details.
+            List of dicts with task_id, preview, status, created_at.
         """
-        from app.models.react import ReactRecursion
-
-        # Get all tasks for this session, ordered by creation time
         stmt = (
-            select(ReactTask)
+            select(
+                ReactTask.task_id,
+                ReactTask.user_message,
+                ReactTask.status,
+                ReactTask.created_at,
+            )
             .where(ReactTask.session_id == session_id)
             .order_by(col(ReactTask.created_at).asc())
         )
-        tasks = list(self.db.exec(stmt).all())
+        rows = self.db.exec(stmt).all()
+        return [
+            {
+                "task_id": r[0],
+                "preview": (r[1] or "")[:100],
+                "status": r[2],
+                "created_at": r[3],
+            }
+            for r in rows
+        ]
+
+    def count_tasks(self, session_id: str) -> int:
+        """Count total tasks for a session."""
+        stmt = (
+            select(func.count())
+            .select_from(ReactTask)
+            .where(ReactTask.session_id == session_id)
+        )
+        return self.db.exec(stmt).one()
+
+    def get_full_session_history(
+        self,
+        session_id: str,
+        *,
+        limit: int = 5,
+        before_task_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Get paginated session history with recursion details.
+
+        Args:
+            session_id: UUID of the session.
+            limit: Max number of tasks to return.
+            before_task_id: If set, return tasks older than this task.
+
+        Returns:
+            Dict with total_task_count, has_more_older, tasks.
+        """
+        from app.models.react import ReactRecursion
+
+        # Paginated query: newest tasks first, then reverse to ASC
+        base_filter = ReactTask.session_id == session_id
+        if before_task_id is not None:
+            cursor_task = self.db.exec(
+                select(ReactTask).where(ReactTask.task_id == before_task_id)
+            ).first()
+            if cursor_task is not None:
+                base_filter = base_filter & (
+                    ReactTask.created_at < cursor_task.created_at
+                )
+
+        stmt = (
+            select(ReactTask)
+            .where(base_filter)
+            .order_by(col(ReactTask.created_at).desc())
+            .limit(limit)
+        )
+        tasks = list(reversed(self.db.exec(stmt).all()))
+
+        # has_more_older: is there anything before the oldest returned task?
+        has_more_older = False
+        if tasks:
+            oldest = tasks[0]
+            probe = self.db.exec(
+                select(ReactTask.task_id)
+                .where(
+                    ReactTask.session_id == session_id,
+                    ReactTask.created_at < oldest.created_at,
+                )
+                .limit(1)
+            ).first()
+            has_more_older = probe is not None
+
+        file_history = FileService(self.db).build_history_items(
+            [task.task_id for task in tasks]
+        )
+        attachment_history = TaskAttachmentService(self.db).list_by_task_ids(
+            [task.task_id for task in tasks]
+        )
+        current_plan_by_task = self._load_current_plan_by_task(tasks)
         file_history = FileService(self.db).build_history_items(
             [task.task_id for task in tasks]
         )
@@ -974,7 +1051,11 @@ class SessionService:
                 }
             )
 
-        return result
+        return {
+            "total_task_count": self.count_tasks(session_id),
+            "has_more_older": has_more_older,
+            "tasks": result,
+        }
 
     def get_last_task_event_id(self, session_id: str) -> int:
         """Return the latest persisted task-event cursor for a session.

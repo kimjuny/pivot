@@ -22,35 +22,6 @@ class FileReadTrackerService:
             return None
         return self._loads(session.react_file_read_tracker)
 
-    def check_and_record_read(
-        self,
-        *,
-        session_id: str,
-        path: str,
-        content_hash: str,
-        total_lines: int,
-        start_line: int,
-        end_line: int,
-    ) -> bool:
-        """Record a file read unless the range is already covered.
-
-        Returns:
-            True when the caller can safely return a dedup summary.
-        """
-        session = self._get_session(session_id, lock=True)
-        if session is None:
-            return False
-
-        tracker = self._loads(session.react_file_read_tracker) or {}
-        if check_dedup(tracker, path, content_hash, start_line, end_line):
-            return True
-
-        record_read(tracker, path, content_hash, total_lines, start_line, end_line)
-        session.react_file_read_tracker = self._dumps(tracker)
-        self.db.add(session)
-        self.db.commit()
-        return False
-
     def record_read(
         self,
         *,
@@ -70,6 +41,44 @@ class FileReadTrackerService:
         session.react_file_read_tracker = self._dumps(tracker)
         self.db.add(session)
         self.db.commit()
+
+    def record_full_file_state(
+        self,
+        *,
+        session_id: str,
+        path: str,
+        content_hash: str,
+        total_lines: int,
+    ) -> None:
+        """Record the whole file as known-current for future edits/writes."""
+        self.record_read(
+            session_id=session_id,
+            path=path,
+            content_hash=content_hash,
+            total_lines=total_lines,
+            start_line=1,
+            end_line=0 if total_lines == 0 else total_lines,
+        )
+
+    def require_full_read_hash(
+        self,
+        *,
+        session_id: str,
+        path: str,
+    ) -> str:
+        """Return the tracked hash if the session has read the full file.
+
+        Raises:
+            RuntimeError: If the file has not been fully read in this session.
+        """
+        session = self._get_session(session_id, lock=False)
+        tracker = self._loads(session.react_file_read_tracker) if session else None
+        entry = get_full_read_entry(tracker, path)
+        if entry is None:
+            raise RuntimeError(
+                f"Read the full file with read_file before modifying it: {path}"
+            )
+        return str(entry["hash"])
 
     def invalidate_file(
         self,
@@ -120,24 +129,35 @@ class FileReadTrackerService:
         return json.dumps(tracker, ensure_ascii=False)
 
 
-def check_dedup(
+def get_full_read_entry(
     tracker: dict[str, Any] | None,
     path: str,
-    content_hash: str,
-    start_line: int,
-    end_line: int,
-) -> bool:
-    """Return whether the requested unchanged range is already tracked."""
+) -> dict[str, Any] | None:
+    """Return the tracker entry if it covers the complete current file."""
     if not tracker:
-        return False
+        return None
     entry = tracker.get(path)
     if not isinstance(entry, dict):
-        return False
-    if entry.get("hash") != content_hash:
-        return False
-    if end_line < start_line:
-        return int(entry.get("total_lines", -1)) == 0
-    return _is_range_covered(entry.get("read_ranges", []), start_line, end_line)
+        return None
+    content_hash = entry.get("hash")
+    if not isinstance(content_hash, str) or content_hash == "":
+        return None
+    raw_total_lines = entry.get("total_lines")
+    if raw_total_lines is None:
+        return None
+    try:
+        total_lines = int(raw_total_lines)
+    except (TypeError, ValueError):
+        return None
+    if total_lines == 0:
+        return entry
+    if total_lines < 0:
+        return None
+    return (
+        entry
+        if _is_range_covered(entry.get("read_ranges", []), 1, total_lines)
+        else None
+    )
 
 
 def record_read(

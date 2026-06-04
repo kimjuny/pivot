@@ -23,6 +23,7 @@ from app.schemas.session import (
     SessionResponse,
     SessionUpdate,
     TaskMessage,
+    TaskSummary,
 )
 from app.security.permission_catalog import Permission
 from app.services.access_service import AccessService
@@ -34,7 +35,7 @@ from app.services.session_service import (
     SESSION_METADATA_UNSET,
     SessionService,
 )
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session as DBSession, col, select
 
 router = APIRouter()
@@ -482,21 +483,25 @@ async def get_session_history(
 )
 async def get_full_session_history(
     session_id: str,
+    limit: int = Query(default=10, ge=1, le=50),
+    before_task_id: str | None = Query(default=None),
     db: DBSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> FullSessionHistoryResponse:
-    """Get full session history with recursion details.
+    """Get paginated session history with recursion details.
 
-    Returns all tasks for a session with their complete recursion details,
-    suitable for rendering the full conversation history in the UI.
+    Returns the latest tasks for a session with their complete recursion
+    details, plus lightweight summaries of all tasks for anchor navigation.
 
     Args:
         session_id: UUID of the session.
+        limit: Max number of full tasks to return.
+        before_task_id: Cursor to load tasks older than this task.
         db: Database session dependency.
         current_user: Authenticated user.
 
     Returns:
-        Full session history with tasks and recursions.
+        Paginated session history with summaries, tasks and recursions.
 
     Raises:
         HTTPException: If session not found or access denied.
@@ -511,11 +516,25 @@ async def get_full_session_history(
         raise HTTPException(status_code=403, detail="Access denied")
     _require_session_access(db, current_user, session)
 
-    tasks_data = service.get_full_session_history(session_id)
+    history_result = service.get_full_session_history(
+        session_id, limit=limit, before_task_id=before_task_id
+    )
+    summaries_raw = service.get_task_summaries(session_id)
 
-    # Convert to response schema
+    # Convert summaries
+    task_summaries = [
+        TaskSummary(
+            task_id=s["task_id"],
+            preview=s["preview"],
+            status=s["status"],
+            created_at=s["created_at"].replace(tzinfo=UTC).isoformat(),
+        )
+        for s in summaries_raw
+    ]
+
+    # Convert tasks
     tasks = []
-    for task_data in tasks_data:
+    for task_data in history_result["tasks"]:
         recursions = [
             RecursionDetail(
                 iteration=r["iteration"],
@@ -581,9 +600,12 @@ async def get_full_session_history(
 
     return FullSessionHistoryResponse(
         session_id=session_id,
+        total_task_count=history_result["total_task_count"],
+        has_more_older=history_result["has_more_older"],
+        task_summaries=task_summaries,
+        tasks=tasks,
         last_event_id=service.get_last_task_event_id(session_id),
         resume_from_event_id=service.get_resume_from_task_event_id(session_id),
-        tasks=tasks,
     )
 
 

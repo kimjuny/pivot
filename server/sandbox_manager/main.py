@@ -510,6 +510,21 @@ def _mounted_skill_sources(container: Any) -> dict[str, str]:
     return skill_sources
 
 
+def _workspace_mount_source(container: Any) -> str | None:
+    """Read the host source currently mounted at /workspace."""
+    try:
+        mounts = _get_container_mounts(container)
+    except HTTPException:
+        return None
+
+    for mount in mounts:
+        if _mount_destination(mount) != "/workspace":
+            continue
+        source = _mount_source(mount)
+        return source.rstrip("/") if isinstance(source, str) else None
+    return None
+
+
 def _decode_bytes(value: Any) -> str:
     """Decode Podman API output into a UTF-8 string."""
     if value is None:
@@ -809,6 +824,7 @@ def _should_recreate_container(
     expected_skill_sources: dict[str, str],
     *,
     expected_skills_volume_name: str,
+    expected_workspace_host_dir: str,
 ) -> tuple[bool, str]:
     """Decide whether an existing sandbox container must be recreated.
 
@@ -817,6 +833,7 @@ def _should_recreate_container(
     - working dir is not ``/workspace``
     - full project mounts (e.g. ``/app/server`` or ``/app/web``) are present
     - ``/workspace`` mount is missing
+    - ``/workspace`` source differs from the current workspace host directory
     - mounted ``/workspace/skills/*`` sources differ from expected
     - current container image differs from ``SANDBOX_BASE_IMAGE``
     - current container network mode differs from ``SANDBOX_NETWORK_MODE``
@@ -837,6 +854,8 @@ def _should_recreate_container(
         return True, "workdir_mismatch"
     if "/workspace" not in destinations:
         return True, "missing_workspace_mount"
+    if _workspace_mount_source(container) != expected_workspace_host_dir.rstrip("/"):
+        return True, "workspace_mount_mismatch"
     if "/workspace/skills" not in destinations:
         return True, "missing_skills_volume_mount"
     if "/app/server" in destinations or "/app/web" in destinations:
@@ -893,6 +912,15 @@ def _ensure_sandbox(
     _ensure_workspace_dir(workspace_backend_path)
     normalized_skills = _normalize_skill_mounts(skills)
     skill_volumes, expected_skill_sources = _build_skill_mounts(normalized_skills)
+    workspace_host_dir = _resolve_host_path_from_backend_path(workspace_backend_path)
+    if workspace_host_dir is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Could not resolve host path for workspace_backend_path "
+                f"{workspace_backend_path!r}."
+            ),
+        )
 
     existing = _find_container(name)
     if existing is not None and require_existing and not allow_recreate:
@@ -902,6 +930,7 @@ def _ensure_sandbox(
             existing,
             expected_skill_sources,
             expected_skills_volume_name=skills_volume_name,
+            expected_workspace_host_dir=workspace_host_dir,
         )
     else:
         should_recreate, recreate_reason = (False, "no_container")
@@ -997,15 +1026,6 @@ def _ensure_sandbox(
         )
         return existing
 
-    workspace_host_dir = _resolve_host_path_from_backend_path(workspace_backend_path)
-    if workspace_host_dir is None:
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Could not resolve host path for workspace_backend_path "
-                f"{workspace_backend_path!r}."
-            ),
-        )
     volumes = {workspace_host_dir: {"bind": "/workspace", "mode": "rw"}}
     volumes[skills_volume_name] = {"bind": "/workspace/skills", "mode": "rw"}
     volumes.update(skill_volumes)

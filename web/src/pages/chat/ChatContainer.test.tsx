@@ -62,8 +62,21 @@ vi.mock("@/utils/api", async () => {
     getReactContextUsage: vi.fn(),
     getReactRuntimeSkills: vi.fn(),
     getReactSessionRuntimeDebug: vi.fn(),
+    getUsableLLMById: vi.fn(),
     httpClient: vi.fn(() =>
-      Promise.resolve(new Response(null, { status: 200 })),
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.close();
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      ),
     ),
     listProjects: vi.fn(),
     listSessions: vi.fn(),
@@ -104,6 +117,7 @@ import {
   getReactContextUsage,
   getReactRuntimeSkills,
   getReactSessionRuntimeDebug,
+  getUsableLLMById,
   httpClient,
   listProjects,
   listSessions,
@@ -151,6 +165,20 @@ function createDeferredPromise<T>() {
   return { promise, resolve, reject };
 }
 
+function createEmptyEventStreamResponse() {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    },
+  );
+}
+
 /**
  * Radix Select expects pointer-capture helpers that happy-dom does not ship.
  */
@@ -177,6 +205,7 @@ function applyPointerCapturePolyfill() {
 
 describe("ChatContainer session rollover", () => {
   const expectedSessionListArgs = [7, 50, { type: "client" }] as const;
+  const expectedHistoryOptions = { limit: 10 };
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -231,6 +260,11 @@ describe("ChatContainer session rollover", () => {
       thinking_policy: "auto",
       thinking_effort: null,
     } as Awaited<ReturnType<typeof getLLMById>>);
+    vi.mocked(getUsableLLMById).mockResolvedValue({
+      image_input: false,
+      thinking_policy: "auto",
+      thinking_effort: null,
+    } as Awaited<ReturnType<typeof getUsableLLMById>>);
     vi.mocked(createProject).mockResolvedValue({
       id: 1,
       project_id: "project-1",
@@ -267,6 +301,9 @@ describe("ChatContainer session rollover", () => {
     });
     vi.mocked(getFullSessionHistory).mockResolvedValue({
       session_id: "session-1",
+      total_task_count: 0,
+      has_more_older: false,
+      task_summaries: [],
       last_event_id: 0,
       resume_from_event_id: 0,
       tasks: [],
@@ -294,7 +331,17 @@ describe("ChatContainer session rollover", () => {
       updated_at: "2026-03-19T01:00:00.000Z",
     });
     vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        },
+      ),
     );
   });
 
@@ -346,7 +393,10 @@ describe("ChatContainer session rollover", () => {
     });
 
     expect(createSession).not.toHaveBeenCalled();
-    expect(getFullSessionHistory).not.toHaveBeenCalled();
+    expect(getFullSessionHistory).toHaveBeenCalledWith(
+      "session-1",
+      expectedHistoryOptions,
+    );
     expect(screen.getByText("Old chat")).toBeInTheDocument();
     expect(screen.getByText("Chat with Pivot Agent")).toBeInTheDocument();
   });
@@ -409,7 +459,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith("session-1");
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        "session-1",
+        expectedHistoryOptions,
+      );
     });
     expect(screen.getByText("Surface thread")).toBeInTheDocument();
   });
@@ -561,9 +614,7 @@ describe("ChatContainer session rollover", () => {
       status: "pending",
       cursor_before_start: 0,
     });
-    vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.mocked(httpClient).mockResolvedValue(createEmptyEventStreamResponse());
 
     const user = userEvent.setup();
     render(
@@ -583,7 +634,10 @@ describe("ChatContainer session rollover", () => {
     await user.click(await screen.findByText("Focused thread"));
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith(selectedSessionId);
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        selectedSessionId,
+        expectedHistoryOptions,
+      );
     });
 
     await user.type(screen.getByPlaceholderText("Ask anything"), "Keep going");
@@ -636,6 +690,9 @@ describe("ChatContainer session rollover", () => {
     vi.mocked(getFullSessionHistory)
       .mockResolvedValueOnce({
         session_id: "session-current",
+        total_task_count: 0,
+        has_more_older: false,
+        task_summaries: [],
         last_event_id: 0,
         resume_from_event_id: 0,
         tasks: [],
@@ -654,7 +711,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith("session-current");
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        "session-current",
+        expectedHistoryOptions,
+      );
     });
 
     await user.click(await screen.findByText("Next thread"));
@@ -672,6 +732,9 @@ describe("ChatContainer session rollover", () => {
       session_id: "session-next",
       last_event_id: 0,
       resume_from_event_id: 0,
+      total_task_count: 0,
+      has_more_older: false,
+      task_summaries: [],
       tasks: [],
     });
 
@@ -968,7 +1031,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith("session-1");
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        "session-1",
+        expectedHistoryOptions,
+      );
     });
 
     const textarea = await screen.findByPlaceholderText("Ask anything");
@@ -994,11 +1060,11 @@ describe("ChatContainer session rollover", () => {
 
   it("defaults to Auto mode when the primary LLM exposes a non-fast thinking tier", async () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
-    vi.mocked(getLLMById).mockResolvedValue({
+    vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
       thinking_policy: "openai-response-reasoning-effort",
       thinking_effort: "high",
-    } as Awaited<ReturnType<typeof getLLMById>>);
+    } as Awaited<ReturnType<typeof getUsableLLMById>>);
     vi.mocked(startReactTask).mockResolvedValue({
       task_id: "task-thinking",
       session_id: "fresh-session",
@@ -1016,9 +1082,7 @@ describe("ChatContainer session rollover", () => {
       created_at: "2026-03-20T00:00:00.000Z",
       updated_at: "2026-03-20T00:00:00.000Z",
     });
-    vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.mocked(httpClient).mockResolvedValue(createEmptyEventStreamResponse());
 
     const user = userEvent.setup();
     render(
@@ -1061,11 +1125,11 @@ describe("ChatContainer session rollover", () => {
 
   it("lets the user switch the chat payload to Fast mode", async () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
-    vi.mocked(getLLMById).mockResolvedValue({
+    vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
       thinking_policy: "openai-response-reasoning-effort",
       thinking_effort: "high",
-    } as Awaited<ReturnType<typeof getLLMById>>);
+    } as Awaited<ReturnType<typeof getUsableLLMById>>);
     vi.mocked(startReactTask).mockResolvedValue({
       task_id: "task-fast",
       session_id: "fresh-session",
@@ -1083,9 +1147,7 @@ describe("ChatContainer session rollover", () => {
       created_at: "2026-03-20T00:00:00.000Z",
       updated_at: "2026-03-20T00:00:00.000Z",
     });
-    vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.mocked(httpClient).mockResolvedValue(createEmptyEventStreamResponse());
 
     const user = userEvent.setup();
     render(
@@ -1124,11 +1186,11 @@ describe("ChatContainer session rollover", () => {
 
   it("shows only Fast when the stored thinking tier is already disabled", async () => {
     vi.mocked(listSessions).mockResolvedValue({ sessions: [], total: 0 });
-    vi.mocked(getLLMById).mockResolvedValue({
+    vi.mocked(getUsableLLMById).mockResolvedValue({
       image_input: false,
       thinking_policy: "qwen-disable-thinking",
       thinking_effort: null,
-    } as Awaited<ReturnType<typeof getLLMById>>);
+    } as Awaited<ReturnType<typeof getUsableLLMById>>);
 
     const user = userEvent.setup();
     render(
@@ -1227,6 +1289,9 @@ describe("ChatContainer session rollover", () => {
       session_id: sessionId,
       last_event_id: 25,
       resume_from_event_id: 20,
+      total_task_count: 1,
+      has_more_older: false,
+      task_summaries: [{ task_id: "task-live", preview: "Help me draft a React landing page", status: "running", created_at: "2026-03-16T13:24:40.000Z" }],
       tasks: [
         {
           task_id: "task-live",
@@ -1310,7 +1375,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        sessionId,
+        expectedHistoryOptions,
+      );
     });
 
     await waitFor(() => {
@@ -1344,6 +1412,9 @@ describe("ChatContainer session rollover", () => {
       session_id: sessionId,
       last_event_id: 0,
       resume_from_event_id: 0,
+      total_task_count: 0,
+      has_more_older: false,
+      task_summaries: [],
       tasks: [],
     });
 
@@ -1534,6 +1605,9 @@ describe("ChatContainer session rollover", () => {
       session_id: sessionId,
       last_event_id: 0,
       resume_from_event_id: 0,
+      total_task_count: 1,
+      has_more_older: false,
+      task_summaries: [{ task_id: "task-skill-approval", preview: "Build me a skill", status: "waiting_input", created_at: "2026-03-16T00:00:00.000Z" }],
       tasks: [
         {
           task_id: "task-skill-approval",
@@ -1589,9 +1663,7 @@ describe("ChatContainer session rollover", () => {
         },
       ],
     });
-    vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.mocked(httpClient).mockResolvedValue(createEmptyEventStreamResponse());
 
     const user = userEvent.setup();
     render(
@@ -1645,6 +1717,9 @@ describe("ChatContainer session rollover", () => {
       session_id: sessionId,
       last_event_id: 0,
       resume_from_event_id: 0,
+      total_task_count: 1,
+      has_more_older: false,
+      task_summaries: [{ task_id: "task-clarify-history", preview: "Help me export", status: "waiting_input", created_at: "2026-03-16T00:00:00.000Z" }],
       tasks: [
         {
           task_id: "task-clarify-history",
@@ -1679,9 +1754,7 @@ describe("ChatContainer session rollover", () => {
         },
       ],
     });
-    vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.mocked(httpClient).mockResolvedValue(createEmptyEventStreamResponse());
 
     render(
       <ChatContainer
@@ -1693,7 +1766,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        sessionId,
+        expectedHistoryOptions,
+      );
     });
 
     expect(await screen.findByPlaceholderText("Write your answer...")).toBeInTheDocument();
@@ -2323,6 +2399,9 @@ describe("ChatContainer session rollover", () => {
       session_id: sessionId,
       last_event_id: 0,
       resume_from_event_id: 0,
+      total_task_count: 1,
+      has_more_older: false,
+      task_summaries: [{ task_id: "task-stop", preview: "Please stop", status: "running", created_at: "2026-03-16T00:00:00.000Z" }],
       tasks: [
         {
           task_id: "task-stop",
@@ -2361,9 +2440,7 @@ describe("ChatContainer session rollover", () => {
       status: "cancelled",
       cancel_requested: true,
     });
-    vi.mocked(httpClient).mockResolvedValue(
-      new Response(null, { status: 204 }),
-    );
+    vi.mocked(httpClient).mockResolvedValue(createEmptyEventStreamResponse());
 
     const user = userEvent.setup();
     render(
@@ -2376,7 +2453,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        sessionId,
+        expectedHistoryOptions,
+      );
     });
 
     await user.click(screen.getByTitle("Stop execution"));
@@ -2410,6 +2490,9 @@ describe("ChatContainer session rollover", () => {
       session_id: sessionId,
       last_event_id: 0,
       resume_from_event_id: 0,
+      total_task_count: 1,
+      has_more_older: false,
+      task_summaries: [{ task_id: "task-title", preview: "Help me plan a launch", status: "running", created_at: "2026-03-16T00:00:00.000Z" }],
       tasks: [
         {
           task_id: "task-title",
@@ -2486,7 +2569,10 @@ describe("ChatContainer session rollover", () => {
     );
 
     await waitFor(() => {
-      expect(getFullSessionHistory).toHaveBeenCalledWith(sessionId);
+      expect(getFullSessionHistory).toHaveBeenCalledWith(
+        sessionId,
+        expectedHistoryOptions,
+      );
     });
 
     await waitFor(() => {

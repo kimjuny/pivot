@@ -66,6 +66,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 container,
                 {},
                 expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+                expected_workspace_host_dir="/tmp/workspace",
             )
 
         self.assertTrue(should_recreate)
@@ -117,6 +118,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 container,
                 {},
                 expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+                expected_workspace_host_dir="/tmp/workspace",
             )
 
         self.assertFalse(should_recreate)
@@ -168,6 +170,7 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 container,
                 {},
                 expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+                expected_workspace_host_dir="/tmp/workspace",
             )
 
         self.assertTrue(should_recreate)
@@ -214,10 +217,59 @@ class SandboxManagerRecreateTestCase(unittest.TestCase):
                 container,
                 {},
                 expected_skills_volume_name="pivot-sandbox-alice-1-skills",
+                expected_workspace_host_dir="/tmp/workspace",
             )
 
         self.assertTrue(should_recreate)
         self.assertEqual(reason, "missing_skills_volume_mount")
+
+    def test_recreates_container_when_workspace_mount_source_changes(self) -> None:
+        """Reusing a sandbox mounted to another workspace writes to the wrong tree."""
+        module = cast("Any", sandbox_manager)
+        container = object()
+
+        with (
+            patch.object(module, "_container_working_dir", return_value="/workspace"),
+            patch.object(
+                module,
+                "_get_container_mounts",
+                return_value=[
+                    {"Destination": "/workspace", "Source": "/tmp/old-workspace"},
+                    {"Destination": "/workspace/skills", "Source": "/tmp/skills"},
+                ],
+            ),
+            patch.object(module, "_container_skills_volume_name", return_value=None),
+            patch.object(module, "_mounted_skill_sources", return_value={}),
+            patch.object(module, "_container_network_mode", return_value="bridge"),
+            patch.object(
+                module,
+                "_container_image_ref",
+                return_value="localhost/pivot-sandbox-base:py311-rg",
+            ),
+            patch.object(module, "_resolve_image_id", return_value="sha256:current"),
+            patch.object(module, "_container_image_id", return_value="sha256:current"),
+            patch.object(
+                module,
+                "get_settings",
+                return_value=type(
+                    "Settings",
+                    (),
+                    {
+                        "SANDBOX_BASE_IMAGE": "localhost/pivot-sandbox-base:py311-rg",
+                        "SANDBOX_NETWORK_MODE": "bridge",
+                    },
+                )(),
+            ),
+        ):
+            should_recreate, reason = module._should_recreate_container(
+                container,
+                {},
+                expected_skills_volume_name=None,
+                expected_workspace_host_dir="/tmp/current-workspace",
+            )
+
+        self.assertTrue(should_recreate)
+        self.assertEqual(reason, "workspace_mount_mismatch")
 
 
 class SandboxManagerWorkspaceRootTestCase(unittest.TestCase):
@@ -419,7 +471,7 @@ class SandboxManagerHttpProxyTestCase(unittest.TestCase):
         """Upstream preview disconnects should become user-facing 502 errors."""
         module = cast("Any", sandbox_manager)
         payload = module.SandboxHttpProxyRequest(
-            username="default",
+            user_id=1,
             workspace_id="workspace-1",
             workspace_backend_path="/app/server/workspace/default/workspace-1",
             skills=[],

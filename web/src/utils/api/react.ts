@@ -65,11 +65,21 @@ export interface TaskMessage {
   updated_at: string;
 }
 
+export interface TaskSummary {
+  task_id: string;
+  preview: string;
+  status: string;
+  created_at: string;
+}
+
 export interface FullSessionHistoryResponse {
   session_id: string;
+  total_task_count: number;
+  has_more_older: boolean;
+  task_summaries: TaskSummary[];
+  tasks: TaskMessage[];
   last_event_id: number;
   resume_from_event_id: number;
-  tasks: TaskMessage[];
 }
 
 export interface ReactTaskStartResponse {
@@ -147,8 +157,15 @@ export interface ReactSessionCompactResponse {
   usage_after: ReactContextUsageSummary;
 }
 
-export const getFullSessionHistory = async (sessionId: string): Promise<FullSessionHistoryResponse> => {
-  return apiRequest(`/sessions/${sessionId}/full-history`) as Promise<FullSessionHistoryResponse>;
+export const getFullSessionHistory = async (
+  sessionId: string,
+  options?: { limit?: number; beforeTaskId?: string },
+): Promise<FullSessionHistoryResponse> => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.beforeTaskId) params.set("before_task_id", options.beforeTaskId);
+  const qs = params.toString();
+  return apiRequest(`/sessions/${sessionId}/full-history${qs ? `?${qs}` : ""}`) as Promise<FullSessionHistoryResponse>;
 };
 
 export const startReactTask = async (payload: {

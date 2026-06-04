@@ -42,6 +42,7 @@ class ReadFileToolTestCase(unittest.TestCase):
                     str(file_path),
                     "2",
                     "10",
+                    "false",
                 ],
                 check=False,
                 capture_output=True,
@@ -52,6 +53,32 @@ class ReadFileToolTestCase(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertEqual(payload["start_line"], 2)
         self.assertEqual(payload["end_line"], 3)
+        self.assertEqual(payload["content"], "  beta\ngamma\n")
+
+    def test_script_can_return_numbered_chunk(self) -> None:
+        """Line numbers are opt-in for navigation-focused reads."""
+        module = cast("Any", read_file_module)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "example.py"
+            file_path.write_text("alpha\n  beta\ngamma\n", encoding="utf-8")
+
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    module._READ_FILE_SCRIPT,
+                    str(file_path),
+                    "2",
+                    "10",
+                    "true",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
         self.assertEqual(payload["content"], "2 |   beta\n3 | gamma\n")
 
     def test_script_truncates_requested_range_by_max_lines(self) -> None:
@@ -69,6 +96,7 @@ class ReadFileToolTestCase(unittest.TestCase):
                     str(file_path),
                     "2",
                     "2",
+                    "false",
                 ],
                 check=False,
                 capture_output=True,
@@ -77,7 +105,7 @@ class ReadFileToolTestCase(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["content"], "2 | b\n3 | c\n")
+        self.assertEqual(payload["content"], "b\nc\n")
         self.assertTrue(payload["truncated"])
         self.assertEqual(payload["next_start_line"], 4)
 
@@ -95,6 +123,7 @@ class ReadFileToolTestCase(unittest.TestCase):
                     str(missing_path),
                     "1",
                     "10",
+                    "false",
                 ],
                 check=False,
                 capture_output=True,
@@ -126,11 +155,11 @@ class ReadFileToolTestCase(unittest.TestCase):
         """Huge chunks should fail fast to keep reads focused."""
         module = cast("Any", read_file_module)
 
-        with self.assertRaisesRegex(ValueError, "less than or equal to 800"):
-            module.read_file(path="src/app.py", max_lines=801)
+        with self.assertRaisesRegex(ValueError, "less than or equal to 2000"):
+            module.read_file(path="src/app.py", max_lines=2001)
 
-    def test_read_file_dedups_repeated_same_range(self) -> None:
-        """Repeated text reads should return a short summary after tracking."""
+    def test_read_file_returns_content_for_repeated_same_range(self) -> None:
+        """Repeated text reads should still return content after tracking."""
         module = cast("Any", read_file_module)
         engine = create_engine(
             "sqlite://",
@@ -182,10 +211,10 @@ class ReadFileToolTestCase(unittest.TestCase):
             module._read_text_in_sandbox = original_read
 
         self.assertEqual(first["content"], payload["content"])
-        self.assertTrue(second["deduped"])
-        self.assertEqual(second["returned_line_count"], 0)
+        self.assertEqual(second["content"], payload["content"])
+        self.assertEqual(second["returned_line_count"], payload["returned_line_count"])
 
-    def test_read_file_overlapping_range_with_new_content_is_not_deduped(self) -> None:
+    def test_read_file_overlapping_range_returns_content(self) -> None:
         """Partially overlapping reads should return content when new lines exist."""
         module = cast("Any", read_file_module)
         engine = create_engine(
@@ -254,4 +283,3 @@ class ReadFileToolTestCase(unittest.TestCase):
             module._read_text_in_sandbox = original_read
 
         self.assertEqual(second["content"], "second chunk")
-        self.assertNotIn("deduped", second)

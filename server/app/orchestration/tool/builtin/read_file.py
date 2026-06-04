@@ -103,6 +103,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 start_line = int(sys.argv[2])
 max_lines = int(sys.argv[3])
+show_line_numbers = sys.argv[4].lower() == "true"
 
 display_path = str(path).removeprefix("/workspace/") or "."
 if not path.exists():
@@ -142,11 +143,14 @@ if start_line > total_lines:
 
 actual_end_line = min(total_lines, start_line + max_lines - 1)
 chunk_lines = lines[start_line - 1 : actual_end_line]
-number_width = len(str(actual_end_line))
-numbered_chunk = "".join(
-    f"{line_number:>{number_width}} | {line}"
-    for line_number, line in enumerate(chunk_lines, start=start_line)
-)
+if show_line_numbers:
+    number_width = len(str(actual_end_line))
+    content = "".join(
+        f"{line_number:>{number_width}} | {line}"
+        for line_number, line in enumerate(chunk_lines, start=start_line)
+    )
+else:
+    content = "".join(chunk_lines)
 
 payload = {
     "path": str(path).removeprefix("/workspace/") or ".",
@@ -159,7 +163,7 @@ payload = {
     "truncated": actual_end_line < total_lines,
     "next_start_line": actual_end_line + 1 if actual_end_line < total_lines else None,
     "previous_start_line": max(1, start_line - max_lines) if start_line > 1 else None,
-    "content": numbered_chunk,
+    "content": content,
     "content_hash": content_hash,
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -222,8 +226,9 @@ def _read_text_in_sandbox(
     path: str,
     start_line: int,
     max_lines: int,
+    show_line_numbers: bool,
 ) -> dict[str, object]:
-    """Read a text file inside the sandbox with line-numbered output."""
+    """Read a text file inside the sandbox with optional line-numbered output."""
     target = workspace_path(path)
     try:
         output = exec_in_sandbox(
@@ -234,6 +239,7 @@ def _read_text_in_sandbox(
                 target,
                 str(start_line),
                 str(max_lines),
+                "true" if show_line_numbers else "false",
             ]
         )
     except RuntimeError as exc:
@@ -280,41 +286,6 @@ def _read_document(path: str) -> dict[str, object]:
             "kind": "document",
             "content": markdown_text,
         }
-
-
-def _build_dedup_summary(
-    path: str,
-    result: dict[str, object],
-    content_hash: str,
-) -> dict[str, object]:
-    start = int(result["start_line"])  # type: ignore[arg-type]
-    end = int(result["end_line"])  # type: ignore[arg-type]
-    total = int(result["total_lines"])  # type: ignore[arg-type]
-    range_desc = (
-        f"{total} lines (full file)"
-        if start == 1 and end == total
-        else f"lines {start}-{end}"
-    )
-    return {
-        "path": path,
-        "total_lines": total,
-        "start_line": start,
-        "end_line": end,
-        "returned_line_count": 0,
-        "has_more_before": False,
-        "has_more_after": False,
-        "truncated": False,
-        "next_start_line": None,
-        "previous_start_line": None,
-        "content": (
-            f"[File unchanged since last read — content already in context]\n"
-            f"Path: {path}\n"
-            f"Range: {range_desc}\n"
-            f"Hash: {content_hash[:8]}..."
-        ),
-        "deduped": True,
-        "content_hash": content_hash,
-    }
 
 
 def _read_image(path: str) -> dict[str, object]:
@@ -389,15 +360,12 @@ def _read_image(path: str) -> dict[str, object]:
 @tool(
     description=(
         "Read a file under /workspace. Auto-selects reading strategy by extension: "
-        "text/code files (and any unknown extension) get line-numbered output, "
+        "text/code files (and any unknown extension) get raw text output by default, "
         "documents (pdf/docx/pptx/xlsx) get Docling-converted markdown, "
         "images (png/jpg/jpeg/webp) are made visible to the model. "
         "IMPORTANT: Always prefer read_file over bash tools (cat, head, tail, etc.) "
         "for reading files. Only fall back to bash if read_file explicitly reports "
-        "that the file type is not supported. "
-        "If you have already read the same range of a text file in this session "
-        "and the content has not changed, the system returns a short summary "
-        "instead of the full content to save context space."
+        "that the file type is not supported."
     ),
 )
 def read_file(
@@ -414,13 +382,20 @@ def read_file(
             "Maximum returned lines for text files. "
             "Ignored for documents and images."
         ),
-    ] = 400,
+    ] = 1200,
+    show_line_numbers: Annotated[
+        bool,
+        Param(
+            "Whether to include line number prefixes in text output. "
+            "Default false so content can be copied directly into edit_file.old_string."
+        ),
+    ] = False,
 ) -> dict[str, object]:
     """Read a file under ``/workspace``. Automatically selects the appropriate
     reading strategy based on file extension:
 
     - **Text/code files** (.py, .js, .json, .yaml, .md, .csv, .txt, etc.) and
-      any unknown extension: Returns line-numbered content with pagination hints.
+      any unknown extension: Returns raw content with pagination hints.
     - **Documents** (.pdf, .docx, .pptx, .xlsx): Returns Docling-converted
       markdown content.
     - **Images** (.png, .jpg, .jpeg, .webp): Makes the image visible to the
@@ -440,10 +415,10 @@ def read_file(
             raise ValueError("start_line must be greater than or equal to 1.")
         if max_lines < 1:
             raise ValueError("max_lines must be greater than or equal to 1.")
-        if max_lines > 800:
-            raise ValueError("max_lines must be less than or equal to 800.")
+        if max_lines > 2000:
+            raise ValueError("max_lines must be less than or equal to 2000.")
 
-        result = _read_text_in_sandbox(path, start_line, max_lines)
+        result = _read_text_in_sandbox(path, start_line, max_lines, show_line_numbers)
 
         ctx = get_current_tool_execution_context()
         can_track = ctx is not None and ctx.session_id and ctx.db_session_factory
@@ -463,7 +438,7 @@ def read_file(
             assert ctx.db_session_factory is not None
 
             with ctx.db_session_factory() as db:
-                deduped = FileReadTrackerService(db).check_and_record_read(
+                FileReadTrackerService(db).record_read(
                     session_id=ctx.session_id,
                     path=relative_path,
                     content_hash=content_hash,
@@ -471,8 +446,6 @@ def read_file(
                     start_line=actual_start,
                     end_line=actual_end,
                 )
-            if deduped:
-                return _build_dedup_summary(relative_path, result, content_hash)
 
         return result
 

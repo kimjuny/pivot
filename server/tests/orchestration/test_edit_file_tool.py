@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -18,33 +19,31 @@ if str(SERVER_ROOT) not in sys.path:
 edit_file_module = import_module("app.orchestration.tool.builtin.edit_file")
 
 
+def md5_text(value: str) -> str:
+    return hashlib.md5(value.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
 class EditFileToolTestCase(unittest.TestCase):
-    """Validate single-file unified diff application behavior."""
+    """Validate exact string replacement behavior."""
 
-    def test_script_applies_multiple_hunks_atomically(self) -> None:
-        """The edit tool should apply multiple hunks in one file."""
+    def test_script_replaces_unique_string_and_returns_diff(self) -> None:
         module = cast("Any", edit_file_module)
-        diff = """--- a/example.py
-+++ b/example.py
-@@ -1,3 +1,3 @@
- before
--old one
-+new one
- middle
-@@ -5,3 +5,4 @@
- tail
--old two
-+new two
-+extra
- done
-"""
+        original = "alpha\nold value\ngamma\n"
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
-            original = "before\nold one\nmiddle\nspacer\ntail\nold two\ndone\n"
             file_path.write_text(original, encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                [
+                    sys.executable,
+                    "-c",
+                    module._EDIT_FILE_SCRIPT,
+                    str(file_path),
+                    "old value",
+                    "new value",
+                    "false",
+                    md5_text(original),
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -54,36 +53,31 @@ class EditFileToolTestCase(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["hunk_count"], 2)
-        self.assertEqual(payload["added_lines"], 3)
-        self.assertEqual(payload["removed_lines"], 2)
-        self.assertEqual(payload["warnings"], [])
-        self.assertEqual(
-            updated,
-            "before\nnew one\nmiddle\nspacer\ntail\nnew two\nextra\ndone\n",
-        )
+        self.assertEqual(updated, "alpha\nnew value\ngamma\n")
+        self.assertEqual(payload["replacement_count"], 1)
+        self.assertEqual(payload["added_lines"], 1)
+        self.assertEqual(payload["removed_lines"], 1)
+        self.assertIn("-old value", payload["diff"])
+        self.assertIn("+new value", payload["diff"])
 
-    def test_script_fails_without_writing_when_later_hunk_misses(self) -> None:
-        """A later failed hunk should roll back the whole edit_file call."""
+    def test_script_rejects_multiple_matches_without_replace_all(self) -> None:
         module = cast("Any", edit_file_module)
-        diff = """--- a/example.py
-+++ b/example.py
-@@ -1,2 +1,2 @@
- alpha
--beta
-+BETA
-@@ -3,2 +3,2 @@
- gamma
--missing
-+MISSING
-"""
+        original = "target\nmiddle\ntarget\n"
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
-            original = "alpha\nbeta\ngamma\ndelta\n"
             file_path.write_text(original, encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                [
+                    sys.executable,
+                    "-c",
+                    module._EDIT_FILE_SCRIPT,
+                    str(file_path),
+                    "target",
+                    "updated",
+                    "false",
+                    md5_text(original),
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -92,27 +86,27 @@ class EditFileToolTestCase(unittest.TestCase):
             updated = file_path.read_text(encoding="utf-8")
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("Patch failed at hunk 2", completed.stderr)
-        self.assertIn("searched within +/-5 lines", completed.stderr)
-        self.assertIn("Expected old/context lines", completed.stderr)
-        self.assertIn("Actual file lines there", completed.stderr)
+        self.assertIn("Found 2 matches", completed.stderr)
         self.assertEqual(updated, original)
 
-    def test_script_autocorrects_nearby_unique_anchor(self) -> None:
-        """A small old_start miss should still apply when the nearby match is unique."""
+    def test_script_replace_all_updates_every_match(self) -> None:
         module = cast("Any", edit_file_module)
-        diff = """@@ -3,2 +3,2 @@
--old target
-+new target
- context line
-"""
+        original = "target\nmiddle\ntarget\n"
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
-            original = "alpha\nold target\ncontext line\nomega\n"
             file_path.write_text(original, encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                [
+                    sys.executable,
+                    "-c",
+                    module._EDIT_FILE_SCRIPT,
+                    str(file_path),
+                    "target",
+                    "updated",
+                    "true",
+                    md5_text(original),
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -122,25 +116,27 @@ class EditFileToolTestCase(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertIn("old_start=3 did not match exactly", payload["warnings"][0])
-        self.assertIn("nearby original line 2", payload["warnings"][0])
-        self.assertEqual(updated, "alpha\nnew target\ncontext line\nomega\n")
+        self.assertEqual(payload["replacement_count"], 2)
+        self.assertEqual(updated, "updated\nmiddle\nupdated\n")
 
-    def test_script_rejects_ambiguous_nearby_anchor_matches(self) -> None:
-        """The tool should not guess when multiple nearby matches exist."""
+    def test_script_rejects_changed_file_hash(self) -> None:
         module = cast("Any", edit_file_module)
-        diff = """@@ -4,2 +4,2 @@
--target
-+updated
- context
-"""
+        original = "old\n"
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
-            original = "a\ntarget\ncontext\nb\ntarget\ncontext\nc\n"
-            file_path.write_text(original, encoding="utf-8")
+            file_path.write_text("changed\n", encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                [
+                    sys.executable,
+                    "-c",
+                    module._EDIT_FILE_SCRIPT,
+                    str(file_path),
+                    "changed",
+                    "updated",
+                    "false",
+                    md5_text(original),
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -149,23 +145,25 @@ class EditFileToolTestCase(unittest.TestCase):
             updated = file_path.read_text(encoding="utf-8")
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("multiple nearby matches", completed.stderr)
-        self.assertEqual(updated, original)
+        self.assertIn("File has changed since it was read", completed.stderr)
+        self.assertEqual(updated, "changed\n")
 
-    def test_script_accepts_hunks_without_file_headers(self) -> None:
-        """The path argument should be the only required target file signal."""
+    def test_script_creates_missing_file_when_old_string_is_empty(self) -> None:
         module = cast("Any", edit_file_module)
-        diff = """@@ -1,1 +1,1 @@
--old
-+new
-"""
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = Path(temp_dir) / "example.py"
-            original = "old\n"
-            file_path.write_text(original, encoding="utf-8")
 
             completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
+                [
+                    sys.executable,
+                    "-c",
+                    module._EDIT_FILE_SCRIPT,
+                    str(file_path),
+                    "",
+                    "created\n",
+                    "false",
+                    "",
+                ],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -175,135 +173,15 @@ class EditFileToolTestCase(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
-        self.assertEqual(payload["warnings"], [])
-        self.assertEqual(updated, "new\n")
+        self.assertEqual(payload["replacement_count"], 1)
+        self.assertEqual(updated, "created\n")
 
-    def test_script_matches_lf_diff_against_crlf_file(self) -> None:
-        """Agents should not need to encode target-file line endings in diffs."""
-        module = cast("Any", edit_file_module)
-        diff = """@@ -1,3 +1,4 @@
-+import tailwindcss from '@tailwindcss/vite'
- import { defineConfig } from 'vite'
- import react from '@vitejs/plugin-react'
- 
-"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = Path(temp_dir) / "vite.config.ts"
-            original = (
-                "import { defineConfig } from 'vite'\r\n"
-                "import react from '@vitejs/plugin-react'\r\n"
-                "\r\n"
-            )
-            with file_path.open("w", encoding="utf-8", newline="") as target_file:
-                target_file.write(original)
-
-            completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-
-            with file_path.open("r", encoding="utf-8", newline="") as source_file:
-                updated = source_file.read()
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(
-            updated,
-            "import tailwindcss from '@tailwindcss/vite'\r\n"
-            "import { defineConfig } from 'vite'\r\n"
-            "import react from '@vitejs/plugin-react'\r\n"
-            "\r\n",
-        )
-
-    def test_script_tolerates_count_mismatch_with_warning(self) -> None:
-        """Hunk counts are advisory; body matching remains the safety check."""
-        module = cast("Any", edit_file_module)
-        diff = """@@ -1,7 +1,7 @@
- alpha
--old
-+new
- gamma
-"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = Path(temp_dir) / "example.py"
-            file_path.write_text("alpha\nold\ngamma\n", encoding="utf-8")
-
-            completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-
-            updated = file_path.read_text(encoding="utf-8")
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        payload = json.loads(completed.stdout)
-        self.assertIn("old_count=7", payload["warnings"][0])
-        self.assertIn("new_count=7", payload["warnings"][1])
-        self.assertEqual(updated, "alpha\nnew\ngamma\n")
-
-    def test_script_rejects_file_headers_after_first_hunk(self) -> None:
-        """A multi-file-looking diff should not be accepted silently."""
-        module = cast("Any", edit_file_module)
-        diff = """@@ -1,1 +1,1 @@
--old
-+new
---- a/other.py
-+++ b/other.py
-@@ -1,1 +1,1 @@
--other
-+changed
-"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = Path(temp_dir) / "example.py"
-            original = "old\n"
-            file_path.write_text(original, encoding="utf-8")
-
-            completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-
-            updated = file_path.read_text(encoding="utf-8")
-
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn(
-            "file headers are only allowed before the first hunk", completed.stderr
-        )
-        self.assertEqual(updated, original)
-
-    def test_script_rejects_full_git_diff_metadata(self) -> None:
-        """The tool should keep the agent-facing format small and explicit."""
-        module = cast("Any", edit_file_module)
-        diff = """diff --git a/example.py b/example.py
-index 1234567..89abcde 100644
---- a/example.py
-+++ b/example.py
-@@ -1,1 +1,1 @@
--old
-+new
-"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            file_path = Path(temp_dir) / "example.py"
-            file_path.write_text("old\n", encoding="utf-8")
-
-            completed = subprocess.run(
-                [sys.executable, "-c", module._EDIT_FILE_SCRIPT, str(file_path), diff],
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-
-        self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("simplified unified diff", completed.stderr)
-
-    def test_edit_file_rejects_empty_diff(self) -> None:
-        """The public wrapper should validate obviously empty patches."""
+    def test_edit_file_rejects_unread_existing_file(self) -> None:
         module = cast("Any", edit_file_module)
 
-        with self.assertRaisesRegex(ValueError, "non-empty unified diff"):
-            module.edit_file(path="src/app.py", diff="")
+        with self.assertRaisesRegex(RuntimeError, "requires read_file"):
+            module.edit_file(
+                path="src/app.py",
+                old_string="old",
+                new_string="new",
+            )
