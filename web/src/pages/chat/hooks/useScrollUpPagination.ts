@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 interface UseScrollUpPaginationOptions {
   scrollContainerRef: React.RefObject<HTMLElement | null>;
   messages: unknown[];
-  hasMoreOlderRef: React.RefObject<boolean>;
-  isLoadingOlderRef: React.RefObject<boolean>;
+  canLoadOlder: () => boolean;
+  isOlderLoading: () => boolean;
   loadOlderTasks: (
     limit: number,
     options?: { preserveScroll?: boolean },
@@ -21,8 +21,8 @@ interface UseScrollUpPaginationOptions {
 export function useScrollUpPagination({
   scrollContainerRef,
   messages,
-  hasMoreOlderRef,
-  isLoadingOlderRef,
+  canLoadOlder,
+  isOlderLoading,
   loadOlderTasks,
   isTaskLoaded,
   batchSize = 10,
@@ -38,7 +38,7 @@ export function useScrollUpPagination({
 
     observerRef.current?.disconnect();
 
-    if (!hasMoreOlderRef.current) return;
+    if (!canLoadOlder()) return;
 
     const sentinel = container.querySelector("[data-message-id]");
     if (!sentinel) return;
@@ -50,8 +50,8 @@ export function useScrollUpPagination({
         if (
           entry.isIntersecting &&
           !triggeredRef.current &&
-          !isLoadingOlderRef.current &&
-          hasMoreOlderRef.current
+          !isOlderLoading() &&
+          canLoadOlder()
         ) {
           triggeredRef.current = true;
           setIsLoadingOlder(true);
@@ -71,8 +71,8 @@ export function useScrollUpPagination({
   }, [
     scrollContainerRef,
     messages,
-    hasMoreOlderRef,
-    isLoadingOlderRef,
+    canLoadOlder,
+    isOlderLoading,
     loadOlderTasks,
     batchSize,
   ]);
@@ -87,20 +87,22 @@ export function useScrollUpPagination({
       }
 
       for (let i = 0; i < maxBatches; i++) {
-        if (isLoadingOlderRef.current || !hasMoreOlderRef.current) break;
+        if (isOlderLoading() || !canLoadOlder()) break;
 
         setIsLoadingOlder(true);
-        await loadOlderTasks(batchSize, { preserveScroll: false });
+        const loadedTaskIds = await loadOlderTasks(batchSize, {
+          preserveScroll: false,
+        });
         setIsLoadingOlder(false);
 
-        if (isTaskLoaded(targetTaskId)) {
+        if (loadedTaskIds.includes(targetTaskId) || isTaskLoaded(targetTaskId)) {
           return true;
         }
       }
 
       return false;
     },
-    [isTaskLoaded, isLoadingOlderRef, hasMoreOlderRef, loadOlderTasks, batchSize],
+    [isTaskLoaded, isOlderLoading, canLoadOlder, loadOlderTasks, batchSize],
   );
 
   return { isLoadingOlder, loadUntilTask };

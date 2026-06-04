@@ -95,6 +95,7 @@ import ProjectAccessDialog from "./components/ProjectAccessDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
 import StaleSessionDialog from "@/components/StaleSessionDialog";
 import { useChatAutoScroll } from "./hooks/useChatAutoScroll";
+import { useChatSessionRuntime } from "./hooks/useChatSessionRuntime";
 import { useConversationRounds, type ConversationRound } from "./hooks/useConversationRounds";
 import { useChatUploads } from "./hooks/useChatUploads";
 import { useScrollUpPagination } from "./hooks/useScrollUpPagination";
@@ -148,8 +149,11 @@ const COMPACT_SKILL_SELECTION: MandatorySkillSelection = {
 };
 const DOCK_TRANSITION_MS = 200;
 const SESSION_LOADING_OVERLAY_TRANSITION_MS = 200;
+const CHAT_HISTORY_PAGE_SIZE = 10;
 const OFFICIAL_SAMPLE_SURFACE_KEY = "workspace-editor";
 const LOCAL_VITE_RUNTIME_URL = "http://127.0.0.1:5173";
+const EMPTY_TASK_SUMMARIES: TaskSummary[] = [];
+const EMPTY_LOADED_TASK_IDS = new Set<string>();
 
 function isCompactSkillSelection(skill: MandatorySkillSelection): boolean {
   return skill.name === COMPACT_SKILL_NAME;
@@ -724,14 +728,15 @@ function ChatContainer({
   initialWebSearchProviders,
 }: ChatPageProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-
-  // Pagination state
-  const [taskSummaries, setTaskSummaries] = useState<TaskSummary[]>([]);
-  const [loadedTaskIds, setLoadedTaskIds] = useState<Set<string>>(new Set());
-  const loadedTaskIdsRef = useRef<Set<string>>(new Set());
-  const oldestLoadedTaskIdRef = useRef<string | null>(null);
-  const hasMoreOlderRef = useRef(false);
-  const isLoadingOlderRef = useRef(false);
+  const {
+    runtime: chatSessionRuntime,
+    runtimeRef: chatSessionRuntimeRef,
+    dispatch: dispatchChatSessionRuntime,
+  } = useChatSessionRuntime();
+  const taskSummaries =
+    chatSessionRuntime?.taskSummaries ?? EMPTY_TASK_SUMMARIES;
+  const loadedTaskIds =
+    chatSessionRuntime?.loadedTaskIds ?? EMPTY_LOADED_TASK_IDS;
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [pendingMidTaskInput, setPendingMidTaskInput] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1286,8 +1291,19 @@ function ChatContainer({
   );
 
   const isTaskLoaded = useCallback((taskId: string) => {
-    return loadedTaskIdsRef.current.has(taskId);
-  }, []);
+    return chatSessionRuntimeRef.current?.loadedTaskIds.has(taskId) ?? false;
+  }, [chatSessionRuntimeRef]);
+
+  const canLoadOlderTasks = useCallback(() => {
+    const runtime = chatSessionRuntimeRef.current;
+    return Boolean(
+      runtime?.olderStatus === "idle" && runtime.oldestLoadedTaskId,
+    );
+  }, [chatSessionRuntimeRef]);
+
+  const isOlderTaskLoadInFlight = useCallback(() => {
+    return chatSessionRuntimeRef.current?.olderStatus === "loading";
+  }, [chatSessionRuntimeRef]);
 
   const getMessageContentTop = useCallback(
     (container: HTMLElement, element: HTMLElement): number | null => {
@@ -1354,21 +1370,21 @@ function ChatContainer({
    */
   const loadHistoryResponse = useCallback(
     (history: FullSessionHistoryResponse, isInitialLoad: boolean) => {
+      if (history.session_id !== currentSessionIdRef.current) {
+        return [];
+      }
+
       if (isInitialLoad) {
-        setTaskSummaries(history.task_summaries);
+        dispatchChatSessionRuntime({
+          type: "HYDRATE_HISTORY",
+          sessionId: history.session_id,
+          taskSummaries: history.task_summaries,
+          tasks: history.tasks,
+          hasMoreOlder: history.has_more_older,
+          pageSize: CHAT_HISTORY_PAGE_SIZE,
+        });
         prepareForProgrammaticScroll();
       }
-      const taskIds = history.tasks.map((t) => t.task_id);
-      setLoadedTaskIds((prev) => {
-        const next = isInitialLoad ? new Set(taskIds) : new Set(prev);
-        if (!isInitialLoad) taskIds.forEach((id) => next.add(id));
-        loadedTaskIdsRef.current = next;
-        return next;
-      });
-      if (history.tasks.length > 0) {
-        oldestLoadedTaskIdRef.current = history.tasks[0].task_id;
-      }
-      hasMoreOlderRef.current = history.has_more_older;
 
       const nextMessages = buildMessagesFromHistory(history.tasks);
       if (isInitialLoad) {
@@ -1376,7 +1392,11 @@ function ChatContainer({
       }
       return nextMessages;
     },
-    [applyHistoryMessages, prepareForProgrammaticScroll],
+    [
+      applyHistoryMessages,
+      dispatchChatSessionRuntime,
+      prepareForProgrammaticScroll,
+    ],
   );
 
   /**
@@ -1390,15 +1410,19 @@ function ChatContainer({
       options: { preserveScroll?: boolean } = {},
     ) => {
       const sessionId = currentSessionIdRef.current;
-      if (!sessionId || isLoadingOlderRef.current || !hasMoreOlderRef.current) {
+      const runtime = chatSessionRuntimeRef.current;
+      if (
+        !sessionId ||
+        !runtime ||
+        runtime.sessionId !== sessionId ||
+        runtime.olderStatus !== "idle" ||
+        !runtime.oldestLoadedTaskId
+      ) {
         return [];
       }
 
-      const cursor = oldestLoadedTaskIdRef.current;
-      if (!cursor) return [];
-
       const shouldPreserveScroll = options.preserveScroll ?? true;
-      isLoadingOlderRef.current = true;
+      dispatchChatSessionRuntime({ type: "START_LOAD_OLDER", sessionId });
       pauseAutoScroll();
       const visibleAnchor = shouldPreserveScroll
         ? captureFirstVisibleMessageAnchor()
@@ -1407,7 +1431,13 @@ function ChatContainer({
       try {
         const history = await getFullSessionHistory(sessionId, {
           limit,
-          beforeTaskId: cursor,
+          beforeTaskId: runtime.oldestLoadedTaskId,
+        });
+        dispatchChatSessionRuntime({
+          type: "APPLY_OLDER_PAGE",
+          sessionId,
+          tasks: history.tasks,
+          hasMoreOlder: history.has_more_older,
         });
         if (history.tasks.length === 0) {
           return [];
@@ -1427,13 +1457,14 @@ function ChatContainer({
         return loadedTaskIds;
       } catch (err) {
         console.error("Failed to load older tasks:", err);
+        dispatchChatSessionRuntime({ type: "FAIL_LOAD_OLDER", sessionId });
         return [];
-      } finally {
-        isLoadingOlderRef.current = false;
       }
     },
     [
       captureFirstVisibleMessageAnchor,
+      chatSessionRuntimeRef,
+      dispatchChatSessionRuntime,
       loadHistoryResponse,
       pauseAutoScroll,
       restoreVisibleMessageAnchor,
@@ -1444,8 +1475,8 @@ function ChatContainer({
   const { isLoadingOlder, loadUntilTask } = useScrollUpPagination({
     scrollContainerRef,
     messages,
-    hasMoreOlderRef,
-    isLoadingOlderRef,
+    canLoadOlder: canLoadOlderTasks,
+    isOlderLoading: isOlderTaskLoadInFlight,
     loadOlderTasks,
     isTaskLoaded,
   });
@@ -1637,7 +1668,9 @@ function ChatContainer({
           event.task_id.length > 0
         ) {
           historyReloadInFlightRef.current = true;
-          void getFullSessionHistory(currentSessionId, { limit: 10 })
+          void getFullSessionHistory(currentSessionId, {
+            limit: CHAT_HISTORY_PAGE_SIZE,
+          })
             .then((history) => {
               loadHistoryResponse(history, true);
               sessionEventCursorRef.current = Math.max(
@@ -2336,8 +2369,15 @@ function ChatContainer({
           setActiveContextIteration(null);
 
           if (autoSelectedSessionId) {
+            dispatchChatSessionRuntime({
+              type: "INIT_SESSION",
+              sessionId: autoSelectedSessionId,
+              pageSize: CHAT_HISTORY_PAGE_SIZE,
+            });
             try {
-              const history = await getFullSessionHistory(autoSelectedSessionId, { limit: 10 });
+              const history = await getFullSessionHistory(autoSelectedSessionId, {
+                limit: CHAT_HISTORY_PAGE_SIZE,
+              });
               loadHistoryResponse(history, true);
               openSessionStream(
                 autoSelectedSessionId,
@@ -2369,9 +2409,16 @@ function ChatContainer({
             setReplyTaskId(null);
             setActiveContextTaskId(null);
             setActiveContextIteration(null);
+            dispatchChatSessionRuntime({
+              type: "INIT_SESSION",
+              sessionId: fallbackSessionId,
+              pageSize: CHAT_HISTORY_PAGE_SIZE,
+            });
 
             try {
-              const history = await getFullSessionHistory(fallbackSessionId, { limit: 10 });
+              const history = await getFullSessionHistory(fallbackSessionId, {
+                limit: CHAT_HISTORY_PAGE_SIZE,
+              });
               loadHistoryResponse(history, true);
               openSessionStream(
                 fallbackSessionId,
@@ -2390,6 +2437,7 @@ function ChatContainer({
             setReplyTaskId(null);
             setActiveContextTaskId(null);
             setActiveContextIteration(null);
+            dispatchChatSessionRuntime({ type: "RESET_DRAFT" });
             syncLiveRefsFromMessages([]);
             commitMessages([]);
             setIsStreaming(false);
@@ -2414,6 +2462,7 @@ function ChatContainer({
     initialSessions,
     initialProjects,
     isLoadingSession,
+    dispatchChatSessionRuntime,
     loadHistoryResponse,
     refreshSidebarData,
     sessionIdleTimeoutMs,
@@ -2882,6 +2931,7 @@ function ChatContainer({
       setCurrentProjectId(nextProjectId);
       setCurrentSessionId(null);
       currentSessionIdRef.current = null;
+      dispatchChatSessionRuntime({ type: "RESET_DRAFT" });
       commitMessages([]);
       setReplyTaskId(null);
       setSelectedMandatorySkills([]);
@@ -3018,12 +3068,11 @@ function ChatContainer({
     setIsLoadingSession(true);
     setReplyTaskId(null);
     setSelectedMandatorySkills([]);
-    setTaskSummaries([]);
-    setLoadedTaskIds(new Set());
-    loadedTaskIdsRef.current = new Set();
-    oldestLoadedTaskIdRef.current = null;
-    hasMoreOlderRef.current = false;
-    isLoadingOlderRef.current = false;
+    dispatchChatSessionRuntime({
+      type: "INIT_SESSION",
+      sessionId,
+      pageSize: CHAT_HISTORY_PAGE_SIZE,
+    });
     setActiveContextTaskId(null);
     setActiveContextIteration(null);
     setContextUsage(null);
@@ -3033,7 +3082,9 @@ function ChatContainer({
     stopSessionStream();
 
     try {
-      const history = await getFullSessionHistory(sessionId, { limit: 10 });
+      const history = await getFullSessionHistory(sessionId, {
+        limit: CHAT_HISTORY_PAGE_SIZE,
+      });
       loadHistoryResponse(history, true);
       openSessionStream(sessionId, history.resume_from_event_id);
     } catch (historyError) {
@@ -3208,7 +3259,9 @@ function ChatContainer({
         stoppedTaskIdsRef.current.delete(activeTaskId);
         setError("Failed to stop execution");
         if (currentSessionIdRef.current) {
-          void getFullSessionHistory(currentSessionIdRef.current, { limit: 10 })
+          void getFullSessionHistory(currentSessionIdRef.current, {
+            limit: CHAT_HISTORY_PAGE_SIZE,
+          })
             .then((history) => {
               loadHistoryResponse(history, true);
             })
@@ -3278,6 +3331,11 @@ function ChatContainer({
           setCurrentProjectId(session.project_id ?? currentProjectId);
           setCurrentSessionId(activeSessionId);
           currentSessionIdRef.current = activeSessionId;
+          dispatchChatSessionRuntime({
+            type: "INIT_SESSION",
+            sessionId: activeSessionId,
+            pageSize: CHAT_HISTORY_PAGE_SIZE,
+          });
           setSessions((previous) => upsertSessionListItem(previous, sessionItem));
           initialCursor = 0;
           openSessionStream(activeSessionId, initialCursor);
@@ -3458,20 +3516,17 @@ function ChatContainer({
         liveTaskIdRef.current = launchResult.task_id;
         // Register the new task in pagination state for the anchor.
         if (!isClarifyReply) {
-          setTaskSummaries((prev) => [
-            ...prev,
-            {
+          dispatchChatSessionRuntime({
+            type: "REGISTER_NEW_TASK",
+            sessionId: launchResult.session_id ?? activeSessionId,
+            task: {
               task_id: launchResult.task_id,
               preview: pendingMessage.trim().slice(0, 100),
               status: "running",
               created_at: new Date().toISOString(),
             },
-          ]);
-          setLoadedTaskIds((prev) => {
-            const next = new Set(prev);
-            next.add(launchResult.task_id);
-            loadedTaskIdsRef.current = next;
-            return next;
+            isBrandNewSession: shouldResetConversation,
+            pageSize: CHAT_HISTORY_PAGE_SIZE,
           });
         }
         void refreshSidebarData().catch((refreshError) => {
@@ -3523,6 +3578,7 @@ function ChatContainer({
       commitMessages,
       currentSessionId,
       discardReadyPendingFiles,
+      dispatchChatSessionRuntime,
       loadSessionRuntimeDebug,
       manualCompactSkillNames,
       openSessionStream,
@@ -3584,7 +3640,9 @@ function ChatContainer({
         setIsStreaming(false);
         setError("Failed to submit approval decision");
         if (currentSessionIdRef.current) {
-          void getFullSessionHistory(currentSessionIdRef.current, { limit: 10 })
+          void getFullSessionHistory(currentSessionIdRef.current, {
+            limit: CHAT_HISTORY_PAGE_SIZE,
+          })
             .then((history) => {
               loadHistoryResponse(history, true);
             })
