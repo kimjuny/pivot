@@ -6,6 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import { Info } from "lucide-react";
 import { resolveIcon } from "@/lib/icon-resolver";
 import { useNewSessionShortcut } from "@/hooks/use-new-session-shortcut";
@@ -1288,6 +1289,19 @@ function ChatContainer({
     return loadedTaskIdsRef.current.has(taskId);
   }, []);
 
+  const getMessageContentTop = useCallback(
+    (container: HTMLElement, element: HTMLElement): number | null => {
+      const contentElement = container.firstElementChild as HTMLElement | null;
+      if (!contentElement) return null;
+
+      return (
+        element.getBoundingClientRect().top -
+        contentElement.getBoundingClientRect().top
+      );
+    },
+    [],
+  );
+
   const captureFirstVisibleMessageAnchor = useCallback(() => {
     const container = scrollContainerRef.current;
     if (!container) return null;
@@ -1300,38 +1314,37 @@ function ChatContainer({
     for (const element of messageElements) {
       const rect = element.getBoundingClientRect();
       if (rect.bottom > containerRect.top && rect.top < containerRect.bottom) {
+        const contentTop = getMessageContentTop(container, element);
+        if (contentTop === null) return null;
+
         return {
           messageId: element.dataset.messageId ?? "",
-          topOffset: rect.top - containerRect.top,
+          contentTop,
         };
       }
     }
 
     return null;
-  }, [scrollContainerRef]);
+  }, [getMessageContentTop, scrollContainerRef]);
 
   const restoreVisibleMessageAnchor = useCallback(
-    (anchor: { messageId: string; topOffset: number } | null) => {
+    (anchor: { messageId: string; contentTop: number } | null) => {
       if (!anchor || anchor.messageId.length === 0) return;
 
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const container = scrollContainerRef.current;
-          if (!container) return;
+      const container = scrollContainerRef.current;
+      if (!container) return;
 
-          const element = container.querySelector<HTMLElement>(
-            `[data-message-id="${anchor.messageId}"]`,
-          );
-          if (!element) return;
+      const element = container.querySelector<HTMLElement>(
+        `[data-message-id="${anchor.messageId}"]`,
+      );
+      if (!element) return;
 
-          const containerRect = container.getBoundingClientRect();
-          const rect = element.getBoundingClientRect();
-          const nextTopOffset = rect.top - containerRect.top;
-          container.scrollTop += nextTopOffset - anchor.topOffset;
-        });
-      });
+      const nextContentTop = getMessageContentTop(container, element);
+      if (nextContentTop === null) return;
+
+      container.scrollTop += nextContentTop - anchor.contentTop;
     },
-    [scrollContainerRef],
+    [getMessageContentTop, scrollContainerRef],
   );
 
   /**
@@ -1403,11 +1416,13 @@ function ChatContainer({
         const olderMsgs = loadHistoryResponse(history, false);
         const loadedTaskIds = history.tasks.map((task) => task.task_id);
 
-        // Prepend older messages before current ones.
-        updateMessages((prev) => [...olderMsgs, ...prev]);
-
         if (shouldPreserveScroll) {
+          flushSync(() => {
+            updateMessages((prev) => [...olderMsgs, ...prev]);
+          });
           restoreVisibleMessageAnchor(visibleAnchor);
+        } else {
+          updateMessages((prev) => [...olderMsgs, ...prev]);
         }
         return loadedTaskIds;
       } catch (err) {
@@ -4117,7 +4132,10 @@ function ChatContainer({
         viewportRef={scrollContainerRef}
         className="flex-1"
       >
-        <div className="mx-auto max-w-3xl px-4 pb-2 pt-4">
+        <div
+          className="mx-auto max-w-3xl px-4 pb-2 pt-4"
+          style={{ overflowAnchor: "none" }}
+        >
           {selectedProject && currentSessionId === null && messages.length === 0 ? (
             <div className="rounded-3xl border border-border/70 bg-card/70 p-6 shadow-sm">
               <div className="space-y-2">

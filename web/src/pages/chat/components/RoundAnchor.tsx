@@ -282,7 +282,13 @@ export function RoundAnchor({
                         {round.preview}
                       </span>
                     ) : (
-                      <Skeleton className="h-3 w-full" />
+                      <span
+                        className="flex min-w-0 flex-1 flex-col gap-1"
+                        aria-hidden="true"
+                      >
+                        <Skeleton className="h-2 w-11/12" />
+                        <Skeleton className="h-2 w-2/3" />
+                      </span>
                     )}
                   </button>
                 );
