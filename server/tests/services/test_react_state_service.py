@@ -69,7 +69,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
         self.session.close()
 
     def test_finalize_success_replan_persists_plan_and_snapshot(self) -> None:
-        """RE_PLAN should replace plan rows and write a snapshot."""
+        """PLAN should replace plan rows and write a snapshot."""
         context = self.service.load_context(self.task)
         context.update_for_new_recursion("trace-1")
         recursion = self.service.start_recursion(
@@ -82,7 +82,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             task=self.task,
             recursion=recursion,
             thinking="provider thinking",
-            action_type="RE_PLAN",
+            action_type="PLAN",
             action_output={
                 "plan": [
                     {
@@ -111,7 +111,7 @@ class ReactStateServiceTestCase(unittest.TestCase):
             task=self.task,
             recursion=recursion,
             context=context,
-            action_type="RE_PLAN",
+            action_type="PLAN",
             action_output={
                 "plan": [
                     {

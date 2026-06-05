@@ -82,7 +82,7 @@ export function deriveTaskPlanSnapshot(
 }
 
 /**
- * Narrows unknown event payloads to the minimal RE_PLAN output shape the UI can consume.
+ * Narrows unknown event payloads to the minimal PLAN output shape the UI can consume.
  */
 function asPlanEventPayload(value: unknown): PlanEventPayload | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

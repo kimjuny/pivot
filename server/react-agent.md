@@ -94,8 +94,8 @@ state RECURSION {
       }]
     end note
 
-    ACTION_TYPE --> RE_PLAN(LLM): if action_type == PLAN
-    note left of RE_PLAN(LLM)
+    ACTION_TYPE --> PLAN(LLM): if action_type == PLAN
+    note left of PLAN(LLM)
       duty: 
       (plan)基于observe和thought,对任务进行一次plan. plan最终会在下一轮的recursion中的INPUT环节,被植入到context的plan章节中,用于指导后续整个任务流程的执行
       (replan)当然,如果有error_log,给出修复过的plan.下一轮recursion的llm应当能看懂上下文和断点,继续执行.
@@ -122,7 +122,7 @@ state RECURSION {
     end note
 
     CALL_TOOL --> [*]
-    RE_PLAN(LLM) --> [*]
+    PLAN(LLM) --> [*]
     REFLECT(LLM) --> [*]
     ANSWER(LLM) --> [*]
   }

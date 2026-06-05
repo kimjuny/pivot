@@ -286,6 +286,63 @@ class ReactEngineToolBatchTestCase(unittest.TestCase):
         self.assertTrue(all(item["success"] for item in results))
         self.assertEqual(tool_manager.max_active_total, 1)
 
+    def test_next_action_result_strips_diff_without_mutating_raw_tool_result(
+        self,
+    ) -> None:
+        """Frontend raw results keep diff while LLM context gets compact output."""
+        raw_diff = "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n"
+        event_data = {
+            "action_type": "CALL_TOOL",
+            "tool_results": [
+                {
+                    "tool_call_id": "call-edit",
+                    "name": "edit_file",
+                    "arguments": {
+                        "path": "/workspace/app.py",
+                        "old_string": "old",
+                        "new_string": "new",
+                    },
+                    "result": {
+                        "path": "app.py",
+                        "replacement_count": 1,
+                        "added_lines": 1,
+                        "removed_lines": 1,
+                        "total_lines": 1,
+                        "content_hash": "hash-after-edit",
+                        "diff": raw_diff,
+                    },
+                    "success": True,
+                }
+            ],
+        }
+        engine = ReactEngine(
+            llm=_LlmStub("{}"),
+            tool_manager=_WriteLockToolManager(),
+            db=self.session,
+            stream_llm_responses=False,
+        )
+
+        compact_action_result = engine._build_next_pending_action_result(event_data)
+
+        raw_result = event_data["tool_results"][0]["result"]
+        self.assertEqual(raw_result["diff"], raw_diff)
+        self.assertEqual(raw_result["content_hash"], "hash-after-edit")
+        self.assertEqual(
+            compact_action_result,
+            [
+                {
+                    "id": "call-edit",
+                    "result": {
+                        "path": "app.py",
+                        "replacement_count": 1,
+                        "added_lines": 1,
+                        "removed_lines": 1,
+                        "total_lines": 1,
+                    },
+                }
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

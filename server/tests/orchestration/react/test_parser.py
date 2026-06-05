@@ -400,7 +400,7 @@ Everything is ready.
         content = """
 {
   "action": {
-    "action_type": "RE_PLAN",
+    "action_type": "PLAN",
     "output": {
       "step_status_update": [{"step_id": "2", "status": "running"}],
       "plan": []
@@ -450,7 +450,7 @@ Everything is ready.
         content = """
 {
   "action": {
-    "action_type": "RE_PLAN",
+    "action_type": "PLAN",
     "step_status_update": {"step_id": "1", "status": "done"},
     "output": {
       "plan": []

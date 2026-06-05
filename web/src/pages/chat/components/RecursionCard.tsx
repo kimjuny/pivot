@@ -129,6 +129,25 @@ function formatToolValue(value: unknown): string {
   }
 }
 
+function getDisplayToolResultPayload(
+  toolName: string,
+  payload: unknown,
+): unknown {
+  if (
+    (toolName !== "edit_file" && toolName !== "write_file") ||
+    payload === null ||
+    typeof payload !== "object" ||
+    Array.isArray(payload)
+  ) {
+    return payload;
+  }
+
+  const sanitized = { ...(payload as Record<string, unknown>) };
+  delete sanitized.diff;
+  delete sanitized.content_hash;
+  return sanitized;
+}
+
 function getToolResultLabel(result: ToolResultSnapshot | undefined): string | null {
   if (!result) {
     return null;
@@ -766,9 +785,15 @@ function ToolExecutionItem({
       : result?.error
         ? { error: result.error }
         : null;
+  const displayResultPayload = getDisplayToolResultPayload(
+    call.name,
+    resultPayload,
+  );
   const argumentText = formatToolValue(call.arguments);
   const resultText =
-    resultPayload === null ? "Waiting for tool result..." : formatToolValue(resultPayload);
+    displayResultPayload === null
+      ? "Waiting for tool result..."
+      : formatToolValue(displayResultPayload);
   const args = getToolArgumentRecord(call.arguments);
   const resultRecord = getRecord(result?.result);
   const writeContent =

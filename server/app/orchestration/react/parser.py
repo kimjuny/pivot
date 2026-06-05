@@ -6,7 +6,7 @@ from typing import Any
 
 from .types import ParsedAction, ParsedReactDecision, StepStatusUpdate, ToolCallRequest
 
-ALLOWED_ACTION_TYPES = {"CALL_TOOL", "RE_PLAN", "REFLECT", "CLARIFY", "ANSWER"}
+ALLOWED_ACTION_TYPES = {"CALL_TOOL", "PLAN", "REFLECT", "CLARIFY", "ANSWER"}
 PARSE_RETRY_LIMIT = 1
 PARSE_RETRY_INSTRUCTION = (
     "Your previous response could not be parsed.\n"

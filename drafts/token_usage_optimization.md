@@ -139,7 +139,7 @@
   "message": "note to the user about current progress",
   "thinking_next_turn": false,
   "action": {
-    "action_type": "CALL_TOOL | RE_PLAN | REFLECT | CLARIFY | ANSWER",
+    "action_type": "CALL_TOOL | PLAN | REFLECT | CLARIFY | ANSWER",
     "output": {},
     "step_id": "current step being executed",
     "step_status_update": []

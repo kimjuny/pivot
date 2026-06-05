@@ -3255,7 +3255,7 @@ class ReactEngine:
                         self.state_service.advance_iteration(task)
                         break
 
-                elif action_type == "RE_PLAN":
+                elif action_type == "PLAN":
                     plan_output = event_data.get("output")
                     yield {
                         "type": "plan_update",

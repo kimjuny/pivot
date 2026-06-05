@@ -17,13 +17,13 @@ Output a bare JSON object (no markdown fences, no comments, no trailing commas).
 {
   "iteration": 3,
   "message": "A note to the user about what you are doing, what you found, or what happens next. Every recursion must include this",
-  "thinking_next_turn": false,       // Set `true` only when the next recursion involves RE_PLAN, a high-cost/irreversible action, or resolving a critical ambiguity. Default `false`.
+  "thinking_next_turn": false,       // Set `true` only when the next recursion involves PLAN, a high-cost/irreversible action, or resolving a critical ambiguity. Default `false`.
   "action": {
-    "action_type": "CALL_TOOL | RE_PLAN | REFLECT | CLARIFY | ANSWER",
+    "action_type": "CALL_TOOL | PLAN | REFLECT | CLARIFY | ANSWER",
     "output": {},
-    "step_id": "current step being executed",
+    "step_id": "a step_id from your PLAN (null if no plan exists)",
     "step_status_update": [
-      {"step_id": "...", "status": "done | running | pending | error"}
+      {"step_id": "must match a PLAN step_id", "status": "done | running | pending | error"}
     ]
   }
 }
@@ -70,9 +70,9 @@ Example (output starts at `{` and ends at the last END marker):
 Multi-line payload body here.
 <<<PIVOT_PAYLOAD:content_payload:END_6F2D9C1A>>>
 
-### RE_PLAN
+### PLAN
 
-Replan when there is no plan or the current plan is unachievable due to new information. **Do not replan without sufficient facts.** Replanning is expensive.
+Create a plan when there is none, or replace the current plan when it is unachievable due to new information. **Do not plan without sufficient facts.** Planning is expensive.
 
 `action.output` shape:
 
@@ -109,7 +109,7 @@ Use when critical information is missing and cannot be obtained via tools. Prefe
 
 ### ANSWER
 
-Use when information is sufficient or the task is complete. **ANSWER immediately when able; do not waste recursions.** The answer body must be payload-referenced: `action.output.answer` must be `{"$payload_ref":"answer_payload"}`. The payload body is the final markdown answer (no fences). `attachments` lists file paths in `/workspace` that the user can browse or download. `session_title` optionally overrides the auto-generated session title.
+Use when information is sufficient or the task is complete. **ANSWER immediately when able; do not waste recursions.** The answer body must be payload-referenced: `action.output.answer` must be `{"$payload_ref":"answer_payload"}`. The payload body is the final markdown answer (no fences). 
 
 Example:
 
@@ -121,7 +121,7 @@ Example:
     "action_type": "ANSWER",
     "output": {
       "answer": {"$payload_ref": "answer_payload"},
-      "attachments": [],
+      "attachments": ["lists ABSOLUTE FILE PATHS in `/workspace` that the user can browse or download."],
       "session_title": "optional: override the auto-generated session title"
     }
   }

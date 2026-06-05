@@ -198,7 +198,7 @@ export interface ReactStreamEvent {
 }
 
 /**
- * Plan step payload emitted by RE_PLAN output.
+ * Plan step payload emitted by PLAN output.
  */
 export interface PlanStepData {
   step_id: string;

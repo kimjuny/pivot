@@ -441,8 +441,7 @@ export function buildMessagesFromHistory(tasks: TaskMessage[]): ChatMessage[] {
       }
 
       if (
-        (recursion.action_type === "RE_PLAN" ||
-          recursion.action_type === "PLAN") &&
+        recursion.action_type === "PLAN" &&
         recursion.action_output
       ) {
         const planData = parseJson(recursion.action_output);

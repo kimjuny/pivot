@@ -489,7 +489,7 @@ class ReactStateService:
             message: User-facing progress note.
         """
 
-        if action_type == "RE_PLAN":
+        if action_type == "PLAN":
             self._replace_plan(task, context, action_output.get("plan", []))
 
         self._apply_step_status_updates(

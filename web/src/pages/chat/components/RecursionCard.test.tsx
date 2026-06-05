@@ -465,6 +465,67 @@ describe("RecursionCard", () => {
     expect(screen.queryByText(/^1$/)).not.toBeInTheDocument();
   });
 
+  it("keeps edit_file diff in the preview but hides it from the displayed result", async () => {
+    const user = userEvent.setup();
+    const diff =
+      "@@ -1,2 +1,2 @@\n-old value\n+new value\n context line";
+
+    render(
+      <RecursionCard
+        messageId="message-edit-result-diff"
+        recursion={buildRecursion({
+          message: "Editing a file",
+          events: [
+            {
+              type: "tool_call",
+              task_id: "task-edit-result-diff",
+              trace_id: "trace-edit-result-diff",
+              iteration: 0,
+              timestamp: "2026-03-24T00:00:02.000Z",
+              data: {
+                tool_calls: [
+                  {
+                    id: "call-edit-result-diff",
+                    name: "edit_file",
+                    arguments: {
+                      path: "server/app/demo.py",
+                      old_string: "old value",
+                      new_string: "new value",
+                    },
+                  },
+                ],
+                tool_results: [
+                  {
+                    tool_call_id: "call-edit-result-diff",
+                    name: "edit_file",
+                    success: true,
+                    result: {
+                      message: "Updated server/app/demo.py",
+                      diff,
+                      content_hash: "abc123",
+                      added_lines: 1,
+                      removed_lines: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        })}
+        isExpanded={false}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Ran edit_file/i }));
+
+    expect(screen.getByText(/-old value/)).toBeInTheDocument();
+    expect(screen.getByText(/\+new value/)).toBeInTheDocument();
+    expect(screen.queryByText(/"diff":/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"content_hash":/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Updated server\/app\/demo.py/)).toBeInTheDocument();
+  });
+
   it("renders tool executions as one-line records with terminal details", async () => {
     const user = userEvent.setup();
 

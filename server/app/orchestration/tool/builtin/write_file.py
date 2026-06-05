@@ -11,7 +11,11 @@ from app.orchestration.tool import (
     tool,
 )
 
-from ._sandbox_common import exec_in_sandbox, workspace_path
+from ._sandbox_common import (
+    exec_in_sandbox,
+    verify_backend_visible_text_file,
+    workspace_path,
+)
 
 _WRITE_FILE_SCRIPT = r"""
 from __future__ import annotations
@@ -192,9 +196,17 @@ def write_file(
     if not isinstance(payload, dict):
         raise RuntimeError("Sandbox write_file returned an invalid payload.")
 
+    result_path = str(payload.get("path", relative_path))
+    result_hash = str(payload.get("content_hash", ""))
+    result_total_lines = int(payload.get("total_lines", 0))
+    verify_backend_visible_text_file(
+        result_path,
+        expected_hash=result_hash,
+        expected_total_lines=result_total_lines,
+    )
     _record_full_file_state(
-        str(payload.get("path", relative_path)),
-        str(payload.get("content_hash", "")),
-        int(payload.get("total_lines", 0)),
+        result_path,
+        result_hash,
+        result_total_lines,
     )
     return payload
