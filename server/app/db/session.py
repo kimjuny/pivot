@@ -445,6 +445,12 @@ def ensure_react_schema_compatibility() -> None:
                         "WHERE delegation_depth IS NULL"
                     )
                 )
+            if "sandbox_checkpoint_hash" not in task_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE reacttask ADD COLUMN sandbox_checkpoint_hash VARCHAR"
+                    )
+                )
             conn.execute(
                 text(
                     "UPDATE reacttask "

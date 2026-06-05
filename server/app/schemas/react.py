@@ -436,6 +436,24 @@ class ReactMidTaskInputRequest(AppBaseModel):
     )
 
 
+class TaskEditRequest(AppBaseModel):
+    """Request schema for editing a completed task and rewinding conversation."""
+
+    new_message: str = Field(
+        ...,
+        min_length=1,
+        description="Edited user message to replace the original",
+    )
+    rewind_scope: Literal["conversation", "full"] = Field(
+        default="conversation",
+        description=(
+            '"conversation" rewinds only chat history. '
+            '"full" also reverts sandbox file changes to the checkpoint '
+            "taken before the original task started."
+        ),
+    )
+
+
 class ReactMidTaskInputResponse(AppBaseModel):
     """Response schema acknowledging a mid-task user input was enqueued."""
 

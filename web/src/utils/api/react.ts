@@ -257,3 +257,17 @@ export const compactReactSession = async (
     body: JSON.stringify({ instruction }),
   }) as Promise<ReactSessionCompactResponse>;
 };
+
+export const editReactTask = async (
+  taskId: string,
+  newMessage: string,
+  rewindScope: "conversation" | "full" = "conversation",
+): Promise<ReactTaskStartResponse> => {
+  return apiRequest(`/react/tasks/${taskId}/edit`, {
+    method: "POST",
+    body: JSON.stringify({
+      new_message: newMessage,
+      rewind_scope: rewindScope,
+    }),
+  }) as Promise<ReactTaskStartResponse>;
+};

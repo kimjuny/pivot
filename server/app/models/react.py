@@ -99,6 +99,11 @@ class ReactTask(SQLModel, table=True):
     total_cached_input_tokens: int = Field(
         default=0, description="Total cached input tokens consumed by this task"
     )
+    sandbox_checkpoint_hash: str | None = Field(
+        default=None,
+        index=True,
+        description="Git commit hash of sandbox state before this task started",
+    )
     cancel_requested_at: datetime | None = Field(
         default=None,
         description="UTC timestamp when a user explicitly requested cancellation",

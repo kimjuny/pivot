@@ -454,6 +454,7 @@ export default function SessionDetailPage() {
                       isStreaming={false}
                       onToggleRecursion={toggleRecursion}
                       onReplyTask={() => {}}
+                      onEditSubmit={() => {}}
                       onApproveSkillChange={() => {}}
                       onRejectSkillChange={() => {}}
                     />

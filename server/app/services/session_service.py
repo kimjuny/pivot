@@ -626,6 +626,78 @@ class SessionService:
         except RuntimeError:
             return
 
+    def rewind_tasks_from(self, session_id: str, from_task_id: str) -> None:
+        """Delete tasks from the specified task onward and truncate runtime messages.
+
+        Used by the task-edit flow to rewind the session to a prior user turn.
+        Removes the target task and all subsequent tasks, truncates the session
+        runtime window, and clears stale session-level caches.
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session {session_id} not found")
+
+        from_task = self.db.exec(
+            select(ReactTask).where(ReactTask.task_id == from_task_id)
+        ).first()
+        if from_task is None:
+            raise ValueError(f"Task {from_task_id} not found")
+
+        tasks_to_delete = list(
+            self.db.exec(
+                select(ReactTask).where(
+                    ReactTask.session_id == session_id,
+                    col(ReactTask.created_at) >= from_task.created_at,
+                )
+            ).all()
+        )
+        task_ids = [t.task_id for t in tasks_to_delete]
+
+        # Truncate runtime messages at the edit point
+        start_index = max(0, from_task.runtime_message_start_index)
+        messages = json.loads(session.react_llm_messages)
+        session.react_llm_messages = json.dumps(
+            messages[:start_index], ensure_ascii=False
+        )
+
+        if session.react_compact_result is not None and start_index < 2:
+            session.react_compact_result = None
+
+        session.react_file_read_tracker = None
+        session.react_pending_action_result = None
+        session.react_llm_cache_state = "{}"
+        session.runtime_status = "idle"
+        self.db.add(session)
+
+        if task_ids:
+            for row in self.db.exec(
+                select(ReactRecursionState).where(
+                    col(ReactRecursionState.task_id).in_(task_ids)
+                )
+            ).all():
+                self.db.delete(row)
+
+            for row in self.db.exec(
+                select(ReactTaskEvent).where(
+                    col(ReactTaskEvent.task_id).in_(task_ids)
+                )
+            ).all():
+                self.db.delete(row)
+
+            from app.models.task_attachment import TaskAttachment
+
+            for row in self.db.exec(
+                select(TaskAttachment).where(
+                    col(TaskAttachment.task_id).in_(task_ids)
+                )
+            ).all():
+                self.db.delete(row)
+
+        for task_row in tasks_to_delete:
+            self.db.delete(task_row)
+
+        self.db.commit()
+
     def _delete_task_rows_for_session(self, session_id: str) -> None:
         """Delete all persisted task rows that belong to one session."""
         task_rows = list(

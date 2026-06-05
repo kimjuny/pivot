@@ -16,11 +16,14 @@ from ._sandbox_common import (
 _EDIT_FILE_SCRIPT = r"""
 from __future__ import annotations
 
+import contextlib
 import difflib
 import hashlib
 import json
+import os
 import pathlib
 import sys
+import tempfile
 
 path = pathlib.Path(sys.argv[1])
 old_string = sys.argv[2]
@@ -78,6 +81,35 @@ def count_diff_lines(diff_text: str) -> tuple[int, int]:
     return additions, deletions
 
 
+def write_text_durably(target_path: pathlib.Path, text: str) -> None:
+    def fsync_best_effort(fd: int) -> None:
+        with contextlib.suppress(OSError):
+            os.fsync(fd)
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".tmp",
+        dir=str(target_path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as target_file:
+            target_file.write(text)
+            target_file.flush()
+            fsync_best_effort(target_file.fileno())
+        os.replace(temp_name, target_path)
+        dir_fd = os.open(target_path.parent, os.O_RDONLY)
+        try:
+            fsync_best_effort(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temp_name)
+        raise
+
+
 if old_string == new_string:
     fail("No changes to make: old_string and new_string are exactly the same.")
 if path.exists() and path.is_dir():
@@ -123,7 +155,6 @@ if file_exists:
 else:
     if old_string != "":
         fail(f"Cannot edit file because it does not exist: {relative_path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
     original_text = ""
     updated_text = new_string
     replacement_count = 1
@@ -131,8 +162,7 @@ else:
 if updated_text == original_text:
     fail("Original and edited file match exactly. No changes were written.")
 
-with path.open("w", encoding="utf-8", newline="") as target_file:
-    target_file.write(updated_text)
+write_text_durably(path, updated_text)
 
 diff = build_diff(relative_path, original_text, updated_text)
 added_lines, removed_lines = count_diff_lines(diff)

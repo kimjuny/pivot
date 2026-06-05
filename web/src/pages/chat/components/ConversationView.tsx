@@ -5,6 +5,7 @@ import type { ChatMessage, SkillChangeApprovalRequest } from "../types";
 import { getChatMessageRenderKey } from "../utils/chatData";
 import { AssistantMessageBlock } from "./AssistantMessageBlock";
 import { UserMessageBubble } from "./UserMessageBubble";
+import type { RewindScope } from "./UserMessageBubble";
 
 interface ConversationViewProps {
   messages: ChatMessage[];
@@ -13,6 +14,11 @@ interface ConversationViewProps {
   isStreaming: boolean;
   onToggleRecursion: (messageId: string, recursionUid: string) => void;
   onReplyTask: (taskId: string | null) => void;
+  onEditSubmit: (
+    taskId: string,
+    newMessage: string,
+    rewindScope: RewindScope,
+  ) => void | Promise<void>;
   onApproveSkillChange: (
     taskId: string,
     request: SkillChangeApprovalRequest,
@@ -33,6 +39,7 @@ export const ConversationView = memo(function ConversationView({
   isStreaming,
   onToggleRecursion,
   onReplyTask,
+  onEditSubmit,
   onApproveSkillChange,
   onRejectSkillChange,
 }: ConversationViewProps) {
@@ -67,7 +74,7 @@ export const ConversationView = memo(function ConversationView({
           className="mb-6 space-y-2 last:mb-0"
         >
           {item.role === "user" ? (
-            <UserMessageBubble message={item} />
+            <UserMessageBubble message={item} isStreaming={isStreaming} onEditSubmit={onEditSubmit} />
           ) : (
             <AssistantMessageBlock
               message={item}

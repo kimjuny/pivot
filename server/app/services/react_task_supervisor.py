@@ -39,6 +39,7 @@ from app.services.extension_hook_service import ExtensionHookService
 from app.services.extension_service import ExtensionService
 from app.services.file_service import FileService
 from app.services.react_runtime_service import ReactRuntimeService
+from app.services.sandbox_service import get_sandbox_service
 from app.services.session_service import SessionService
 from app.services.skill_change_service import apply_skill_change_submission
 from app.services.skill_service import (
@@ -762,6 +763,25 @@ class ReactTaskSupervisor:
                     event_name="task.before_start",
                     event_payload={"message": launch.message},
                 )
+
+                # Checkpoint sandbox state before task execution begins.
+                # This allows full rewind (including file changes) in Phase 2.
+                try:
+                    checkpoint_hash = get_sandbox_service().checkpoint(
+                        user_id=launch.user_id,
+                        workspace_id=workspace.workspace_id,
+                        workspace_backend_path=workspace_backend_path,
+                        skills=allowed_skill_mounts,
+                    )
+                    running_task.sandbox_checkpoint_hash = checkpoint_hash
+                    db.add(running_task)
+                    db.commit()
+                except Exception:
+                    logger.warning(
+                        "sandbox.checkpoint failed for task=%s, proceeding without checkpoint",
+                        task_id,
+                        exc_info=True,
+                    )
 
                 async with self._lock:
                     self._active_engines[task_id] = engine

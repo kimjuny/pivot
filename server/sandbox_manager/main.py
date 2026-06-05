@@ -1118,6 +1118,26 @@ class SandboxExecResponse(BaseModel):
     container_name: str
 
 
+class SandboxCheckpointResponse(BaseModel):
+    """Response payload for sandbox checkpoint."""
+
+    commit_hash: str
+    container_name: str
+
+
+class SandboxRestoreRequest(SandboxRequest):
+    """Request payload for sandbox restore."""
+
+    commit_hash: str = Field(min_length=1)
+
+
+class SandboxRestoreResponse(BaseModel):
+    """Response payload for sandbox restore."""
+
+    files_restored: int
+    container_name: str
+
+
 class SandboxHttpProxyRequest(SandboxRequest):
     """Request payload for proxying one HTTP request into a sandbox."""
 
@@ -1440,6 +1460,161 @@ def destroy_sandbox(payload: SandboxRequest) -> dict[str, str]:
         int((time.perf_counter() - started) * 1000),
     )
     return {"status": "destroyed", "container_name": name}
+
+
+def _run_git_in_sandbox(
+    container: Any,
+    git_args: list[str],
+) -> tuple[int, str, str]:
+    """Run a git command in the sandbox using the hidden pivot git-dir."""
+    cmd = ["git", "--git-dir=/workspace/.pivot/git", "--work-tree=/workspace", *git_args]
+    result = container.exec_run(
+        cmd,
+        workdir="/workspace",
+        demux=True,
+        tty=False,
+        stream=False,
+        socket=False,
+    )
+    if isinstance(result, tuple) and len(result) == 2:
+        exit_code = int(result[0])
+        output = result[1]
+    else:
+        exit_code = int(getattr(result, "exit_code", -1))
+        output = getattr(result, "output", (b"", b""))
+
+    if isinstance(output, tuple) and len(output) == 2:
+        stdout = _decode_bytes(output[0])
+        stderr = _decode_bytes(output[1])
+    else:
+        stdout = _decode_bytes(output)
+        stderr = ""
+
+    return exit_code, stdout, stderr
+
+
+@app.post("/sandboxes/checkpoint", dependencies=[Depends(_require_token)])
+def checkpoint_sandbox(payload: SandboxRequest) -> SandboxCheckpointResponse:
+    """Create a git checkpoint of the sandbox workspace.
+
+    Initializes the hidden git repo on first call. Returns the commit hash
+    that can be used later with /sandboxes/restore to revert file changes.
+    """
+    name = _sandbox_name(payload.user_id, payload.workspace_id)
+    container = _ensure_sandbox(
+        payload.user_id,
+        payload.workspace_id,
+        payload.workspace_backend_path,
+        payload.skills,
+    )
+    _touch_container(name)
+
+    # Initialize hidden git repo if needed
+    exit_code, stdout, stderr = _run_git_in_sandbox(container, ["status", "--porcelain"])
+    if exit_code != 0 and "not a git repository" in (stdout + stderr).lower():
+        # Create git-dir parent and workspace-level gitignore before init
+        container.exec_run(
+            ["sh", "-c",
+             "mkdir -p /workspace/.pivot/git && "
+             "printf 'node_modules/\\n__pycache__/\\n.git/\\n*.pyc\\n.pivot/\\n' "
+             "> /workspace/.gitignore"],
+            workdir="/workspace",
+            demux=True,
+            tty=False,
+            stream=False,
+            socket=False,
+        )
+        init_code, _, init_err = _run_git_in_sandbox(container, ["init"])
+        if init_code != 0:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to init checkpoint repo: {init_err}",
+            )
+        _run_git_in_sandbox(container, ["config", "user.email", "pivot@checkpoint"])
+        _run_git_in_sandbox(container, ["config", "user.name", "Pivot Checkpoint"])
+        _run_git_in_sandbox(container, ["add", "-A"])
+        _run_git_in_sandbox(container, ["commit", "-m", "initial", "--allow-empty"])
+
+    # Ensure git identity is configured (idempotent)
+    _run_git_in_sandbox(container, ["config", "user.email", "pivot@checkpoint"])
+    _run_git_in_sandbox(container, ["config", "user.name", "Pivot Checkpoint"])
+
+    # Stage all changes and commit
+    _run_git_in_sandbox(container, ["add", "-A"])
+    exit_code, stdout, stderr = _run_git_in_sandbox(
+        container, ["commit", "-m", "checkpoint", "--allow-empty"]
+    )
+    if exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Checkpoint commit failed: {stderr or stdout}",
+        )
+
+    # Get the commit hash
+    exit_code, stdout, stderr = _run_git_in_sandbox(
+        container, ["rev-parse", "HEAD"]
+    )
+    if exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get commit hash: {stderr}",
+        )
+    commit_hash = stdout.strip()
+
+    logger.info(
+        "sandbox.checkpoint name=%s user_id=%s commit=%s",
+        name,
+        payload.user_id,
+        commit_hash[:12],
+    )
+    return SandboxCheckpointResponse(
+        commit_hash=commit_hash,
+        container_name=name,
+    )
+
+
+@app.post("/sandboxes/restore", dependencies=[Depends(_require_token)])
+def restore_sandbox(payload: SandboxRestoreRequest) -> SandboxRestoreResponse:
+    """Restore sandbox workspace to a previously checkpointed state."""
+    name = _sandbox_name(payload.user_id, payload.workspace_id)
+    container = _ensure_sandbox(
+        payload.user_id,
+        payload.workspace_id,
+        payload.workspace_backend_path,
+        payload.skills,
+    )
+    _touch_container(name)
+
+    # Get current file count for reporting
+    exit_code, stdout, _ = _run_git_in_sandbox(
+        container, ["diff", "--name-only", payload.commit_hash, "HEAD"]
+    )
+    changed_files = [f for f in stdout.strip().split("\n") if f] if exit_code == 0 else []
+
+    # Hard reset to target commit
+    exit_code, stdout, stderr = _run_git_in_sandbox(
+        container, ["reset", "--hard", payload.commit_hash]
+    )
+    if exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Restore reset failed: {stderr or stdout}",
+        )
+
+    # Clean untracked files
+    _run_git_in_sandbox(container, ["clean", "-fd"])
+
+    logger.info(
+        "sandbox.restore name=%s user_id=%s commit=%s files=%d",
+        name,
+        payload.user_id,
+        payload.commit_hash[:12],
+        len(changed_files),
+    )
+    return SandboxRestoreResponse(
+        files_restored=len(changed_files),
+        container_name=name,
+    )
 
 
 @app.post("/sandboxes/exec", dependencies=[Depends(_require_token)])

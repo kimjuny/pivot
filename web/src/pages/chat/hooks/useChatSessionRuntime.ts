@@ -42,6 +42,12 @@ type ChatSessionRuntimeAction =
       task: TaskSummary;
       isBrandNewSession: boolean;
       pageSize: number;
+    }
+  | {
+      type: "REPLACE_TASK_FROM";
+      sessionId: string;
+      fromTaskId: string;
+      replacementTask: TaskSummary;
     };
 
 function olderStatusForPage(
@@ -176,6 +182,35 @@ function chatSessionRuntimeReducer(
       return {
         ...runtime,
         taskSummaries: upsertTaskSummary(runtime.taskSummaries, action.task),
+        loadedTaskIds,
+      };
+    }
+
+    case "REPLACE_TASK_FROM": {
+      if (!runtime || runtime.sessionId !== action.sessionId) {
+        return runtime;
+      }
+      const fromIndex = runtime.taskSummaries.findIndex(
+        (s) => s.task_id === action.fromTaskId,
+      );
+      if (fromIndex === -1) {
+        return {
+          ...runtime,
+          taskSummaries: upsertTaskSummary(
+            runtime.taskSummaries,
+            action.replacementTask,
+          ),
+        };
+      }
+      const truncated = runtime.taskSummaries.slice(0, fromIndex);
+      const loadedTaskIds = new Set(runtime.loadedTaskIds);
+      for (let i = fromIndex; i < runtime.taskSummaries.length; i++) {
+        loadedTaskIds.delete(runtime.taskSummaries[i].task_id);
+      }
+      loadedTaskIds.add(action.replacementTask.task_id);
+      return {
+        ...runtime,
+        taskSummaries: [...truncated, action.replacementTask],
         loadedTaskIds,
       };
     }

@@ -21,6 +21,7 @@ import {
   createSession,
   deleteProject,
   deleteSession,
+  editReactTask,
   getAgentWebSearchBindings,
   getAgentChatSurfaces,
   type ChatSurfaceDescriptorResponse,
@@ -87,6 +88,7 @@ import {
 import { ChatComposer } from "./components/ChatComposer";
 import { CompactStatusPill } from "./components/CompactStatusPill";
 import { ConversationView } from "./components/ConversationView";
+import type { RewindScope } from "./components/UserMessageBubble";
 import { RoundAnchor } from "./components/RoundAnchor";
 import { ExtensionDock } from "./components/ExtensionDock";
 import type { InstalledChatSurfaceDescriptor } from "./components/ExtensionDock";
@@ -3736,6 +3738,141 @@ function ChatContainer({
   );
 
   /**
+   * Rewinds conversation to the given task, replaces the user message, and
+   * starts a fresh task from that point.
+   */
+  const handleEditSubmit = useCallback(
+    async (taskId: string, newMessage: string, rewindScope: RewindScope) => {
+      if (isStreaming) return;
+
+      setIsStreaming(true);
+      setError(null);
+      clearCompactStatusImmediately();
+
+      try {
+        const launchResult = await editReactTask(
+          taskId,
+          newMessage,
+          rewindScope,
+        );
+
+        // Truncate local messages: find the user message for this task and
+        // keep everything before it.
+        const editIndex = messagesRef.current.findIndex(
+          (m) => m.role === "user" && m.task_id === taskId,
+        );
+        if (editIndex === -1) {
+          // Fallback: just append (should not happen)
+          commitMessages([]);
+        } else {
+          commitMessages(messagesRef.current.slice(0, editIndex));
+        }
+
+        // Create optimistic user + assistant messages for the new task.
+        const userTimestamp = new Date().toISOString();
+        const tempUserId = `user-${Date.now()}`;
+        const tempAssistantId = `assistant-${Date.now()}`;
+        const userMessage: ChatMessage = {
+          id: tempUserId,
+          role: "user",
+          content: newMessage,
+          timestamp: userTimestamp,
+          task_id: launchResult.task_id,
+        };
+        const assistantMessage: ChatMessage = {
+          id: tempAssistantId,
+          role: "assistant",
+          content: "",
+          timestamp: new Date(Date.now() + 1).toISOString(),
+          recursions: [],
+          status: "running",
+          task_id: launchResult.task_id,
+        };
+        commitMessages([
+          ...messagesRef.current,
+          userMessage,
+          assistantMessage,
+        ]);
+
+        // Wire up the SSE stream.
+        const canonicalUserId = getCanonicalChatMessageId(
+          "user",
+          launchResult.task_id,
+        );
+        const canonicalAssistantId = getCanonicalChatMessageId(
+          "assistant",
+          launchResult.task_id,
+        );
+
+        if (sessionStreamAbortControllerRef.current) {
+          sessionStreamAbortControllerRef.current.abort();
+          sessionStreamAbortControllerRef.current = null;
+        }
+
+        if (launchResult.session_id) {
+          setCurrentSessionId(launchResult.session_id);
+          currentSessionIdRef.current = launchResult.session_id;
+          openSessionStream(
+            launchResult.session_id,
+            launchResult.cursor_before_start,
+          );
+        }
+
+        // Remap optimistic IDs to canonical IDs.
+        updateMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempUserId
+              ? { ...m, id: canonicalUserId, task_id: launchResult.task_id }
+              : m.id === tempAssistantId
+                ? {
+                    ...m,
+                    id: canonicalAssistantId,
+                    task_id: launchResult.task_id,
+                  }
+                : m,
+          ),
+        );
+
+        liveAssistantMessageIdRef.current = canonicalAssistantId;
+        liveTaskIdRef.current = launchResult.task_id;
+
+        dispatchChatSessionRuntime({
+          type: "REPLACE_TASK_FROM",
+          sessionId: launchResult.session_id ?? currentSessionId ?? "",
+          fromTaskId: taskId,
+          replacementTask: {
+            task_id: launchResult.task_id,
+            preview: newMessage.slice(0, 100),
+            status: "running",
+            created_at: userTimestamp,
+          },
+        });
+
+        draftMessageRef.current = "";
+        setComposerResetSignal((prev) => prev + 1);
+      } catch (err) {
+        setIsStreaming(false);
+        if (err instanceof ApiError) {
+          setError(err.message);
+        } else {
+          setError(
+            err instanceof Error ? err.message : "Failed to edit task",
+          );
+        }
+      }
+    },
+    [
+      isStreaming,
+      commitMessages,
+      openSessionStream,
+      dispatchChatSessionRuntime,
+      clearCompactStatusImmediately,
+      currentSessionId,
+      updateMessages,
+    ],
+  );
+
+  /**
    * Stabilizes approval and rejection actions so memoized timeline rows can
    * skip work when unrelated composer state changes elsewhere.
    */
@@ -4236,6 +4373,7 @@ function ChatContainer({
               isStreaming={isStreaming}
               onToggleRecursion={toggleRecursion}
               onReplyTask={setReplyTaskId}
+              onEditSubmit={handleEditSubmit}
               onApproveSkillChange={handleApproveSkillChange}
               onRejectSkillChange={handleRejectSkillChange}
             />

@@ -20,11 +20,14 @@ from ._sandbox_common import (
 _WRITE_FILE_SCRIPT = r"""
 from __future__ import annotations
 
+import contextlib
 import difflib
 import hashlib
 import json
+import os
 import pathlib
 import sys
+import tempfile
 
 path = pathlib.Path(sys.argv[1])
 content = sys.argv[2]
@@ -80,6 +83,35 @@ def count_diff_lines(diff_text: str) -> tuple[int, int]:
     return additions, deletions
 
 
+def write_text_durably(target_path: pathlib.Path, text: str) -> None:
+    def fsync_best_effort(fd: int) -> None:
+        with contextlib.suppress(OSError):
+            os.fsync(fd)
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{target_path.name}.",
+        suffix=".tmp",
+        dir=str(target_path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as target_file:
+            target_file.write(text)
+            target_file.flush()
+            fsync_best_effort(target_file.fileno())
+        os.replace(temp_name, target_path)
+        dir_fd = os.open(target_path.parent, os.O_RDONLY)
+        try:
+            fsync_best_effort(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temp_name)
+        raise
+
+
 if path.exists() and path.is_dir():
     fail(f"Cannot write directory: {display_path(path)}")
 
@@ -99,11 +131,9 @@ if file_exists:
     write_type = "update"
 else:
     original_text = ""
-    path.parent.mkdir(parents=True, exist_ok=True)
     write_type = "create"
 
-with path.open("w", encoding="utf-8", newline="") as target_file:
-    target_file.write(content)
+write_text_durably(path, content)
 
 diff = build_diff(relative_path, original_text, content) if file_exists else ""
 added_lines, removed_lines = count_diff_lines(diff)

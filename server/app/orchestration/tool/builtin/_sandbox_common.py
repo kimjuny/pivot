@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+import time
 from pathlib import Path
 
 from app.orchestration.tool import get_current_tool_execution_context
@@ -87,6 +88,8 @@ def verify_backend_visible_text_file(
     *,
     expected_hash: str,
     expected_total_lines: int,
+    timeout_seconds: float = 15.0,
+    poll_interval_seconds: float = 0.25,
 ) -> None:
     """Ensure a sandbox write is immediately visible from the backend workspace.
 
@@ -112,20 +115,29 @@ def verify_backend_visible_text_file(
             f"{workspace_relative_path(path)}"
         )
 
-    text = backend_path.read_text(encoding="utf-8", errors="replace")
-    actual_hash = hashlib.md5(
-        text.encode("utf-8", errors="replace"),
-        usedforsecurity=False,
-    ).hexdigest()
-    actual_total_lines = 0 if text == "" else len(text.splitlines())
-    if actual_hash != expected_hash or actual_total_lines != expected_total_lines:
-        raise RuntimeError(
-            "Sandbox write was not visible from backend workspace. "
-            f"path={workspace_relative_path(path)} "
-            f"expected_hash={expected_hash} actual_hash={actual_hash} "
-            f"expected_total_lines={expected_total_lines} "
-            f"actual_total_lines={actual_total_lines}"
-        )
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    actual_hash = ""
+    actual_total_lines = -1
+    while True:
+        text = backend_path.read_text(encoding="utf-8", errors="replace")
+        actual_hash = hashlib.md5(
+            text.encode("utf-8", errors="replace"),
+            usedforsecurity=False,
+        ).hexdigest()
+        actual_total_lines = 0 if text == "" else len(text.splitlines())
+        if actual_hash == expected_hash and actual_total_lines == expected_total_lines:
+            return
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(poll_interval_seconds)
+
+    raise RuntimeError(
+        "Sandbox write was not visible from backend workspace. "
+        f"path={workspace_relative_path(path)} "
+        f"expected_hash={expected_hash} actual_hash={actual_hash} "
+        f"expected_total_lines={expected_total_lines} "
+        f"actual_total_lines={actual_total_lines}"
+    )
 
 
 def exec_in_sandbox(cmd: list[str]) -> str:

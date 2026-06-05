@@ -249,6 +249,62 @@ class SandboxService:
             timeout_seconds=timeout_seconds,
         )
 
+    def checkpoint(
+        self,
+        *,
+        user_id: int,
+        workspace_id: str,
+        workspace_backend_path: str,
+        skills: list[dict[str, str]] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> str:
+        """Create a git checkpoint of the sandbox workspace.
+
+        Returns the commit hash that can be used to restore later.
+        """
+        if skills is None:
+            skills = []
+        data = self._post(
+            "/sandboxes/checkpoint",
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "workspace_backend_path": workspace_backend_path,
+                "skills": skills,
+            },
+            timeout_seconds=timeout_seconds,
+        )
+        return str(data["commit_hash"])
+
+    def restore(
+        self,
+        *,
+        user_id: int,
+        workspace_id: str,
+        workspace_backend_path: str,
+        commit_hash: str,
+        skills: list[dict[str, str]] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> int:
+        """Restore sandbox workspace to a checkpointed state.
+
+        Returns the number of files restored.
+        """
+        if skills is None:
+            skills = []
+        data = self._post(
+            "/sandboxes/restore",
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "workspace_backend_path": workspace_backend_path,
+                "skills": skills,
+                "commit_hash": commit_hash,
+            },
+            timeout_seconds=timeout_seconds,
+        )
+        return int(data.get("files_restored", 0))
+
     def proxy_http(
         self,
         *,

@@ -25,6 +25,7 @@ from app.schemas.react import (
     ReactStreamEvent,
     ReactTaskCancelResponse,
     ReactTaskStartResponse,
+    TaskEditRequest,
 )
 from app.security.permission_catalog import Permission
 from app.services.access_service import AccessService
@@ -37,7 +38,9 @@ from app.services.react_task_supervisor import (
     ReactTaskLaunchRequest,
     get_react_task_supervisor,
 )
+from app.services.sandbox_service import get_sandbox_service
 from app.services.session_service import SessionService
+from app.services.workspace_service import WorkspaceService
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
@@ -274,6 +277,109 @@ async def start_react_task(
                 thinking_mode=request.thinking_mode,
                 mandatory_skill_names=request.mandatory_skill_names,
                 task_id=request.task_id,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ReactTaskStartResponse(
+        task_id=launch_result.task_id,
+        session_id=launch_result.session_id,
+        status=launch_result.status,
+        cursor_before_start=launch_result.cursor_before_start,
+    )
+
+
+@router.post("/react/tasks/{task_id}/edit", response_model=ReactTaskStartResponse)
+async def edit_react_task(
+    task_id: str,
+    request: TaskEditRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ReactTaskStartResponse:
+    """Edit a completed task: rewind conversation to that point and resubmit."""
+    if current_user.id is None:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+
+    task = _get_owned_task(db=db, task_id=task_id, user=current_user)
+
+    if task.status not in ("completed", "failed", "cancelled"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot edit task with status '{task.status}'",
+        )
+    if not task.session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Task has no associated session",
+        )
+
+    session = _get_owned_session(
+        db=db, session_id=task.session_id, user=current_user
+    )
+    agent = AgentService(db).get_required_agent(task.agent_id)
+    session_type = session.type
+    _require_runtime_permission(db=db, user=current_user, session_type=session_type)
+    _require_agent_runtime_access(
+        db=db, user=current_user, agent=agent, session_type=session_type
+    )
+
+    if session.runtime_status == "running":
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot edit while a task is running",
+        )
+
+    # Restore sandbox files when full rewind is requested.
+    if request.rewind_scope == "full":
+        if not task.sandbox_checkpoint_hash:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot undo file changes: no sandbox checkpoint exists for "
+                    "this task. The checkpoint may have failed when the task "
+                    "started. Use 'Rewind conversation only' instead."
+                ),
+            )
+        if session.workspace_id:
+            workspace = WorkspaceService(db).get_workspace(session.workspace_id)
+            if workspace is not None:
+                workspace_backend_path = WorkspaceService(
+                    db
+                ).get_workspace_backend_path(workspace)
+                try:
+                    get_sandbox_service().restore(
+                        user_id=current_user.id,
+                        workspace_id=workspace.workspace_id,
+                        workspace_backend_path=workspace_backend_path,
+                        commit_hash=task.sandbox_checkpoint_hash,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "sandbox.restore failed for edit task=%s hash=%s: %s",
+                        task_id,
+                        task.sandbox_checkpoint_hash[:12],
+                        exc,
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to restore sandbox: {exc}",
+                    ) from exc
+
+    SessionService(db).rewind_tasks_from(
+        session_id=session.session_id,
+        from_task_id=task.task_id,
+    )
+
+    supervisor = get_react_task_supervisor()
+    try:
+        launch_result = await supervisor.start_task(
+            ReactTaskLaunchRequest(
+                agent_id=task.agent_id,
+                message=request.new_message,
+                user_id=current_user.id,
+                session_id=session.session_id,
+                file_ids=[],
             )
         )
     except ValueError as exc:
