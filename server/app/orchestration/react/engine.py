@@ -683,10 +683,6 @@ class ReactEngine:
 
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
-        # Buffer content deltas until first tool_call is detected; flush
-        # them as "content" events so the user sees the LLM's commentary
-        # during CALL_TOOL recursions.  Discarded for text-action recursions.
-        content_buffer: list[str] = []
         # Accumulate tool_calls by list position across streaming chunks.
         tool_calls_by_pos: dict[int, dict[str, Any]] = {}
         # Per-call streaming state for partial-parse + eager execution.
@@ -743,20 +739,6 @@ class ReactEngine:
                 if isinstance(content_delta, str) and content_delta:
                     content_parts.append(content_delta)
                     estimated_completion_tokens += estimate_text_tokens(content_delta)
-                    if token_meter_queue is not None:
-                        if tool_calls_by_pos:
-                            # Tool calls already detected → emit live.
-                            for buf_delta in content_buffer:
-                                await token_meter_queue.put(
-                                    {"type": "content", "delta": buf_delta}
-                                )
-                            content_buffer.clear()
-                            await token_meter_queue.put(
-                                {"type": "content", "delta": content_delta}
-                            )
-                        else:
-                            # No tool calls yet → buffer for later.
-                            content_buffer.append(content_delta)
 
                 # Accumulate native tool_call fragments by position.
                 if chunk_message.tool_calls:
@@ -770,14 +752,6 @@ class ReactEngine:
                         if not isinstance(idx, int):
                             idx = pos
                         if idx not in tool_calls_by_pos:
-                            # First tool_call detected — flush any buffered
-                            # content that arrived before this tool_call.
-                            if content_buffer and token_meter_queue is not None:
-                                for buf_delta in content_buffer:
-                                    await token_meter_queue.put(
-                                        {"type": "content", "delta": buf_delta}
-                                    )
-                                content_buffer.clear()
                             tool_calls_by_pos[idx] = {
                                 "id": "",
                                 "type": "function",
@@ -1784,6 +1758,7 @@ class ReactEngine:
             parse_error: ValueError | None = None
             request_messages = messages
             native_tool_calls: list[dict[str, Any]] | None = None
+            call_tool_meta: dict[str, Any] | None = None
             eager_state: _EagerToolExecutionState | None = None
 
             # Build native tools parameter for all LLM calls in this recursion.
@@ -1820,13 +1795,17 @@ class ReactEngine:
                 choice = response.first()
                 message = choice.message
 
-                # Native tool_calls → CALL_TOOL path (no text parsing needed).
+                # Native tool_calls → CALL_TOOL path.
                 if message.tool_calls:
                     native_tool_calls = message.tool_calls
+                    # Extract message/step_status_update from the JSON
+                    # envelope that accompanies tool calls.
+                    call_tool_meta = self._parse_call_tool_meta(message.content)
                     logger.debug(
-                        "LLM returned native tool_calls (trace_id=%s, count=%s)",
+                        "LLM returned native tool_calls (trace_id=%s, count=%s, has_meta=%s)",
                         trace_id,
                         len(native_tool_calls),
+                        bool(call_tool_meta.get("message")),
                     )
                     break
 
@@ -1897,6 +1876,7 @@ class ReactEngine:
                     token_meter_queue=token_meter_queue,
                     response=response,
                     eager_state=eager_state,
+                    call_tool_meta=call_tool_meta,
                 )
 
             # --- Text action path: PLAN / REFLECT / CLARIFY / ANSWER ---
@@ -2037,6 +2017,46 @@ class ReactEngine:
             results_list.append(await coro)
         return results_list
 
+    @staticmethod
+    def _parse_call_tool_meta(content: str | None) -> dict[str, Any]:
+        """Extract message and step_status_update from a CALL_TOOL JSON envelope.
+
+        The LLM may emit truncated JSON when text and tool_calls coexist in one
+        response, so we use partial parsing instead of ``parse_react_output``
+        which requires valid JSON.
+
+        Returns a dict with keys ``message`` (str) and ``step_status_updates``
+        (list[dict]).  Falls back gracefully if the content is absent or not
+        parseable.
+        """
+        if not content or not content.strip():
+            return {"message": "", "step_status_updates": []}
+
+        stripped = content.strip()
+        # Fast path: content doesn't look like JSON → treat as plain text.
+        if not stripped.startswith("{"):
+            return {"message": stripped, "step_status_updates": []}
+
+        parsed = try_partial_parse(stripped)
+        if parsed is None:
+            return {"message": stripped, "step_status_updates": []}
+
+        message = parsed.get("message")
+        if not isinstance(message, str):
+            # No message key extracted yet (JSON too truncated) → use raw text.
+            return {"message": "", "step_status_updates": []}
+
+        step_updates: list[dict[str, Any]] = []
+        action = parsed.get("action")
+        if isinstance(action, dict):
+            raw_updates = action.get("step_status_update")
+            if isinstance(raw_updates, list):
+                for item in raw_updates:
+                    if isinstance(item, dict):
+                        step_updates.append(item)
+
+        return {"message": message, "step_status_updates": step_updates}
+
     async def _execute_call_tool_recursion(
         self,
         *,
@@ -2050,6 +2070,7 @@ class ReactEngine:
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
         response: Response,
         eager_state: _EagerToolExecutionState | None = None,
+        call_tool_meta: dict[str, Any] | None = None,
     ) -> tuple[ReactRecursion, dict[str, Any]]:
         """Execute native tool calls and build the recursion event.
 
@@ -2131,6 +2152,10 @@ class ReactEngine:
                             {"type": "tool_result", "tool_results": [skipped]}
                         )
 
+        meta = call_tool_meta or {}
+        ct_message = meta.get("message", "")
+        ct_step_updates = meta.get("step_status_updates", [])
+
         tokens_data = self.state_service.record_llm_decision(
             task=task,
             recursion=recursion,
@@ -2138,7 +2163,7 @@ class ReactEngine:
             action_type="CALL_TOOL",
             action_output=action_output,
             action_step_id=None,
-            message="",
+            message=ct_message,
             token_counter=token_counter,
         )
 
@@ -2148,8 +2173,8 @@ class ReactEngine:
             context=context,
             action_type="CALL_TOOL",
             action_output=action_output,
-            step_status_updates=[],
-            message="",
+            step_status_updates=ct_step_updates,
+            message=ct_message,
             tool_results=tool_results,
             pending_user_action=pending_user_action,
         )
@@ -2160,7 +2185,7 @@ class ReactEngine:
             "trace_id": trace_id,
             "action_type": "CALL_TOOL",
             "llm_response_id": response.id,
-            "message": "",
+            "message": ct_message,
             "thinking": message.reasoning_content,
             "session_title": "",
             "output": action_output,
@@ -2169,7 +2194,7 @@ class ReactEngine:
             "tool_calls": reconstructed_tool_calls,
             "tool_results": tool_results,
             "pending_user_action": pending_user_action,
-            "step_status_update": [],
+            "step_status_update": ct_step_updates,
             "current_plan": build_current_plan_payload(context),
         }
         if tokens_data is not None:
@@ -2632,19 +2657,6 @@ class ReactEngine:
                                 "trace_id": trace_id,
                                 "iteration": task.iteration,
                                 "delta": reasoning_delta,
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            }
-                        continue
-
-                    if meter_type == "content":
-                        content_delta = meter_data.get("delta")
-                        if isinstance(content_delta, str) and content_delta:
-                            yield {
-                                "type": "content",
-                                "task_id": task.task_id,
-                                "trace_id": trace_id,
-                                "iteration": task.iteration,
-                                "delta": content_delta,
                                 "timestamp": datetime.now(UTC).isoformat(),
                             }
                         continue

@@ -1,8 +1,10 @@
-"""Parse and validate ReAct text-only assistant responses.
+"""Parse and validate ReAct assistant responses.
 
-After the native tool calling migration, the parser only handles text-based
-actions (PLAN, REFLECT, CLARIFY, ANSWER).  CALL_TOOL is routed from the
-LLM response's native ``tool_calls`` field and never reaches this parser.
+The parser validates JSON envelope output for all action types including
+CALL_TOOL (which accompanies native tool_calls).  The native ``tool_calls``
+field is handled separately by the engine, but the JSON envelope that
+rides alongside it is parsed here for its ``message`` and
+``step_status_update`` fields.
 """
 
 import json
@@ -10,7 +12,7 @@ from typing import Any
 
 from .types import ParsedAction, ParsedReactDecision, StepStatusUpdate
 
-ALLOWED_ACTION_TYPES = {"PLAN", "REFLECT", "CLARIFY", "ANSWER"}
+ALLOWED_ACTION_TYPES = {"CALL_TOOL", "PLAN", "REFLECT", "CLARIFY", "ANSWER"}
 PARSE_RETRY_LIMIT = 1
 PARSE_RETRY_INSTRUCTION = (
     "Your previous response could not be parsed.\n"
