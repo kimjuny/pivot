@@ -14,9 +14,17 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from app.llm.abstract_llm import AbstractLLM, ChatMessage, Choice, Response, UsageInfo
+from app.config import get_settings
+from app.llm.abstract_llm import (
+    AbstractLLM,
+    ChatMessage,
+    Choice,
+    FinishReason,
+    Response,
+    UsageInfo,
+)
 from app.llm.thinking_policy import build_runtime_thinking_kwargs
 from app.llm.token_estimator import estimate_messages_tokens, estimate_text_tokens
 from app.llm.usage_accumulator import StreamingUsageAccumulator, usage_to_token_counter
@@ -37,20 +45,14 @@ from app.services.react_state_service import ReactStateService
 from app.services.session_service import SessionService
 from app.services.task_attachment_service import TaskAttachmentService
 from fastapi.concurrency import run_in_threadpool
+from pydantic import TypeAdapter
 from sqlmodel import Session, desc, select
 
 from .context import ReactContext
 from .parser import (
     PARSE_RETRY_INSTRUCTION,
     PARSE_RETRY_LIMIT,
-    PAYLOAD_BEGIN_RE,
-    PAYLOAD_REF_KEY,
-    PAYLOAD_SENTINEL_SUFFIX,
-    collect_complete_payload_blocks,
-    collect_tool_call_payload_refs,
-    parse_react_control_section,
     parse_react_output,
-    resolve_tool_call_payloads,
     safe_load_json,
 )
 from .prompt_template import (
@@ -63,30 +65,49 @@ from .runtime_payload import (
     build_current_plan_payload,
     build_recursion_user_payload,
 )
-from .types import ToolCallRequest
-
-if TYPE_CHECKING:
-    from .types import ParsedReactDecision
+from .types import ParsedReactDecision, ToolCallRequest
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
 
+# Reusable adapter for partial JSON parsing of tool call arguments.
+_DICT_ADAPTER = TypeAdapter(dict)
+
+
+def try_partial_parse(accumulated_json: str) -> dict[str, Any] | None:
+    """Parse incomplete JSON using Pydantic ``allow_partial``.
+
+    Returns completed top-level key/value pairs, or ``None`` on failure.
+    """
+    try:
+        result = _DICT_ADAPTER.validate_json(
+            accumulated_json,
+            experimental_allow_partial=True,
+        )
+        return result if isinstance(result, dict) else None
+    except Exception:
+        return None
+
+
+@dataclass(slots=True)
+class _StreamingToolCallState:
+    """Track accumulated argument state for one streaming tool call."""
+
+    call_id: str
+    name: str
+    accumulated_json: str = ""
+    last_parse_time: float = 0.0
+    last_parsed_result: dict[str, Any] = field(default_factory=dict)
+    arguments_complete: bool = False
+
 
 @dataclass(slots=True)
 class _EagerToolExecutionState:
-    """Track tool calls that start while the model is still streaming."""
+    """Track eagerly-started tool executions during streaming."""
 
-    decision: "ParsedReactDecision | None" = None
-    payloads: dict[str, str] = field(default_factory=dict)
     started_call_ids: set[str] = field(default_factory=set)
     running_tasks: dict[str, asyncio.Task[dict[str, Any]]] = field(default_factory=dict)
-    result_pump_tasks: set[asyncio.Task[None]] = field(default_factory=set)
     result_by_call_id: dict[str, dict[str, Any]] = field(default_factory=dict)
-    result_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    active_batch_index: int = 0
-    stopped_after_batch: bool = False
-    live_payload_emitted_lengths: dict[str, int] = field(default_factory=dict)
-    live_payload_finalized: set[str] = field(default_factory=set)
 
 
 class ReactEngine:
@@ -259,7 +280,7 @@ class ReactEngine:
                 continue
 
             try:
-                decision = parse_react_output(content, tool_manager=self.tool_manager)
+                decision = parse_react_output(content)
             except ValueError:
                 logger.warning(
                     "Failed to parse previous assistant payload while resolving "
@@ -646,9 +667,15 @@ class ReactEngine:
         llm_chat_kwargs: dict[str, Any],
         token_counter: dict[str, int],
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
-        eager_tool_state: _EagerToolExecutionState | None = None,
+        eager_state: _EagerToolExecutionState | None = None,
     ) -> Response:
-        """Collect full model output via ``chat_stream`` while emitting live updates."""
+        """Collect full model output via ``chat_stream`` while emitting live updates.
+
+        When ``eager_state`` is provided, tool calls whose arguments complete
+        during streaming are executed eagerly (before the full response
+        finishes).  Periodic partial-parse events (``tool_payload_delta``)
+        are emitted so the frontend can render arguments progressively.
+        """
         stream_iterator = self.llm.chat_stream(
             messages=messages,
             **llm_chat_kwargs,
@@ -656,14 +683,24 @@ class ReactEngine:
 
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
+        # Buffer content deltas until first tool_call is detected; flush
+        # them as "content" events so the user sees the LLM's commentary
+        # during CALL_TOOL recursions.  Discarded for text-action recursions.
+        content_buffer: list[str] = []
+        # Accumulate tool_calls by list position across streaming chunks.
+        tool_calls_by_pos: dict[int, dict[str, Any]] = {}
+        # Per-call streaming state for partial-parse + eager execution.
+        streaming_tool_states: dict[int, _StreamingToolCallState] = {}
+        # Track finish_reason from streaming chunks (e.g. LENGTH = max_tokens hit).
+        stream_finish_reason: FinishReason | None = None
+
+        partial_parse_interval = (
+            get_settings().REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS / 1000
+        )
+
         # Keep empty until provider emits a real response id.
-        # Random fallback IDs would poison ``previous_response_id`` chaining.
         response_id = ""
         response_model = getattr(self.llm, "model", "")
-        emitted_control_preview = False
-        live_answer_payload_name: str | None = None
-        live_answer_emitted_length = 0
-        live_answer_finalized = False
 
         stream_started_at = perf_counter()
         last_report_at = stream_started_at
@@ -686,6 +723,11 @@ class ReactEngine:
 
             usage_accumulator.observe(stream_chunk.usage)
 
+            # Track the finish reason (e.g. LENGTH when max_tokens is hit).
+            for chunk_choice in stream_chunk.choices:
+                if chunk_choice.finish_reason is not None:
+                    stream_finish_reason = chunk_choice.finish_reason
+
             for chunk_choice in stream_chunk.choices:
                 chunk_message = chunk_choice.message
                 reasoning_delta = chunk_message.reasoning_content
@@ -694,130 +736,194 @@ class ReactEngine:
                     estimated_completion_tokens += estimate_text_tokens(reasoning_delta)
                     if token_meter_queue is not None:
                         await token_meter_queue.put(
-                            {
-                                "type": "reasoning",
-                                "delta": reasoning_delta,
-                            }
+                            {"type": "reasoning", "delta": reasoning_delta}
                         )
 
                 content_delta = chunk_message.content
                 if isinstance(content_delta, str) and content_delta:
                     content_parts.append(content_delta)
                     estimated_completion_tokens += estimate_text_tokens(content_delta)
-                    if not emitted_control_preview and (
-                        token_meter_queue is not None or eager_tool_state is not None
-                    ):
-                        partial_content = "".join(content_parts)
-                        if PAYLOAD_BEGIN_RE.search(partial_content) is not None:
-                            try:
-                                preview_decision = parse_react_control_section(
-                                    partial_content
+                    if token_meter_queue is not None:
+                        if tool_calls_by_pos:
+                            # Tool calls already detected → emit live.
+                            for buf_delta in content_buffer:
+                                await token_meter_queue.put(
+                                    {"type": "content", "delta": buf_delta}
                                 )
-                            except ValueError:
-                                logger.debug(
-                                    "Skipping early ReAct control preview; "
-                                    "JSON section is not parseable yet.",
-                                    exc_info=True,
-                                )
-                            else:
-                                emitted_control_preview = True
-                                if (
-                                    eager_tool_state is not None
-                                    and preview_decision.action.action_type
-                                    == "CALL_TOOL"
-                                ):
-                                    eager_tool_state.decision = preview_decision
-                                if (
-                                    preview_decision.action.action_type == "ANSWER"
-                                    and live_answer_payload_name is None
-                                ):
-                                    live_answer_payload_name = (
-                                        self._extract_answer_payload_ref_name(
-                                            preview_decision.action.output
-                                        )
-                                    )
-                                if token_meter_queue is not None:
+                            content_buffer.clear()
+                            await token_meter_queue.put(
+                                {"type": "content", "delta": content_delta}
+                            )
+                        else:
+                            # No tool calls yet → buffer for later.
+                            content_buffer.append(content_delta)
+
+                # Accumulate native tool_call fragments by position.
+                if chunk_message.tool_calls:
+                    for pos, tc in enumerate(chunk_message.tool_calls):
+                        if not isinstance(tc, dict):
+                            continue
+                        # OpenAI Completion streams an explicit ``index`` field
+                        # for parallel tool calls.  Fall back to ``pos`` for
+                        # providers that don't use it (Anthropic, Gemini, etc.)
+                        idx = tc.get("index")
+                        if not isinstance(idx, int):
+                            idx = pos
+                        if idx not in tool_calls_by_pos:
+                            # First tool_call detected — flush any buffered
+                            # content that arrived before this tool_call.
+                            if content_buffer and token_meter_queue is not None:
+                                for buf_delta in content_buffer:
                                     await token_meter_queue.put(
-                                        {
-                                            "type": "react_control",
-                                            "message": preview_decision.message,
-                                            "action_type": (
-                                                preview_decision.action.action_type
-                                            ),
-                                            "tool_calls": [
-                                                tool_call.to_dict()
-                                                for tool_call in (
-                                                    preview_decision.action.tool_calls
-                                                )
-                                            ],
-                                        }
+                                        {"type": "content", "delta": buf_delta}
                                     )
+                                content_buffer.clear()
+                            tool_calls_by_pos[idx] = {
+                                "id": "",
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            }
+                        acc = tool_calls_by_pos[idx]
+                        tc_id = tc.get("id", "")
+                        if isinstance(tc_id, str) and tc_id:
+                            acc["id"] = tc_id
+                        func = tc.get("function")
+                        if isinstance(func, dict):
+                            name = func.get("name", "")
+                            if isinstance(name, str) and name:
+                                acc["function"]["name"] = name
+                            args = func.get("arguments", "")
+                            if isinstance(args, str) and args:
+                                acc["function"]["arguments"] += args
 
-                    if eager_tool_state is not None:
-                        await self._emit_live_payload_deltas(
-                            eager_tool_state,
-                            "".join(content_parts),
-                            token_meter_queue,
-                        )
-                        await self._advance_eager_tool_execution(
-                            eager_tool_state,
-                            "".join(content_parts),
-                            token_meter_queue,
-                        )
-                    if live_answer_payload_name is not None:
-                        (
-                            live_answer_emitted_length,
-                            live_answer_finalized,
-                        ) = await self._emit_live_answer_delta(
-                            content="".join(content_parts),
-                            payload_name=live_answer_payload_name,
-                            emitted_length=live_answer_emitted_length,
-                            finalized=live_answer_finalized,
-                            token_meter_queue=token_meter_queue,
-                        )
+                        # --- Streaming tool-call tracking ---
+                        call_id = acc["id"]
+                        call_name = acc["function"]["name"]
+                        if not call_id or not call_name:
+                            continue
 
-            if token_meter_queue is not None:
-                now = perf_counter()
-                if now - last_report_at >= 1.0:
-                    window_seconds = max(now - last_report_at, 1e-6)
-                    window_tokens = max(
-                        estimated_completion_tokens - last_report_tokens,
-                        0,
+                        if idx not in streaming_tool_states:
+                            streaming_tool_states[idx] = _StreamingToolCallState(
+                                call_id=call_id,
+                                name=call_name,
+                            )
+                            # Emit tool_call with pending_arguments on first appearance.
+                            if token_meter_queue is not None:
+                                await token_meter_queue.put(
+                                    {
+                                        "type": "action",
+                                        "action_type": "CALL_TOOL",
+                                    }
+                                )
+                                await token_meter_queue.put(
+                                    {
+                                        "type": "tool_call",
+                                        "tool_calls": [
+                                            {
+                                                "id": call_id,
+                                                "name": call_name,
+                                                "arguments": {},
+                                                "pending_arguments": True,
+                                            }
+                                        ],
+                                        "tool_results": [],
+                                    }
+                                )
+
+                        st = streaming_tool_states[idx]
+                        if st.arguments_complete:
+                            continue
+
+                        # Update accumulated JSON from the assembled arguments.
+                        st.accumulated_json = acc["function"]["arguments"]
+
+            # --- Periodic partial parse for tool_payload_delta ---
+            now = perf_counter()
+            if token_meter_queue is not None or eager_state is not None:
+                for _pos, st in streaming_tool_states.items():
+                    if st.arguments_complete or not st.accumulated_json:
+                        continue
+                    if now - st.last_parse_time < partial_parse_interval:
+                        continue
+                    st.last_parse_time = now
+
+                    parsed = try_partial_parse(st.accumulated_json)
+                    if parsed is None:
+                        continue
+
+                    # Diff: emit newly completed arguments.
+                    for key, value in parsed.items():
+                        if (
+                            key not in st.last_parsed_result
+                            and token_meter_queue is not None
+                        ):
+                            await token_meter_queue.put(
+                                {
+                                    "type": "tool_payload_delta",
+                                    "tool_call_id": st.call_id,
+                                    "tool_name": st.name,
+                                    "argument_name": key,
+                                    "payload_name": key,
+                                    "delta": json.dumps(value, ensure_ascii=False)
+                                    if not isinstance(value, str)
+                                    else value,
+                                    "is_final": True,
+                                }
+                            )
+                    st.last_parsed_result = dict(parsed)
+
+                    # Check if arguments are now complete JSON.
+                    try:
+                        final_args = json.loads(st.accumulated_json)
+                        if isinstance(final_args, dict):
+                            self._finalize_streaming_tool_call(
+                                st,
+                                final_args,
+                                token_meter_queue,
+                                eager_state,
+                            )
+                    except json.JSONDecodeError:
+                        pass
+
+            # Token rate reporting.
+            if token_meter_queue is not None and now - last_report_at >= 1.0:
+                window_seconds = max(now - last_report_at, 1e-6)
+                window_tokens = max(estimated_completion_tokens - last_report_tokens, 0)
+                await token_meter_queue.put(
+                    {
+                        "type": "token_rate",
+                        "tokens_per_second": round(window_tokens / window_seconds, 2),
+                        "estimated_completion_tokens": estimated_completion_tokens,
+                    }
+                )
+                last_report_at = now
+                last_report_tokens = estimated_completion_tokens
+
+        # --- Finalize any remaining streaming tool calls ---
+        for _pos, st in streaming_tool_states.items():
+            if st.arguments_complete:
+                continue
+            if not st.accumulated_json:
+                continue
+            try:
+                final_args = json.loads(st.accumulated_json)
+                if isinstance(final_args, dict):
+                    self._finalize_streaming_tool_call(
+                        st, final_args, token_meter_queue, eager_state
                     )
-                    await token_meter_queue.put(
-                        {
-                            "type": "token_rate",
-                            "tokens_per_second": round(
-                                window_tokens / window_seconds,
-                                2,
-                            ),
-                            "estimated_completion_tokens": estimated_completion_tokens,
-                        }
-                    )
-                    last_report_at = now
-                    last_report_tokens = estimated_completion_tokens
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Streaming tool call arguments are not valid JSON at stream end. "
+                    "call_id=%s name=%s",
+                    st.call_id,
+                    st.name,
+                )
 
-        if eager_tool_state is not None:
-            await self._emit_live_payload_deltas(
-                eager_tool_state,
-                "".join(content_parts),
-                token_meter_queue,
-            )
-            await self._advance_eager_tool_execution(
-                eager_tool_state,
-                "".join(content_parts),
-                token_meter_queue,
-            )
-        if live_answer_payload_name is not None:
-            await self._emit_live_answer_delta(
-                content="".join(content_parts),
-                payload_name=live_answer_payload_name,
-                emitted_length=live_answer_emitted_length,
-                finalized=live_answer_finalized,
-                token_meter_queue=token_meter_queue,
-            )
+        # Drain any completed eager results before returning.
+        if eager_state is not None:
+            await self._drain_eager_results(eager_state, token_meter_queue)
 
-        # Final flush so UI gets the latest completion estimate before action arrives.
+        # Final token-rate flush.
         if token_meter_queue is not None:
             now = perf_counter()
             window_seconds = max(now - last_report_at, 1e-6)
@@ -832,7 +938,7 @@ class ReactEngine:
 
         attempt_usage_counter = usage_accumulator.build_token_counter()
 
-        # Usage fallback: estimate prompt/completion when provider does not return usage.
+        # Usage fallback.
         if (
             attempt_usage_counter["prompt_tokens"] == 0
             and attempt_usage_counter["completion_tokens"] == 0
@@ -859,6 +965,35 @@ class ReactEngine:
 
         full_content = "".join(content_parts)
         full_reasoning = "".join(reasoning_parts) or None
+
+        # Assemble tool_calls from accumulated fragments.
+        assembled_tool_calls: list[dict[str, Any]] | None = None
+        if tool_calls_by_pos:
+            assembled_tool_calls = [
+                tool_calls_by_pos[i]
+                for i in sorted(tool_calls_by_pos)
+                if tool_calls_by_pos[i]["id"]
+            ]
+            if not assembled_tool_calls:
+                assembled_tool_calls = None
+
+        # Warn when max_tokens truncated a response that included tool calls.
+        if stream_finish_reason == FinishReason.LENGTH and assembled_tool_calls:
+            for tc in assembled_tool_calls:
+                args = tc.get("function", {}).get("arguments", "")
+                try:
+                    json.loads(args)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(
+                        "max_tokens truncated a tool_use call — arguments are "
+                        "incomplete JSON. The tool call will likely fail. "
+                        "Consider increasing max_tokens. call_id=%s name=%s "
+                        "args_prefix=%s",
+                        tc.get("id", ""),
+                        tc.get("function", {}).get("name", ""),
+                        args[:100],
+                    )
+
         usage_info = (
             UsageInfo(
                 prompt_tokens=attempt_usage_counter["prompt_tokens"],
@@ -874,10 +1009,12 @@ class ReactEngine:
             choices=[
                 Choice(
                     index=0,
+                    finish_reason=stream_finish_reason,
                     message=ChatMessage(
                         role="assistant",
                         content=full_content,
                         reasoning_content=full_reasoning,
+                        tool_calls=assembled_tool_calls,
                     ),
                 )
             ],
@@ -885,6 +1022,84 @@ class ReactEngine:
             model=response_model,
             usage=usage_info,
         )
+
+    def _finalize_streaming_tool_call(
+        self,
+        st: _StreamingToolCallState,
+        final_args: dict[str, Any],
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+        eager_state: _EagerToolExecutionState | None,
+    ) -> None:
+        """Mark one streaming tool call as complete and optionally start eager execution."""
+        st.arguments_complete = True
+
+        # Emit remaining arguments not caught by partial parse.
+        for key, value in final_args.items():
+            if key not in st.last_parsed_result and token_meter_queue is not None:
+                delta = (
+                    json.dumps(value, ensure_ascii=False)
+                    if not isinstance(value, str)
+                    else value
+                )
+                token_meter_queue.put_nowait(
+                    {
+                        "type": "tool_payload_delta",
+                        "tool_call_id": st.call_id,
+                        "tool_name": st.name,
+                        "argument_name": key,
+                        "payload_name": key,
+                        "delta": delta,
+                        "is_final": True,
+                    }
+                )
+
+        # Emit finalized tool_call (no pending_arguments).
+        if token_meter_queue is not None:
+            token_meter_queue.put_nowait(
+                {
+                    "type": "tool_call",
+                    "tool_calls": [
+                        {
+                            "id": st.call_id,
+                            "name": st.name,
+                            "arguments": final_args,
+                            "pending_arguments": False,
+                        }
+                    ],
+                    "tool_results": [],
+                }
+            )
+
+        # Start eager execution.
+        if eager_state is not None and st.call_id not in eager_state.started_call_ids:
+            eager_state.started_call_ids.add(st.call_id)
+            tool_call = ToolCallRequest(
+                id=st.call_id, name=st.name, arguments=final_args
+            )
+            execution_task = asyncio.create_task(
+                self._execute_tool_call_request(tool_call)
+            )
+            eager_state.running_tasks[st.call_id] = execution_task
+
+    async def _drain_eager_results(
+        self,
+        eager_state: _EagerToolExecutionState,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> None:
+        """Collect completed eager tool execution results."""
+        for call_id, task in list(eager_state.running_tasks.items()):
+            if not task.done():
+                continue
+            try:
+                result = task.result()
+                eager_state.result_by_call_id[call_id] = result
+                del eager_state.running_tasks[call_id]
+                if token_meter_queue is not None:
+                    await token_meter_queue.put(
+                        {"type": "tool_result", "tool_results": [result]}
+                    )
+            except Exception:
+                logger.warning("Eager tool execution failed for call_id=%s", call_id)
 
     def _build_parse_retry_messages(
         self, messages: list[dict[str, Any]]
@@ -978,10 +1193,7 @@ class ReactEngine:
             Pretty-printed string for log output.
         """
         try:
-            parsed = parse_react_output(
-                content,
-                tool_manager=self.tool_manager,
-            ).to_dict()
+            parsed = parse_react_output(content).to_dict()
         except ValueError:
             return content
         return json.dumps(parsed, ensure_ascii=False, indent=2)
@@ -1068,51 +1280,11 @@ class ReactEngine:
     ) -> list[dict[str, Any]] | None:
         """Derive next recursion's action_result payload from current action output.
 
-        Args:
-            event_data: Recursion event payload produced by execute_recursion.
-
-        Returns:
-            action_result payload list for next recursion, or None when not needed.
+        After the native tool calling migration, CALL_TOOL results are fed back
+        via the message converter (``tool_results`` on the user message), so this
+        method only handles non-tool action types.
         """
         action_type = event_data.get("action_type")
-        if action_type == "CALL_TOOL":
-            tool_results = event_data.get("tool_results", [])
-            if not isinstance(tool_results, list):
-                return [{"error": "Invalid tool_results payload"}]
-            compact_results: list[dict[str, Any]] = []
-            for result_item in tool_results:
-                if not isinstance(result_item, dict):
-                    continue
-                compact_item: dict[str, Any] = {}
-                tool_call_id = result_item.get("tool_call_id")
-                if isinstance(tool_call_id, str) and tool_call_id:
-                    compact_item["id"] = tool_call_id
-                if result_item.get("success") is True:
-                    raw_result = result_item.get("result")
-                    # Extract multimodal blocks for next iteration injection
-                    if isinstance(raw_result, dict):
-                        multimodal_blocks = raw_result.pop(
-                            "_pivot_multimodal_blocks", None
-                        )
-                        if isinstance(multimodal_blocks, list):
-                            self._pending_multimodal_blocks.extend(multimodal_blocks)
-                    compact_item["result"] = self._compact_result_for_llm(
-                        result_item.get("name", ""), raw_result
-                    )
-                else:
-                    compact_item["error"] = result_item.get(
-                        "error", "Tool execution failed"
-                    )
-                compact_results.append(compact_item)
-            parse_error = event_data.get("parse_error")
-            if isinstance(parse_error, str) and parse_error.strip():
-                compact_results.append(
-                    {
-                        "error": parse_error.strip(),
-                        "source": "assistant_response_parse",
-                    }
-                )
-            return compact_results
         if action_type == "CLARIFY":
             output = event_data.get("output", {})
             return [{"result": output if isinstance(output, dict) else {}}]
@@ -1209,6 +1381,48 @@ class ReactEngine:
 
         return raw_result
 
+    def _compact_tool_results(
+        self,
+        tool_results: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]] | None:
+        """Build compacted tool results in the internal unified format.
+
+        Every result always has ``tool_call_id``, ``name``, ``result``, and
+        ``is_error``.  The ``result`` value is always a **string** because
+        all provider APIs (Anthropic, OpenAI Completion, OpenAI Response,
+        Gemini) require string content in their tool-result message fields.
+        """
+        if not tool_results:
+            return None
+        compacted: list[dict[str, Any]] = []
+        for result_item in tool_results:
+            if not isinstance(result_item, dict):
+                continue
+            if result_item.get("success") is True:
+                raw_result = self._compact_result_for_llm(
+                    result_item.get("name", ""), result_item.get("result")
+                )
+                result_str = (
+                    raw_result
+                    if isinstance(raw_result, str)
+                    else json.dumps(raw_result, ensure_ascii=False)
+                )
+                compact_item: dict[str, Any] = {
+                    "tool_call_id": result_item.get("tool_call_id", ""),
+                    "name": result_item.get("name", ""),
+                    "result": result_str,
+                    "is_error": False,
+                }
+            else:
+                compact_item = {
+                    "tool_call_id": result_item.get("tool_call_id", ""),
+                    "name": result_item.get("name", ""),
+                    "result": result_item.get("error", "Tool execution failed"),
+                    "is_error": True,
+                }
+            compacted.append(compact_item)
+        return compacted or None
+
     def _extract_pivot_action_from_tool_results(
         self,
         tool_results: list[dict[str, Any]],
@@ -1241,16 +1455,6 @@ class ReactEngine:
                 continue
             return dict(pivot_action)
         return None
-
-    @staticmethod
-    def _group_tool_calls_by_batch(
-        tool_calls: list[ToolCallRequest],
-    ) -> list[tuple[int, list[ToolCallRequest]]]:
-        """Group tool calls into ascending execution batches."""
-        calls_by_batch: dict[int, list[ToolCallRequest]] = {}
-        for tool_call in tool_calls:
-            calls_by_batch.setdefault(tool_call.batch, []).append(tool_call)
-        return sorted(calls_by_batch.items(), key=lambda item: item[0])
 
     @staticmethod
     def _write_tool_path(tool_call: ToolCallRequest) -> str | None:
@@ -1329,196 +1533,6 @@ class ReactEngine:
                 "tool_results": [],
             }
         )
-
-    @staticmethod
-    def _build_payload_ref_index(
-        tool_calls: list[ToolCallRequest],
-    ) -> dict[str, dict[str, str]]:
-        """Map payload names to the tool argument they are filling."""
-        ref_index: dict[str, dict[str, str]] = {}
-        for tool_call in tool_calls:
-            for argument_name, argument_value in tool_call.arguments.items():
-                if not isinstance(argument_value, dict):
-                    continue
-                payload_ref = argument_value.get(PAYLOAD_REF_KEY)
-                if not isinstance(payload_ref, str) or not payload_ref:
-                    continue
-                ref_index[payload_ref] = {
-                    "tool_call_id": tool_call.id,
-                    "tool_name": tool_call.name,
-                    "argument_name": argument_name,
-                }
-        return ref_index
-
-    @staticmethod
-    def _trim_possible_payload_end_marker(
-        payload_text: str,
-        payload_name: str,
-    ) -> str:
-        """Hold back only text that could be a partial payload END marker."""
-        end_marker = f"<<<PIVOT_PAYLOAD:{payload_name}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>"
-        line_start = payload_text.rfind("\n") + 1
-        tail = payload_text[line_start:]
-        if tail and end_marker.startswith(tail):
-            return payload_text[:line_start]
-        return payload_text
-
-    @staticmethod
-    def _extract_answer_payload_ref_name(action_output: dict[str, Any]) -> str | None:
-        """Return the payload name used by an ANSWER action, if present."""
-        raw_answer = action_output.get("answer")
-        if not isinstance(raw_answer, dict):
-            return None
-        payload_ref = raw_answer.get(PAYLOAD_REF_KEY)
-        return payload_ref if isinstance(payload_ref, str) and payload_ref else None
-
-    async def _emit_live_answer_delta(
-        self,
-        *,
-        content: str,
-        payload_name: str,
-        emitted_length: int,
-        finalized: bool,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-    ) -> tuple[int, bool]:
-        """Emit incremental ANSWER payload text for live assistant rendering."""
-        if token_meter_queue is None or finalized:
-            return emitted_length, finalized
-
-        begin_re = re.compile(
-            rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:BEGIN_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
-        )
-        begin_match = begin_re.search(content)
-        if begin_match is None:
-            return emitted_length, finalized
-
-        content_start = begin_match.end()
-        if content_start < len(content) and content[content_start] == "\n":
-            content_start += 1
-
-        end_re = re.compile(
-            rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
-        )
-        end_match = end_re.search(content, content_start)
-        is_final = end_match is not None
-        if is_final:
-            content_end = end_match.start()
-            if content_end > content_start and content[content_end - 1] == "\n":
-                content_end -= 1
-                if content_end > content_start and content[content_end - 1] == "\r":
-                    content_end -= 1
-        else:
-            content_end = len(content)
-
-        if content_end < content_start:
-            return emitted_length, finalized
-
-        payload_text = content[content_start:content_end]
-        if not is_final:
-            payload_text = self._trim_possible_payload_end_marker(
-                payload_text,
-                payload_name,
-            )
-
-        delta = payload_text[emitted_length:]
-        next_emitted_length = emitted_length
-        if delta:
-            next_emitted_length = len(payload_text)
-
-        should_emit_final = is_final and not finalized
-        if not delta and not should_emit_final:
-            return next_emitted_length, finalized
-
-        await token_meter_queue.put(
-            {
-                "type": "answer_delta",
-                "payload_name": payload_name,
-                "delta": delta,
-                "is_final": is_final,
-            }
-        )
-        return next_emitted_length, finalized or is_final
-
-    async def _emit_live_payload_deltas(
-        self,
-        eager_state: _EagerToolExecutionState,
-        content: str,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-    ) -> None:
-        """Emit incremental payload text for frontend live tool previews."""
-        if (
-            token_meter_queue is None
-            or eager_state.decision is None
-            or eager_state.decision.action.action_type != "CALL_TOOL"
-        ):
-            return
-
-        ref_index = self._build_payload_ref_index(
-            eager_state.decision.action.tool_calls
-        )
-        if not ref_index:
-            return
-
-        for begin_match in PAYLOAD_BEGIN_RE.finditer(content):
-            payload_name = begin_match.group(1)
-            ref_data = ref_index.get(payload_name)
-            if ref_data is None:
-                continue
-
-            content_start = begin_match.end()
-            if content_start < len(content) and content[content_start] == "\n":
-                content_start += 1
-
-            end_re = re.compile(
-                rf"(?m)^<<<PIVOT_PAYLOAD:{re.escape(payload_name)}:END_{PAYLOAD_SENTINEL_SUFFIX}>>>$"
-            )
-            end_match = end_re.search(content, content_start)
-            is_final = end_match is not None
-            if is_final:
-                content_end = end_match.start()
-                if content_end > content_start and content[content_end - 1] == "\n":
-                    content_end -= 1
-                    if content_end > content_start and content[content_end - 1] == "\r":
-                        content_end -= 1
-            else:
-                content_end = len(content)
-
-            if content_end < content_start:
-                continue
-
-            payload_text = content[content_start:content_end]
-            if not is_final:
-                payload_text = self._trim_possible_payload_end_marker(
-                    payload_text,
-                    payload_name,
-                )
-            emitted_length = eager_state.live_payload_emitted_lengths.get(
-                payload_name, 0
-            )
-            delta = payload_text[emitted_length:]
-            if delta:
-                eager_state.live_payload_emitted_lengths[payload_name] = len(
-                    payload_text
-                )
-
-            should_emit_final = (
-                is_final and payload_name not in eager_state.live_payload_finalized
-            )
-            if should_emit_final:
-                eager_state.live_payload_finalized.add(payload_name)
-
-            if not delta and not should_emit_final:
-                continue
-
-            await token_meter_queue.put(
-                {
-                    "type": "tool_payload_delta",
-                    **ref_data,
-                    "payload_name": payload_name,
-                    "delta": delta,
-                    "is_final": is_final,
-                }
-            )
 
     async def _execute_tool_call_request(
         self,
@@ -1730,250 +1744,6 @@ class ReactEngine:
 
         return _on_delegation_event
 
-    def _has_all_payloads_for_tool_call(
-        self,
-        tool_call: ToolCallRequest,
-        payloads: dict[str, str],
-    ) -> bool:
-        """Return whether one preview tool call can be resolved now."""
-        try:
-            refs = collect_tool_call_payload_refs(tool_call)
-        except ValueError:
-            logger.debug(
-                "Skipping eager tool start; tool_call payload refs are invalid.",
-                exc_info=True,
-            )
-            return False
-        return refs.issubset(payloads)
-
-    async def _drain_eager_tool_results(
-        self,
-        eager_state: _EagerToolExecutionState,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-        *,
-        wait_for_one: bool,
-    ) -> bool:
-        """Move completed eager tool tasks into the result map."""
-        if not eager_state.running_tasks:
-            return False
-
-        running_tasks = set(eager_state.running_tasks.values())
-        if wait_for_one:
-            await asyncio.wait(
-                running_tasks,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-        drained = False
-        for tool_call_id, execution_task in list(eager_state.running_tasks.items()):
-            if not execution_task.done():
-                continue
-            drained = (
-                await self._complete_eager_tool_task(
-                    eager_state,
-                    token_meter_queue,
-                    tool_call_id,
-                    execution_task,
-                )
-                or drained
-            )
-        return drained
-
-    async def _complete_eager_tool_task(
-        self,
-        eager_state: _EagerToolExecutionState,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-        tool_call_id: str,
-        execution_task: asyncio.Task[dict[str, Any]],
-    ) -> bool:
-        """Record and emit one eager tool task exactly once."""
-        async with eager_state.result_lock:
-            current_task = eager_state.running_tasks.get(tool_call_id)
-            if current_task is not execution_task or not execution_task.done():
-                return False
-            result_item = execution_task.result()
-            eager_state.result_by_call_id[tool_call_id] = result_item
-            del eager_state.running_tasks[tool_call_id]
-
-        await self._emit_tool_result(token_meter_queue, result_item)
-        return True
-
-    async def _pump_eager_tool_result(
-        self,
-        eager_state: _EagerToolExecutionState,
-        token_meter_queue: asyncio.Queue[dict[str, Any]],
-        tool_call_id: str,
-        execution_task: asyncio.Task[dict[str, Any]],
-    ) -> None:
-        """Emit a tool result as soon as its eager task completes."""
-        try:
-            await execution_task
-            await self._complete_eager_tool_task(
-                eager_state,
-                token_meter_queue,
-                tool_call_id,
-                execution_task,
-            )
-        finally:
-            current_task = asyncio.current_task()
-            if current_task is not None:
-                eager_state.result_pump_tasks.discard(current_task)
-
-    async def _wait_eager_result_pumps(
-        self,
-        eager_state: _EagerToolExecutionState,
-    ) -> None:
-        """Wait for any live eager result pump tasks to finish emitting."""
-        while eager_state.result_pump_tasks:
-            await asyncio.gather(
-                *list(eager_state.result_pump_tasks),
-                return_exceptions=True,
-            )
-
-    async def _skip_unstarted_eager_tool_calls(
-        self,
-        eager_state: _EagerToolExecutionState,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-    ) -> None:
-        """Close future tool calls after a prior batch requested user action."""
-        if eager_state.decision is None:
-            return
-        eager_state.stopped_after_batch = True
-
-        for tool_call in eager_state.decision.action.tool_calls:
-            if tool_call.id in eager_state.result_by_call_id:
-                continue
-            result_item = {
-                "tool_call_id": tool_call.id,
-                "name": tool_call.name,
-                "arguments": tool_call.arguments,
-                "error": "Tool skipped because an earlier tool requested user action.",
-                "success": False,
-            }
-            eager_state.result_by_call_id[tool_call.id] = result_item
-            await self._emit_tool_result(token_meter_queue, result_item)
-
-    async def _advance_eager_tool_execution(
-        self,
-        eager_state: _EagerToolExecutionState,
-        content: str,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-    ) -> bool:
-        """Start newly-ready tool calls while preserving batch order."""
-        await self._drain_eager_tool_results(
-            eager_state,
-            token_meter_queue,
-            wait_for_one=False,
-        )
-
-        if eager_state.decision is None or eager_state.stopped_after_batch:
-            return False
-        if eager_state.decision.action.action_type != "CALL_TOOL":
-            return False
-
-        try:
-            eager_state.payloads.update(collect_complete_payload_blocks(content))
-        except ValueError:
-            logger.debug("Skipping eager payload collection.", exc_info=True)
-            return False
-
-        grouped_calls = self._group_tool_calls_by_batch(
-            eager_state.decision.action.tool_calls
-        )
-        if eager_state.active_batch_index >= len(grouped_calls):
-            return False
-
-        _batch_number, batch_calls = grouped_calls[eager_state.active_batch_index]
-        batch_call_ids = {tool_call.id for tool_call in batch_calls}
-        if batch_call_ids.issubset(eager_state.result_by_call_id):
-            batch_results = [
-                eager_state.result_by_call_id[tool_call.id] for tool_call in batch_calls
-            ]
-            if self._extract_pivot_action_from_tool_results(
-                batch_results,
-                category_filter="approval",
-            ):
-                await self._skip_unstarted_eager_tool_calls(
-                    eager_state,
-                    token_meter_queue,
-                )
-                return False
-            eager_state.active_batch_index += 1
-            return await self._advance_eager_tool_execution(
-                eager_state,
-                content,
-                token_meter_queue,
-            )
-
-        started_any = False
-        for tool_call in batch_calls:
-            if tool_call.id in eager_state.started_call_ids:
-                continue
-            if self._has_unfinished_prior_write_to_same_path(
-                tool_call,
-                batch_calls,
-                set(eager_state.result_by_call_id),
-            ):
-                continue
-            if not self._has_all_payloads_for_tool_call(
-                tool_call, eager_state.payloads
-            ):
-                continue
-
-            try:
-                resolved_tool_call = resolve_tool_call_payloads(
-                    tool_call,
-                    eager_state.payloads,
-                    tool_manager=self.tool_manager,
-                )
-            except ValueError:
-                logger.debug("Skipping eager tool-call resolution.", exc_info=True)
-                continue
-
-            eager_state.started_call_ids.add(resolved_tool_call.id)
-            execution_task = asyncio.create_task(
-                self._execute_tool_call_request(resolved_tool_call)
-            )
-            eager_state.running_tasks[resolved_tool_call.id] = execution_task
-            if token_meter_queue is not None:
-                pump_task = asyncio.create_task(
-                    self._pump_eager_tool_result(
-                        eager_state,
-                        token_meter_queue,
-                        resolved_tool_call.id,
-                        execution_task,
-                    )
-                )
-                eager_state.result_pump_tasks.add(pump_task)
-            await self._emit_tool_call(token_meter_queue, [resolved_tool_call])
-            started_any = True
-
-        return started_any
-
-    async def _finish_eager_tool_execution(
-        self,
-        eager_state: _EagerToolExecutionState,
-        content: str,
-        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
-    ) -> None:
-        """Finish all eager-ready calls before final recursion persistence."""
-        while True:
-            progressed = await self._advance_eager_tool_execution(
-                eager_state,
-                content,
-                token_meter_queue,
-            )
-            if eager_state.running_tasks:
-                await self._drain_eager_tool_results(
-                    eager_state,
-                    token_meter_queue,
-                    wait_for_one=True,
-                )
-                continue
-            if not progressed:
-                await self._wait_eager_result_pumps(eager_state)
-                break
-
     async def execute_recursion(
         self,
         task: ReactTask,
@@ -1984,44 +1754,48 @@ class ReactEngine:
         llm_chat_kwargs: dict[str, Any] | None = None,
         token_meter_queue: asyncio.Queue[dict[str, Any]] | None = None,
     ) -> tuple[ReactRecursion, dict[str, Any]]:
-        """
-        Execute a single recursion cycle.
+        """Execute a single recursion cycle.
+
+        Routes LLM response to native tool calling or text-action parsing:
+        - Native ``tool_calls`` in the response trigger the CALL_TOOL path.
+        - Text-only responses are parsed as JSON for PLAN/REFLECT/CLARIFY/ANSWER.
 
         Args:
-            task: The ReactTask being executed
-            context: Current context state
+            task: The ReactTask being executed.
+            context: Current context state.
             input_message: Exact per-recursion user message appended for this cycle.
-            messages: Message history for LLM
+            messages: Message history for LLM.
             llm_chat_kwargs: Extra runtime kwargs passed to LLM chat call.
             token_meter_queue: Optional queue for realtime token-rate snapshots.
 
         Returns:
-            Tuple of (ReactRecursion record, event data for streaming)
+            Tuple of (ReactRecursion record, event data for streaming).
         """
         task_id_value = task.task_id
         task_iteration_value = task.iteration
-
-        # Use server-generated trace_id from this recursion cycle.
         context.update_for_new_recursion(trace_id)
-
         recursion = self.state_service.start_recursion(task, trace_id, input_message)
 
-        # Call LLM WITHOUT tools parameter (using prompt-based approach).
-        # Stable schema rules live in the session-level system prompt, while the
-        # task-scoped tool/session-memory/skills catalog is injected once via the
-        # task bootstrap user prompt before recursion begins.
         try:
             token_counter = self._new_token_counter()
-            response = None
+            response: Response | None = None
             message: ChatMessage | None = None
-            assistant_message_raw: str | None = None
             decision: ParsedReactDecision | None = None
             parse_error: ValueError | None = None
             request_messages = messages
-            eager_tool_state: _EagerToolExecutionState | None = None
+            native_tool_calls: list[dict[str, Any]] | None = None
+            eager_state: _EagerToolExecutionState | None = None
+
+            # Build native tools parameter for all LLM calls in this recursion.
+            tools = self.tool_manager.to_openai_tools()
+            effective_kwargs: dict[str, Any] = {
+                **(llm_chat_kwargs or {}),
+                "tools": tools,
+            }
 
             for parse_attempt in range(PARSE_RETRY_LIMIT + 1):
-                eager_tool_state = (
+                # Enable eager execution on first streaming attempt.
+                eager_state = (
                     _EagerToolExecutionState()
                     if self.stream_llm_responses and parse_attempt == 0
                     else None
@@ -2029,32 +1803,37 @@ class ReactEngine:
                 if self.stream_llm_responses:
                     response = await self._stream_chat_response(
                         messages=request_messages,
-                        llm_chat_kwargs=llm_chat_kwargs or {},
+                        llm_chat_kwargs=effective_kwargs,
                         token_counter=token_counter,
                         token_meter_queue=token_meter_queue,
-                        eager_tool_state=eager_tool_state,
+                        eager_state=eager_state,
                     )
                 else:
                     response = await run_in_threadpool(
                         self.llm.chat,
                         messages=request_messages,
-                        **(llm_chat_kwargs or {}),
-                    )  # type: ignore[arg-type]
+                        **effective_kwargs,
+                    )
                     self._accumulate_usage(token_counter, response.usage)
                     self._ensure_total_tokens(token_counter)
 
                 choice = response.first()
                 message = choice.message
 
-                # Parse JSON from content to extract decision fields
-                content = message.content or "{}"
-                assistant_message_raw = content
-
-                try:
-                    decision = parse_react_output(
-                        content,
-                        tool_manager=self.tool_manager,
+                # Native tool_calls → CALL_TOOL path (no text parsing needed).
+                if message.tool_calls:
+                    native_tool_calls = message.tool_calls
+                    logger.debug(
+                        "LLM returned native tool_calls (trace_id=%s, count=%s)",
+                        trace_id,
+                        len(native_tool_calls),
                     )
+                    break
+
+                # Text-only response → parse as text action.
+                content = message.content or "{}"
+                try:
+                    decision = parse_react_output(content)
                     logger.debug(
                         "Successfully parsed LLM output (trace_id=%s, attempt=%s)",
                         trace_id,
@@ -2063,11 +1842,7 @@ class ReactEngine:
                     break
                 except ValueError as e:
                     parse_error = e
-                    can_retry_parse = parse_attempt < PARSE_RETRY_LIMIT and not (
-                        eager_tool_state is not None
-                        and bool(eager_tool_state.started_call_ids)
-                    )
-                    if can_retry_parse:
+                    if parse_attempt < PARSE_RETRY_LIMIT:
                         logger.warning(
                             "Failed to parse LLM output (trace_id=%s, attempt=%s): %s. "
                             "Retrying once with strict format repair instruction.",
@@ -2079,125 +1854,21 @@ class ReactEngine:
                         continue
 
                     logger.error(
-                        f"Failed to parse LLM response\n"
-                        f"Trace ID: {trace_id}\n"
-                        f"Task ID: {task.task_id}\n"
-                        f"Iteration: {task.iteration}\n"
-                        f"Error: {e}"
+                        "Failed to parse LLM response\n"
+                        "Trace ID: %s\nTask ID: %s\nIteration: %s\nError: %s",
+                        trace_id,
+                        task.task_id,
+                        task.iteration,
+                        e,
                     )
                     break
 
-            if response is None or decision is None or message is None:
+            # --- Parse failure: no tool_calls, no valid decision ---
+            if response is None or (decision is None and native_tool_calls is None):
                 parse_error_message = str(parse_error or "Failed to parse LLM output")
-                if eager_tool_state is not None:
-                    while eager_tool_state.running_tasks:
-                        await self._drain_eager_tool_results(
-                            eager_tool_state,
-                            token_meter_queue,
-                            wait_for_one=True,
-                        )
-                    await self._wait_eager_result_pumps(eager_tool_state)
-                    if eager_tool_state.started_call_ids and (
-                        eager_tool_state.decision is not None
-                    ):
-                        preview_decision = eager_tool_state.decision
-                        result_by_call_id = dict(eager_tool_state.result_by_call_id)
-
-                        for tool_call in preview_decision.action.tool_calls:
-                            if tool_call.id in result_by_call_id:
-                                continue
-                            result_by_call_id[tool_call.id] = {
-                                "tool_call_id": tool_call.id,
-                                "name": tool_call.name,
-                                "arguments": tool_call.arguments,
-                                "error": (
-                                    "Tool skipped because assistant response parsing "
-                                    f"failed before this call could start: {parse_error_message}"
-                                ),
-                                "success": False,
-                            }
-                            await self._emit_tool_result(
-                                token_meter_queue,
-                                result_by_call_id[tool_call.id],
-                            )
-
-                        recovered_tool_calls: list[dict[str, Any]] = []
-                        for tool_call in preview_decision.action.tool_calls:
-                            recovered_tool_call = tool_call.to_dict()
-                            result_item = result_by_call_id.get(tool_call.id)
-                            if isinstance(result_item, dict) and isinstance(
-                                result_item.get("arguments"),
-                                dict,
-                            ):
-                                recovered_tool_call["arguments"] = result_item[
-                                    "arguments"
-                                ]
-                            recovered_tool_calls.append(recovered_tool_call)
-
-                        tool_results = [
-                            result_by_call_id[tool_call.id]
-                            for tool_call in preview_decision.action.tool_calls
-                            if tool_call.id in result_by_call_id
-                        ]
-                        action_output = dict(preview_decision.action.output)
-                        action_output["tool_calls"] = recovered_tool_calls
-                        step_status_updates_validated = [
-                            item.to_dict()
-                            for item in preview_decision.action.step_status_update
-                        ]
-                        pending_user_action = (
-                            self._extract_pivot_action_from_tool_results(
-                                tool_results,
-                                category_filter="approval",
-                            )
-                        )
-                        tokens_data = self.state_service.finalize_partial_tool_error(
-                            task=task,
-                            recursion=recursion,
-                            context=context,
-                            thinking=message.reasoning_content
-                            if message is not None
-                            else None,
-                            action_output=action_output,
-                            action_step_id=preview_decision.action.step_id,
-                            step_status_updates=step_status_updates_validated,
-                            message=preview_decision.message,
-                            tool_results=tool_results,
-                            error_log=parse_error_message,
-                            pending_user_action=pending_user_action,
-                            token_counter=token_counter,
-                        )
-                        return recursion, {
-                            "trace_id": trace_id,
-                            "action_type": "CALL_TOOL",
-                            "error": parse_error_message,
-                            "parse_error": parse_error_message,
-                            "tokens": tokens_data,
-                            "assistant_message": assistant_message_raw,
-                            "rollback_messages": False,
-                            "llm_response_id": response.id
-                            if response is not None
-                            else None,
-                            "message": preview_decision.message,
-                            "thinking": message.reasoning_content
-                            if message is not None
-                            else None,
-                            "session_title": "",
-                            "output": action_output,
-                            "answer_attachments": [],
-                            "tool_calls": recovered_tool_calls,
-                            "tool_results": tool_results,
-                            "pending_user_action": pending_user_action,
-                            "step_status_update": step_status_updates_validated,
-                            "current_plan": build_current_plan_payload(context),
-                        }
                 tokens_data = self.state_service.finalize_error(
-                    task,
-                    recursion,
-                    parse_error_message,
-                    token_counter,
+                    task, recursion, parse_error_message, token_counter
                 )
-
                 return recursion, {
                     "trace_id": trace_id,
                     "action_type": "ERROR",
@@ -2208,233 +1879,55 @@ class ReactEngine:
                     "llm_response_id": response.id if response is not None else None,
                 }
 
-            thinking = message.reasoning_content
-            message_text = decision.message
-            action = decision.action
-            action_type = action.action_type
-            action_output = dict(action.output)
-            answer_attachments: list[dict[str, Any]] = []
+            # --- CALL_TOOL path: native tool_calls ---
+            assert message is not None  # guaranteed by response check above
+            if native_tool_calls is not None:
+                # Wait for any remaining eager tasks to complete.
+                if eager_state is not None and eager_state.running_tasks:
+                    await self._wait_eager_tasks(eager_state, token_meter_queue)
 
-            if action_type == "ANSWER":
-                action_output, answer_attachments = self._persist_answer_attachments(
+                return await self._execute_call_tool_recursion(
                     task=task,
-                    action_output=action_output,
+                    recursion=recursion,
+                    context=context,
+                    trace_id=trace_id,
+                    message=message,
+                    native_tool_calls=native_tool_calls,
+                    token_counter=token_counter,
+                    token_meter_queue=token_meter_queue,
+                    response=response,
+                    eager_state=eager_state,
                 )
 
-            # Extract the plan step this recursion belongs to.
-            # The LLM returns action.step_id when executing as part of a plan.
-            # We must validate its presence when a plan exists, but never abort — a
-            # missing step_id should only surface as a warning so the task can continue.
-            action_step_id = action.step_id
-
-            session_title = ""
-            if action_type == "ANSWER":
-                session_title = action_output.get("session_title") or ""
-
-            tokens_data = self.state_service.record_llm_decision(
-                task=task,
-                recursion=recursion,
-                thinking=thinking,
-                action_type=action_type,
-                action_output=action_output,
-                action_step_id=action_step_id,
-                message=message_text,
-                token_counter=token_counter,
-            )
-
-            # Handle CALL_TOOL with native function calling
-            tool_results: list[dict[str, Any]] = []
-            reconstructed_tool_calls: list[dict[str, Any]] = []
-
-            if action_type == "CALL_TOOL":
-                reconstructed_tool_calls = [
-                    tool_call.to_dict() for tool_call in action.tool_calls
-                ]
-                if token_meter_queue is not None:
-                    await token_meter_queue.put(
-                        {
-                            "type": "action",
-                            "action_type": action_type,
-                        }
-                    )
-
-                if eager_tool_state is not None:
-                    await self._finish_eager_tool_execution(
-                        eager_tool_state,
-                        assistant_message_raw or "",
-                        token_meter_queue,
-                    )
-
-                result_by_call_id: dict[str, dict[str, Any]] = (
-                    dict(eager_tool_state.result_by_call_id)
-                    if eager_tool_state is not None
-                    else {}
-                )
-                for tool_call in action.tool_calls:
-                    existing_result = result_by_call_id.get(tool_call.id)
-                    if existing_result is not None:
-                        existing_result["arguments"] = tool_call.arguments
-                should_stop_after_batch = False
-
-                for _batch_number, batch_calls in self._group_tool_calls_by_batch(
-                    action.tool_calls
-                ):
-                    if all(
-                        tool_call.id in result_by_call_id for tool_call in batch_calls
-                    ):
-                        batch_results = [
-                            result_by_call_id[tool_call.id] for tool_call in batch_calls
-                        ]
-                        if self._extract_pivot_action_from_tool_results(
-                            batch_results,
-                            category_filter="approval",
-                        ):
-                            break
-                        continue
-
-                    pending_batch_calls = [
-                        tool_call
-                        for tool_call in batch_calls
-                        if tool_call.id not in result_by_call_id
-                    ]
-
-                    await self._emit_tool_call(token_meter_queue, pending_batch_calls)
-
-                    batch_results: list[dict[str, Any]] = []
-                    if len(pending_batch_calls) == 1 or self._has_duplicate_write_paths(
-                        pending_batch_calls
-                    ):
-                        for tool_call in pending_batch_calls:
-                            batch_results.append(
-                                await self._execute_tool_call_request(tool_call)
-                            )
-                    else:
-                        execution_tasks = [
-                            asyncio.create_task(
-                                self._execute_tool_call_request(tool_call)
-                            )
-                            for tool_call in pending_batch_calls
-                        ]
-                        for execution_task in asyncio.as_completed(execution_tasks):
-                            batch_results.append(await execution_task)
-
-                    for result_item in batch_results:
-                        tool_call_id = result_item.get("tool_call_id")
-                        if isinstance(tool_call_id, str):
-                            result_by_call_id[tool_call_id] = result_item
-                        if token_meter_queue is not None:
-                            await token_meter_queue.put(
-                                {
-                                    "type": "tool_result",
-                                    "tool_results": [result_item],
-                                }
-                            )
-
-                    batch_results = [
-                        result_by_call_id[tool_call.id]
-                        for tool_call in batch_calls
-                        if tool_call.id in result_by_call_id
-                    ]
-                    if self._extract_pivot_action_from_tool_results(
-                        batch_results,
-                        category_filter="approval",
-                    ):
-                        should_stop_after_batch = True
-                    if should_stop_after_batch:
-                        break
-
-                if should_stop_after_batch:
-                    for tool_call in action.tool_calls:
-                        if tool_call.id in result_by_call_id:
-                            continue
-                        result_by_call_id[tool_call.id] = {
-                            "tool_call_id": tool_call.id,
-                            "name": tool_call.name,
-                            "arguments": tool_call.arguments,
-                            "error": (
-                                "Tool skipped because an earlier tool requested "
-                                "user action."
-                            ),
-                            "success": False,
-                        }
-                        if token_meter_queue is not None:
-                            await token_meter_queue.put(
-                                {
-                                    "type": "tool_result",
-                                    "tool_results": [result_by_call_id[tool_call.id]],
-                                }
-                            )
-
-                tool_results = [
-                    result_by_call_id[tool_call.id]
-                    for tool_call in action.tool_calls
-                    if tool_call.id in result_by_call_id
-                ]
-
-            # Validate optional step status updates requested by the LLM.
-            step_status_updates_validated = [
-                item.to_dict() for item in action.step_status_update
-            ]
-            pending_user_action = self._extract_pivot_action_from_tool_results(
-                tool_results,
-                category_filter="approval",
-            )
-            self.state_service.finalize_success(
+            # --- Text action path: PLAN / REFLECT / CLARIFY / ANSWER ---
+            assert decision is not None  # guaranteed: native_tool_calls is None
+            return self._execute_text_action_recursion(
                 task=task,
                 recursion=recursion,
                 context=context,
-                action_type=action_type,
-                action_output=action_output,
-                step_status_updates=step_status_updates_validated,
-                message=message_text,
-                tool_results=tool_results,
-                pending_user_action=pending_user_action,
+                trace_id=trace_id,
+                message=message,
+                decision=decision,
+                token_counter=token_counter,
+                response=response,
             )
-            persisted_session_title = self._persist_session_title(task, session_title)
-
-            # Prepare event data
-            event_data = {
-                "trace_id": trace_id,
-                "action_type": action_type,
-                "llm_response_id": response.id,
-                "message": message_text,
-                "thinking": thinking,
-                "session_title": persisted_session_title,
-                "output": action_output,
-                "answer_attachments": answer_attachments,
-                "assistant_message": assistant_message_raw,
-                "tool_calls": reconstructed_tool_calls,  # Native tool_calls
-                "tool_results": tool_results,  # Tool execution results
-                "pending_user_action": pending_user_action,
-                "step_status_update": step_status_updates_validated,
-                "current_plan": build_current_plan_payload(context),
-            }
-
-            # Add token usage if available
-            if tokens_data is not None:
-                event_data["tokens"] = tokens_data
-
-            return recursion, event_data
 
         except Exception as e:
-            # Handle errors with detailed logging
             error_msg = str(e)
             is_timeout_error = self._is_timeout_error(e)
             non_retryable_error = self._is_non_retryable_llm_error(e)
             logger.error(
-                f"Recursion execution failed for trace_id={trace_id}\n"
-                f"Error type: {type(e).__name__}\n"
-                f"Error message: {error_msg}\n"
-                f"Task ID: {task_id_value}\n"
-                f"Iteration: {task_iteration_value}"
-            )
-
-            tokens_data = self.state_service.finalize_error(
-                task,
-                recursion,
+                "Recursion execution failed for trace_id=%s\n"
+                "Error type: %s\nError message: %s\n"
+                "Task ID: %s\nIteration: %s",
+                trace_id,
+                type(e).__name__,
                 error_msg,
+                task_id_value,
+                task_iteration_value,
             )
 
+            tokens_data = self.state_service.finalize_error(task, recursion, error_msg)
             rollback_messages = is_timeout_error
 
             return recursion, {
@@ -2450,6 +1943,321 @@ class ReactEngine:
                 "rollback_messages": rollback_messages,
                 "non_retryable_error": non_retryable_error,
             }
+
+    # ------------------------------------------------------------------
+    # Eager execution helpers
+    # ------------------------------------------------------------------
+
+    async def _wait_eager_tasks(
+        self,
+        eager_state: _EagerToolExecutionState,
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> None:
+        """Wait for all running eager tasks to finish and collect their results."""
+        while eager_state.running_tasks:
+            await asyncio.wait(
+                set(eager_state.running_tasks.values()),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            await self._drain_eager_results(eager_state, token_meter_queue)
+
+    # ------------------------------------------------------------------
+    # CALL_TOOL path
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _convert_native_tool_calls(
+        native_tool_calls: list[dict[str, Any]],
+    ) -> list[ToolCallRequest]:
+        """Convert native tool_call dicts to internal ToolCallRequest objects.
+
+        Native format has ``function.arguments`` as a JSON string.
+        We parse it into a dict for internal use.
+        """
+        requests: list[ToolCallRequest] = []
+        for tc in native_tool_calls:
+            call_id = tc.get("id", "") or ""
+            func = tc.get("function", {})
+            name = func.get("name", "") if isinstance(func, dict) else ""
+            raw_args = func.get("arguments", "{}") if isinstance(func, dict) else "{}"
+
+            if isinstance(raw_args, str):
+                try:
+                    arguments = json.loads(raw_args) if raw_args.strip() else {}
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Failed to parse tool_call arguments as JSON: %s",
+                        raw_args[:200],
+                    )
+                    arguments = {}
+            elif isinstance(raw_args, dict):
+                arguments = raw_args
+            else:
+                arguments = {}
+
+            if not isinstance(arguments, dict):
+                arguments = {}
+
+            requests.append(ToolCallRequest(id=call_id, name=name, arguments=arguments))
+        return requests
+
+    async def _execute_tool_calls_concurrent(
+        self,
+        tool_calls: list[ToolCallRequest],
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]]:
+        """Execute tool calls concurrently, serializing writes to the same file."""
+        if not tool_calls:
+            return []
+
+        # Sequential when only one call or duplicate write paths.
+        if len(tool_calls) == 1 or self._has_duplicate_write_paths(tool_calls):
+            results: list[dict[str, Any]] = []
+            for tool_call in tool_calls:
+                result = await self._execute_tool_call_request(tool_call)
+                results.append(result)
+                if token_meter_queue is not None:
+                    await token_meter_queue.put(
+                        {"type": "tool_result", "tool_results": [result]}
+                    )
+            return results
+
+        # Concurrent execution.
+        async def _run_and_emit(tc: ToolCallRequest) -> dict[str, Any]:
+            result = await self._execute_tool_call_request(tc)
+            if token_meter_queue is not None:
+                await token_meter_queue.put(
+                    {"type": "tool_result", "tool_results": [result]}
+                )
+            return result
+
+        tasks = [asyncio.create_task(_run_and_emit(tc)) for tc in tool_calls]
+        results_list: list[dict[str, Any]] = []
+        for coro in asyncio.as_completed(tasks):
+            results_list.append(await coro)
+        return results_list
+
+    async def _execute_call_tool_recursion(
+        self,
+        *,
+        task: ReactTask,
+        recursion: ReactRecursion,
+        context: ReactContext,
+        trace_id: str,
+        message: ChatMessage,
+        native_tool_calls: list[dict[str, Any]],
+        token_counter: dict[str, int],
+        token_meter_queue: asyncio.Queue[dict[str, Any]] | None,
+        response: Response,
+        eager_state: _EagerToolExecutionState | None = None,
+    ) -> tuple[ReactRecursion, dict[str, Any]]:
+        """Execute native tool calls and build the recursion event.
+
+        When ``eager_state`` is provided, tool calls that were already
+        executed during streaming are reused instead of re-executed.
+        """
+        tool_call_requests = self._convert_native_tool_calls(native_tool_calls)
+
+        # Separate eager-completed calls from pending ones.
+        result_by_call_id: dict[str, dict[str, Any]] = {}
+        if eager_state is not None:
+            result_by_call_id = dict(eager_state.result_by_call_id)
+
+        pending_calls = [
+            tc for tc in tool_call_requests if tc.id not in result_by_call_id
+        ]
+
+        # Emit lifecycle events only for non-eagerly-started calls.
+        if pending_calls:
+            eager_started = (
+                eager_state.started_call_ids if eager_state is not None else set()
+            )
+            if token_meter_queue is not None and not eager_started:
+                await token_meter_queue.put(
+                    {"type": "action", "action_type": "CALL_TOOL"}
+                )
+            await self._emit_tool_call(token_meter_queue, pending_calls)
+
+            # Execute remaining tool calls.
+            new_results = await self._execute_tool_calls_concurrent(
+                pending_calls, token_meter_queue
+            )
+            for result_item in new_results:
+                call_id = result_item.get("tool_call_id")
+                if isinstance(call_id, str):
+                    result_by_call_id[call_id] = result_item
+
+        # Merge results in tool_call order.
+        tool_results = [
+            result_by_call_id[tc.id]
+            for tc in tool_call_requests
+            if tc.id in result_by_call_id
+        ]
+
+        # Extract multimodal blocks from results for next-iteration injection.
+        for result_item in tool_results:
+            if result_item.get("success") is not True:
+                continue
+            raw_result = result_item.get("result")
+            if isinstance(raw_result, dict):
+                multimodal_blocks = raw_result.pop("_pivot_multimodal_blocks", None)
+                if isinstance(multimodal_blocks, list):
+                    self._pending_multimodal_blocks.extend(multimodal_blocks)
+
+        reconstructed_tool_calls = [tc.to_dict() for tc in tool_call_requests]
+        action_output: dict[str, Any] = {"tool_calls": reconstructed_tool_calls}
+
+        pending_user_action = self._extract_pivot_action_from_tool_results(
+            tool_results, category_filter="approval"
+        )
+
+        # Check for approval → skip remaining calls if found.
+        if pending_user_action:
+            executed_ids = {
+                r.get("tool_call_id") for r in tool_results if isinstance(r, dict)
+            }
+            for tc in tool_call_requests:
+                if tc.id not in executed_ids:
+                    skipped = {
+                        "tool_call_id": tc.id,
+                        "name": tc.name,
+                        "arguments": tc.arguments,
+                        "error": "Tool skipped because an earlier tool requested user action.",
+                        "success": False,
+                    }
+                    tool_results.append(skipped)
+                    if token_meter_queue is not None:
+                        await token_meter_queue.put(
+                            {"type": "tool_result", "tool_results": [skipped]}
+                        )
+
+        tokens_data = self.state_service.record_llm_decision(
+            task=task,
+            recursion=recursion,
+            thinking=message.reasoning_content,
+            action_type="CALL_TOOL",
+            action_output=action_output,
+            action_step_id=None,
+            message="",
+            token_counter=token_counter,
+        )
+
+        self.state_service.finalize_success(
+            task=task,
+            recursion=recursion,
+            context=context,
+            action_type="CALL_TOOL",
+            action_output=action_output,
+            step_status_updates=[],
+            message="",
+            tool_results=tool_results,
+            pending_user_action=pending_user_action,
+        )
+
+        assistant_content = message.content or ""
+
+        event_data: dict[str, Any] = {
+            "trace_id": trace_id,
+            "action_type": "CALL_TOOL",
+            "llm_response_id": response.id,
+            "message": "",
+            "thinking": message.reasoning_content,
+            "session_title": "",
+            "output": action_output,
+            "answer_attachments": [],
+            "assistant_message": assistant_content,
+            "tool_calls": reconstructed_tool_calls,
+            "tool_results": tool_results,
+            "pending_user_action": pending_user_action,
+            "step_status_update": [],
+            "current_plan": build_current_plan_payload(context),
+        }
+        if tokens_data is not None:
+            event_data["tokens"] = tokens_data
+        return recursion, event_data
+
+    # ------------------------------------------------------------------
+    # Text action path (PLAN / REFLECT / CLARIFY / ANSWER)
+    # ------------------------------------------------------------------
+
+    def _execute_text_action_recursion(
+        self,
+        *,
+        task: ReactTask,
+        recursion: ReactRecursion,
+        context: ReactContext,
+        trace_id: str,
+        message: ChatMessage,
+        decision: ParsedReactDecision,
+        token_counter: dict[str, int],
+        response: Response,
+    ) -> tuple[ReactRecursion, dict[str, Any]]:
+        """Handle a text-only action (PLAN / REFLECT / CLARIFY / ANSWER)."""
+        thinking = message.reasoning_content
+        message_text = decision.message
+        action = decision.action
+        action_type = action.action_type
+        action_output = dict(action.output)
+        answer_attachments: list[dict[str, Any]] = []
+
+        if action_type == "ANSWER":
+            action_output, answer_attachments = self._persist_answer_attachments(
+                task=task,
+                action_output=action_output,
+            )
+
+        action_step_id = action.step_id
+        session_title = ""
+        if action_type == "ANSWER":
+            session_title = action_output.get("session_title") or ""
+
+        tokens_data = self.state_service.record_llm_decision(
+            task=task,
+            recursion=recursion,
+            thinking=thinking,
+            action_type=action_type,
+            action_output=action_output,
+            action_step_id=action_step_id,
+            message=message_text,
+            token_counter=token_counter,
+        )
+
+        step_status_updates_validated = [
+            item.to_dict() for item in action.step_status_update
+        ]
+
+        self.state_service.finalize_success(
+            task=task,
+            recursion=recursion,
+            context=context,
+            action_type=action_type,
+            action_output=action_output,
+            step_status_updates=step_status_updates_validated,
+            message=message_text,
+            tool_results=[],
+            pending_user_action=None,
+        )
+        persisted_session_title = self._persist_session_title(task, session_title)
+
+        event_data: dict[str, Any] = {
+            "trace_id": trace_id,
+            "action_type": action_type,
+            "llm_response_id": response.id,
+            "message": message_text,
+            "thinking": thinking,
+            "session_title": persisted_session_title,
+            "output": action_output,
+            "answer_attachments": answer_attachments,
+            "assistant_message": message.content or "{}",
+            "tool_calls": [],
+            "tool_results": [],
+            "pending_user_action": None,
+            "step_status_update": step_status_updates_validated,
+            "current_plan": build_current_plan_payload(context),
+        }
+        if tokens_data is not None:
+            event_data["tokens"] = tokens_data
+        return recursion, event_data
 
     async def run_task(
         self,
@@ -2505,7 +2313,6 @@ class ReactEngine:
         max_context_tokens = max(int(max_context_tokens or 0), 0)
         compact_threshold_percent = max(int(compact_threshold_percent or 0), 0)
         system_prompt = build_runtime_system_prompt(
-            tool_manager=self.tool_manager,
             skills=skills_metadata_json,
             delegation_agents=delegation_agents,
             channel_context=channel_context,
@@ -2539,6 +2346,7 @@ class ReactEngine:
         )
         logged_message_count = len(runtime_state.messages)
         pending_turn_attachments = turn_attachments
+        pending_tool_results: list[dict[str, Any]] | None = None
 
         if task.iteration == 0:
             task_bootstrap_message = build_runtime_task_bootstrap_message(
@@ -2697,9 +2505,11 @@ class ReactEngine:
                     task,
                     user_payload,
                     attachments=multimodal_attachments,
+                    tool_results=self._compact_tool_results(pending_tool_results),
                 )
                 input_message = dict(runtime_state.messages[-1])
                 pending_turn_attachments = None
+                pending_tool_results = None
                 self._log_messages_pretty(
                     messages=runtime_state.messages,
                     task_id=task.task_id,
@@ -2826,56 +2636,16 @@ class ReactEngine:
                             }
                         continue
 
-                    if meter_type == "react_control":
-                        preview_action_type = meter_data.get("action_type")
-                        if not isinstance(preview_action_type, str):
-                            preview_action_type = ""
-                        preview_timestamp = datetime.now(UTC).isoformat()
-                        preview_trace_id = trace_id
-
-                        preview_message = meter_data.get("message")
-                        if isinstance(preview_message, str) and preview_message:
+                    if meter_type == "content":
+                        content_delta = meter_data.get("delta")
+                        if isinstance(content_delta, str) and content_delta:
                             yield {
-                                "type": "message",
+                                "type": "content",
                                 "task_id": task.task_id,
-                                "trace_id": preview_trace_id,
+                                "trace_id": trace_id,
                                 "iteration": task.iteration,
-                                "delta": preview_message,
-                                "timestamp": preview_timestamp,
-                                "data": {
-                                    "current_plan": build_current_plan_payload(context),
-                                    "session_title": "",
-                                },
-                            }
-
-                        if preview_action_type:
-                            streamed_action = True
-                            yield {
-                                "type": "action",
-                                "task_id": task.task_id,
-                                "trace_id": preview_trace_id,
-                                "iteration": task.iteration,
-                                "delta": preview_action_type,
-                                "timestamp": preview_timestamp,
-                            }
-
-                        preview_tool_calls = meter_data.get("tool_calls")
-                        if (
-                            preview_action_type == "CALL_TOOL"
-                            and isinstance(preview_tool_calls, list)
-                            and preview_tool_calls
-                        ):
-                            yield {
-                                "type": "tool_call",
-                                "task_id": task.task_id,
-                                "trace_id": preview_trace_id,
-                                "iteration": task.iteration,
-                                "data": {
-                                    "tool_calls": preview_tool_calls,
-                                    "tool_results": [],
-                                    "pending_arguments": True,
-                                },
-                                "timestamp": preview_timestamp,
+                                "delta": content_delta,
+                                "timestamp": datetime.now(UTC).isoformat(),
                             }
                         continue
 
@@ -2936,58 +2706,21 @@ class ReactEngine:
                         continue
 
                     if meter_type == "tool_payload_delta":
-                        tool_call_id = meter_data.get("tool_call_id")
-                        tool_name = meter_data.get("tool_name")
-                        argument_name = meter_data.get("argument_name")
-                        payload_name = meter_data.get("payload_name")
-                        delta = meter_data.get("delta")
-                        is_final = meter_data.get("is_final")
-                        if (
-                            isinstance(tool_call_id, str)
-                            and isinstance(tool_name, str)
-                            and isinstance(argument_name, str)
-                            and isinstance(payload_name, str)
-                            and isinstance(delta, str)
-                            and isinstance(is_final, bool)
-                        ):
-                            yield {
-                                "type": "tool_payload_delta",
-                                "task_id": task.task_id,
-                                "trace_id": trace_id,
-                                "iteration": task.iteration,
-                                "data": {
-                                    "tool_call_id": tool_call_id,
-                                    "tool_name": tool_name,
-                                    "argument_name": argument_name,
-                                    "payload_name": payload_name,
-                                    "delta": delta,
-                                    "is_final": is_final,
-                                },
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            }
-                        continue
-
-                    if meter_type == "answer_delta":
-                        payload_name = meter_data.get("payload_name")
-                        delta = meter_data.get("delta")
-                        is_final = meter_data.get("is_final")
-                        if (
-                            isinstance(payload_name, str)
-                            and isinstance(delta, str)
-                            and isinstance(is_final, bool)
-                        ):
-                            yield {
-                                "type": "answer_delta",
-                                "task_id": task.task_id,
-                                "trace_id": trace_id,
-                                "iteration": task.iteration,
-                                "data": {
-                                    "payload_name": payload_name,
-                                    "delta": delta,
-                                    "is_final": is_final,
-                                },
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            }
+                        yield {
+                            "type": "tool_payload_delta",
+                            "task_id": task.task_id,
+                            "trace_id": trace_id,
+                            "iteration": task.iteration,
+                            "data": {
+                                "tool_call_id": meter_data.get("tool_call_id", ""),
+                                "tool_name": meter_data.get("tool_name", ""),
+                                "argument_name": meter_data.get("argument_name", ""),
+                                "payload_name": meter_data.get("payload_name", ""),
+                                "delta": meter_data.get("delta", ""),
+                                "is_final": meter_data.get("is_final", False),
+                            },
+                            "timestamp": datetime.now(UTC).isoformat(),
+                        }
                         continue
 
                     raw_rate = meter_data.get("tokens_per_second")
@@ -3074,10 +2807,17 @@ class ReactEngine:
                                 )
                             )
                     assistant_message = event_data.get("assistant_message")
-                    if isinstance(assistant_message, str) and assistant_message:
+                    event_tool_calls = event_data.get("tool_calls")
+                    has_tool_calls = (
+                        isinstance(event_tool_calls, list) and event_tool_calls
+                    )
+                    if isinstance(assistant_message, str) and (
+                        assistant_message or has_tool_calls
+                    ):
                         runtime_state = self.runtime_service.append_assistant_message(
                             task,
-                            assistant_message,
+                            assistant_message or "",
+                            tool_calls=event_tool_calls if has_tool_calls else None,
                         )
                         self._log_messages_pretty(
                             messages=runtime_state.messages,
@@ -3103,6 +2843,14 @@ class ReactEngine:
                 if isinstance(action_type, str):
                     action_type = action_type.strip()
                 pending_user_action = event_data.get("pending_user_action")
+
+                # Track tool results for next iteration's user message.
+                if action_type == "CALL_TOOL":
+                    raw_tool_results = event_data.get("tool_results")
+                    pending_tool_results = (
+                        raw_tool_results if isinstance(raw_tool_results, list) else None
+                    )
+
                 next_action_result = self._build_next_pending_action_result(event_data)
                 if isinstance(pending_user_action, dict):
                     runtime_state = self.runtime_service.set_next_action_result(

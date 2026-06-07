@@ -145,22 +145,6 @@ class ToolManager:
             if token is not None:
                 _tool_execution_context.reset(token)
 
-    def to_text_catalog(self) -> str:
-        """Generate a JSON-structured catalog of all registered tools for LLM consumption.
-
-        Each tool is represented as a JSON object with ``name``, ``description``,
-        and ``parameters`` fields.  The entire catalog is a JSON array so the LLM
-        receives a consistently structured, unambiguous tool list regardless of
-        how complex the individual descriptions are.
-
-        Returns:
-            Pretty-printed JSON array string, or the string ``"[]"`` when empty.
-        """
-        import json
-
-        tools = [meta.to_dict() for meta in self._registry.values()]
-        return json.dumps(tools, ensure_ascii=False, indent=2)
-
     def to_openai_tools(self) -> list[dict[str, Any]]:
         """
         Generate OpenAI function calling format tool list.

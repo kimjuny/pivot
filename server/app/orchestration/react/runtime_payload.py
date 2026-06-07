@@ -89,8 +89,16 @@ def build_recursion_user_payload(
     attachments: list[dict[str, Any]] | None = None,
     after_compaction: bool = False,
     user_intent_override: str | None = None,
+    include_action_result: bool = True,
 ) -> dict[str, Any]:
-    """Build the next recursion payload appended as a user message."""
+    """Build the next recursion payload appended as a user message.
+
+    After the native tool calling migration, tool results are fed back via
+    the ``tool_results`` key on the user message (handled by the message
+    converter), so ``action_result`` is only included when explicitly
+    requested (e.g. for non-tool CALL_TOOL legacy compatibility during
+    the transition period).
+    """
     if after_compaction:
         plan_value: str | list[dict[str, Any]] = build_current_plan_payload(context)
     else:
@@ -104,7 +112,7 @@ def build_recursion_user_payload(
         payload["user_intent"] = task.user_intent
     elif user_intent_override is not None:
         payload["user_intent"] = user_intent_override
-    if pending_action_result is not None:
+    if include_action_result and pending_action_result is not None:
         payload["action_result"] = pending_action_result
     if attachments:
         payload["attachments"] = attachments

@@ -145,6 +145,7 @@ class ReactRuntimeService:
         task: ReactTask,
         payload: dict[str, Any],
         attachments: list[dict[str, Any]] | None = None,
+        tool_results: list[dict[str, Any]] | None = None,
     ) -> TaskRuntimeState:
         """Append the per-recursion user payload and persist it.
 
@@ -152,13 +153,18 @@ class ReactRuntimeService:
             task: Task whose runtime state should be updated.
             payload: Serializable user payload for the next recursion.
             attachments: Neutral multimodal content blocks to append after text.
+            tool_results: Native tool call results to feed back to the LLM.
 
         Returns:
             The updated runtime state.
         """
         state = self.load(task)
         state.messages.append(
-            build_runtime_payload_message(payload, attachments=attachments)
+            build_runtime_payload_message(
+                payload,
+                attachments=attachments,
+                tool_results=tool_results,
+            )
         )
         session = self._get_session_or_raise(task)
         self._persist_state(session, state)
@@ -168,18 +174,24 @@ class ReactRuntimeService:
         self,
         task: ReactTask,
         content: str,
+        *,
+        tool_calls: list[dict[str, Any]] | None = None,
     ) -> TaskRuntimeState:
         """Append the assistant reply to persisted runtime messages.
 
         Args:
             task: Task whose runtime state should be updated.
             content: Raw assistant content to append.
+            tool_calls: Native tool calls when the LLM used function calling.
 
         Returns:
             The updated runtime state.
         """
         state = self.load(task)
-        state.messages.append({"role": "assistant", "content": content})
+        message: dict[str, Any] = {"role": "assistant", "content": content}
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        state.messages.append(message)
         session = self._get_session_or_raise(task)
         self._persist_state(session, state)
         return state
@@ -678,7 +690,12 @@ class ReactRuntimeService:
 
     @staticmethod
     def _normalize_messages(raw_messages: Any) -> list[dict[str, Any]]:
-        """Normalize serialized messages into the accepted runtime shape."""
+        """Normalize serialized messages into the accepted runtime shape.
+
+        Preserves ``tool_calls`` on assistant messages and ``tool_results``
+        on user messages — these are part of the internal unified format
+        consumed by the message converter.
+        """
         if not isinstance(raw_messages, list):
             return []
 
@@ -689,9 +706,9 @@ class ReactRuntimeService:
             role = item.get("role")
             content = item.get("content")
             if (
-                isinstance(role, str)
-                and role in {"system", "user", "assistant"}
-                and (
+                not isinstance(role, str)
+                or role not in {"system", "user", "assistant"}
+                or not (
                     isinstance(content, str)
                     or (
                         isinstance(content, list)
@@ -699,7 +716,21 @@ class ReactRuntimeService:
                     )
                 )
             ):
-                normalized.append({"role": role, "content": content})
+                continue
+
+            message: dict[str, Any] = {"role": role, "content": content}
+
+            # Preserve native tool_calls on assistant messages
+            tool_calls = item.get("tool_calls")
+            if isinstance(tool_calls, list) and role == "assistant":
+                message["tool_calls"] = tool_calls
+
+            # Preserve tool_results on user messages
+            tool_results = item.get("tool_results")
+            if isinstance(tool_results, list) and role == "user":
+                message["tool_results"] = tool_results
+
+            normalized.append(message)
         return normalized
 
     def _get_session_or_raise(self, task: ReactTask) -> Session:

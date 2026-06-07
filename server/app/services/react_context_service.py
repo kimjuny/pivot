@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.crud.llm import llm as llm_crud
 from app.llm.token_estimator import estimate_messages_tokens
@@ -34,9 +34,6 @@ from app.services.skill_service import (
 from app.services.workspace_guidance_service import build_workspace_guidance_prompt
 from app.services.workspace_service import WorkspaceService
 from sqlmodel import Session as DBSession, select
-
-if TYPE_CHECKING:
-    from app.orchestration.tool.manager import ToolManager
 
 
 class ReactContextUsageService:
@@ -265,10 +262,6 @@ class ReactContextUsageService:
             Ordered list of preview messages for token estimation.
         """
         messages: list[dict[str, Any]] = []
-        tool_manager = self._build_request_tool_manager(
-            user_id=user_id,
-            runtime_config=runtime_config,
-        )
         extension_skills = ExtensionService(self.db).build_bundle_skill_payloads(
             runtime_config.extension_bundle
         )
@@ -283,7 +276,6 @@ class ReactContextUsageService:
                 {
                     "role": "system",
                     "content": build_runtime_system_prompt(
-                        tool_manager=tool_manager,
                         skills=skills_json,
                     ),
                 }
@@ -407,20 +399,6 @@ class ReactContextUsageService:
             user_id,
             raw_skill_ids=runtime_config.raw_skill_ids,
             extra_skills=extension_skills,
-        )
-
-    def _build_request_tool_manager(
-        self,
-        *,
-        user_id: int,
-        runtime_config: AgentRuntimeConfig,
-    ) -> ToolManager:
-        """Rebuild the request-scoped tool catalog used in ReAct prompts."""
-        return ExtensionService(self.db).build_request_tool_manager(
-            user_id=user_id,
-            agent_id=runtime_config.agent_id,
-            raw_tool_ids=runtime_config.raw_tool_ids,
-            extension_bundle=runtime_config.extension_bundle,
         )
 
     def _resolve_runtime_config(

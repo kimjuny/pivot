@@ -1,5 +1,6 @@
 """Typed ReAct protocol objects used by the orchestration runtime."""
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,27 +36,25 @@ class ToolCallRequest:
     Attributes:
         id: Tool-call identifier returned by the model.
         name: Tool registry name to execute.
-        batch: Positive execution batch. Lower batches run first; calls in the
-            same batch may run concurrently.
         arguments: Fully resolved argument object for the call.
     """
 
     id: str
     name: str
     arguments: dict[str, Any]
-    batch: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the tool call for persistence and streaming.
 
-        Returns:
-            A plain dictionary representation of the tool call.
+        ``arguments`` is serialized to a JSON string because the internal
+        unified message format stores it that way (matching the OpenAI
+        wire format).  Downstream consumers — ``message_converter`` and
+        ``append_assistant_message`` — expect a string.
         """
         return {
             "id": self.id,
             "name": self.name,
-            "batch": self.batch,
-            "arguments": self.arguments,
+            "arguments": json.dumps(self.arguments, ensure_ascii=False),
         }
 
 

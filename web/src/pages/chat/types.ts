@@ -149,6 +149,7 @@ export type ReactStreamEventType =
   | "compact_failed"
   | "recursion_start"
   | "reasoning"
+  | "content"
   | "message"
   | "action"
   | "tool_call"

@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     OPENROUTER_APP_TITLE: str = "pivot"
     OPENROUTER_APP_CATEGORIES: str = "general-agent"
 
+    # ReactEngine — streaming tool call rendering
+    # How often (ms) to attempt a Pydantic allow_partial parse on accumulated
+    # native tool-call argument JSON during LLM streaming.  The parse discovers
+    # which argument key-value pairs have completed so the frontend can render
+    # them as structured fields instead of raw JSON text.  Higher values save
+    # CPU (parse is ~µs via jiter/Rust); lower values reduce the delay before
+    # a completed argument becomes visible.  500 ms is imperceptible to users
+    # because raw JSON is already streaming in the meantime.
+    REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS: int = 500
+
     # Automation scheduler
     AUTOMATION_SCHEDULER_ENABLED: bool = True
     AUTOMATION_SCHEDULER_SCAN_INTERVAL_SECONDS: int = 30

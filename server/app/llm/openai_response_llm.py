@@ -22,7 +22,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
-from .multimodal import to_openai_response_content
+from .message_converter import to_openai_response_messages
 from .openrouter_attribution import build_openrouter_attribution_headers
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
@@ -83,52 +83,41 @@ class OpenAIResponseLLM(AbstractLLM):
         """Whether this LLM expects incremental input chunks only."""
         return self.cache_policy == "doubao-response-previous-id"
 
-    def _build_input_messages(
-        self,
-        messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Convert chat history to Responses API ``input`` message format."""
-        input_messages: list[dict[str, Any]] = []
+    @staticmethod
+    def _convert_tools_to_response_format(
+        openai_tools: list[dict[str, Any]] | None,
+    ) -> list[dict[str, Any]] | None:
+        """Convert Chat Completions tools to Responses API flat format.
 
-        for message in messages:
-            role = message.get("role", "")
-            content = message.get("content", "")
+        Chat Completions uses a nested ``function`` wrapper:
+            {"type": "function", "function": {"name": ..., "parameters": ...}}
 
-            if role == "system":
-                if isinstance(content, str) and content:
-                    input_messages.append(
-                        {
-                            "role": "system",
-                            "content": content,
-                        }
-                    )
-                continue
+        Responses API expects a flat structure:
+            {"type": "function", "name": ..., "parameters": ...}
+        """
+        if not openai_tools:
+            return None
 
-            if role in {"user", "assistant"}:
-                converted_content = to_openai_response_content(content, role)
-                if isinstance(converted_content, str) and not converted_content:
-                    continue
-                input_messages.append(
-                    {
-                        "role": role,
-                        "content": (
-                            [
-                                {
-                                    "type": (
-                                        "input_text"
-                                        if role == "user"
-                                        else "output_text"
-                                    ),
-                                    "text": converted_content,
-                                }
-                            ]
-                            if isinstance(converted_content, str)
-                            else converted_content
-                        ),
-                    }
-                )
+        response_tools: list[dict[str, Any]] = []
+        for tool in openai_tools:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                response_tool: dict[str, Any] = {
+                    "type": "function",
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {}),
+                }
+                # Forward any extra keys already in flat format (e.g. strict).
+                for key in ("strict",):
+                    if key in tool:
+                        response_tool[key] = tool[key]
+                response_tools.append(response_tool)
+            else:
+                # Pass through non-function tools as-is (custom, namespace, etc.).
+                response_tools.append(tool)
 
-        return input_messages
+        return response_tools or None
 
     def _extract_text_and_tools(
         self, raw_dict: dict[str, Any]
@@ -246,21 +235,64 @@ class OpenAIResponseLLM(AbstractLLM):
         if response is None:
             return "<no response>"
 
-        text = ""
-        with contextlib.suppress(Exception):
-            text = (response.text or "").strip()
-        if not text:
-            text = "<empty response body>"
+        request_id = ""
+        for header_name in (
+            "x-request-id",
+            "request-id",
+            "x-tt-logid",
+            "x-amzn-requestid",
+            "trace-id",
+        ):
+            header_value = response.headers.get(header_name)
+            if isinstance(header_value, str) and header_value.strip():
+                request_id = header_value.strip()
+                break
 
-        request_id = (
-            response.headers.get("x-request-id")
-            or response.headers.get("x-tt-logid")
-            or response.headers.get("x-amzn-requestid")
-            or ""
-        )
+        content_type = response.headers.get("content-type", "").strip()
+
+        parsed_body: Any = None
+        with contextlib.suppress(Exception):
+            parsed_body = response.json()
+
+        detail = ""
+        if isinstance(parsed_body, dict):
+            summary_keys = (
+                "error",
+                "message",
+                "msg",
+                "error_msg",
+                "error_code",
+                "code",
+                "type",
+                "request_id",
+            )
+            summary = {
+                key: parsed_body[key]
+                for key in summary_keys
+                if key in parsed_body and parsed_body[key] not in (None, "")
+            }
+            detail = json.dumps(
+                summary or parsed_body,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        else:
+            with contextlib.suppress(Exception):
+                detail = (response.text or "").strip()
+
+        if not detail:
+            detail = "<empty response body>"
+        if len(detail) > 1200:
+            detail = f"{detail[:1200]}...(truncated)"
+
+        suffix_parts: list[str] = []
+        if content_type:
+            suffix_parts.append(f"content_type={content_type}")
         if request_id:
-            return f"{text} (request_id={request_id})"
-        return text
+            suffix_parts.append(f"request_id={request_id}")
+        if suffix_parts:
+            return f"{detail} ({', '.join(suffix_parts)})"
+        return detail
 
     @staticmethod
     def _extract_stream_response_id(event: dict[str, Any]) -> str | None:
@@ -340,14 +372,18 @@ class OpenAIResponseLLM(AbstractLLM):
             previous_response_id = kwargs.pop("_pivot_previous_response_id", "")
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
-            input_messages = self._build_input_messages(messages)
+            tools = normalized_kwargs.pop("tools", None)
+            response_tools = self._convert_tools_to_response_format(tools)
+            input_messages = to_openai_response_messages(messages)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = self._build_headers()
-            payload = {
+            payload: dict[str, Any] = {
                 "model": self.model,
                 "input": input_messages,
                 **normalized_kwargs,
             }
+            if response_tools and not previous_response_id:
+                payload["tools"] = response_tools
             if (
                 self.cache_policy == "openai-response-prompt-cache-key"
                 and isinstance(pivot_task_id, str)
@@ -393,15 +429,19 @@ class OpenAIResponseLLM(AbstractLLM):
             previous_response_id = kwargs.pop("_pivot_previous_response_id", "")
             merged_kwargs = {**self.extra_config, **kwargs}
             normalized_kwargs = self._merge_extra_body_kwargs(merged_kwargs)
-            input_messages = self._build_input_messages(messages)
+            tools = normalized_kwargs.pop("tools", None)
+            response_tools = self._convert_tools_to_response_format(tools)
+            input_messages = to_openai_response_messages(messages)
             url = f"{self.endpoint.rstrip('/')}/responses"
             headers = self._build_headers()
-            payload = {
+            payload: dict[str, Any] = {
                 "model": self.model,
                 "input": input_messages,
                 "stream": True,
                 **normalized_kwargs,
             }
+            if response_tools and not previous_response_id:
+                payload["tools"] = response_tools
             if (
                 self.cache_policy == "openai-response-prompt-cache-key"
                 and isinstance(pivot_task_id, str)
@@ -416,7 +456,12 @@ class OpenAIResponseLLM(AbstractLLM):
             with requests.post(
                 url, headers=headers, json=payload, timeout=self.timeout, stream=True
             ) as response:
-                response.raise_for_status()
+                if not response.ok:
+                    detail = self._http_error_detail(response)
+                    raise RuntimeError(
+                        "OpenAI response streaming failed for "
+                        f"{self.endpoint}: HTTP {response.status_code} - {detail}"
+                    )
                 stream_response_id: str | None = None
                 for line in response.iter_lines():
                     if not line:
@@ -466,6 +511,75 @@ class OpenAIResponseLLM(AbstractLLM):
                                                 role="assistant",
                                                 content="",
                                                 reasoning_content=reasoning_delta,
+                                            ),
+                                        )
+                                    ],
+                                    created=int(time.time()),
+                                    model=self.model,
+                                )
+                        elif event_type == "response.output_item.added":
+                            # New function_call item: emit tool_call with name + call_id.
+                            item = event.get("item", {})
+                            output_index = event.get("output_index")
+                            if (
+                                isinstance(item, dict)
+                                and item.get("type") == "function_call"
+                            ):
+                                yield Response(
+                                    id=stream_response_id or "",
+                                    choices=[
+                                        Choice(
+                                            index=0,
+                                            message=ChatMessage(
+                                                role="assistant",
+                                                content="",
+                                                tool_calls=[
+                                                    {
+                                                        "index": output_index
+                                                        if isinstance(output_index, int)
+                                                        else None,
+                                                        "id": item.get("call_id", ""),
+                                                        "type": "function",
+                                                        "function": {
+                                                            "name": item.get(
+                                                                "name", ""
+                                                            ),
+                                                            "arguments": "",
+                                                        },
+                                                    }
+                                                ],
+                                            ),
+                                        )
+                                    ],
+                                    created=int(time.time()),
+                                    model=self.model,
+                                )
+                        elif event_type == "response.function_call_arguments.delta":
+                            # Incremental arguments fragment for a function_call.
+                            delta_args = event.get("delta", "")
+                            output_index = event.get("output_index")
+                            if isinstance(delta_args, str) and delta_args:
+                                yield Response(
+                                    id=stream_response_id or "",
+                                    choices=[
+                                        Choice(
+                                            index=0,
+                                            message=ChatMessage(
+                                                role="assistant",
+                                                content="",
+                                                tool_calls=[
+                                                    {
+                                                        "index": output_index
+                                                        if isinstance(output_index, int)
+                                                        else None,
+                                                        "id": "",
+                                                        "type": "function",
+                                                        "function": {
+                                                            "name": "",
+                                                            "arguments": delta_args,
+                                                        },
+                                                    }
+                                                ],
                                             ),
                                         )
                                     ],

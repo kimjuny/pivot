@@ -22,7 +22,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
-from .multimodal import to_openai_completion_content
+from .message_converter import to_openai_completion_messages
 from .openrouter_attribution import build_openrouter_attribution_headers
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
@@ -207,7 +207,8 @@ class OpenAICompletionLLM(AbstractLLM):
                 tool_calls = []
                 for tc in raw_tool_calls:
                     func_data = tc.get("function", {})
-                    tool_call_dict = {
+                    tool_call_dict: dict[str, Any] = {
+                        "index": tc.get("index"),
                         "id": tc.get("id", ""),
                         "type": tc.get("type", "function"),
                         "function": {
@@ -391,13 +392,7 @@ class OpenAICompletionLLM(AbstractLLM):
         url = f"{self.endpoint.rstrip('/')}/chat/completions"
         headers = self._build_headers()
 
-        request_messages: list[dict[str, Any]] = [
-            {
-                **message,
-                "content": to_openai_completion_content(message.get("content", "")),
-            }
-            for message in messages
-        ]
+        request_messages = to_openai_completion_messages(messages)
         if self.cache_policy == "qwen-completion-block-cache":
             request_messages = self._messages_with_qwen_cache_markers(request_messages)
 
@@ -513,13 +508,7 @@ class OpenAICompletionLLM(AbstractLLM):
         url = f"{self.endpoint.rstrip('/')}/chat/completions"
         headers = self._build_headers()
 
-        request_messages: list[dict[str, Any]] = [
-            {
-                **message,
-                "content": to_openai_completion_content(message.get("content", "")),
-            }
-            for message in messages
-        ]
+        request_messages = to_openai_completion_messages(messages)
         if self.cache_policy == "qwen-completion-block-cache":
             request_messages = self._messages_with_qwen_cache_markers(request_messages)
 
@@ -546,7 +535,12 @@ class OpenAICompletionLLM(AbstractLLM):
                     timeout=self.timeout,
                     stream=True,
                 ) as response:
-                    response.raise_for_status()
+                    if not response.ok:
+                        detail = self._http_error_detail(response)
+                        raise RuntimeError(
+                            "OpenAI completion streaming failed for "
+                            f"{self.endpoint}: HTTP {response.status_code} - {detail}"
+                        )
 
                     for line in response.iter_lines():
                         if line:

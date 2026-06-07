@@ -24,7 +24,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
-from .multimodal import to_gemini_content
+from .message_converter import to_gemini_messages
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ _GEMINI_FINISH_REASON_MAP: dict[str, FinishReason] = {
     "PROHIBITED_CONTENT": FinishReason.CONTENT_FILTER,
     "SPII": FinishReason.CONTENT_FILTER,
     "MALFORMED_FUNCTION_CALL": FinishReason.STOP,
+    "TOOL_CALL": FinishReason.TOOL_CALLS,
+    "FUNCTION_CALL": FinishReason.TOOL_CALLS,
 }
 
 
@@ -87,47 +89,6 @@ class GeminiLLM(AbstractLLM):
         )
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
-
-    # ------------------------------------------------------------------
-    # Message conversion
-    # ------------------------------------------------------------------
-
-    def _convert_messages(
-        self, messages: list[dict[str, Any]]
-    ) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]]]:
-        """Convert internal messages to Gemini ``contents`` format.
-
-        Returns:
-            (system_instruction, contents) where *system_instruction* is
-            ``None`` when absent, otherwise a Gemini ``Content`` dict with
-            ``parts``.
-        """
-        system_parts: list[dict[str, Any]] = []
-        contents: list[dict[str, Any]] = []
-
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-
-            if role == "system":
-                if isinstance(content, str) and content:
-                    system_parts.append({"text": content})
-                continue
-
-            gemini_role = "model" if role == "assistant" else "user"
-            converted = to_gemini_content(content)
-
-            if isinstance(converted, str):
-                parts: list[dict[str, Any]] = [{"text": converted}]
-            elif isinstance(converted, list):
-                parts = converted
-            else:
-                continue
-
-            contents.append({"role": gemini_role, "parts": parts})
-
-        system_instruction = {"parts": system_parts} if system_parts else None
-        return system_instruction, contents
 
     # ------------------------------------------------------------------
     # Tool conversion
@@ -183,7 +144,7 @@ class GeminiLLM(AbstractLLM):
         kwargs.pop("_pivot_task_id", None)
         kwargs.pop("_pivot_previous_response_id", None)
 
-        system_instruction, contents = self._convert_messages(messages)
+        system_instruction, contents = to_gemini_messages(messages)
         merged = {**self.extra_config, **kwargs}
 
         tools = merged.pop("tools", None)
@@ -256,9 +217,12 @@ class GeminiLLM(AbstractLLM):
                         content_text += part["text"]
                 elif "functionCall" in part:
                     fc = part["functionCall"]
+                    # Prefer provider-returned id, fall back to tool_use_id,
+                    # then synthetic UUID.
+                    call_id = fc.get("id") or fc.get("tool_use_id") or str(uuid.uuid4())
                     tool_calls.append(
                         {
-                            "id": str(uuid.uuid4()),
+                            "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": fc.get("name", ""),
@@ -324,7 +288,12 @@ class GeminiLLM(AbstractLLM):
                 timeout=self.timeout,
                 stream=True,
             ) as resp:
-                resp.raise_for_status()
+                if not resp.ok:
+                    detail = self._http_error_detail(resp)
+                    raise RuntimeError(
+                        f"Gemini streaming failed for {self.endpoint}: "
+                        f"HTTP {resp.status_code} - {detail}"
+                    )
 
                 for line in resp.iter_lines():
                     if not line:
@@ -370,7 +339,7 @@ class GeminiLLM(AbstractLLM):
 
         if candidates and isinstance(candidates[0], dict):
             parts = candidates[0].get("content", {}).get("parts", [])
-            for part in parts:
+            for part_idx, part in enumerate(parts):
                 if not isinstance(part, dict):
                     continue
                 if "text" in part:
@@ -380,9 +349,11 @@ class GeminiLLM(AbstractLLM):
                         content_text += part["text"]
                 elif "functionCall" in part:
                     fc = part["functionCall"]
+                    call_id = fc.get("id") or fc.get("tool_use_id") or str(uuid.uuid4())
                     tool_calls.append(
                         {
-                            "id": str(uuid.uuid4()),
+                            "index": part_idx,
+                            "id": call_id,
                             "type": "function",
                             "function": {
                                 "name": fc.get("name", ""),

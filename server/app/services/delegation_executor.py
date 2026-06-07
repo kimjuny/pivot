@@ -196,7 +196,6 @@ class DelegationExecutor:
 
         system_prompt = (
             build_runtime_system_prompt(
-                tool_manager=request_tool_manager,
                 skills="[]",
                 delegation_agents="",
             )

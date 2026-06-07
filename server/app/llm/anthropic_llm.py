@@ -23,7 +23,7 @@ from .abstract_llm import (
     UsageInfo,
 )
 from .cache_policy import DEFAULT_CACHE_POLICY, validate_cache_policy
-from .multimodal import to_anthropic_content
+from .message_converter import to_anthropic_messages
 from .openrouter_attribution import build_openrouter_attribution_headers
 from .thinking_policy import DEFAULT_THINKING_POLICY, validate_thinking_policy
 
@@ -38,7 +38,7 @@ class AnthropicLLM(AbstractLLM):
     """
 
     DEFAULT_TIMEOUT = 60  # Request timeout in seconds
-    DEFAULT_MAX_TOKENS = 4096  # Default max tokens for response
+    DEFAULT_MAX_TOKENS = 16384  # Default max tokens for response
 
     def __init__(
         self,
@@ -91,36 +91,6 @@ class AnthropicLLM(AbstractLLM):
         )
         self.timeout = timeout or self.DEFAULT_TIMEOUT
         self.extra_config = extra_config or {}
-
-    def _convert_messages(
-        self, messages: list[dict[str, Any]]
-    ) -> tuple[str, list[dict[str, Any]]]:
-        """Convert messages format to Anthropic's expected format.
-
-        Anthropic requires system message to be separate from the messages array.
-
-        Args:
-            messages: List of message dictionaries with 'role' and 'content'
-
-        Returns:
-            Tuple of (system_message, formatted_messages)
-        """
-        system_message = ""
-        formatted_messages = []
-
-        for msg in messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-
-            if role == "system":
-                if isinstance(content, str):
-                    system_message = content
-            elif role in ["user", "assistant"]:
-                formatted_messages.append(
-                    {"role": role, "content": to_anthropic_content(content)}
-                )
-
-        return system_message, formatted_messages
 
     def _convert_tools_to_anthropic(
         self, openai_tools: list[dict[str, Any]] | None
@@ -297,7 +267,7 @@ class AnthropicLLM(AbstractLLM):
         kwargs.pop("_pivot_task_id", None)
         kwargs.pop("_pivot_previous_response_id", None)
 
-        system_message, formatted_messages = self._convert_messages(messages)
+        system_message, formatted_messages = to_anthropic_messages(messages)
         merged_kwargs = {**self.extra_config, **kwargs}
 
         tools = merged_kwargs.pop("tools", None)
@@ -439,6 +409,37 @@ class AnthropicLLM(AbstractLLM):
             return None
 
         if event_type == "content_block_start":
+            # Emit tool_call with name + id when a tool_use block starts.
+            content_block = event_data.get("content_block", {})
+            if (
+                isinstance(content_block, dict)
+                and content_block.get("type") == "tool_use"
+            ):
+                block_index = event_data.get("index")
+                message = ChatMessage(
+                    role="assistant",
+                    content="",
+                    tool_calls=[
+                        {
+                            "index": block_index
+                            if isinstance(block_index, int)
+                            else None,
+                            "id": content_block.get("id", ""),
+                            "type": "function",
+                            "function": {
+                                "name": content_block.get("name", ""),
+                                "arguments": "",
+                            },
+                        }
+                    ],
+                )
+                choice = Choice(index=0, message=message)
+                return Response(
+                    id=str(uuid.uuid4()),
+                    choices=[choice],
+                    created=int(time.time()),
+                    model=self.model,
+                )
             return None
 
         if event_type == "content_block_stop":
@@ -476,7 +477,34 @@ class AnthropicLLM(AbstractLLM):
                     )
 
             if delta_type == "input_json_delta":
-                # Tool input is accumulated by the caller; nothing to yield.
+                # Yield incremental tool input JSON fragment.
+                partial_json = delta.get("partial_json", "")
+                if isinstance(partial_json, str) and partial_json:
+                    block_index = event_data.get("index")
+                    message = ChatMessage(
+                        role="assistant",
+                        content="",
+                        tool_calls=[
+                            {
+                                "index": block_index
+                                if isinstance(block_index, int)
+                                else None,
+                                "id": "",
+                                "type": "function",
+                                "function": {
+                                    "name": "",
+                                    "arguments": partial_json,
+                                },
+                            }
+                        ],
+                    )
+                    choice = Choice(index=0, message=message)
+                    return Response(
+                        id=str(uuid.uuid4()),
+                        choices=[choice],
+                        created=int(time.time()),
+                        model=self.model,
+                    )
                 return None
 
             return None
@@ -599,7 +627,12 @@ class AnthropicLLM(AbstractLLM):
                 timeout=self.timeout,
                 stream=True,
             ) as resp:
-                resp.raise_for_status()
+                if not resp.ok:
+                    text = self._http_error_detail(resp)
+                    raise RuntimeError(
+                        "Anthropic streaming failed for "
+                        f"{self.endpoint}: HTTP {resp.status_code} - {text}"
+                    )
 
                 stream_response_id = ""
 
@@ -630,13 +663,42 @@ class AnthropicLLM(AbstractLLM):
 
                     usage = self._extract_stream_usage(event_data)
                     if usage is not None:
-                        yield Response(
-                            id=stream_response_id or str(uuid.uuid4()),
-                            choices=[],
-                            created=int(time.time()),
-                            model=self.model,
-                            usage=usage,
-                        )
+                        # message_delta carries the final stop_reason alongside usage.
+                        finish_reason = None
+                        if event_data.get("type") == "message_delta":
+                            delta = event_data.get("delta")
+                            if isinstance(delta, dict):
+                                raw_stop = delta.get("stop_reason")
+                                if raw_stop == "end_turn":
+                                    finish_reason = FinishReason.STOP
+                                elif raw_stop == "max_tokens":
+                                    finish_reason = FinishReason.LENGTH
+                                elif raw_stop == "tool_use":
+                                    finish_reason = FinishReason.TOOL_CALLS
+                        if finish_reason is not None:
+                            yield Response(
+                                id=stream_response_id or str(uuid.uuid4()),
+                                choices=[
+                                    Choice(
+                                        index=0,
+                                        message=ChatMessage(
+                                            role="assistant", content=""
+                                        ),
+                                        finish_reason=finish_reason,
+                                    )
+                                ],
+                                created=int(time.time()),
+                                model=self.model,
+                                usage=usage,
+                            )
+                        else:
+                            yield Response(
+                                id=stream_response_id or str(uuid.uuid4()),
+                                choices=[],
+                                created=int(time.time()),
+                                model=self.model,
+                                usage=usage,
+                            )
 
                     parsed = self._parse_stream_event(event_data)
                     if parsed is not None:

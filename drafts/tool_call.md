@@ -1,713 +1,744 @@
-# Tool Call Batch 与 Eager Execution 执行计划
+# Native Tool Calling 迁移方案
 
-本文面向后续实现者，尤其是 Agent 自己。目标是把我们已经达成的 tool call 设计共识落成可执行计划。
+> 从 prompt-based（sentinel marker）迁移到各 LLM provider 的原生 tool calling API。
 
-## 最新共识
+## 1. 背景与目标
 
-1. `tool_call.batch` 是核心编排协议。
-2. `batch` 越小越早执行，同一个 `batch` 内并发执行。
-3. 是否并发主要由 Agent 判断。明显互相影响、存在前后依赖、或者需要前一个结果构造后一个参数的动作，Agent 应自行拆 batch 或拆 recursion。
-4. Runtime 不做过度保姆式串行，只保留协议校验、取消、fatal error、pending user action 等底线保护。
-5. Eager tool call 是目标能力：某个 tool 的参数 payload 完整且所在 batch 可执行后，应尽早启动，不必等整段 assistant response 完成。
-6. Eager 不能突破 batch 顺序。payload ready 只代表参数可解析，不代表可以越过更早 batch 执行。
+### 现状
 
-核心规则：
+Pivot 的 ReactEngine 采用 **prompt-based tool calling**：
+- 工具通过 `ToolManager.to_text_catalog()` 以 JSON 数组注入 system prompt
+- LLM 输出一个 JSON envelope，其中 `action_type: "CALL_TOOL"` 时附带 `$payload_ref` 引用
+- 实际参数值放在 `<<<PIVOT_PAYLOAD:name:BEGIN/END_6F2D9C1A>>>` 哨兵标记之间
+- `parser.py` 负责解析 JSON + 提取 payload 块 + 解析 `$payload_ref`
+- Eager execution：payload 块完整后立即启动工具执行，不等整个 LLM 响应结束
 
-```text
-Eager execution is readiness-gated by payload completeness,
-but order-gated by the lowest unfinished batch.
+### 目标
+
+- 迁移到各 provider 的 **原生 tool calling API**（`tools` 参数 → `tool_calls` 响应 → `tool_result` 回传）
+- 保留 Eager Execution 能力（基于 streaming tool call 完成检测）
+- PLAN / REFLECT / CLARIFY / ANSWER 保持文本输出，只有 **CALL_TOOL** 走 native tool calling
+- 干净切，无 fallback，删除所有旧 sentinel/parser 代码
+
+---
+
+## 2. 已达成的共识
+
+| # | 决策 | 结论 |
+|---|------|------|
+| 1 | Custom Tools（Response API 独有） | **不做**。PLAN/REFLECT/CLARIFY/ANSWER 保持文本，只有 CALL_TOOL 走 native |
+| 2 | Gemini call_id | Gemini 并行调用支持 `call_id` / `tool_use_id`，需从 API 响应中正确提取 |
+| 3 | 消息持久化格式 | **方案 A**：DB 存统一内部格式，发送给 LLM 时按 provider 转换 |
+| 4 | 是否保留 prompt-based 作为 fallback | **不保留**。干净切，旧代码全删 |
+| 5 | Batch 编排 | **方案 A（隐式多轮）**：删除 batch 字段。并行调用由模型在一个响应中返回多个 tool_calls；顺序调用由模型自然分多轮。不再一次响应多批 |
+| 6 | `strict` mode | 默认 `false`，前端 LLM Provider Create/Edit Dialog 中可选。三方兼容模型可能不支持此参数 |
+| 7 | `tool_choice` | 保持默认 `auto`，不实现配置。模型需自由切换 tool calling 和文本输出 |
+| 8 | Eager Tool Execution | **保留且更干净**。每个 provider 有明确的 tool call 完成信号（见第 5.4 节） |
+
+### 路由逻辑
+
+```
+response 到达后:
+├── 有 tool_calls? → 执行 CALL_TOOL 流程（优先）
+│   文本部分作为 reasoning/thinking 展示给用户
+├── 无 tool_calls? → 解析文本部分
+│   ├── 含 PLAN/REFLECT/CLARIFY/ANSWER → 对应处理
+│   └── 纯文本 → 当作 ANSWER 处理
 ```
 
-中文：
+每个轮次只有一种主 action，逻辑清晰。
 
-```text
-eager 只解决“能早跑就早跑”，但不能突破 batch 顺序。
-```
+---
 
-## 协议目标形态
+## 3. 四大 Provider Native Tool Calling API 规范
 
-`CALL_TOOL` 的 `tool_calls` 中每个对象新增 `batch`：
+### 3.1 OpenAI Chat Completion (`/chat/completions`)
+
+**Tool 定义**：
 
 ```json
 {
-  "id": "call_read_component",
-  "name": "read_file",
-  "batch": 1,
-  "arguments": {
-    "path": {
-      "$payload_ref": "payload_component_path"
-    }
+  "type": "function",
+  "function": {
+    "name": "read_file",
+    "description": "...",
+    "parameters": { "type": "object", ... },
+    "strict": true
   }
 }
 ```
 
-约束：
-
-- `id`: 非空字符串，全局唯一于本轮 `CALL_TOOL`。
-- `name`: 非空字符串。
-- `batch`: 正整数。建议从 1 开始。
-- `arguments`: object，所有参数值继续使用 `{"$payload_ref":"..."}`。
-- 没有 `batch` 时，Phase 3A 可以兼容为 `1`；如果希望更严格，也可以 parser retry 要求补齐。建议第一版兼容，system prompt 强要求。
-
-执行语义：
-
-```text
-batch 1 内全部可并发
-batch 1 全部结束后，batch 2 才能开始
-batch 2 全部结束后，batch 3 才能开始
-```
-
-## System Prompt 改造
-
-修改 `pivot/server/app/orchestration/react/system_prompt.md` 的 `action_type = CALL_TOOL` 章节。
-
-需要新增说明：
-
-- 每个 tool_call 必须包含 `batch`。
-- 同 batch 表示可以并行。
-- 更大的 batch 表示必须等更小 batch 完成后再执行。
-- 如果动作之间有明显依赖，必须拆 batch。
-- 如果后一个工具的参数依赖前一个工具的结果，不能放进同一个 `CALL_TOOL`，应进入下一轮 recursion。
-- Agent 不应把可能互相覆盖的写操作放在同一个 batch。
-- Agent 可以把多个独立 read/search/list 操作放在同一个 batch。
-
-示例要更新为：
+**响应格式**（`message.tool_calls`）：
 
 ```json
 {
-  "action": {
-    "action_type": "CALL_TOOL",
-    "output": {
-      "tool_calls": [
-        {
-          "id": "call_read_a",
-          "name": "read_file",
-          "batch": 1,
-          "arguments": {
-            "path": {
-              "$payload_ref": "payload1"
-            }
-          }
-        },
-        {
-          "id": "call_read_b",
-          "name": "read_file",
-          "batch": 1,
-          "arguments": {
-            "path": {
-              "$payload_ref": "payload2"
-            }
-          }
-        },
-        {
-          "id": "call_run_tests",
-          "name": "run_bash",
-          "batch": 2,
-          "arguments": {
-            "command": {
-              "$payload_ref": "payload3"
-            }
-          }
-        }
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "I'll read that file.",
+      "tool_calls": [{
+        "id": "call_abc123",
+        "type": "function",
+        "function": { "name": "read_file", "arguments": "{\"path\":\"main.py\"}" }
+      }]
+    },
+    "finish_reason": "tool_calls"
+  }]
+}
+```
+
+**Tool Result 回传**（专用 `tool` 角色）：
+
+```json
+{ "role": "tool", "tool_call_id": "call_abc123", "content": "file contents..." }
+```
+
+**流式事件**：
+- `delta.tool_calls[i].function.arguments` 逐片段拼接
+- `finish_reason: "tool_calls"` 表示所有 tool call 完成
+
+---
+
+### 3.2 OpenAI Response (`/responses`)
+
+**Tool 定义**（扁平格式，无 `function` 包裹）：
+
+```json
+{
+  "type": "function",
+  "name": "read_file",
+  "description": "...",
+  "parameters": { "type": "object", ... },
+  "strict": true
+}
+```
+
+**响应格式**（`output[]` 数组）：
+
+```json
+{
+  "output": [
+    { "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "..."}] },
+    {
+      "type": "function_call",
+      "id": "fc_abc123",
+      "call_id": "call_abc123",
+      "name": "read_file",
+      "arguments": "{\"path\":\"main.py\"}"
+    }
+  ]
+}
+```
+
+**Tool Result 回传**（`function_call_output`，无角色概念）：
+
+```json
+{ "type": "function_call_output", "call_id": "call_abc123", "output": "file contents..." }
+```
+
+**流式事件**：
+- `response.output_item.added` → 新 tool call 开始（含 `name`, `call_id`）
+- `response.function_call_arguments.delta` → 逐步拼接 arguments
+- `response.function_call_arguments.done` → 完整 arguments 可用 → **触发 eager execution**
+
+---
+
+### 3.3 Anthropic (`/v1/messages`)
+
+**Tool 定义**（`input_schema` 替代 `parameters`）：
+
+```json
+{
+  "name": "read_file",
+  "description": "...",
+  "input_schema": { "type": "object", ... }
+}
+```
+
+**响应格式**（`content[]` 数组中的 `tool_use` block）：
+
+```json
+{
+  "content": [
+    { "type": "text", "text": "I'll read that file." },
+    {
+      "type": "tool_use",
+      "id": "toolu_abc123",
+      "name": "read_file",
+      "input": { "path": "main.py" }
+    }
+  ],
+  "stop_reason": "tool_use"
+}
+```
+
+**Tool Result 回传**（`user` 角色 + `tool_result` content block）：
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "tool_result", "tool_use_id": "toolu_abc123", "content": "file contents..." },
+    { "type": "text", "text": "What should I do next?" }
+  ]
+}
+```
+
+⚠️ **Anthropic 硬性约束**：
+- `tool_result` blocks 必须紧跟在 assistant 的 `tool_use` 消息之后
+- 同一 user message 中，`tool_result` blocks 必须排在任何 `text` blocks 之前
+
+**流式事件**：
+- `content_block_start`（type=`tool_use`）→ 新 tool call 开始（含 `id`, `name`）
+- `input_json_delta` → 逐步拼接 input JSON
+- `content_block_stop` → tool call 完整 → **触发 eager execution**
+
+---
+
+### 3.4 Gemini (`generateContent`)
+
+**Tool 定义**（包裹在 `functionDeclarations` 内）：
+
+```json
+{
+  "tools": [{
+    "functionDeclarations": [{
+      "name": "read_file",
+      "description": "...",
+      "parameters": { "type": "object", ... }
+    }]
+  }]
+}
+```
+
+**响应格式**（`candidates[0].content.parts[]` 中的 `functionCall`）：
+
+```json
+{
+  "candidates": [{
+    "content": {
+      "role": "model",
+      "parts": [
+        { "text": "I'll read that file." },
+        { "functionCall": { "name": "read_file", "args": { "path": "main.py" } } }
       ]
     }
-  }
+  }]
 }
 ```
 
-## Data Model 改造
+**Tool Result 回传**（`user` 角色 + `functionResponse` part）：
 
-文件：`pivot/server/app/orchestration/react/types.py`
-
-`ToolCallRequest` 增加：
-
-```python
-batch: int = 1
+```json
+{
+  "role": "user",
+  "parts": [
+    { "functionResponse": { "name": "read_file", "response": { "content": "file contents..." } } }
+  ]
+}
 ```
 
-`to_dict()` 输出 `batch`。
+⚠️ **Gemini 注意事项**：
+- 并行调用时使用 `tool_use_id`（匹配输出中的 `call_id`）来关联结果
+- 需要保留 `thought_signature` 跨轮次（思考模型）
+- `args` 是已解析的 dict，不是 JSON 字符串
 
-可以增加 helper：
+---
+
+## 4. Pivot 现有代码就绪度评估
+
+基于源码探索的精确评估：
+
+### 4.1 LLM Provider 层
+
+| 组件 | 文件 | 状态 | Gap |
+|------|------|------|-----|
+| **Tool 定义转换** | | | |
+| Completion tools 透传 | `openai_completion_llm.py:370-408` | ✅ 已支持 | 需要从 OpenAI Completion 格式传入 |
+| Response tools 透传 | `openai_response_llm.py:336-350` | ✅ 已支持 | 需要 Response 扁平格式（不是嵌套 `function`） |
+| Anthropic 格式转换 | `anthropic_llm.py:125-150` | ✅ 已实现 | `parameters` → `input_schema` |
+| Gemini 格式转换 | `gemini_llm.py:136-157` | ✅ 已实现 | → `functionDeclarations` |
+| **非流式 Response 解析** | | | |
+| Completion | `openai_completion_llm.py:204-218` | ✅ 已解析 `tool_calls` | 无 |
+| Response | `openai_response_llm.py:133-177` | ✅ 已解析 `function_call` | 无 |
+| Anthropic | `anthropic_llm.py:346-372` | ✅ 已解析 `tool_use` | 无 |
+| Gemini | `gemini_llm.py:234-306` | ✅ 已解析 `functionCall` | 需要提取真实 call_id 而非合成 UUID |
+| **流式 Tool Call 解析** | | | |
+| Completion | `openai_completion_llm.py:488-632` | ⚠️ 片段已 yield | 需要上层积累（当前已如此） |
+| Response | `openai_response_llm.py:387-543` | ❌ 完全缺失 | 需要新增 `response.output_item.added` / `response.function_call_arguments.delta` / `response.function_call_arguments.done` 事件处理 |
+| Anthropic | `anthropic_llm.py:422-484` | ❌ 被丢弃 | `content_block_start`(L441) 和 `input_json_delta`(L478) 都 return None，需要改为正确 yield |
+| Gemini | `gemini_llm.py:363-428` | ⚠️ 可用但有缺陷 | 每个 chunk 生成新 UUID，需要去重或使用 provider 返回的 id |
+| **Tool Role 消息处理** | | | |
+| Completion | `openai_completion_llm.py` 无转换 | ✅ 原样透传 | 无 |
+| Response | `openai_response_llm.py:86-131` | ❌ 被丢弃 | `_build_input_messages()` 需要处理 `function_call_output` 类型 |
+| Anthropic | `anthropic_llm.py:95-123` | ❌ 被丢弃 | `_convert_messages()` 需要生成 `tool_use`/`tool_result` 格式 |
+| Gemini | `gemini_llm.py:95-130` | ❌ 被丢弃 | `_convert_messages()` 需要生成 `functionCall`/`functionResponse` 格式 |
+| **死代码** | | | |
+| `AbstractLLM._convert_response()` | `abstract_llm.py:254-351` | 死代码 | 迁移完成后删除 |
+
+### 4.2 ReactEngine 层
+
+| 组件 | 文件:行号 | 当前行为 | 迁移后 |
+|------|-----------|----------|--------|
+| LLM 调用 | `engine.py:2009-2012` | 不传 `tools` 参数 | 传入 `tools=tool_manager.to_openai_tools()` |
+| 输出解析 | `engine.py:2053-2057` | `parse_react_output(content)` | 从 response 的 `tool_calls` 提取 + 文本部分解析 PLAN/REFLECT/CLARIFY/ANSWER |
+| Eager 触发 | `engine.py:643-887` | 哨兵标记检测 → payload 块完成 | provider-native 流式 tool call 完成检测 |
+| Eager 执行 | `engine.py:1856-1951` | payload refs 解析后启动 | tool call arguments 完整后启动 |
+| 工具结果回传 | `engine.py:3106-3122` | 文本形式嵌入下一轮 user message | provider-native tool result 格式 |
+| Assistant 消息追加 | `engine.py:3077-3091` | 原始文本（含 sentinel） | 含 `tool_calls` 的消息 |
+
+### 4.3 Parser 层
+
+| 组件 | 文件:行号 | 迁移后处理 |
+|------|-----------|-----------|
+| `parse_react_output()` | `parser.py:265-308` | 大幅简化：只解析 JSON envelope 中的 PLAN/REFLECT/CLARIFY/ANSWER |
+| `split_json_and_payload_sections()` | `parser.py:66-93` | **删除**：不再有 payload section |
+| `parse_payload_blocks()` | `parser.py:110-161` | **删除** |
+| `collect_complete_payload_blocks()` | `parser.py:164-213` | **删除** |
+| `$payload_ref` 解析 | `parser.py:705-798` | **删除** |
+| `PAYLOAD_BEGIN_RE` / 哨兵相关常量 | `parser.py:9-27` | **删除** |
+
+### 4.4 System Prompt
+
+| 组件 | 文件:行号 | 变化 |
+|------|-----------|------|
+| `{{tools_description}}` 占位符 | `system_prompt.md:133-139` | **删除**：工具通过 API 传入，不再注入 prompt |
+| CALL_TOOL 格式说明 | `system_prompt.md:32-71` | **大幅简化**：不再需要 `$payload_ref` 和哨兵格式说明 |
+| 工具使用指导 | `system_prompt.md:133-139` | **简化**：只保留何时使用工具的高层指导 |
+
+### 4.5 Frontend（预计零或极小改动）
+
+SSE 事件类型不变（`tool_call`, `tool_payload_delta`, `tool_result` 等），因为：
+- 这些事件由 ReactEngine 发射，格式由我们控制
+- 后端从 sentinel-based 改为 native-tool-based 后，发射的事件数据结构保持兼容
+- `RecursionCard.tsx` 渲染逻辑不变
+
+可能的微小变化：
+- `tool_payload_delta` 事件的 arguments 内容来源从 "sentinel payload 文本" 变为 "native tool call arguments JSON"，前端需要验证兼容性
+
+---
+
+## 5. 架构设计
+
+### 5.1 统一内部消息格式
+
+DB 中存储的消息使用统一格式（不依赖任何 provider）：
 
 ```python
-def group_tool_calls_by_batch(tool_calls: list[ToolCallRequest]) -> list[list[ToolCallRequest]]:
+# 消息角色
+INTERNAL_ROLE_USER = "user"
+INTERNAL_ROLE_ASSISTANT = "assistant"
+INTERNAL_ROLE_SYSTEM = "system"
+
+# 一条消息的内部表示
+{
+    "role": "assistant",
+    "content": "I'll read that file for you.",
+    "tool_calls": [                          # 可选，仅 assistant 消息
+        {
+            "id": "call_abc123",
+            "name": "read_file",
+            "arguments": "{\"path\":\"main.py\"}"
+        }
+    ]
+}
+
+{
+    "role": "user",
+    "content": "Here are the results...",     # 可选
+    "tool_results": [                         # 可选，仅 user 消息
+        {
+            "tool_call_id": "call_abc123",
+            "name": "read_file",
+            "result": "file contents...",
+            "is_error": false
+        }
+    ]
+}
+```
+
+### 5.2 Provider 消息转换层
+
+新增 `server/app/llm/message_converter.py`，将内部格式转换为各 provider 的 API 格式：
+
+```
+内部格式 → OpenAI Completion: content + tool_calls → message.tool_calls, role=tool
+内部格式 → OpenAI Response: content + tool_calls → output items, function_call_output
+内部格式 → Anthropic: content + tool_calls → content blocks (text + tool_use / tool_result)
+内部格式 → Gemini: content + tool_calls → parts (text + functionCall / functionResponse)
+```
+
+### 5.3 Provider Tool Result Formatter
+
+每个 provider 需要将自己的 tool call 结果格式化为该 provider 能理解的消息：
+
+| Provider | Tool Call 消息 | Tool Result 消息 |
+|----------|---------------|-----------------|
+| Completion | `message.tool_calls` 保留原样 | `{role: "tool", tool_call_id, content}` |
+| Response | `output[]` 中的 `function_call` item | `{type: "function_call_output", call_id, output}` |
+| Anthropic | `content[]` 中的 `tool_use` block | `{role: "user", content: [{type: "tool_result", tool_use_id, content}]}` |
+| Gemini | `parts[]` 中的 `functionCall` part | `{role: "user", parts: [{functionResponse: {name, response}}]}` |
+
+### 5.4 Eager Execution 新触发机制
+
+| Provider | 流式中的 tool call 完成信号 | Eager 触发点 |
+|----------|--------------------------|-------------|
+| Completion | `delta.tool_calls[i]` arguments 拼接完整 | 检测到完整 JSON arguments |
+| Response | `response.function_call_arguments.done` 事件 | 该事件到达即触发 |
+| Anthropic | `content_block_stop`（当前 block 是 `tool_use`） | 该事件到达即触发 |
+| Gemini | `functionCall` part 出现（含完整 args） | part 出现即触发 |
+
+---
+
+## 6. 需要修改的文件清单
+
+### 新增文件
+
+| 文件 | 用途 |
+|------|------|
+| `server/app/llm/message_converter.py` | 内部消息格式 → 各 provider API 格式的转换 |
+
+### 修改文件
+
+| 文件 | 改动范围 |
+|------|----------|
+| **LLM Provider 层** | |
+| `server/app/llm/openai_completion_llm.py` | 小：`_build_messages()` 处理 `tool_results` 角色 |
+| `server/app/llm/openai_response_llm.py` | **中**：`_build_input_messages()` 处理 tool result + **补全流式 tool call 事件** |
+| `server/app/llm/anthropic_llm.py` | **中**：`_convert_messages()` 处理 tool_use/tool_result + 修改 `_parse_stream_event()` 中的 `content_block_start` / `input_json_delta` |
+| `server/app/llm/gemini_llm.py` | **中**：`_convert_messages()` 处理 functionCall/functionResponse + `_parse_response()` 提取真实 call_id + `_parse_stream_chunk()` 去重 |
+| **ReactEngine 层** | |
+| `server/app/orchestration/react/engine.py` | **大**：`execute_recursion()` 传入 tools、解析 tool_calls、tool result 回传、eager execution 重构 |
+| **Parser 层** | |
+| `server/app/orchestration/react/parser.py` | **大**：删除 sentinel/payload/ref 相关代码，只保留 PLAN/REFLECT/CLARIFY/ANSWER 文本解析 |
+| **System Prompt** | |
+| `server/app/orchestration/react/system_prompt.md` | **中**：删除 `{{tools_description}}` 占位符和 CALL_TOOL 格式说明 |
+| `server/app/orchestration/react/prompt_template.py` | **小**：删除 `tools_description` 模板替换逻辑 |
+| **Tool 层** | |
+| `server/app/orchestration/tool/manager.py` | **小**：删除 `to_text_catalog()`，保留 `to_openai_tools()` |
+
+### 删除文件
+
+无（代码删除在现有文件中完成）。
+
+### 删除的代码
+
+| 代码 | 位置 | 原因 |
+|------|------|------|
+| `AbstractLLM._convert_response()` | `abstract_llm.py:254-351` | 死代码，从未被调用 |
+| `to_text_catalog()` | `manager.py:148-162` | 不再需要文本目录注入 prompt |
+| 哨兵相关常量 | `parser.py:9-27` | 不再使用 sentinel markers |
+| `split_json_and_payload_sections()` | `parser.py:66-93` | 不再有 payload section |
+| `parse_payload_blocks()` | `parser.py:110-161` | 不再有 payload blocks |
+| `collect_complete_payload_blocks()` | `parser.py:164-213` | 不再需要流式 payload 检测 |
+| `_resolve_payload_references()` | `parser.py:705-798` | 不再使用 `$payload_ref` |
+| `_resolve_answer_payload_reference()` | `parser.py:801-829` | ANSWER 不再需要 payload ref |
+| Eager execution 中的 sentinel 检测逻辑 | `engine.py` 中的 `PAYLOAD_BEGIN_RE` 使用 | 改为 native tool call 完成检测 |
+
+---
+
+## 7. 实施阶段
+
+### Phase 0: 基础抽象（2 天）
+
+1. 创建 `message_converter.py`，实现内部消息格式 → 四种 provider 格式的转换
+2. 修改四个 provider 的 `_convert_messages()` / `_build_input_messages()` / `_build_messages()`，使其能处理 tool result 消息
+3. 单元测试：给定内部格式消息 → 验证各 provider 输出正确的 API 格式
+
+**验证**：每个 provider 的消息转换有独立的单元测试通过
+
+### Phase 1: ReactEngine 核心改造（3 天）
+
+1. 修改 `execute_recursion()`：传入 `tools=tool_manager.to_openai_tools()`
+2. 新增 `_extract_tool_calls_and_text()` 方法：从 LLM response 中分离 tool_calls 和文本
+3. 修改路由逻辑：有 tool_calls → CALL_TOOL；无 → 解析文本
+4. 修改工具结果回传：使用内部统一格式存储，通过 message_converter 转换后发送
+5. 简化 `parser.py`：只保留文本 action（PLAN/REFLECT/CLARIFY/ANSWER）的解析
+
+**验证**：用 OpenAI Completion protocol 端到端验证（非流式）
+
+### Phase 2: Eager Execution 适配（2 天）
+
+1. 重构 `_stream_chat_response()`：移除 sentinel 检测，改为 tool call 完成检测
+2. 每个 provider 的流式 tool call 处理：
+   - Completion：积累 `delta.tool_calls[i].function.arguments`
+   - Response：处理 `response.function_call_arguments.done`
+   - Anthropic：处理 `content_block_start`(tool_use) + `input_json_delta` + `content_block_stop`
+   - Gemini：检测 `functionCall` part 出现
+3. `_advance_eager_tool_execution()` 改为基于 tool call arguments 完整性触发
+
+**验证**：用 OpenAI Completion protocol 端到端验证（流式 + eager execution）
+
+### Phase 3: 补全其他 Provider（2-3 天）
+
+1. **OpenAI Response**：补全 `chat_stream()` 中的 `response.output_item.added` / `response.function_call_arguments.delta` / `response.function_call_arguments.done` 事件处理
+2. **Anthropic**：修改 `_parse_stream_event()` 让 `content_block_start`(tool_use) 和 `input_json_delta` 正确 yield
+3. **Gemini**：`_parse_response()` 提取真实 call_id、`_parse_stream_chunk()` 去重、添加 FinishReason.TOOL_CALLS 映射
+
+**验证**：每个 provider 独立端到端测试
+
+### Phase 4: 清理与 System Prompt 优化（1 天）
+
+1. 删除所有 sentinel/parser 相关的死代码
+2. 精简 `system_prompt.md`：移除 `{{tools_description}}` 和 CALL_TOOL 格式说明
+3. 修改 `prompt_template.py`：移除 `tools_description` 模板变量
+4. 删除 `to_text_catalog()`
+5. 删除 `AbstractLLM._convert_response()` 死代码
+6. 全量回归测试
+
+**验证**：四个 provider 全部通过，前端显示正常
+
+---
+
+## 8. System Prompt 变化
+
+### 现有 system_prompt.md 关键部分
+
+```
+## Output Format
+Output a bare JSON object. When `action_type` is `CALL_TOOL` or `ANSWER`,
+append payload blocks immediately after the JSON.
+
+## CALL_TOOL Format
+(30+ 行关于 $payload_ref、sentinel markers、batch 编排的说明)
+
+## Available Tools
+```json
+{{tools_description}}
+```
+```
+
+### 迁移后
+
+```
+## Output Format
+Output a bare JSON object with your reasoning and next action decision.
+
+When you need to execute tools, use the tool calling interface.
+When you want to plan, reflect, clarify, or answer, output the JSON action directly.
+
+## Action Types
+- PLAN: ...
+- REFLECT: ...
+- CLARIFY: ...
+- ANSWER: ...
+
+## Available Tools
+(不再列出。工具通过 API tools 参数传入，模型自动感知)
+```
+
+关键变化：
+- **不再在 prompt 中描述工具列表**（通过 API 传入）
+- **不再描述 CALL_TOOL 格式**（模型通过 native tool calling 自动处理）
+- **不再描述 sentinel/payload 协议**（完全删除）
+- **保留** PLAN/REFLECT/CLARIFY/ANSWER 的文本格式说明
+
+---
+
+## 9. 前端影响评估
+
+### SSE 事件类型（不变）
+
+| 事件 | 来源变化 | 数据结构变化 |
+|------|----------|-------------|
+| `tool_call` | 从 sentinel 解析变为从 native tool_calls 提取 | `tool_calls[].arguments` 从 payload ref 变为直接 JSON |
+| `tool_payload_delta` | 从 payload 文本流变为 tool call arguments 流 | 可能从纯文本变为 JSON 片段 |
+| `tool_result` | 不变 | 不变 |
+| `answer_delta` | 不变 | 不变 |
+| `reasoning` / `message` / `action` | 不变 | 不变 |
+
+### RecursionCard.tsx
+
+- `ToolTimeline` 组件处理 `tool_call` / `tool_payload_delta` / `tool_result` 事件
+- 需要验证 `tool_payload_delta` 的 arguments 流内容是否兼容现有的 live payload 累积逻辑
+- 如果 native tool calling 的 arguments 是 JSON 字符串而非自由文本，可能需要微调
+
+### 预计改动
+
+**极小或零**。主要风险在 `tool_payload_delta` 的内容格式兼容性，需要实测确认。
+
+---
+
+## 10. Batch 编排（已确认：方案 A 隐式多轮）
+
+### 决策
+
+**删除 batch 字段**，采用隐式多轮方案。
+
+### 现有方式
+LLM 在 JSON envelope 中指定每个 tool call 的 `batch` 编号，parser 提取后按 batch 顺序执行。一次 LLM 调用可以编排多批工具。
+
+### 迁移后
+
+Native tool calling API 的 `tool_calls` 是扁平列表，没有地方挂 batch 元数据。
+
+**方案 A（隐式多轮）**：
+- 并行调用 → 模型在一个响应中返回多个 tool_calls → 全部并发执行
+- 顺序调用 → 模型分多轮：先返回第一批 tool_calls → 收到结果 → 再返回第二批
+- 这就是 Claude Code、OpenAI Agents SDK 等所有主流 agent 的标准做法
+
+### 影响
+
+| 维度 | 现在 | 迁移后 |
+|------|------|--------|
+| 编排方式 | 显式 batch 编号 | 隐式多轮 |
+| 串行执行 | 1 次 LLM 调用内完成 | N 次 LLM 调用 |
+| 并行执行 | 同 batch 内并发 | 同一响应内多个 tool_calls 并发 |
+| 协议复杂度 | 需要 batch 字段 + 顺序保证 | 零额外协议 |
+| 延迟 | 较低（少一次 LLM 往返） | 略高（多一次 LLM 往返） |
+
+### 代码变化
+
+- **删除** `parser.py` 中 `tool_calls[].batch` 的解析逻辑
+- **删除** `engine.py` 中按 batch 分组的执行逻辑
+- **简化** `execute_recursion()`：所有 tool_calls 并发执行，无 batch 排序
+- **简化** `system_prompt.md`：不再需要 batch 编排指导
+
+---
+
+## 11. 已确认方案：`tool_payload_delta` Streaming 渲染
+
+### 决策：方案 B — Batched Partial Parse（500ms 纯时间驱动）
+
+**核心思路**：LLM streaming 时，native tool call 的 arguments 以 JSON 字符串片段到达。后端每 500ms 用 Pydantic `allow_partial` 做一次 partial parse，发现新完成的参数后发射兼容现有前端格式的事件。工具调用完成时立即做最终 parse（不等 500ms）。
+
+**为什么选 B 不选 A（Claude Code 做法）**：
+- 方案 B 能让前端按参数名逐个展示（和现在一致），用户体验无变化
+- 方案 A 在 streaming 阶段只能显示 raw JSON 增长，完成后才切换结构化——有体验降级
+- jiter (Rust) partial parse 开销极小（~µs 级），500ms 间隔下每秒仅 2 次 parse
+
+**为什么是 500ms 纯时间驱动**：
+- 500ms 内主流模型约产出 20-150 字符（取决于模型速度），足够包含 1-2 个完整参数
+- 用户在 streaming 中看到的是连续 token 流，结构化参数延迟 500ms 完全无感知
+- 不用 delta 计数或字符数阈值，因为这些值与 JSON 结构无关且跨 provider 不可比
+- 配置项在 `config.py: REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS = 500`
+
+### 四 provider 的流式 tool call 能力
+
+| Provider | Tool Call 流式？ | 机制 |
+|----------|-----------------|------|
+| OpenAI Completion | ✅ 增量 delta | `delta.tool_calls[i].function.arguments` 逐片段 |
+| OpenAI Response | ✅ 增量 delta | `response.function_call_arguments.delta` |
+| Anthropic | ✅ 增量 delta | `input_json_delta` 逐字符 |
+| Gemini | ❌ 完整单元 | `functionCall` 一个 chunk 完整到达（天然适合，无需 partial parse） |
+
+### 后端实现
+
+```python
+# config.py
+REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS: int = 500
+
+# engine.py — StreamingToolCallState
+class StreamingToolCallState:
+    """跟踪流式 tool call 的累积状态"""
+    call_id: str
+    name: str
+    accumulated_json: str = ""
+    last_parse_time: float = 0.0
+    last_parsed_result: dict = {}  # 上次 parse 结果，用于 diff
+
+# _stream_chat_response() 中的核心逻辑
+streaming_tools: dict[str, StreamingToolCallState] = {}
+parse_interval = get_settings().REACT_TOOL_CALL_PARTIAL_PARSE_INTERVAL_MS / 1000
+
+for chunk in self.llm.chat_stream(messages=messages, tools=tools, **kwargs):
+    # 1. 文本 delta（reasoning / message）→ 和现在一样处理
     ...
+
+    # 2. Tool call delta（provider-specific extraction）
+    tool_call_delta = extract_tool_call_delta(chunk)
+
+    if tool_call_delta.type == "tool_call_start":
+        # 工具名立即可见
+        streaming_tools[call_id] = StreamingToolCallState(call_id=..., name=...)
+        yield {"type": "tool_call", "data": {
+            "tool_calls": [{"id": call_id, "name": name, "arguments": {},
+                            "pending_arguments": True}]
+        }}
+
+    elif tool_call_delta.type == "arguments_delta":
+        state = streaming_tools[call_id]
+        state.accumulated_json += delta
+
+        # 每 500ms 做一次 partial parse
+        now = time.monotonic()
+        if now - state.last_parse_time >= parse_interval:
+            state.last_parse_time = now
+            parsed = try_partial_parse(state.accumulated_json)
+            if parsed is not None:
+                # Diff → 发射新完成参数的事件（前端零改动）
+                for key in parsed:
+                    if key not in state.last_parsed_result:
+                        yield {
+                            "type": "tool_payload_delta",
+                            "data": {
+                                "tool_call_id": call_id,
+                                "argument_name": key,
+                                "delta": str(parsed[key]),
+                                "is_final": True,
+                            },
+                        }
+                state.last_parsed_result = parsed
+
+    elif tool_call_delta.type == "arguments_done":
+        # 工具调用完成 → 最终 parse → eager execution
+        state = streaming_tools.pop(call_id)
+        final_args = json.loads(state.accumulated_json)
+
+        # 发射剩余未通过 partial parse 捕获的参数
+        for key, value in final_args.items():
+            if key not in state.last_parsed_result:
+                yield {"type": "tool_payload_delta", "data": {
+                    "tool_call_id": call_id,
+                    "argument_name": key,
+                    "delta": str(value),
+                    "is_final": True,
+                }}
+
+        yield {"type": "tool_call", "data": {
+            "tool_calls": [{"id": call_id, "name": name,
+                            "arguments": final_args,
+                            "pending_arguments": False}]
+        }}
+
+        # Eager execution
+        asyncio.create_task(self._execute_tool_call_request(...))
+
+
+def try_partial_parse(accumulated_json: str) -> dict | None:
+    """Pydantic allow_partial 解析不完整 JSON"""
+    try:
+        return TypeAdapter(dict).validate_json(
+            accumulated_json, allow_partial=True,
+        )
+    except Exception:
+        return None
 ```
 
-但第一版也可以在 engine 内部就地 group，避免过早抽象。
+### 前端影响
 
-## Parser 改造
-
-文件：`pivot/server/app/orchestration/react/parser.py`
-
-在 `_parse_tool_calls()` 中解析并校验 `batch`：
-
-- `batch` 缺省为 `1`。
-- 如果提供，必须是 int，且 `>= 1`。
-- Python 中要注意 bool 是 int 子类，`true` 不应被接受为 batch。
-- 同一轮 `tool_call.id` 不能重复。
-
-建议错误信息：
-
-```text
-action.output.tool_calls[0].batch must be a positive integer.
-Duplicate tool_call id: call_xxx.
-```
-
-`parse_react_control_section()` 也走 `_parse_action()`，所以 preview 阶段会自然拿到 batch。
-
-测试：
-
-- 解析带 batch 的 tool call。
-- 缺省 batch 为 1。
-- batch 为 0 / -1 / true / "1" 报错。
-- 重复 id 报错。
-- control section preview 保留 payload refs，同时包含 batch。
-
-## Phase 3A: Batch Executor（已完成）
-
-第一阶段先不做 eager。仍然等完整 LLM response parse 完，再按 batch 执行。
-
-改造位置：
-
-`pivot/server/app/orchestration/react/engine.py`
-
-当前逻辑：
-
-```python
-for tool_call in action.tool_calls:
-    result = await run_in_threadpool(...)
-```
-
-目标逻辑：
-
-```python
-for batch_number in sorted_batches:
-    batch_calls = calls_by_batch[batch_number]
-    if len(batch_calls) == 1:
-        await execute_one(batch_calls[0])
-    else:
-        await execute_batch_parallel(batch_calls)
-```
-
-并发执行建议：
-
-```python
-tasks = [
-    asyncio.create_task(execute_one(tool_call))
-    for tool_call in batch_calls
-]
-for task in asyncio.as_completed(tasks):
-    result_item = await task
-    tool_results.append(result_item)
-    emit tool_result
-```
-
-注意事项：
-
-- `execute_one()` 内部继续使用 `run_in_threadpool(self.tool_manager.execute, ...)`。
-- 每个 tool 完成后立刻通过 `token_meter_queue` emit `tool_result`。
-- batch 内结果顺序可以按完成顺序流式发出。
-- 最终持久化的 `tool_results` 建议按 `tool_calls` 原始顺序排序，方便历史稳定；如果保持完成顺序，也必须前后端都接受。建议最终 event_data 用原始 call 顺序，live SSE 用完成顺序。
-- 如果某个 tool 失败，只记录该 tool 的 failed result，不默认取消同 batch 其他 tool。
-- 当前 batch 全部结束后再进入下一 batch。
-- 如果发现 pending user action，需要停止后续 batch。已完成工具结果保留。
-- 如果 task cancelled，取消尚未完成的 asyncio task，并停止后续 batch。
-
-事件：
-
-- 完整 parse 后 emit resolved `tool_call`，包含所有 tool calls 和 batch。
-- 每个 tool 完成 emit `tool_result`。
-- 前端当前已经能合并 `tool_call` / `tool_result`，只需确认 batch 字段不会破坏展示。
-
-测试：
-
-- 同 batch 两个慢工具并发，总耗时小于串行。
-- batch 2 等 batch 1 完成后才开始。
-- batch 1 一个失败不阻止同 batch 另一个完成。
-- pending user action 阻止后续 batch。
-- live stream 中多个 result 能逐个发出。
-
-## Phase 3B: 前端展示增强
-
-第一版前端无需大改，现有 timeline 已经支持：
-
-- Preparing
-- Running
-- Ran
-- Failed badge
-- 多工具聚合
-
-可选增强：
-
-- 展开 group 时按 batch 分组展示。
-- 多 tool group 文案可以从 `n tools used` 升级为 `batch 1: n tools`，但不是必须。
-- tooltip 或 detail 中展示 `Batch 1`。
-
-保持克制：Phase 3A 不需要为了 batch 大改视觉层。
-
-## Phase 3C: Eager Tool Call（基础闭环已完成）
-
-这一阶段 blast radius 最大，应在 batch executor 稳定后再做。
-
-当前已落地的最小闭环：
-
-- `collect_complete_payload_blocks()` 可以从半截 assistant response 中收集已闭合 payload block。
-- `resolve_tool_call_payloads()` 可以只解析单个 tool call 的 payload refs。
-- `_stream_chat_response()` 在 JSON control section 可解析后初始化 eager state。
-- payload 完整后，runtime 会在不突破 batch 顺序的前提下启动 ready tool。
-- 最终完整 `parse_react_output()` 后，runtime 复用 eager 已完成结果，只补跑没有被 eager 启动的调用，避免重复执行。
-- 单测已经覆盖：payload 在 stream 结束前闭合时，tool 会在后续 chunk 到达前启动。
-
-仍待增强：
-
-- 已完成：如果最终 parse failure 发生在 eager tool 已执行之后，当前实现会等待已启动任务结束，把本轮作为 failed `CALL_TOOL` 持久化，并把已发生 tool results 与 parse error 写入下一轮 `action_result`。
-- 已完成：eager tool result pump。工具任务完成后会独立推送 `tool_result` 到 SSE 队列，不再依赖模型继续输出下一个 chunk。
-
-### 前置条件
-
-由于当前协议是“JSON control section 在前，payload blocks 在后”，scheduler 可以在第一个 payload begin 出现时拿到完整 tool call 列表：
-
-```text
-JSON control section complete
-=> parse tool_calls + batch + payload refs
-=> 初始化 scheduler
-```
-
-每个 tool 的启动条件：
-
-1. tool_call JSON 已解析。
-2. 该 tool 引用的所有 payload refs 都完整。
-3. `tool_call.batch == active_batch`。
-4. 没有 cancellation / fatal parse error / pending user action 阻断。
-
-### Scheduler 状态
-
-建议内部状态：
-
-```python
-class EagerToolScheduler:
-    calls_by_id: dict[str, ToolCallRequest]
-    refs_by_call_id: dict[str, set[str]]
-    payloads: dict[str, str]
-    ready_call_ids: set[str]
-    running_call_ids: set[str]
-    completed_call_ids: set[str]
-    failed_call_ids: set[str]
-    active_batch: int
-```
-
-关键行为：
-
-```text
-on_json_control(parsed_action):
-  初始化 calls_by_id / refs_by_call_id / batches
-
-on_payload_complete(payload_name, payload_text):
-  保存 payload
-  找到因此 ready 的 calls
-  尝试启动 active_batch 中 ready 且未启动的 calls
-
-on_tool_complete(call_id):
-  标记完成
-  如果 active_batch 全部完成，推进到下一个 batch
-  推进后立刻启动新 active_batch 中已经 ready 的 calls
-```
-
-### Payload 顺序特例
-
-如果 Agent 先输出 batch 3 的 payload，再输出 batch 1 的 payload：
-
-```text
-batch 3 payload ready -> 只进入 ready queue，不执行
-batch 1 payload ready -> batch 1 active，立即执行
-batch 1 完成 -> active_batch 推进
-batch 3 到达 active 后，如果已经 ready，立即执行
-```
-
-这就是“payload readiness 不突破 batch order”。
-
-### 增量 Payload Parser
-
-需要从 `_stream_chat_response()` 或更靠近 streaming content 的位置提取 payload block 完成事件。
-
-可选实现：
-
-- 增加一个 incremental parser，只识别 payload begin/end sentinel。
-- JSON control section 仍使用现有 `parse_react_control_section()`。
-- 当某个 payload end sentinel 到达时，emit 内部事件 `payload_complete`。
-
-注意：
-
-- payload 内容可能很大，不要无限复制字符串。
-- sentinel 必须按行匹配，沿用 `PAYLOAD_SENTINEL_SUFFIX`。
-- 重复 payload name 应 fatal。
-- payload end 缺失时，最终 parse 会失败。
-
-### Eager 后的 Final Parse
-
-即使 eager 已执行，最终仍必须完整调用 `parse_react_output()` 做一次最终校验。
-
-如果最终 parse 失败，但已有 tool 执行：
-
-- 不要假装工具没执行。
-- 本轮 recursion 应记录 parse failure 以及已发生的 tool results。
-- 下一轮让 Agent 看见这些事实并恢复。
-
-这是重要边界：eager execution 把工具调用提前了，也意味着 parse failure 不再是纯粹无副作用失败。
-
-### Parse Failure Recovery 规则
-
-核心不变量：
-
-```text
-Before first tool execution, parse failures are retryable and rollbackable.
-After first tool execution, parse failures are durable facts and must be recovered in the next recursion.
-```
-
-实现语义：
-
-1. JSON control section parse failed
-   - 没有 tool list，也不会启动 tool。
-   - 可以走现有 parse retry。
-   - 最终失败时 rollback 本轮 user payload，不消耗 iteration。
-
-2. JSON control section parse 成功，但任何 tool 启动前 payload 协议失败
-   - 仍未越过副作用边界。
-   - 可以 retry/rollback。
-
-3. 任意 tool 已 started 后，后续 payload 或最终完整 parse 失败
-   - 不允许 retry 成“这一轮没发生过”。
-   - 等待已 started tool 完成。
-   - 已完成结果写入 `tool_call_results`。
-   - 未启动 tool 写入 skipped/failed 结果。
-   - recursion 以 `status=error` 持久化，但 `action_type=CALL_TOOL` 保持本轮 tool 事实。
-   - `rollback_messages=false`，assistant raw message 进入 runtime window。
-   - 下一轮 `action_result` 包含：
-     - 已执行 tool 的 result/error。
-     - `{"source":"assistant_response_parse","error":"..."}`。
-
-这样下一轮 Agent 会明确知道：哪些副作用已经发生，以及本轮响应哪里坏了。
-
-## Phase 3D: Runtime 底线约束
-
-我们已经达成共识：不要把“Agent 傻导致并发错”作为 runtime 默认强制串行的理由。
-
-但底线约束仍可能需要：
-
-- cancellation 停止未启动 call。
-- pending user action 停止后续 batch。
-- fatal parse error 停止后续 batch。
-- 同一个 call id 只允许启动一次。
-
-未来如果确实需要工具级互斥，可以设计：
-
-```python
-parallel_policy = {
-    "exclusive": False,
-    "concurrency_key": "workspace:{workspace_id}:path:{path}"
-}
-```
-
-但不要在 Phase 3A 主动扩大范围。
-
-## Phase 3E: Live Tool Payload Preview（新增共识）
-
-目标：让前端不只是看到 `Preparing / Running / Ran`，还可以在模型生成 tool 参数 payload 的过程中实时展示参数内容。第一批重点支持 `write_file` 和 `edit_file`：
-
-- 折叠态只显示文件名和实时变更统计。
-- 展开态不再把这两个工具渲染成传统 `Arguments:` JSON，而是渲染成类代码编辑器 / diff viewer。
-- 统计和预览都随 payload stream 实时增长。
-
-### 用户侧目标形态
-
-折叠态：
-
-```text
-Running write_file index.html +37
-Running edit_file index.html +12 -5
-```
-
-展开态：
-
-```text
-write_file index.html
-+ 1  <!doctype html>
-+ 2  <html>
-+ 3    <head>
-...
-```
-
-```diff
-edit_file index.html
-@@ -56,6 +56,6 @@
-  .hero {
--   background: old;
-+   background: new;
-  }
-```
-
-### 后端 SSE 事件
-
-新增一种 live payload event：
-
+**零改动**。后端发射的 `tool_payload_delta` 事件格式和现在完全一致：
 ```json
-{
-  "type": "tool_payload_delta",
-  "task_id": "...",
-  "trace_id": "...",
-  "iteration": 1,
-  "data": {
-    "tool_call_id": "call_1",
-    "tool_name": "edit_file",
-    "argument_name": "diff",
-    "payload_name": "diff_payload",
-    "delta": "...",
-    "is_final": false
-  },
-  "timestamp": "..."
-}
+{"type": "tool_payload_delta", "data": {"tool_call_id": "...", "argument_name": "path", "delta": "main.py", "is_final": true}}
 ```
 
-字段语义：
+前端 `livePayload.arguments[argument_name] += delta` 逻辑无需任何变化。
 
-- `tool_call_id`: 所属 tool call。
-- `tool_name`: 工具名，例如 `write_file` / `edit_file`。
-- `argument_name`: 参数名，例如 `content` / `diff` / `path`。
-- `payload_name`: payload block 名称。
-- `delta`: 本次新增 payload 文本。
-- `is_final`: 该 payload 是否已经看到 END sentinel。
+### 实施前需验证
 
-### 映射来源
+1. **Pydantic `allow_partial` 行为**：确认 `{"path": "main.py", "con` → 返回 `{"path": "main.py"}`
+2. **嵌套对象处理**：`{"path": "main.py", "options": {"enc` 的 partial parse 结果
+3. **空值/null 参数**：`{"path": null, "enc` 的 partial parse 结果
 
-后端需要先从 JSON control section 得到：
+---
 
-```text
-payload_name -> tool_call_id + tool_name + argument_name
-```
+## 12. 工作量估算
 
-来源示例：
-
-```json
-{
-  "id": "call_1",
-  "name": "edit_file",
-  "arguments": {
-    "path": {"$payload_ref": "path_payload"},
-    "diff": {"$payload_ref": "diff_payload"}
-  }
-}
-```
-
-如果 payload begin 先于映射可用（极端 streaming 时序），可以先按 `payload_name` 暂存 delta；映射可用后再补发或补绑定。正常协议里 JSON control section 在前，payload blocks 在后，因此大多数情况下映射应已存在。
-
-### 后端增量解析
-
-后端 streaming parser 已经能明确感知 payload begin / end：
-
-```text
-<<<PIVOT_PAYLOAD:name:BEGIN_6F2D9C1A>>>
-...
-<<<PIVOT_PAYLOAD:name:END_6F2D9C1A>>>
-```
-
-新增能力：
-
-- 当某个 payload begin 出现后，后端开始把 payload 内容作为 delta 推给前端。
-- END sentinel 不进入 delta 内容。
-- begin/end sentinel 只用于协议，不展示给用户。
-- payload 完整后仍走现有 final parse / resolved tool_call / eager execution 逻辑。
-
-边界：
-
-- tool 仍不能在 payload 未完整前执行。
-- payload 协议失败时，沿用 Phase 3C 的 parse failure recovery 规则。
-- 不要为了预览改变最终 tool arguments 的解析语义。
-
-### 前端状态设计
-
-不要把实时 payload delta 直接塞进主 `messages` 状态。否则每个 delta 都会重渲染整条 Chat timeline，容易卡顿。
-
-推荐新增一个轻量 live payload store：
-
-```ts
-type LiveToolPayloadState = {
-  toolCallId: string;
-  toolName: string;
-  argumentName: string;
-  payloadName: string;
-  filename?: string;
-  addedLines: number;
-  removedLines: number;
-  isFinal: boolean;
-  previewLines: string[];
-};
-```
-
-设计原则：
-
-- 用 `Map<toolCallId, LiveToolPayloadState>` 存在独立 store/ref 中。
-- SSE 收到 delta 后先 append 到 buffer/ref。
-- 用 `requestAnimationFrame` 或 100ms throttle 批量通知订阅组件。
-- 只有相关 tool row / expanded preview 订阅自己的 `toolCallId`。
-- 未展开时只渲染 filename 和 counters。
-- 展开时才渲染代码 / diff 预览。
-- 大 payload 不要全量渲染，优先渲染窗口，例如最近 300-500 行。
-
-这样能复用 Chat 列表当前的 memo 分层，同时避免高频 payload 更新牵动整个 `messages` tree。
-
-### `write_file` 展示规则
-
-摘要：
-
-```text
-Running write_file filename +N
-```
-
-文件名：
-
-- `write_file` 和 `edit_file` 的摘要只显示 basename。
-- 完整 path 放到 `title`，hover 时可看。
-
-计数：
-
-- `write_file.content` 按当前 payload 内容统计写入行数。
-- 折叠态实时显示 `+N`，绿色。
-- content 完整后以最终 resolved arguments 为准校正一次。
-
-展开态：
-
-- 用等宽字体 + 行号。
-- 每一行按新增行展示为绿色。
-- 可以显示为：
-
-```text
-+ 1  first line
-+ 2  second line
-```
-
-性能：
-
-- 未展开时不渲染正文。
-- 展开时渲染可视窗口，不一次性渲染超大文件全文。
-- 可以在完成后提供 “show full” 行为，但初版不必做复杂编辑器。
-
-### `edit_file` 展示规则
-
-摘要：
-
-```text
-Running edit_file filename +N -M
-```
-
-计数：
-
-- 统计 `edit_file.diff` payload 中真正的 diff body 行。
-- `+` 开头计入 added，绿色。
-- `-` 开头计入 removed，红色。
-- 忽略 `+++` / `---` file header。
-- 忽略 `@@` hunk header 和 context 行。
-- diff payload 完整后以最终 resolved arguments 为准校正一次。
-
-展开态：
-
-- 渲染轻量 diff viewer：
-  - hunk header 灰色。
-  - added 行绿色。
-  - removed 行红色。
-  - context 行正常。
-- 不展示 `Arguments:` JSON。
-- `Result:` 仍可在底部保留，或折叠在 “Tool result” 区域。
-
-### 渲染性能约束
-
-核心原则：
-
-```text
-Payload delta can be high-frequency; React state updates must be low-frequency and local.
-```
-
-约束：
-
-- 不允许每个 token / chunk 都 set 主消息状态。
-- 不允许每个 delta 都重新 split 全量 payload。
-- 统计用增量算法。
-- previewLines 只保留窗口，或者保留完整 buffer 在 ref 中、渲染只取尾部。
-- 使用 `requestAnimationFrame` 合并 UI 更新。
-- 展开态组件卸载后要取消订阅，避免后台继续重渲染。
-- auto scroll 只响应已启用 follow mode 的可见高度变化，不因每个 payload token 抖动锚点。
-
-### 与现有 tool_result 的关系
-
-live payload preview 是“参数正在生成”的 UI，不替代最终 tool lifecycle。
-
-完整 lifecycle：
-
-```text
-JSON control parsed
-=> tool_call preview: Preparing
-=> payload begin
-=> tool_payload_delta: live content / diff preview
-=> payload end
-=> resolved tool_call: Running
-=> tool_result: Ran / Failed
-```
-
-如果最终 parse failure 发生在 tool 执行前：
-
-- live preview 可以消失或标记为 parse failed。
-- 不应显示为已执行。
-
-如果 eager tool 已经执行后最终 parse failure：
-
-- 沿用 Phase 3C：已执行结果作为事实保留。
-- live preview 可保留为本轮失败诊断的一部分。
-
-### 实施顺序建议
-
-1. 前端先把 `write_file` / `edit_file` 摘要从完整 path 改为 basename，并在 resolved arguments 后显示最终 `+N` / `+N -M`。
-2. 后端新增 `tool_payload_delta` SSE event。
-3. 前端新增 live payload store，折叠态实时 counters。
-4. 前端给 `write_file` 做展开态 code preview。
-5. 前端给 `edit_file` 做展开态 diff preview。
-6. 大 payload 下做窗口化 / show full 优化。
-
-## 推荐执行顺序（当前进度）
-
-1. 已完成：更新 `system_prompt.md`，加入 `batch` 规范与示例。
-2. 已完成：更新 `types.py`，`ToolCallRequest` 增加 `batch`。
-3. 已完成：更新 `parser.py`，校验 batch 与重复 id。
-4. 已完成：更新 parser tests。
-5. 已完成：更新 `engine.py`，实现非 eager batch executor。
-6. 已完成：更新 engine tests，覆盖 batch 并发、串行、最终结果顺序。
-7. 已完成：确认现有前端 timeline 可消费 `pending_arguments`、resolved `tool_call`、`tool_result`。
-8. 已完成：Phase 3C 最小 eager scheduler。
-9. 已完成：补 parse failure recovery。
-10. 已完成：补 eager result pump，确保 tool 完成后立即进入 SSE 队列。
-11. 下一步：真实 session 联调观察端到端 UI 时序。
-
-## 暂不做
-
-- 暂不做 `$result_ref`。
-- 暂不做任意 DAG。
-- 暂不做复杂工具安全推断。
-- 暂不大改前端 batch 分组视觉。
-- 暂不让后端替 Agent 判断哪些写操作“应该串行”。
-
-## 成功标准
-
-Phase 3A 完成时：
-
-- Agent 可以在一轮 `CALL_TOOL` 中声明多个 batch。
-- 同 batch 工具实际并发执行。
-- 后续 batch 严格等待前序 batch 完成。
-- live tool_result 仍能逐个到达前端。
-- 历史 session 仍能正确展示 tool calls 和 results。
-- 旧的不带 batch 的 tool call 不会立刻崩溃。
-
-Phase 3C 完成时：
-
-- JSON control section 完成后前端能看到 Preparing。
-- 单个 tool 的 payload 完整后，只要所在 batch active，就能进入 Running。
-- batch 顺序不被 payload 输出顺序破坏。
-- 已 eager 执行的结果在 parse failure 下仍作为事实保留。
+| Phase | 内容 | 天数 | 风险 |
+|-------|------|------|------|
+| Phase 0 | 基础抽象 + 消息转换 | 2 | 低 |
+| Phase 1 | ReactEngine 核心改造 | 3 | 中 |
+| Phase 2 | Eager Execution + Streaming Partial Parse | 2 | 中 |
+| Phase 3 | 补全其他 Provider | 2-3 | 中（Response 流式补全、Anthropic 顺序约束） |
+| Phase 4 | 清理与优化 | 1 | 低 |
+| **总计** | | **10-11 天** | |

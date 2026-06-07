@@ -7,7 +7,6 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.config import get_settings
-from app.orchestration.tool.manager import ToolManager
 
 _TEMPLATE_DIR = Path(__file__).parent
 _SYSTEM_TEMPLATE_PATH = _TEMPLATE_DIR / "system_prompt.md"
@@ -37,34 +36,29 @@ _REACT_TASK_PROMPT = _read_template(_TASK_TEMPLATE_PATH)
 
 
 def build_runtime_system_prompt(
-    tool_manager: ToolManager | None = None,
     skills: str = "[]",
     delegation_agents: str = "",
     channel_context: str = "",
 ) -> str:
     """Build the stable system prompt used once for an entire session.
 
-    The system prompt includes session-level context (tool catalog and skills
-    index) that remains constant across all tasks within the same session.
+    The system prompt includes session-level context (skills index) that
+    remains constant across all tasks within the same session.
     Because the system prompt is always restored after context compaction,
     this content never needs to be re-injected per-task.
 
+    Tools are no longer described in the prompt — they are passed via the
+    native tool calling API (``tools`` parameter) instead.
+
     Args:
-        tool_manager: Optional tool manager to describe available tools.
         skills: Runtime-visible skill metadata JSON for prompt injection.
         delegation_agents: Markdown section listing delegatable agents.
         channel_context: Markdown section for channel environment awareness.
 
     Returns:
-        Rendered system prompt text with tool catalog and skills embedded.
+        Rendered system prompt text with skills embedded.
     """
-    tools_description = ""
-    if tool_manager:
-        tools_description = tool_manager.to_text_catalog()
-
-    rendered = _REACT_SYSTEM_PROMPT.replace(
-        "{{tools_description}}", tools_description
-    ).replace("{{skills}}", skills)
+    rendered = _REACT_SYSTEM_PROMPT.replace("{{skills}}", skills)
 
     # Strip the entire delegation section (header + body) when empty
     delegation_section = "## Delegation Agents\n\n{{delegation_agents}}"
@@ -188,12 +182,17 @@ def build_runtime_payload_message(
     payload: dict[str, Any],
     *,
     attachments: list[dict[str, Any]] | None = None,
+    tool_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build one runtime payload user message.
 
     Args:
         payload: Structured recursion payload injected into the user turn.
         attachments: Optional multimodal blocks appended after the text payload.
+        tool_results: Native tool call results to feed back to the LLM.
+            Added as a ``tool_results`` key on the message dict (internal
+            unified format). The message converter handles provider-specific
+            wire formatting.
 
     Returns:
         One chat message dictionary ready for persistence or transport.
@@ -204,4 +203,7 @@ def build_runtime_payload_message(
     )
     if attachments:
         message_content = [{"type": "text", "text": message_content}, *attachments]
-    return {"role": "user", "content": message_content}
+    message: dict[str, Any] = {"role": "user", "content": message_content}
+    if tool_results:
+        message["tool_results"] = tool_results
+    return message

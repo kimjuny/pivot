@@ -2126,6 +2126,11 @@ function ChatContainer({
           thinking: `${currentRecursion.thinking ?? ""}${event.delta ?? ""}`,
           tokens: event.tokens ?? currentRecursion.tokens,
         };
+      } else if (event.type === "content") {
+        nextRecursion = {
+          ...nextRecursion,
+          message: `${currentRecursion.message ?? ""}${event.delta ?? ""}`,
+        };
       } else if (event.type === "message") {
         nextRecursion = {
           ...nextRecursion,
